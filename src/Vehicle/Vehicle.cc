@@ -1480,7 +1480,8 @@ void Vehicle::_handleRCChannels(mavlink_message_t& message)
         }
     }
 
-    emit remoteControlRSSIChanged(channels.rssi);
+    // do not use rssi from #65
+    // emit remoteControlRSSIChanged(channels.rssi);
     emit rcChannelsChanged(channels.chancount, pwmValues);
 }
 

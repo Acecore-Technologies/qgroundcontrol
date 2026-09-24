@@ -40,6 +40,8 @@ TaisyncInfo::TaisyncInfo()
         onAutoSaveChanged();
     }
 
+    (void) connect(MultiVehicleManager::instance(), &MultiVehicleManager::activeVehicleChanged, this, &TaisyncInfo::_setActiveVehicle);
+    _setActiveVehicle(MultiVehicleManager::instance()->activeVehicle());
 }
 
 TaisyncInfo::~TaisyncInfo(void)
@@ -120,6 +122,33 @@ void TaisyncInfo::deleteOldLogs()
     }
 }
 
+void TaisyncInfo::updateRssi(int rssi1, int rssi2)
+{
+    if (!_vehicle) return;
+
+    int rssi = UINT8_MAX;
+    // find available rssi value from 1&2
+    if (rssi1 != UINT8_MAX) rssi = rssi1;
+    if (rssi2 != UINT8_MAX) {
+        if (rssi == UINT8_MAX) rssi = rssi2; // rssi1 is invalide, juse use rssi2
+        else rssi = qMax(rssi, rssi2); // use more good rssi value
+    }
+    if (rssi != UINT8_MAX) {
+        // rssi is negative, but it may received as a positive number
+        if (rssi > 0) rssi = -rssi;
+
+        // update rssi value to vehicle
+        // convert rssi to 0%-100%
+        const int min = -100; // 0%
+        const int max = -50; // 100%
+        rssi = qMax(rssi, min);
+        rssi = qMin(rssi, max);
+        rssi = (int)((float)(rssi - min) / (float)(max - min) * 100);
+    }
+
+    emit _vehicle->remoteControlRSSIChanged(rssi);
+}
+
 void TaisyncInfo::receiveParse(QByteArray b)
 {
     QJsonParseError errJson;
@@ -132,7 +161,7 @@ void TaisyncInfo::receiveParse(QByteArray b)
     else
     {
         QJsonObject _dataObj = jsonData.object();
-        if (SettingsManager::instance()->appSettings()->taisyncFlyViewShow()->rawValue().toBool()) {
+        // if (SettingsManager::instance()->appSettings()->taisyncFlyViewShow()->rawValue().toBool()) {
             const auto toString = [](const QJsonValue& value) -> QString {
                 if (value.isString()) return value.toString().trimmed();
                 if (value.isDouble()) return QString::number(value.toDouble());
@@ -188,23 +217,38 @@ void TaisyncInfo::receiveParse(QByteArray b)
                 emit gndLDPCFailedChanged();
             }
 
+            auto linkConnected = false;
             if (slaveObj.contains("snr_g"))
             {
                 _gndSNR = toString(slaveObj.value("snr_g"));
                 emit gndSNRChanged();
+                linkConnected = _gndSNR.toInt() > 5;
             }
 
+            int rssi1 = UINT8_MAX; // UINT8_MAX is invalid value
+            int rssi2 = UINT8_MAX;
             if (slaveObj.contains("rssi1_g"))
             {
                 _gndRSSI0 = toString(slaveObj.value("rssi1_g"));
                 emit gndRSSI0Changed();
+                if (linkConnected) {
+                    bool ok;
+                    auto value = _gndRSSI0.toInt(&ok);
+                    if (ok) rssi1 = value;
+                }
             }
 
             if (slaveObj.contains("rssi2_g"))
             {
                 _gndRSSI1 = toString(slaveObj.value("rssi2_g"));
                 emit gndRSSI1Changed();
+                if (linkConnected) {
+                    bool ok;
+                    auto value = _gndRSSI1.toInt(&ok);
+                    if (ok) rssi2 = value;
+                }
             }
+            updateRssi(rssi1, rssi2);
 
             if (slaveObj.contains("distance"))
             {
@@ -298,7 +342,7 @@ void TaisyncInfo::receiveParse(QByteArray b)
                 }
                 emit noiseChanged();
             }
-        }
+        // }
 
         if (_dataObj.contains("role"))
         {
@@ -406,4 +450,8 @@ void TaisyncInfo::onAutoSaveChanged()
     }
 }
 
+void TaisyncInfo::_setActiveVehicle(Vehicle *vehicle)
+{
+    _vehicle = vehicle;
+}
 

@@ -11,6 +11,8 @@
 #include <QObject>
 #include <QUdpSocket>
 
+class Vehicle;
+
 class TaisyncInfo : public QObject
 {
     Q_OBJECT
@@ -106,6 +108,7 @@ private:
 
     // auto delete old logs's file
     void deleteOldLogs();
+    void updateRssi(int rssi1, int rssi2);
 
     QUdpSocket  *udpSocket;
     bool        _connectStatus;
@@ -132,5 +135,11 @@ private:
     QVariantList _noiseTitles;
     QVariantList _noiseValuesA;
     QVariantList _noiseValuesG;
+
+private slots:
+    void _setActiveVehicle(Vehicle *vehicle);
+private:
+    Vehicle *_vehicle = nullptr;
+
 };
 #endif
