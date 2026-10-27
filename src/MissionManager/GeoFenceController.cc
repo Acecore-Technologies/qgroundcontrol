@@ -19,6 +19,8 @@
 #include "SettingsManager.h"
 #include "AppSettings.h"
 #include "GeoFenceManager.h"
+#include "GeoZone.h"
+#include "GeoZoneManager.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QGCLoggingCategory.h"
@@ -485,6 +487,64 @@ void GeoFenceController::clearAllInteractive(void)
     for (int i=0; i<_circles.count(); i++) {
         _circles.value<QGCFenceCircle*>(i)->setInteractive(false);
     }
+}
+
+int GeoFenceController::importGeoZones(const QVariantList& restrictions, const QGeoRectangle& area)
+{
+    QList<GeoZone::Restriction> restrictionList;
+    for (const QVariant& restriction : restrictions) {
+        restrictionList.append(static_cast<GeoZone::Restriction>(restriction.toInt()));
+    }
+
+    const QList<GeoZone*> zones = GeoZoneManager::instance()->zonesInArea(restrictionList, area);
+    const int added = addGeoZoneExclusions(zones);
+
+    qCDebug(GeoFenceControllerLog) << "importGeoZones zones:fences" << zones.count() << added;
+
+    return added;
+}
+
+int GeoFenceController::addGeoZoneExclusions(const QList<GeoZone*>& zones)
+{
+    QList<QList<QGeoCoordinate>> existingPolygons;
+    for (int i=0; i<_polygons.count(); i++) {
+        existingPolygons.append(_polygons.value<QGCFencePolygon*>(i)->coordinateList());
+    }
+    QList<QGeoCircle> existingCircles;
+    for (int i=0; i<_circles.count(); i++) {
+        QGCFenceCircle* circle = _circles.value<QGCFenceCircle*>(i);
+        existingCircles.append(QGeoCircle(circle->center(), circle->radius()->rawValue().toDouble()));
+    }
+
+    int added = 0;
+    for (const GeoZone* zone : zones) {
+        for (const QList<QGeoCoordinate>& vertices : zone->exclusionPolygons()) {
+            if (existingPolygons.contains(vertices)) {
+                continue;
+            }
+            existingPolygons.append(vertices);
+
+            QGCFencePolygon* polygon = new QGCFencePolygon(false /* inclusion */, this);
+            polygon->appendVertices(vertices);
+            _polygons.append(polygon);
+            added++;
+        }
+        for (const QGeoCircle& geoCircle : zone->exclusionCircles()) {
+            if (existingCircles.contains(geoCircle)) {
+                continue;
+            }
+            existingCircles.append(geoCircle);
+
+            _circles.append(new QGCFenceCircle(geoCircle.center(), geoCircle.radius(), false /* inclusion */, this));
+            added++;
+        }
+    }
+
+    if (added > 0) {
+        clearAllInteractive();
+    }
+
+    return added;
 }
 
 bool GeoFenceController::supported(void) const

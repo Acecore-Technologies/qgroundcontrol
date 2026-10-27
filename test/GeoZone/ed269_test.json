@@ -1,0 +1,199 @@
+﻿{
+  "title": "Test UASZoneVersion",
+  "description": "Synthetic ED-269 test data",
+  "features": [
+    {
+      "identifier": "T-PROH",
+      "country": "CHE",
+      "name": "Prohibited polygon",
+      "type": "COMMON",
+      "restriction": "PROHIBITED",
+      "reason": [
+        "AIR_TRAFFIC",
+        "SENSITIVE"
+      ],
+      "message": "No flights",
+      "regulationExemption": "NO",
+      "zoneAuthority": [
+        {
+          "name": "Test Authority",
+          "email": "zones@example.com",
+          "purpose": "AUTHORIZATION",
+          "intervalBefore": "P30D"
+        }
+      ],
+      "applicability": [
+        {
+          "permanent": "YES"
+        }
+      ],
+      "geometry": [
+        {
+          "uomDimensions": "M",
+          "lowerLimit": 0,
+          "lowerVerticalReference": "AGL",
+          "upperLimit": 120,
+          "upperVerticalReference": "AGL",
+          "horizontalProjection": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  8.0,
+                  47.0
+                ],
+                [
+                  8.1,
+                  47.0
+                ],
+                [
+                  8.1,
+                  47.1
+                ],
+                [
+                  8.0,
+                  47.1
+                ],
+                [
+                  8.0,
+                  47.0
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "uomDimensions": "M",
+          "lowerLimit": 120,
+          "lowerVerticalReference": "AGL",
+          "upperLimit": 99999,
+          "upperVerticalReference": "AMSL",
+          "horizontalProjection": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  8.0,
+                  47.0
+                ],
+                [
+                  8.1,
+                  47.0
+                ],
+                [
+                  8.1,
+                  47.1
+                ],
+                [
+                  8.0,
+                  47.1
+                ],
+                [
+                  8.0,
+                  47.0
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "identifier": "T-AUTH",
+      "country": "CHE",
+      "name": "Authorisation circle",
+      "type": "COMMON",
+      "restriction": "REQ_AUTHORISATION",
+      "reason": [
+        "NATURE"
+      ],
+      "applicability": [
+        {
+          "permanent": "YES"
+        }
+      ],
+      "geometry": [
+        {
+          "uomDimensions": "FT",
+          "lowerLimit": 0,
+          "lowerVerticalReference": "AGL",
+          "upperLimit": 400,
+          "upperVerticalReference": "AGL",
+          "horizontalProjection": {
+            "type": "Circle",
+            "center": [
+              8.5,
+              47.5
+            ],
+            "radius": 1000
+          }
+        }
+      ]
+    },
+    {
+      "identifier": "T-COND",
+      "country": "CHE",
+      "name": "Scheduled zone",
+      "type": "COMMON",
+      "restriction": "CONDITIONAL",
+      "applicability": [
+        {
+          "permanent": "NO",
+          "startDateTime": "2026-03-29T01:00:00.00Z",
+          "endDateTime": "2026-10-25T00:59:59.00Z",
+          "schedule": [
+            {
+              "day": [
+                "MON",
+                "TUE"
+              ],
+              "startTime": "05:00:00.00Z",
+              "endTime": "18:00:00.00Z"
+            }
+          ]
+        }
+      ],
+      "geometry": [
+        {
+          "uomDimensions": "M",
+          "horizontalProjection": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  9.0,
+                  46.0
+                ],
+                [
+                  9.0,
+                  46.1
+                ],
+                [
+                  9.1,
+                  46.1
+                ],
+                [
+                  9.0,
+                  46.0
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "identifier": "T-NOGEO",
+      "country": "CHE",
+      "name": "No geometry",
+      "type": "COMMON",
+      "restriction": "PROHIBITED",
+      "applicability": [
+        {
+          "permanent": "YES"
+        }
+      ],
+      "geometry": []
+    }
+  ]
+}

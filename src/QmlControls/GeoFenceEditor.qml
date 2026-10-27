@@ -8,6 +8,7 @@ import QGroundControl.ScreenTools
 import QGroundControl.Controls
 import QGroundControl.FactSystem
 import QGroundControl.FactControls
+import QGroundControl.FlightMap
 
 QGCFlickable {
     id:             root
@@ -20,6 +21,8 @@ QGCFlickable {
     readonly property real  _editFieldWidth:    Math.min(width - _margin * 2, ScreenTools.defaultFontPixelWidth * 15)
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _radius:            ScreenTools.defaultFontPixelWidth / 2
+    readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
+    readonly property bool  _geoZonesLoaded:    _geoZoneManager.zones.count > 0
 
     Rectangle {
         id:     geoFenceEditorRect
@@ -348,7 +351,145 @@ QGCFlickable {
                     }
 
                 }
+
+                SectionHeader {
+                    id:             geoZoneSection
+                    anchors.left:   parent.left
+                    anchors.right:  parent.right
+                    text:           qsTr("Geozones (ED-269 / ED-318)")
+                }
+
+                Column {
+                    anchors.left:   parent.left
+                    anchors.right:  parent.right
+                    spacing:        _margin
+                    visible:        geoZoneSection.checked
+
+                    QGCLabel {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        wrapMode:       Text.WordWrap
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        text:           _geoZonesLoaded ?
+                                            qsTr("%1 zones loaded from %2 file: %3").arg(_geoZoneManager.zones.count).arg(_geoZoneManager.formatName).arg(_geoZoneManager.sourceName) :
+                                            qsTr("Load an EUROCAE ED-269 or ED-318 file to show UAS geographical zones on the map.")
+                    }
+
+                    QGCLabel {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        wrapMode:       Text.WordWrap
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        text:           qsTr("%1 features without a supported geometry were skipped.").arg(_geoZoneManager.skippedCount)
+                        visible:        _geoZonesLoaded && _geoZoneManager.skippedCount > 0
+                    }
+
+                    QGCButton {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        text:           qsTr("Load Geozone File...")
+                        onClicked:      geoZoneFileDialog.openForLoad()
+                    }
+
+                    QGCButton {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        text:           qsTr("Remove Geozones")
+                        visible:        _geoZonesLoaded
+                        onClicked:      _geoZoneManager.clear()
+                    }
+
+                    QGCCheckBox {
+                        text:       qsTr("Show geozones on map")
+                        checked:    _geoZoneManager.visible
+                        visible:    _geoZonesLoaded
+                        onClicked:  _geoZoneManager.visible = checked
+                    }
+
+                    Column {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        spacing:        _margin
+                        visible:        _geoZonesLoaded && myGeoFenceController.supported
+
+                        QGCLabel {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            wrapMode:       Text.WordWrap
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            text:           qsTr("Add the selected zone types as exclusion fences. Altitude limits and polygon holes are not transferred to the fence, and vehicles can only store a limited number of fence points.")
+                        }
+
+                        QGCCheckBox {
+                            id:         importProhibitedCheck
+                            text:       qsTr("Prohibited")
+                            checked:    true
+                        }
+
+                        QGCCheckBox {
+                            id:         importReqAuthorisationCheck
+                            text:       qsTr("Authorisation required")
+                            checked:    true
+                        }
+
+                        QGCCheckBox {
+                            id:         importConditionalCheck
+                            text:       qsTr("Conditional")
+                            checked:    false
+                        }
+
+                        QGCCheckBox {
+                            id:         importMapViewOnlyCheck
+                            text:       qsTr("Only zones in current map view")
+                            checked:    true
+                        }
+
+                        QGCButton {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            text:           qsTr("Add Exclusion Fences")
+                            enabled:        importProhibitedCheck.checked || importReqAuthorisationCheck.checked || importConditionalCheck.checked
+                            onClicked:      root._importGeoZones()
+                        }
+                    }
+                }
             }
         }
     } // Rectangle
+
+    function _importGeoZones() {
+        var restrictions = []
+        if (importProhibitedCheck.checked) {
+            restrictions.push(GeoZone.Prohibited)
+        }
+        if (importReqAuthorisationCheck.checked) {
+            restrictions.push(GeoZone.ReqAuthorisation)
+        }
+        if (importConditionalCheck.checked) {
+            restrictions.push(GeoZone.Conditional)
+        }
+        var area = importMapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
+        var fenceCount = myGeoFenceController.importGeoZones(restrictions, area)
+        mainWindow.showMessageDialog(qsTr("Geozones"),
+                                     fenceCount > 0 ?
+                                         qsTr("%1 exclusion fences added.").arg(fenceCount) :
+                                         qsTr("No new matching zones found."))
+    }
+
+    QGCFileDialog {
+        id:             geoZoneFileDialog
+        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
+        title:          qsTr("Select Geozone File")
+        nameFilters:    _geoZoneManager.fileDialogFilters
+
+        onAcceptedForLoad: (file) => {
+            if (_geoZoneManager.loadFile(file)) {
+                var mapRegion = flightMap.visibleRegion.boundingGeoRectangle()
+                if (!mapRegion.intersects(_geoZoneManager.boundingBox)) {
+                    flightMap.fitViewportToGeoShape(_geoZoneManager.boundingBox, ScreenTools.defaultFontPixelHeight)
+                }
+            }
+            close()
+        }
+    }
 }

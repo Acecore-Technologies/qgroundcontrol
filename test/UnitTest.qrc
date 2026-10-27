@@ -22,6 +22,8 @@
         <file alias="UT-MavCmdInfoSub.json">MissionManager/UT-MavCmdInfoSub.json</file>
         <file alias="UT-MavCmdInfoVTOL.json">MissionManager/UT-MavCmdInfoVTOL.json</file>
         <file alias="ADSB_Simulator.py">ADSB/ADSB_Simulator.py</file>
+        <file alias="ed269_test.json">GeoZone/ed269_test.json</file>
+        <file alias="ed318_test.json">GeoZone/ed318_test.json</file>
         <file alias="DSCN0010.jpg">AnalyzeView/DSCN0010.jpg</file>
         <file alias="SampleULog.ulg">AnalyzeView/SampleULog.ulg</file>
         <file alias="arducopter.apj">Utilities/arducopter.apj</file>

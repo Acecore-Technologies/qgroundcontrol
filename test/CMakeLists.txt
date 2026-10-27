@@ -64,6 +64,9 @@ add_qgc_test(ParameterManagerTest)
 add_subdirectory(FollowMe)
 add_qgc_test(FollowMeTest)
 
+add_subdirectory(GeoZone)
+add_qgc_test(GeoZoneTest)
+
 add_subdirectory(GPS)
 add_qgc_test(GpsTest)
 

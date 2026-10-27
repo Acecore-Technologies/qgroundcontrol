@@ -501,6 +501,10 @@ Item {
                 }
             }
 
+            GeoZoneMapVisuals {
+                map: editorMap
+            }
+
             GeoFenceMapVisuals {
                 map:                    editorMap
                 myGeoFenceController:   _geoFenceController

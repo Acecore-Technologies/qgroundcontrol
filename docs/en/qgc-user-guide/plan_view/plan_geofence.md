@@ -54,6 +54,35 @@ Regions can be deleted by pressing the associated **Del** button.
 
 The GeoFence is uploaded in the same way as a mission, using **File** in the [Plan tools](../plan_view/plan_view.md).
 
+## Geozones (ED-269 / ED-318)
+
+_QGroundControl_ can load UAS geographical zone (geozone) files published by aviation authorities in the EUROCAE ED-269 (JSON) or ED-318 (GeoJSON) format.
+The zones are shown on the map in both the Plan and Fly views, colored by restriction: prohibited (red), authorisation required (orange), conditional (yellow), no restriction (green) and U-space airspace (blue).
+Zones that are not active at the current time are drawn with a fainter fill.
+
+To load geozones:
+
+1. Navigate to the Plan View and select the _Geofence_ radio button.
+1. Expand the **Geozones (ED-269 / ED-318)** section of the GeoFence panel.
+1. Press **Load Geozone File...** and select the `.json` or `.geojson` file.
+
+The most recently loaded file is kept by _QGroundControl_ and reloaded automatically on startup.
+Use **Show geozones on map** to hide or show the zones, and **Remove Geozones** to remove them.
+When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits, applicability schedule, reason, message and responsible authority).
+
+### Add Geozones to the GeoFence
+
+If the vehicle supports GeoFences, loaded zones can be converted into exclusion fences:
+
+1. Check the zone types to add (**Prohibited**, **Authorisation required**, **Conditional**).
+1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
+1. Press **Add Exclusion Fences**. Fences that already exist are not added again.
+
+::: warning
+GeoFences have no altitude limits, so a zone's vertical limits are not transferred and the whole zone is excluded at all altitudes.
+Holes in zone polygons are also dropped. Vehicles can store only a limited number of fence points, so only add the zones you need.
+:::
+
 ## Remaining tools
 
 The rest of the tools work exactly as they do while editing a Mission.

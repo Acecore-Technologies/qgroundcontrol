@@ -20,6 +20,8 @@
 #include "PositionManager.h"
 #include "QGCMapEngineManager.h"
 #include "ADSBVehicleManager.h"
+#include "GeoZone.h"
+#include "GeoZoneManager.h"
 #include "MissionCommandTree.h"
 #include "HorizontalFactValueGrid.h"
 #include "FlightPathSegment.h"
@@ -84,6 +86,7 @@ void QGroundControlQmlGlobal::registerQmlTypes()
     qmlRegisterUncreatableType<FactValueGrid>           ("QGroundControl.Templates",             1, 0, "FactValueGrid",       "Reference only");
     qmlRegisterUncreatableType<FlightPathSegment>       ("QGroundControl",                       1, 0, "FlightPathSegment",   "Reference only");
     qmlRegisterUncreatableType<InstrumentValueData>     ("QGroundControl",                       1, 0, "InstrumentValueData", "Reference only");
+    qmlRegisterUncreatableType<GeoZone>                 ("QGroundControl.FlightMap",             1, 0, "GeoZone",             "Reference only");
     qmlRegisterUncreatableType<QGCGeoBoundingCube>      ("QGroundControl.FlightMap",             1, 0, "QGCGeoBoundingCube",  "Reference only");
     qmlRegisterUncreatableType<QGCMapPolygon>           ("QGroundControl.FlightMap",             1, 0, "QGCMapPolygon",       "Reference only");
     qmlRegisterUncreatableType<QmlObjectListModel>      ("QGroundControl",                       1, 0, "QmlObjectListModel",  "Reference only");
@@ -112,6 +115,7 @@ QGroundControlQmlGlobal::QGroundControlQmlGlobal(QObject *parent)
     : QObject(parent)
     , _mapEngineManager(QGCMapEngineManager::instance())
     , _adsbVehicleManager(ADSBVehicleManager::instance())
+    , _geoZoneManager(GeoZoneManager::instance())
     , _qgcPositionManager(QGCPositionManager::instance())
     , _missionCommandTree(MissionCommandTree::instance())
     , _videoManager(VideoManager::instance())

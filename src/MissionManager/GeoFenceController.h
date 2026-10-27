@@ -11,6 +11,7 @@
 
 #include <QtCore/QLoggingCategory>
 #include <QtPositioning/QGeoCoordinate>
+#include <QtPositioning/QGeoRectangle>
 
 #include "PlanElementController.h"
 #include "QmlObjectListModel.h"
@@ -19,6 +20,7 @@
 Q_DECLARE_LOGGING_CATEGORY(GeoFenceControllerLog)
 
 class GeoFenceManager;
+class GeoZone;
 class QGCFenceCircle;
 class QGCFencePolygon;
 class Vehicle;
@@ -61,6 +63,17 @@ public:
 
     /// Clears the interactive bit from all fence items
     Q_INVOKABLE void clearAllInteractive(void);
+
+    /// Adds exclusion fences for the geozones loaded in GeoZoneManager. Polygon holes are dropped, so the
+    /// whole outer boundary is excluded. Fences identical to existing ones are not added again.
+    ///     @param restrictions: GeoZone::Restriction values of the zones to import
+    ///     @param area: Only zones intersecting this area are imported. Invalid to import zones anywhere.
+    /// @return Number of fence polygons and circles added
+    Q_INVOKABLE int importGeoZones(const QVariantList& restrictions, const QGeoRectangle& area);
+
+    /// Adds exclusion fences for the specified geozones, skipping fences identical to existing ones
+    /// @return Number of fence polygons and circles added
+    int addGeoZoneExclusions(const QList<GeoZone*>& zones);
 
 #ifdef QGC_UTM_ADAPTER
     Q_INVOKABLE void loadFlightPlanData(void);

@@ -332,6 +332,10 @@ FlightMap {
         largeMapView:   !pipMode
     }
 
+    GeoZoneMapVisuals {
+        map: _root
+    }
+
     GeoFenceMapVisuals {
         map:                    _root
         myGeoFenceController:   _geoFenceController
