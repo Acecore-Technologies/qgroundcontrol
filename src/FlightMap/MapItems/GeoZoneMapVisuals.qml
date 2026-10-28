@@ -62,9 +62,11 @@ Item {
         GeoZoneInfoDialog { }
     }
 
-    // Map items must be added to the map itself, so Instantiator is used instead of MapItemView
+    // Map items must be added to the map itself, so Instantiator is used instead of MapItemView.
+    // Visibility is controlled with active since Qt 6.8 ignores a model change to 0.
     Instantiator {
-        model: _showZones ? _geoZoneManager.polygonShapes : 0
+        model:  _geoZoneManager.polygonShapes
+        active: _showZones
 
         delegate: MapPolygon {
             geoShape:       object.geoShape
@@ -79,7 +81,8 @@ Item {
     }
 
     Instantiator {
-        model: _showZones ? _geoZoneManager.circleShapes : 0
+        model:  _geoZoneManager.circleShapes
+        active: _showZones
 
         delegate: MapCircle {
             center:         object.center
@@ -96,7 +99,8 @@ Item {
 
     // Clickable zone labels which show the zone details
     Instantiator {
-        model: _showLabels ? _geoZoneManager.zones : 0
+        model:  _geoZoneManager.zones
+        active: _showLabels
 
         delegate: MapQuickItem {
             coordinate:     object.center
