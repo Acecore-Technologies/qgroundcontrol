@@ -11,9 +11,11 @@
 #include "AudioOutput.h"
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneSettings.h"
 #include "MultiVehicleManager.h"
 #include "QmlObjectListModel.h"
 #include "QGCLoggingCategory.h"
+#include "SettingsManager.h"
 #include "Vehicle.h"
 
 #include <QtCore/qapplicationstatic.h>
@@ -36,7 +38,14 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     (void) connect(this, &GeoZoneMonitor::alert, this, &GeoZoneMonitor::_showAlert);
     (void) connect(MultiVehicleManager::instance(), &MultiVehicleManager::activeVehicleChanged, this, &GeoZoneMonitor::_activeVehicleChanged);
     (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateEvaluateTimer);
+    (void) connect(SettingsManager::instance()->geoZoneSettings()->alertsEnabled(), &Fact::rawValueChanged, this, &GeoZoneMonitor::_alertsEnabledChanged);
     _activeVehicleChanged(MultiVehicleManager::instance()->activeVehicle());
+}
+
+void GeoZoneMonitor::_alertsEnabledChanged()
+{
+    _reset();
+    emit monitoringChanged();
 }
 
 void GeoZoneMonitor::_updateEvaluateTimer()
@@ -62,14 +71,14 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager)
 {
-    // Zones are about to be deleted, so forget them
-    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_reset);
+    // Zones are about to be deleted. Their alert states are kept so reloading a source doesn't repeat alerts.
+    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::monitoringChanged);
 }
 
 bool GeoZoneMonitor::monitoring() const
 {
-    return _vehicle && (_manager->zones()->count() > 0);
+    return _vehicle && (_manager->zones()->count() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
 }
 
 QVariantList GeoZoneMonitor::nearbyZones() const
@@ -92,7 +101,7 @@ int GeoZoneMonitor::alertRestriction() const
 
 bool GeoZoneMonitor::inside() const
 {
-    return !_nearby.isEmpty() && _nearby.first().inside;
+    return std::any_of(_nearby.cbegin(), _nearby.cend(), [](const Nearby &nearby) { return nearby.inside; });
 }
 
 void GeoZoneMonitor::_setNearby(const QList<Nearby> &nearby)
@@ -143,23 +152,38 @@ void GeoZoneMonitor::_reset()
     _setNearby({});
 }
 
+void GeoZoneMonitor::_forgetZones()
+{
+    _setNearby({});
+}
+
+QString GeoZoneMonitor::_zoneKey(const GeoZone *zone)
+{
+    return QStringLiteral("%1\x1f%2\x1f%3\x1f%4").arg(zone->identifier(), zone->name(), zone->sourceText().section(QStringLiteral(" ("), 0, 0)).arg(static_cast<int>(zone->restriction()));
+}
+
 void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
 {
     if (!position.coordinate.isValid()) {
         return;
     }
 
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional };
+    // U-space airspace requires a U-space flight authorisation, no restriction zones are only shown on the map
+    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
+    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    const double approachDistance = settings->approachDistance()->rawValue().toDouble();
+    const double approachVerticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
     const QGeoRectangle area = QGeoCircle(position.coordinate, approachDistance + hysteresisDistance).boundingGeoRectangle();
 
-    QSet<const GeoZone*> nearbyZones;
+    QSet<QString> nearbyZones;
     QList<Nearby> nearby;
     for (GeoZone *zone : _manager->zonesInArea(restrictions, area)) {
         if (!zone->active()) {
             continue;
         }
 
-        const State previous = _states.value(zone, State::Away);
+        const QString key = _zoneKey(zone);
+        const State previous = _states.value(key, State::Away);
         const double insideDistance = zone->distanceTo(position, (previous == State::Inside) ? hysteresisDistance : 0);
         const double nearDistance = zone->distanceTo(position, approachVerticalDistance + ((previous != State::Away) ? hysteresisDistance : 0));
         const double distance = std::min(insideDistance, nearDistance);
@@ -173,8 +197,8 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
             continue;
         }
 
-        nearbyZones.insert(zone);
-        _states[zone] = state;
+        nearbyZones.insert(key);
+        _states[key] = state;
         nearby.append(Nearby{ zone, state == State::Inside, static_cast<int>(std::lround(distance)) });
         if (state <= previous) {
             continue;
@@ -193,14 +217,18 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
         it = nearbyZones.contains(it.key()) ? std::next(it) : _states.erase(it);
     }
 
-    // Zones the vehicle is in first, then the most restrictive, then the closest
+    // The most restrictive first, so being inside large U-space airspace doesn't hide a prohibited zone ahead,
+    // then zones the vehicle is in, then the closest
     std::stable_sort(nearby.begin(), nearby.end(), [](const Nearby &a, const Nearby &b) {
+        const int severityA = GeoZone::restrictionSeverity(a.zone->restriction());
+        const int severityB = GeoZone::restrictionSeverity(b.zone->restriction());
+        if (severityA != severityB) {
+            return severityA < severityB;
+        }
         if (a.inside != b.inside) {
             return a.inside;
         }
-        const int severityA = GeoZone::restrictionSeverity(a.zone->restriction());
-        const int severityB = GeoZone::restrictionSeverity(b.zone->restriction());
-        return (severityA != severityB) ? (severityA < severityB) : (a.distance < b.distance);
+        return a.distance < b.distance;
     });
     _setNearby(nearby);
 }
@@ -208,5 +236,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
 void GeoZoneMonitor::_showAlert(const QString &message)
 {
     // MainWindow shows the message without blocking the user
-    AudioOutput::instance()->say(message);
+    if (SettingsManager::instance()->geoZoneSettings()->audioAlerts()->rawValue().toBool()) {
+        AudioOutput::instance()->say(message);
+    }
 }

@@ -32,6 +32,7 @@ Item {
         case GeoZone.Prohibited:        return qgcPal.colorRed
         case GeoZone.ReqAuthorisation:  return qgcPal.colorOrange
         case GeoZone.Conditional:       return qgcPal.colorYellow
+        case GeoZone.USpace:            return qgcPal.colorBlue
         default:                        return qgcPal.text
         }
     }
@@ -67,10 +68,10 @@ Item {
 
                     SettingsGroupLayout {
                         heading:            qsTr("Geozones")
-                        headingDescription: qsTr("Active prohibited, authorisation required and conditional zones within %1, considering altitude limits.").arg(control._distanceText(100))
+                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1, considering altitude limits.").arg(control._distanceText(QGroundControl.settingsManager.geoZoneSettings.approachDistance.rawValue))
 
                         QGCLabel {
-                            text:       qsTr("No restricted zones nearby")
+                            text:       qsTr("No zones nearby")
                             visible:    _monitor.nearbyZones.length === 0
                         }
 

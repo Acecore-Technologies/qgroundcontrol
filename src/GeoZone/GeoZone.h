@@ -163,6 +163,16 @@ public:
     bool intersectsPath(const QList<Position> &path) const;
     bool intersectsPath(const QList<QGeoCoordinate> &path) const;
 
+    /// Area flown over by a mission item, like a survey polygon, with the range of its altitudes
+    struct Area {
+        QList<QGeoCoordinate> polygon;  ///< Unclosed
+        GeoZone::Position lowest;       ///< Lowest altitude, with the highest terrain for limits above ground
+        GeoZone::Position highest;      ///< Highest altitude, with the lowest terrain
+    };
+
+    /// @return true if the area overlaps a volume horizontally and vertically
+    bool intersectsArea(const Area &area) const;
+
     /// @return true if the vertical limits of the volume overlap the altitudes between the positions, extended by
     ///         the margin. Unknown altitudes, limits and references overlap.
     static bool verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin = 0);

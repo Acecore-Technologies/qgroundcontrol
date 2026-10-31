@@ -38,10 +38,9 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged)  ///< Why the last refresh failed
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed)
+    Q_PROPERTY(int          refreshIntervalSecs READ refreshIntervalSecs NOTIFY changed)
 
 public:
-    static constexpr int staleDays = 28;
-
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
     ~GeoZoneSource();
 
@@ -77,6 +76,12 @@ public:
     /// Sets the dates of the stored copy before it is loaded, or when a feed is confirmed unchanged
     void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate);
 
+    GeoZoneParser::Format format() const { return _format; }
+    QByteArray contentHash() const { return _contentHash; }
+
+    /// Records that a download had the same zones as loaded
+    void markCurrent(const QDateTime &loadedAt, const QDateTime &issued);
+
     /// HTTP validators of a feed for downloading it only when it changed
     QString etag() const { return _etag; }
     QString lastModified() const { return _lastModified; }
@@ -88,11 +93,17 @@ public:
     void setBusy(bool busy);
     void setErrorString(const QString &errorString);
 
-    /// Re-evaluates expiry and staleness against the specified UTC time
+    /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data ages of the settings
     void updateValidity(const QDateTime &now);
 
+    /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
+    bool isLive() const { return _format == GeoZoneParser::Format::FaaTfr; }
+
+    /// @return Seconds after which a feed is downloaded again, from the refresh interval settings
+    int refreshIntervalSecs() const;
+
     /// @return true if a feed should be downloaded again
-    bool refreshDue(const QDateTime &now, int refreshIntervalHours) const;
+    bool refreshDue(const QDateTime &now) const;
 
 signals:
     void changed();
@@ -119,6 +130,7 @@ private:
     bool _busy = false;
     QString _errorString;
     QString _storedFileName;
+    QByteArray _contentHash;
     QString _etag;
     QString _lastModified;
 

@@ -65,6 +65,7 @@ add_subdirectory(FollowMe)
 add_qgc_test(FollowMeTest)
 
 add_subdirectory(GeoZone)
+add_qgc_test(GeoZoneFlightTest)
 add_qgc_test(GeoZoneTest)
 
 add_subdirectory(GPS)

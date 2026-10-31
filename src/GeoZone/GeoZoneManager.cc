@@ -8,12 +8,13 @@
  ****************************************************************************/
 
 #include "GeoZoneManager.h"
+#include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "QGCApplication.h"
-#include "QGCFileDownload.h"
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
+#include "SettingsManager.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/qapplicationstatic.h>
@@ -21,21 +22,11 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
-#include <QtCore/QJsonArray>
-#include <QtCore/QJsonDocument>
-#include <QtCore/QJsonObject>
-#include <QtCore/QLocale>
 #include <QtCore/QMap>
-#include <QtCore/QSaveFile>
 #include <QtCore/QSet>
-#include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
-#include <QtCore/QUuid>
-#include <QtNetwork/QNetworkAccessManager>
-#include <QtNetwork/QNetworkReply>
-#include <QtNetwork/QNetworkRequest>
 
 #include <algorithm>
 #include <numeric>
@@ -44,28 +35,37 @@ QGC_LOGGING_CATEGORY(GeoZoneManagerLog, "qgc.geozone.geozonemanager")
 
 Q_APPLICATION_STATIC(GeoZoneManager, _geoZoneManager);
 
+namespace {
+
+QString defaultStorageDir()
+{
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("GeoZones"));
+}
+
+} // namespace
+
 GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     : QObject(parent)
-    , _storageDir(storageDir)
+    , _store(storageDir.isEmpty() ? defaultStorageDir() : storageDir)
+    , _downloader(new GeoZoneDownloader(this))
     , _zones(new QmlObjectListModel(this))
     , _sources(new QmlObjectListModel(this))
     , _activeTimer(new QTimer(this))
     , _refreshTimer(new QTimer(this))
 {
-    if (_storageDir.isEmpty()) {
-        _storageDir = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("GeoZones"));
-    }
-
-    QSettings settings;
-    settings.beginGroup(_settingsGroup);
-    _visible = settings.value(_visibleKey, true).toBool();
-    settings.endGroup();
+    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    (void) connect(settings->showZones(), &Fact::rawValueChanged, this, [this]() { emit visibleChanged(visible()); });
+    // The age at which data is outdated may have changed
+    (void) connect(settings->staleDays(), &Fact::rawValueChanged, this, &GeoZoneManager::_updateValidity);
+    (void) connect(settings->liveStaleHours(), &Fact::rawValueChanged, this, &GeoZoneManager::_updateValidity);
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);
 
     _refreshTimer->setInterval(_refreshCheckIntervalMSecs);
     (void) connect(_refreshTimer, &QTimer::timeout, this, &GeoZoneManager::_refreshDueFeeds);
+
+    (void) connect(_downloader, &GeoZoneDownloader::progressChanged, this, &GeoZoneManager::progressChanged);
 }
 
 GeoZoneManager::~GeoZoneManager()
@@ -105,24 +105,19 @@ QVariantList GeoZoneManager::feedPresets()
         preset(tr("Latvia (LGS)"),              QStringLiteral("https://drz.lv/api/v1/export-history/UASZoneVersion")),
         preset(tr("Luxembourg (Geoportail)"),   QStringLiteral("https://drones.geoportail.lu/zones")),
         preset(tr("Sweden (LFV)"),              QStringLiteral("https://dronechart.lfv.se/data/uas_zones_ED318.json")),
+        preset(tr("United States TFRs (FAA)"),  QStringLiteral("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&outputFormat=application/json")),
         preset(tr("Switzerland (FOCA)"),        QStringLiteral("https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json")),
     };
 }
 
+bool GeoZoneManager::visible() const
+{
+    return SettingsManager::instance()->geoZoneSettings()->showZones()->rawValue().toBool();
+}
+
 void GeoZoneManager::setVisible(bool visible)
 {
-    if (visible == _visible) {
-        return;
-    }
-
-    _visible = visible;
-
-    QSettings settings;
-    settings.beginGroup(_settingsGroup);
-    settings.setValue(_visibleKey, _visible);
-    settings.endGroup();
-
-    emit visibleChanged(_visible);
+    SettingsManager::instance()->geoZoneSettings()->showZones()->setRawValue(visible);
 }
 
 GeoZoneSource *GeoZoneManager::source(const QString &key) const
@@ -136,16 +131,6 @@ GeoZoneSource *GeoZoneManager::source(const QString &key) const
     return nullptr;
 }
 
-QString GeoZoneManager::_storedPath(const QString &storedFileName) const
-{
-    return QDir(_storageDir).filePath(storedFileName);
-}
-
-QString GeoZoneManager::_newStoredFileName()
-{
-    return QStringLiteral("%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-}
-
 void GeoZoneManager::addFile(const QString &fileName)
 {
     const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
@@ -154,7 +139,7 @@ void GeoZoneManager::addFile(const QString &fileName)
     LoadJob job;
     job.key = info.fileName();
     job.sourcePath = localFileName;
-    job.storedFileName = _newStoredFileName();
+    job.storedFileName = GeoZoneStore::newFileName();
     job.loadedAt = QDateTime::currentDateTimeUtc();
     job.fileDate = info.lastModified().toUTC();
     job.userInitiated = true;
@@ -172,12 +157,12 @@ bool GeoZoneManager::loadFile(const QString &fileName, QString &errorString)
     LoadJob job;
     job.key = info.fileName();
     job.sourcePath = localFileName;
-    job.storedFileName = _newStoredFileName();
+    job.storedFileName = GeoZoneStore::newFileName();
     job.loadedAt = QDateTime::currentDateTimeUtc();
     job.fileDate = info.lastModified().toUTC();
     job.generation = ++_generations[job.key];
 
-    const LoadResult loadResult = _runLoad(job, _storageDir);
+    const LoadResult loadResult = _runLoad(job, _store);
     if (!loadResult.errorString.isEmpty()) {
         errorString = tr("Geozone file load failed. %1").arg(loadResult.errorString);
         return false;
@@ -214,7 +199,7 @@ void GeoZoneManager::_refreshDueFeeds()
     const QDateTime now = QDateTime::currentDateTimeUtc();
     for (int i = 0; i < _sources->count(); i++) {
         const GeoZoneSource *const source = _sources->value<GeoZoneSource*>(i);
-        if (!source->busy() && source->refreshDue(now, refreshIntervalHours)) {
+        if (!source->busy() && source->refreshDue(now)) {
             _download(source->url(), false /* userInitiated */);
         }
     }
@@ -237,7 +222,7 @@ void GeoZoneManager::_download(const QString &url, bool userInitiated)
         job.key = url;
         job.url = url;
         job.sourcePath = info.filePath();
-        job.storedFileName = _newStoredFileName();
+        job.storedFileName = GeoZoneStore::newFileName();
         job.loadedAt = QDateTime::currentDateTimeUtc();
         job.fileDate = info.lastModified().toUTC();
         job.userInitiated = userInitiated;
@@ -246,92 +231,43 @@ void GeoZoneManager::_download(const QString &url, bool userInitiated)
         return;
     }
 
-    if (!_networkManager) {
-        _networkManager = new QNetworkAccessManager(this);
-    }
-    QNetworkRequest request(parsedUrl);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    request.setTransferTimeout(downloadTimeoutSecs * 1000);
-    // Servers answer 304 Not Modified instead of sending an unchanged feed again
-    const GeoZoneSource *const existing = source(url);
-    if (existing && existing->loaded()) {
-        if (!existing->etag().isEmpty()) {
-            request.setRawHeader("If-None-Match", existing->etag().toUtf8());
-        }
-        if (!existing->lastModified().isEmpty()) {
-            request.setRawHeader("If-Modified-Since", existing->lastModified().toUtf8());
-        }
+    QString etag;
+    QString lastModified;
+    if (const GeoZoneSource *const existing = source(url); existing && existing->loaded()) {
+        etag = existing->etag();
+        lastModified = existing->lastModified();
     }
 
     _setPending(1);
-    QNetworkReply *const reply = _networkManager->get(request);
-    QGCFileDownload::setIgnoreSSLErrorsIfNeeded(*reply);
-    _downloads.insert(reply, Download{ url });
-    emit progressChanged();
-    (void) connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64 received, qint64 total) {
-        const auto it = _downloads.find(reply);
-        if (it != _downloads.end()) {
-            it->received = received;
-            it->total = total;
-            emit progressChanged();
-        }
-    });
-    (void) connect(reply, &QNetworkReply::finished, this, [this, reply, url, generation, userInitiated]() {
-        reply->deleteLater();
-        (void) _downloads.remove(reply);
-        emit progressChanged();
-        _downloadComplete(reply, url, generation, userInitiated);
+    _downloader->get(url, etag, lastModified, [this, url, generation, userInitiated](const GeoZoneDownloader::Result &download) {
+        _downloadComplete(download, url, generation, userInitiated);
+        _setPending(-1);
     });
 }
 
 double GeoZoneManager::progress() const
 {
-    qint64 received = 0;
-    qint64 total = 0;
-    for (const Download &download : _downloads) {
-        if (download.total <= 0) {
-            return -1;
-        }
-        received += download.received;
-        total += download.total;
-    }
     // Parsing has no progress to report
-    return (total > 0) ? (static_cast<double>(received) / total) : -1;
+    return _downloader->progress();
 }
 
 QString GeoZoneManager::progressText() const
 {
-    if (_downloads.isEmpty()) {
+    if (_downloader->count() == 0) {
         return busy() ? tr("Loading geozones...") : QString();
     }
-
-    qint64 received = 0;
-    qint64 total = 0;
-    bool totalKnown = true;
-    for (const Download &download : _downloads) {
-        received += download.received;
-        total += download.total;
-        totalKnown = totalKnown && (download.total > 0);
-    }
-    const QLocale locale;
-    const QString size = totalKnown ?
-        tr("%1 of %2").arg(locale.formattedDataSize(received), locale.formattedDataSize(total)) :
-        locale.formattedDataSize(received);
-    const QString name = (_downloads.count() == 1) ? QUrl(_downloads.cbegin()->url).host() : tr("%1 feeds").arg(_downloads.count());
-    return tr("Downloading %1: %2").arg(name, size);
+    return _downloader->progressText();
 }
 
-void GeoZoneManager::_downloadComplete(QNetworkReply *reply, const QString &url, int generation, bool userInitiated)
+void GeoZoneManager::_downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated)
 {
     if (_generations.value(url) != generation) {
         // Removed or downloaded again in the meantime
-        _setPending(-1);
         return;
     }
 
     GeoZoneSource *const existing = source(url);
-    const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if ((reply->error() == QNetworkReply::NoError) && (statusCode == 304) && existing) {
+    if ((download.status == GeoZoneDownloader::Result::Status::NotModified) && existing) {
         qCDebug(GeoZoneManagerLog) << "Feed not modified" << url;
         const QDateTime now = QDateTime::currentDateTimeUtc();
         existing->setStoredDates(now, now);
@@ -339,22 +275,11 @@ void GeoZoneManager::_downloadComplete(QNetworkReply *reply, const QString &url,
         existing->setErrorString(QString());
         _saveIndex();
         _updateValidity();
-        _setPending(-1);
         return;
     }
 
-    QString errorString;
-    QByteArray data;
-    if (reply->error() != QNetworkReply::NoError) {
-        errorString = reply->errorString();
-    } else if ((statusCode < 200) || (statusCode >= 300)) {
-        errorString = tr("The server responded with status %1.").arg(statusCode);
-    } else {
-        data = reply->readAll();
-    }
-
-    if (!errorString.isEmpty() || data.isEmpty()) {
-        const QString error = errorString.isEmpty() ? tr("No data was received.") : errorString;
+    if (download.status != GeoZoneDownloader::Result::Status::Ok) {
+        const QString error = download.errorString.isEmpty() ? tr("The server responded with status %1.").arg(304) : download.errorString;
         qCWarning(GeoZoneManagerLog) << "Download failed" << url << error;
         if (existing) {
             existing->setBusy(false);
@@ -363,26 +288,27 @@ void GeoZoneManager::_downloadComplete(QNetworkReply *reply, const QString &url,
         if (userInitiated) {
             qgcApp()->showAppMessage(tr("Geozone download from %1 failed. %2").arg(url, error));
         }
-        _setPending(-1);
         return;
     }
 
     LoadJob job;
     job.key = url;
     job.url = url;
-    job.data = data;
-    job.etag = QString::fromUtf8(reply->rawHeader("ETag"));
-    job.lastModified = QString::fromUtf8(reply->rawHeader("Last-Modified"));
-    job.storedFileName = _newStoredFileName();
+    job.data = download.data;
+    if (QUrl(url).host().endsWith(QStringLiteral("faa.gov")) || (existing && (existing->format() == GeoZoneParser::Format::FaaTfr))) {
+        job.formatHint = GeoZoneParser::Format::FaaTfr;
+    }
+    job.etag = download.etag;
+    job.lastModified = download.lastModified;
+    job.storedFileName = GeoZoneStore::newFileName();
     job.loadedAt = QDateTime::currentDateTimeUtc();
     job.fileDate = job.loadedAt;
     job.userInitiated = userInitiated;
     job.generation = generation;
     _startLoad(job, true /* background */);
-    _setPending(-1);
 }
 
-GeoZoneManager::LoadResult GeoZoneManager::_runLoad(const LoadJob &job, const QString &storageDir)
+GeoZoneManager::LoadResult GeoZoneManager::_runLoad(const LoadJob &job, const GeoZoneStore &store)
 {
     LoadResult loadResult;
 
@@ -397,17 +323,14 @@ GeoZoneManager::LoadResult GeoZoneManager::_runLoad(const LoadJob &job, const QS
     }
 
     QString parseError;
-    if (!GeoZoneParser::parse(bytes, loadResult.result, parseError)) {
+    if (!GeoZoneParser::parse(bytes, loadResult.result, parseError, job.formatHint)) {
         loadResult.errorString = parseError;
         return loadResult;
     }
 
-    if (!job.storedFileName.isEmpty()) {
-        (void) QDir().mkpath(storageDir);
-        QSaveFile storedFile(QDir(storageDir).filePath(job.storedFileName));
-        if (!storedFile.open(QIODevice::WriteOnly) || (storedFile.write(bytes) != bytes.size()) || !storedFile.commit()) {
-            qCWarning(GeoZoneManagerLog) << "Unable to store copy of geozone source" << job.key << storedFile.errorString();
-        }
+    QString storeError;
+    if (!job.storedFileName.isEmpty() && !store.writeFile(job.storedFileName, bytes, storeError)) {
+        qCWarning(GeoZoneManagerLog) << "Unable to store copy of geozone source" << job.key << storeError;
     }
 
     return loadResult;
@@ -421,7 +344,7 @@ void GeoZoneManager::_startLoad(LoadJob job, bool background)
     _setPending(1);
 
     if (!background) {
-        _applyLoad(job, _runLoad(job, _storageDir));
+        _applyLoad(job, _runLoad(job, _store));
         _setPending(-1);
         return;
     }
@@ -432,16 +355,14 @@ void GeoZoneManager::_startLoad(LoadJob job, bool background)
         watcher->deleteLater();
         _setPending(-1);
     });
-    watcher->setFuture(QtConcurrent::run(&GeoZoneManager::_runLoad, job, _storageDir));
+    watcher->setFuture(QtConcurrent::run(&GeoZoneManager::_runLoad, job, _store));
 }
 
 void GeoZoneManager::_applyLoad(const LoadJob &job, const LoadResult &loadResult)
 {
     if (_generations.value(job.key) != job.generation) {
         // Removed or loaded again in the meantime
-        if (!job.storedFileName.isEmpty()) {
-            (void) QFile::remove(_storedPath(job.storedFileName));
-        }
+        _store.removeFile(job.storedFileName);
         return;
     }
 
@@ -461,18 +382,27 @@ void GeoZoneManager::_applyLoad(const LoadJob &job, const LoadResult &loadResult
         return;
     }
 
+    // Live feeds are downloaded often and mostly unchanged, keep their zones so maps and alerts aren't reset
+    if (source && source->loaded() && !loadResult.result.contentHash.isEmpty() && (source->contentHash() == loadResult.result.contentHash) &&
+        (source->format() == loadResult.result.format)) {
+        _setStoredFileName(source, job.storedFileName);
+        source->markCurrent(job.loadedAt, loadResult.result.issued);
+        source->setErrorString(QString());
+        if (source->isFeed() && !job.data.isEmpty()) {
+            source->setValidators(job.etag, job.lastModified);
+        }
+        _saveIndex();
+        _updateValidity();
+        qCDebug(GeoZoneManagerLog) << "Zones unchanged" << job.key;
+        return;
+    }
+
     _beginZonesChange();
     if (!source) {
         source = new GeoZoneSource(job.key, job.url, this);
         _sources->append(source);
     }
-    if (!job.storedFileName.isEmpty()) {
-        const QString previousStoredFileName = source->storedFileName();
-        source->setStoredFileName(job.storedFileName);
-        if (!previousStoredFileName.isEmpty() && (previousStoredFileName != job.storedFileName)) {
-            (void) QFile::remove(_storedPath(previousStoredFileName));
-        }
-    }
+    _setStoredFileName(source, job.storedFileName);
     source->setResult(loadResult.result, job.loadedAt, job.fileDate);
     source->setErrorString(QString());
     if (source->isFeed() && !job.data.isEmpty()) {
@@ -488,6 +418,18 @@ void GeoZoneManager::_applyLoad(const LoadJob &job, const LoadResult &loadResult
     if (job.userInitiated) {
         setVisible(true);
         emit sourceAdded(source);
+    }
+}
+
+void GeoZoneManager::_setStoredFileName(GeoZoneSource *source, const QString &storedFileName)
+{
+    if (storedFileName.isEmpty()) {
+        return;
+    }
+    const QString previousStoredFileName = source->storedFileName();
+    source->setStoredFileName(storedFileName);
+    if (previousStoredFileName != storedFileName) {
+        _store.removeFile(previousStoredFileName);
     }
 }
 
@@ -542,9 +484,7 @@ void GeoZoneManager::removeSource(int index)
     source->deleteLater();
     _endZonesChange();
 
-    if (!storedFileName.isEmpty()) {
-        (void) QFile::remove(_storedPath(storedFileName));
-    }
+    _store.removeFile(storedFileName);
     _saveIndex();
     _updateValidity();
 }
@@ -602,56 +542,39 @@ void GeoZoneManager::_endZonesChange()
 
 void GeoZoneManager::loadStoredSources(bool background)
 {
-    QJsonArray entries;
-    QFile indexFile(_storedPath(_indexFileName));
-    if (indexFile.open(QIODevice::ReadOnly)) {
-        entries = QJsonDocument::fromJson(indexFile.readAll()).object().value(QStringLiteral("sources")).toArray();
-        indexFile.close();
-    } else if (QFile::exists(_storedPath(_legacyStoredFileName))) {
-        // Earlier versions kept a single file
-        QSettings settings;
-        settings.beginGroup(_settingsGroup);
-        const QString sourceName = settings.value(_legacySourceNameKey).toString();
-        settings.remove(_legacySourceNameKey);
-        settings.endGroup();
-
-        const QString fileDate = QFileInfo(_storedPath(_legacyStoredFileName)).lastModified().toUTC().toString(Qt::ISODate);
-        entries.append(QJsonObject{
-            { QStringLiteral("key"), sourceName.isEmpty() ? QString(_legacyStoredFileName) : sourceName },
-            { QStringLiteral("file"), QString(_legacyStoredFileName) },
-            { QStringLiteral("loadedAt"), fileDate },
-            { QStringLiteral("fileDate"), fileDate },
-        });
-    }
-
     QList<LoadJob> jobs;
-    for (const QJsonValue &entryValue : std::as_const(entries)) {
-        const QJsonObject entry = entryValue.toObject();
+    for (const GeoZoneStore::Entry &entry : _store.readIndex()) {
         LoadJob job;
-        job.key = entry.value(QStringLiteral("key")).toString();
-        job.url = entry.value(QStringLiteral("url")).toString();
-        const QString storedFileName = entry.value(QStringLiteral("file")).toString();
-        job.sourcePath = _storedPath(storedFileName);
-        job.loadedAt = QDateTime::fromString(entry.value(QStringLiteral("loadedAt")).toString(), Qt::ISODate);
-        job.fileDate = QDateTime::fromString(entry.value(QStringLiteral("fileDate")).toString(), Qt::ISODate);
-        job.etag = entry.value(QStringLiteral("etag")).toString();
-        job.lastModified = entry.value(QStringLiteral("lastModified")).toString();
-        if (job.key.isEmpty() || storedFileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
-            qCWarning(GeoZoneManagerLog) << "Skipping stored geozone source" << job.key << storedFileName;
+        job.key = entry.key;
+        job.url = entry.url;
+        job.sourcePath = _store.path(entry.fileName);
+        job.loadedAt = entry.loadedAt;
+        job.fileDate = entry.fileDate;
+        if (QUrl(job.url).host().endsWith(QStringLiteral("faa.gov"))) {
+            job.formatHint = GeoZoneParser::Format::FaaTfr;
+        }
+        job.etag = entry.etag;
+        job.lastModified = entry.lastModified;
+        if (job.key.isEmpty() || entry.fileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
+            qCWarning(GeoZoneManagerLog) << "Skipping stored geozone source" << job.key << entry.fileName;
             continue;
         }
         job.generation = ++_generations[job.key];
 
         // Keep the order of the sources while they load
         GeoZoneSource *const placeholder = new GeoZoneSource(job.key, job.url, this);
-        placeholder->setStoredFileName(storedFileName);
+        placeholder->setStoredFileName(entry.fileName);
         placeholder->setStoredDates(job.loadedAt, job.fileDate);
         placeholder->setValidators(job.etag, job.lastModified);
         _sources->append(placeholder);
         jobs.append(job);
     }
 
-    _removeOrphanFiles();
+    QSet<QString> referenced;
+    for (int i = 0; i < _sources->count(); i++) {
+        referenced.insert(_sources->value<GeoZoneSource*>(i)->storedFileName());
+    }
+    _store.removeOrphanFiles(referenced);
     _saveIndex();
 
     for (const LoadJob &job : std::as_const(jobs)) {
@@ -661,57 +584,25 @@ void GeoZoneManager::loadStoredSources(bool background)
 
 void GeoZoneManager::_saveIndex() const
 {
-    QJsonArray entries;
+    QList<GeoZoneStore::Entry> entries;
     for (int i = 0; i < _sources->count(); i++) {
         const GeoZoneSource *const source = _sources->value<GeoZoneSource*>(i);
         if (source->storedFileName().isEmpty()) {
             continue;
         }
-        QJsonObject entry{
-            { QStringLiteral("key"), source->key() },
-            { QStringLiteral("file"), source->storedFileName() },
-            { QStringLiteral("loadedAt"), source->loadedAt().toString(Qt::ISODate) },
-            { QStringLiteral("fileDate"), source->fileDate().toString(Qt::ISODate) },
-        };
+        GeoZoneStore::Entry entry;
+        entry.key = source->key();
+        entry.fileName = source->storedFileName();
+        entry.loadedAt = source->loadedAt();
+        entry.fileDate = source->fileDate();
         if (source->isFeed()) {
-            entry.insert(QStringLiteral("url"), source->url());
-            if (!source->etag().isEmpty()) {
-                entry.insert(QStringLiteral("etag"), source->etag());
-            }
-            if (!source->lastModified().isEmpty()) {
-                entry.insert(QStringLiteral("lastModified"), source->lastModified());
-            }
+            entry.url = source->url();
+            entry.etag = source->etag();
+            entry.lastModified = source->lastModified();
         }
         entries.append(entry);
     }
-
-    if (entries.isEmpty()) {
-        (void) QFile::remove(_storedPath(_indexFileName));
-        return;
-    }
-
-    (void) QDir().mkpath(_storageDir);
-    QSaveFile indexFile(_storedPath(_indexFileName));
-    const QByteArray bytes = QJsonDocument(QJsonObject{ { QStringLiteral("version"), 1 }, { QStringLiteral("sources"), entries } }).toJson();
-    if (!indexFile.open(QIODevice::WriteOnly) || (indexFile.write(bytes) != bytes.size()) || !indexFile.commit()) {
-        qCWarning(GeoZoneManagerLog) << "Unable to save geozone source index" << indexFile.fileName() << indexFile.errorString();
-    }
-}
-
-void GeoZoneManager::_removeOrphanFiles() const
-{
-    QSet<QString> referenced = { QString(_indexFileName) };
-    for (int i = 0; i < _sources->count(); i++) {
-        referenced.insert(_sources->value<GeoZoneSource*>(i)->storedFileName());
-    }
-
-    const QDir dir(_storageDir);
-    for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
-        if (!referenced.contains(fileName)) {
-            qCDebug(GeoZoneManagerLog) << "Removing unreferenced geozone file" << fileName;
-            (void) QFile::remove(dir.filePath(fileName));
-        }
-    }
+    _store.writeIndex(entries);
 }
 
 void GeoZoneManager::_updateActive()
@@ -816,6 +707,23 @@ QList<GeoZone*> GeoZoneManager::zonesCrossingPaths(const QList<GeoZone::Restrict
         const QList<int> &pathIndexes = it.value();
         if (std::any_of(pathIndexes.cbegin(), pathIndexes.cend(), [zone, &paths](int pathIndex) { return zone->intersectsPath(paths[pathIndex]); })) {
             zones.append(zone);
+        }
+    }
+    return zones;
+}
+
+QList<GeoZone*> GeoZoneManager::zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const
+{
+    QList<GeoZone*> zones;
+    for (const GeoZone::Area &area : areas) {
+        if (area.polygon.count() < 3) {
+            continue;
+        }
+        for (const int index : _index.query(QGeoRectangle(area.polygon))) {
+            GeoZone *const zone = _zoneList[index];
+            if (restrictions.contains(zone->restriction()) && !zones.contains(zone) && zone->intersectsArea(area)) {
+                zones.append(zone);
+            }
         }
     }
     return zones;

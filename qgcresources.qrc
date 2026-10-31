@@ -1,4 +1,7 @@
 <RCC>
+    <qresource prefix="/geoid">
+        <file alias="egm96_1deg.bin">resources/geoid/egm96_1deg.bin</file>
+    </qresource>
     <qresource prefix="/fonts">
         <file alias="opensans">resources/fonts/OpenSans-Regular.ttf</file>
         <file alias="opensans-demibold">resources/fonts/OpenSans-Semibold.ttf</file>

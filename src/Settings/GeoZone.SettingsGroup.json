@@ -1,0 +1,88 @@
+{
+    "version": 1,
+    "fileType": "FactMetaData",
+    "QGC.MetaData.Facts":
+[
+{
+    "name":         "showZones",
+    "shortDesc":    "Show geozones on maps",
+    "type":         "bool",
+    "default":      true
+},
+{
+    "name":         "alertsEnabled",
+    "shortDesc":    "Flight alerts",
+    "longDesc":     "Alert when the active vehicle approaches or enters an active restricted geozone or U-space airspace.",
+    "type":         "bool",
+    "default":      true
+},
+{
+    "name":         "audioAlerts",
+    "shortDesc":    "Speak flight alerts",
+    "type":         "bool",
+    "default":      true
+},
+{
+    "name":         "approachDistance",
+    "shortDesc":    "Approach alert distance",
+    "longDesc":     "Horizontal distance from a geozone at which the vehicle is alerted that it approaches the zone.",
+    "type":         "double",
+    "units":        "m",
+    "min":          10,
+    "max":          5000,
+    "decimalPlaces": 0,
+    "default":      100
+},
+{
+    "name":         "approachVerticalDistance",
+    "shortDesc":    "Approach alert height margin",
+    "longDesc":     "Vertical distance below the floor or above the ceiling of a geozone within which the vehicle is considered close to the zone.",
+    "type":         "double",
+    "units":        "m",
+    "min":          0,
+    "max":          1000,
+    "decimalPlaces": 0,
+    "default":      30
+},
+{
+    "name":         "feedRefreshHours",
+    "shortDesc":    "Feed refresh interval",
+    "longDesc":     "Hours after which downloaded geozone feeds are downloaded again.",
+    "type":         "uint32",
+    "units":        "hours",
+    "min":          1,
+    "max":          168,
+    "default":      24
+},
+{
+    "name":         "liveFeedRefreshMinutes",
+    "shortDesc":    "Live restrictions refresh interval",
+    "longDesc":     "Minutes after which feeds of temporary flight restrictions, which change during the day, are downloaded again.",
+    "type":         "uint32",
+    "units":        "min",
+    "min":          5,
+    "max":          240,
+    "default":      15
+},
+{
+    "name":         "staleDays",
+    "shortDesc":    "Outdated data warning",
+    "longDesc":     "Age in days after which the data of a geozone source is reported as outdated.",
+    "type":         "uint32",
+    "units":        "days",
+    "min":          1,
+    "max":          365,
+    "default":      28
+},
+{
+    "name":         "liveStaleHours",
+    "shortDesc":    "Outdated live restrictions warning",
+    "longDesc":     "Age in hours after which the data of a temporary flight restriction feed is reported as outdated.",
+    "type":         "uint32",
+    "units":        "hours",
+    "min":          1,
+    "max":          72,
+    "default":      2
+}
+]
+}

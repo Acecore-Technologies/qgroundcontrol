@@ -56,7 +56,7 @@ The GeoFence is uploaded in the same way as a mission, using **File** in the [Pl
 
 ## Geozones (ED-269 / ED-318)
 
-_QGroundControl_ can load UAS geographical zone (geozone) files published by aviation authorities in the EUROCAE ED-269 (JSON) or ED-318 (GeoJSON) format.
+_QGroundControl_ can load UAS geographical zone (geozone) files published by aviation authorities in the EUROCAE ED-269 (JSON) or ED-318 (GeoJSON) format, and the temporary flight restrictions (TFRs) published by the FAA.
 The zones are shown on the map in both the Plan and Fly views, colored by restriction: prohibited (red), authorisation required (orange), conditional (yellow), no restriction (green) and U-space airspace (blue).
 Zones that are not active at the current time are drawn with a fainter fill. Schedules based on sunrise, sunset or civil twilight are computed for the location of each zone.
 
@@ -68,23 +68,36 @@ To add geozones:
 
 Several files and feeds can be loaded at the same time. Loading a file with the same name, or a feed with the same URL, replaces its zones.
 Files are loaded in the background and the map is moved to the new zones if they are not in view.
-_QGroundControl_ keeps a copy of each source and reloads them automatically on startup. Feeds are checked for updates when they are older than 24 hours, and **Refresh Feeds** checks them immediately. Feeds which have not changed on the server are not downloaded again. If a download fails, the previous data is kept and the error is shown below the source.
+_QGroundControl_ keeps a copy of each source and reloads them automatically on startup. Feeds are checked for updates when they are older than 24 hours (15 minutes for TFRs) by default, and **Refresh Feeds** checks them immediately. Feeds which have not changed on the server are not downloaded again. If a download fails, the previous data is kept and the error is shown below the source.
 
-Each source shows its format, zone count and date. A warning is shown if the data has expired (ED-318 `validTo`), is not valid yet, or is more than 28 days old (based on the ED-318 issue date, or the file or download date). Outdated sources are also reported once when _QGroundControl_ starts.
+The **United States TFRs (FAA)** feed lists the current temporary flight restrictions. It doesn't include their times or altitudes, so every listed TFR is treated as prohibited at all altitudes; its details show the NOTAM to check for times, altitudes and exceptions.
+
+Each source shows its format, zone count and date. A warning is shown if the data has expired (ED-318 `validTo`), is not valid yet, or is more than 28 days old by default (2 hours for TFRs, based on the ED-318 or FAA issue time, or the file or download date). Outdated sources are also reported once when _QGroundControl_ starts and in the Plan View warning, since they can miss zones.
 
 Use **Show geozones on map** to hide or show the zones, **Remove** to remove a source and **Remove All** to remove all of them.
 When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits in your units, applicability schedule, reason, message, responsible authority and the source it was loaded from).
 
 ### Mission and Flight Checks
 
-When the planned mission path enters a prohibited, authorisation required or conditional zone, a warning listing the zones is shown at the top of the Plan View map and the zones are outlined in white. Click the warning to show the zones on the map.
+When the planned mission path or the area of a survey, corridor scan or structure scan enters a prohibited, authorisation required or conditional zone, a warning listing the zones is shown at the top of the Plan View map and the zones are outlined in white. Click the warning to show the zones on the map.
+U-space airspaces the mission enters are listed too, since flying there requires a flight authorisation from a U-space service provider. Zones without restriction are listed for their conditions, they never hide restricted zones.
 Uploading a mission which enters a prohibited zone asks for confirmation.
 The check compares the planned altitudes with the zone altitude limits, using the terrain elevation along the path for limits above ground. When the terrain or altitude is not known, the zone is assumed to apply. Zone schedules are ignored, since the mission may be flown at another time.
 
-While flying, _QGroundControl_ warns once (with a message and audio) when the active vehicle comes within 100 m (or 30 m vertically) of an active prohibited, authorisation required or conditional zone, and again when it enters the zone. Limits above ground use the vehicle's height above terrain. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude.
+While flying, _QGroundControl_ warns once (with a message and audio) when the active vehicle comes within 100 m (or 30 m vertically, by default) of an active prohibited, authorisation required, conditional or U-space zone, and again when it enters the zone. Limits above ground use the vehicle's height above terrain. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude.
 The geozone indicator in the Fly View toolbar turns red, orange or yellow when the vehicle is near or inside a zone. Click it to see the nearby zones.
 
-Altitude limits relative to WGS84 are treated as above mean sea level, which differs by a few tens of meters.
+Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 geoid, within a few meters.
+
+### Geozone Settings
+
+The **Geozones** page of the _Application Settings_ sets:
+
+- **Show geozones on maps**.
+- **Flight alerts**: turns the flight alerts and the toolbar indicator on or off, and **Speak flight alerts** turns their audio on or off.
+- **Approach alert distance** and **Approach alert height margin**: how close horizontally and vertically the vehicle can come to a zone before it is alerted.
+- **Feed refresh interval** and **Live restrictions refresh interval** (TFRs): how often feeds are downloaded again.
+- **Outdated data warning** and **Outdated live restrictions warning** (TFRs): the data age at which a source is reported as outdated.
 
 ::: warning
 These checks are advisory. Always check the official sources and obtain any required authorisation before flying.

@@ -59,4 +59,8 @@ bool isSimple(const QList<QPointF> &ring);
 /// @return The simplified ring, or the original ring if it can't be reduced safely
 QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double toleranceMeters);
 
+/// @return Height of the EGM96 geoid, approximately mean sea level, above the WGS84 ellipsoid in meters.
+///         NaN for an invalid coordinate.
+double geoidHeight(const QGeoCoordinate &coordinate);
+
 } // namespace GeoZoneGeometry

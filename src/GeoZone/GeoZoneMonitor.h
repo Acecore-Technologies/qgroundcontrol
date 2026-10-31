@@ -24,16 +24,16 @@ Q_DECLARE_LOGGING_CATEGORY(GeoZoneMonitorLog)
 class GeoZoneManager;
 class Vehicle;
 
-/// Alerts the user once when the active vehicle approaches or enters an active restricted geozone,
-/// considering the zone altitude limits.
+/// Alerts the user once when the active vehicle approaches or enters an active restricted geozone or
+/// U-space airspace, considering the zone altitude limits. Alerts and the approach distances are set in GeoZoneSettings.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(bool         monitoring          READ monitoring         NOTIFY monitoringChanged)       ///< A vehicle is monitored against loaded zones
-    Q_PROPERTY(QVariantList nearbyZones         READ nearbyZones        NOTIFY nearbyZonesChanged)      ///< Maps with zone, inside and distance (meters), most relevant first
-    Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyZonesChanged)      ///< GeoZone::Restriction of the first nearby zone, -1 without
-    Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged)      ///< The vehicle is inside a nearby zone
+    Q_PROPERTY(bool         monitoring          READ monitoring         NOTIFY monitoringChanged)       ///< Alerts are enabled and a vehicle is monitored against loaded zones
+    Q_PROPERTY(QVariantList nearbyZones         READ nearbyZones        NOTIFY nearbyZonesChanged)      ///< Maps with zone, inside and distance (meters), most restrictive first
+    Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyZonesChanged)      ///< Most restrictive GeoZone::Restriction nearby, -1 without
+    Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged)      ///< The vehicle is inside one of the nearby zones
 
 public:
     /// Monitors the active vehicle against the zones of GeoZoneManager::instance()
@@ -44,8 +44,6 @@ public:
 
     static GeoZoneMonitor *instance();
 
-    static constexpr double approachDistance = 100;         ///< Meters horizontally
-    static constexpr double approachVerticalDistance = 30;  ///< Meters below a zone floor or above its ceiling
     static constexpr double hysteresisDistance = 20;        ///< Meters to move away before an alert can repeat
     static constexpr int evaluateIntervalMSecs = 1000;
 
@@ -73,6 +71,8 @@ private slots:
     void _evaluateVehicle();
     void _updateEvaluateTimer();
     void _reset();
+    void _forgetZones();
+    void _alertsEnabledChanged();
 
 private:
     enum class State {
@@ -95,7 +95,9 @@ private:
 
     GeoZoneManager *_manager = nullptr;
     QPointer<Vehicle> _vehicle;
-    QHash<const GeoZone*, State> _states;   ///< Zones which are not Away
+    static QString _zoneKey(const GeoZone *zone);
+
+    QHash<QString, State> _states;  ///< Zones which are not Away by _zoneKey, which stays the same when a source reloads
     QList<Nearby> _nearby;
     QTimer _evaluateTimer;
 };

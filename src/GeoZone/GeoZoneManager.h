@@ -19,15 +19,15 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZone.h"
+#include "GeoZoneDownloader.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneStore.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 
 class GeoZoneShape;
 class GeoZoneSource;
-class QNetworkAccessManager;
-class QNetworkReply;
 class QmlObjectListModel;
 class QTimer;
 
@@ -53,8 +53,6 @@ class GeoZoneManager : public QObject
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
-    static constexpr int refreshIntervalHours = 24;     ///< Feeds are downloaded again after this time
-    static constexpr int downloadTimeoutSecs = 120;
 
     /// @param storageDir Directory in which copies of the sources are kept. Empty for the default application data location.
     explicit GeoZoneManager(const QString &storageDir = QString(), QObject *parent = nullptr);
@@ -102,13 +100,16 @@ public:
     /// @return Zones matching one of the restrictions which one of the paths enters, see GeoZone::intersectsPath
     QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const;
 
+    /// @return Zones matching one of the restrictions which overlap one of the areas, see GeoZone::intersectsArea
+    QList<GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const;
+
     QmlObjectListModel *zones() const { return _zones; }
     QmlObjectListModel *sources() const { return _sources; }
     GeoZoneSource *source(const QString &key) const;
     /// Polygons and circles of all zones for map display
     const QList<GeoZoneShape*> &shapes() const { return _shapes; }
     QGeoRectangle boundingBox() const { return _boundingBox; }
-    bool visible() const { return _visible; }
+    bool visible() const;
     void setVisible(bool visible);
     bool busy() const { return _pendingCount > 0; }
     double progress() const;
@@ -117,7 +118,7 @@ public:
     QStringList fileDialogFilters() const;
     static QVariantList feedPresets();
 
-    QString storageDir() const { return _storageDir; }
+    QString storageDir() const { return _store.dir(); }
 
 signals:
     void zonesAboutToChange();  ///< Zones and shapes are about to be deleted
@@ -142,6 +143,7 @@ private:
         QString storedFileName;     ///< Name of the copy to write in the storage directory, empty to not copy
         QDateTime loadedAt;
         QDateTime fileDate;
+        GeoZoneParser::Format formatHint = GeoZoneParser::Format::Unknown;
         QString etag;               ///< HTTP validators of a downloaded feed
         QString lastModified;
         bool userInitiated = false;
@@ -152,31 +154,21 @@ private:
         QString errorString;
     };
 
-    static LoadResult _runLoad(const LoadJob &job, const QString &storageDir);
+    static LoadResult _runLoad(const LoadJob &job, const GeoZoneStore &store);
     void _startLoad(LoadJob job, bool background);
     void _applyLoad(const LoadJob &job, const LoadResult &loadResult);
+    void _setStoredFileName(GeoZoneSource *source, const QString &storedFileName);
     void _download(const QString &url, bool userInitiated);
-    void _downloadComplete(QNetworkReply *reply, const QString &url, int generation, bool userInitiated);
+    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated);
     void _idle();
-    GeoZoneSource *_sourceForJob(const QString &key, const QString &url);
     void _setPending(int delta);
     void _beginZonesChange();
     void _endZonesChange();
     void _saveIndex() const;
-    void _migrateSingleFile();
-    void _removeOrphanFiles() const;
     void _updateValidity();
-    QString _storedPath(const QString &storedFileName) const;
-    static QString _newStoredFileName();
 
-    QString _storageDir;
-    QNetworkAccessManager *_networkManager = nullptr;
-    struct Download {
-        QString url;
-        qint64 received = 0;
-        qint64 total = -1;      ///< Negative when the size is unknown
-    };
-    QHash<const QObject*, Download> _downloads;  ///< Keyed by reply
+    GeoZoneStore _store;
+    GeoZoneDownloader *_downloader = nullptr;
     QmlObjectListModel *_zones = nullptr;
     QmlObjectListModel *_sources = nullptr;
     QList<GeoZoneShape*> _shapes;
@@ -185,7 +177,6 @@ private:
     QTimer *_activeTimer = nullptr;
     QTimer *_refreshTimer = nullptr;
     QGeoRectangle _boundingBox;
-    bool _visible = true;
     int _pendingCount = 0;
     bool _changingZones = false;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
@@ -193,11 +184,6 @@ private:
     bool _startupRefreshPending = false;
     bool _startupCheckPending = false;
 
-    static constexpr const char *_settingsGroup = "GeoZoneManager";
-    static constexpr const char *_visibleKey = "visible";
-    static constexpr const char *_legacySourceNameKey = "sourceName";
-    static constexpr const char *_legacyStoredFileName = "geozones.json";
-    static constexpr const char *_indexFileName = "sources.json";
     static constexpr int _activeUpdateIntervalMSecs = 60 * 1000;
-    static constexpr int _refreshCheckIntervalMSecs = 60 * 60 * 1000;
+    static constexpr int _refreshCheckIntervalMSecs = 5 * 60 * 1000;
 };

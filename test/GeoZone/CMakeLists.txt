@@ -1,5 +1,7 @@
 target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
+        GeoZoneFlightTest.cc
+        GeoZoneFlightTest.h
         GeoZoneTest.cc
         GeoZoneTest.h
 )

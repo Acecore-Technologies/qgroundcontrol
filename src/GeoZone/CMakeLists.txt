@@ -2,6 +2,8 @@ target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
         GeoZone.cc
         GeoZone.h
+        GeoZoneDownloader.cc
+        GeoZoneDownloader.h
         GeoZoneGeometry.cc
         GeoZoneGeometry.h
         GeoZoneIndex.cc
@@ -20,6 +22,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneShape.h
         GeoZoneSource.cc
         GeoZoneSource.h
+        GeoZoneStore.cc
+        GeoZoneStore.h
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

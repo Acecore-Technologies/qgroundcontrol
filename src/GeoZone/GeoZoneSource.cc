@@ -9,7 +9,9 @@
 
 #include "GeoZoneSource.h"
 #include "GeoZone.h"
+#include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
+#include "SettingsManager.h"
 
 #include <QtCore/QUrl>
 #include <QtPositioning/QGeoCircle>
@@ -93,6 +95,17 @@ void GeoZoneSource::_clearZones()
     _boundingBox = QGeoRectangle();
 }
 
+void GeoZoneSource::markCurrent(const QDateTime &loadedAt, const QDateTime &issued)
+{
+    _loadedAt = loadedAt;
+    _fileDate = loadedAt;
+    if (issued.isValid()) {
+        _issued = issued;
+    }
+    updateValidity(QDateTime::currentDateTimeUtc());
+    emit changed();
+}
+
 void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate)
 {
     _loadedAt = loadedAt;
@@ -114,6 +127,7 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
     _validTo = result.validTo;
     _loadedAt = loadedAt;
     _fileDate = fileDate;
+    _contentHash = result.contentHash;
 
     const QString sourceText = _dateText().isEmpty() ? name() : QStringLiteral("%1 (%2)").arg(name(), _dateText());
     for (const GeoZone::Data &zoneData : result.zones) {
@@ -163,6 +177,7 @@ void GeoZoneSource::setErrorString(const QString &errorString)
 
 void GeoZoneSource::updateValidity(const QDateTime &now)
 {
+    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
     QString text;
     if (loaded()) {
         const QDateTime date = dataDate();
@@ -170,7 +185,9 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
             text = tr("Expired on %1").arg(_formatDate(_validTo));
         } else if (_validFrom.isValid() && (_validFrom > now)) {
             text = tr("Not valid until %1").arg(_formatDate(_validFrom));
-        } else if (date.isValid() && (date.daysTo(now) > staleDays)) {
+        } else if (isLive() && date.isValid() && (date.secsTo(now) > (settings->liveStaleHours()->rawValue().toLongLong() * 3600))) {
+            text = tr("Data is %1 hours old").arg(date.secsTo(now) / 3600);
+        } else if (!isLive() && date.isValid() && (date.daysTo(now) > settings->staleDays()->rawValue().toLongLong())) {
             text = tr("Data is %1 days old").arg(date.daysTo(now));
         }
     }
@@ -181,7 +198,13 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
     }
 }
 
-bool GeoZoneSource::refreshDue(const QDateTime &now, int refreshIntervalHours) const
+int GeoZoneSource::refreshIntervalSecs() const
 {
-    return isFeed() && (!_loadedAt.isValid() || (_loadedAt.secsTo(now) >= (static_cast<qint64>(refreshIntervalHours) * 3600)));
+    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    return isLive() ? (settings->liveFeedRefreshMinutes()->rawValue().toInt() * 60) : (settings->feedRefreshHours()->rawValue().toInt() * 3600);
+}
+
+bool GeoZoneSource::refreshDue(const QDateTime &now) const
+{
+    return isFeed() && (!_loadedAt.isValid() || (_loadedAt.secsTo(now) >= refreshIntervalSecs()));
 }

@@ -42,6 +42,7 @@
 #include "FollowMeTest.h"
 
 // GeoZone
+#include "GeoZoneFlightTest.h"
 #include "GeoZoneTest.h"
 
 // GPS
@@ -150,6 +151,7 @@ int runTests(bool stress, QStringView unitTestOptions)
     UT_REGISTER_TEST(FollowMeTest)
 
     // GeoZone
+    UT_REGISTER_TEST(GeoZoneFlightTest)
     UT_REGISTER_TEST(GeoZoneTest)
 
     // GPS

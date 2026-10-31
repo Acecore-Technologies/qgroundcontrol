@@ -17,6 +17,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "MissionController.h"
@@ -24,7 +25,9 @@
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
+#include "QGCMapPolygon.h"
 #include "SettingsManager.h"
+#include "SurveyComplexItem.h"
 #include "UnitsSettings.h"
 #include "Vehicle.h"
 
@@ -244,6 +247,49 @@ void GeoZoneTest::_testParseED318()
     QCOMPARE(collection.volumes[1].lowerLimit, 0.0);
     QCOMPARE(collection.volumes[1].upperLimit, 50.0);
     QVERIFY(!collection.volumes[1].feet);
+}
+
+void GeoZoneTest::_testParseFaaTfr()
+{
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/faa_tfr_test.json"), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::FaaTfr);
+    QCOMPARE(result.zones.count(), 2);
+    QCOMPARE(result.issued, _utc(QDate(2026, 10, 31), QTime(12, 20)));
+
+    const GeoZone::Data &tfr = result.zones[0];
+    QCOMPARE(tfr.identifier, QStringLiteral("6/4240-1-FDC-F"));
+    QCOMPARE(tfr.restriction, GeoZone::Prohibited);
+    QVERIFY(tfr.name.startsWith(QStringLiteral("SAN ANGELO, TX")));
+    QCOMPARE(tfr.otherReasonInfo, QStringLiteral("SECURITY"));
+    QVERIFY(tfr.message.contains(QStringLiteral("6/4240")));
+    QCOMPARE(tfr.volumes.count(), 1);
+    QVERIFY(qIsNaN(tfr.volumes[0].lowerLimit) && qIsNaN(tfr.volumes[0].upperLimit));
+    QVERIFY(tfr.applicability.isEmpty());
+
+    // An empty list from the FAA is valid, all restrictions have ended. From other GeoServer feeds it's an error,
+    // which keeps their previous zones.
+    const QByteArray emptyList = R"({ "type": "FeatureCollection", "features": [], "totalFeatures": 0, "timeStamp": "2026-10-31T12:20:00Z" })";
+    QVERIFY2(GeoZoneParser::parse(emptyList, result, errorString, GeoZoneParser::Format::FaaTfr), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::FaaTfr);
+    QVERIFY(result.zones.isEmpty());
+    QVERIFY(!GeoZoneParser::parse(emptyList, result, errorString));
+
+    // Live restrictions are refreshed more often than other feeds
+    GeoZoneSource source(QStringLiteral("https://tfr.faa.gov/x"), QStringLiteral("https://tfr.faa.gov/x"));
+    QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/faa_tfr_test.json"), result, errorString), qPrintable(errorString));
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    source.setResult(result, now, now);
+    QCOMPARE(source.refreshIntervalSecs(), 15 * 60);
+    QVERIFY(!source.refreshDue(now.addSecs(10 * 60)));
+    QVERIFY(source.refreshDue(now.addSecs(16 * 60)));
+
+    // Restrictions change during the day, so the list is outdated after hours rather than weeks
+    source.updateValidity(result.issued.addSecs(3600));
+    QVERIFY(source.validityText().isEmpty());
+    source.updateValidity(result.issued.addSecs(3 * 3600));
+    QCOMPARE(source.validityText(), QStringLiteral("Data is 3 hours old"));
 }
 
 void GeoZoneTest::_testParseErrors()
@@ -764,8 +810,8 @@ void GeoZoneTest::_testManagerBackgroundLoad()
     // The user's file is read in place, never removed
     QVERIFY(QFile::exists(ed318File));
     const QDateTime now = QDateTime::currentDateTimeUtc();
-    QVERIFY(!feed->refreshDue(now, GeoZoneManager::refreshIntervalHours));
-    QVERIFY(feed->refreshDue(now.addSecs(25 * 3600), GeoZoneManager::refreshIntervalHours));
+    QVERIFY(!feed->refreshDue(now));
+    QVERIFY(feed->refreshDue(now.addSecs(25 * 3600)));
 
     // A failed refresh keeps the previous data
     QVERIFY(QFile::remove(ed318File));
@@ -837,6 +883,7 @@ void GeoZoneTest::_testFeedNotModified()
         QCOMPARE(requestCount, 1);
 
         // An unchanged feed is not downloaded again but counts as current
+        QSignalSpy aboutToChangeSpy(&manager, &GeoZoneManager::zonesAboutToChange);
         const QDateTime loadedAt = feed->loadedAt();
         QTest::qWait(10);
         manager.refreshFeeds();
@@ -845,6 +892,15 @@ void GeoZoneTest::_testFeedNotModified()
         QCOMPARE(manager.zones()->count(), 3);
         QVERIFY(feed->loadedAt() > loadedAt);
         QVERIFY(feed->errorString().isEmpty());
+
+        // A server without validators sends the same zones again, which are kept instead of reloaded
+        QCOMPARE(aboutToChangeSpy.count(), 0);
+        feed->setValidators(QString(), QString());
+        manager.refreshFeeds();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(requestCount, 3);
+        QCOMPARE(aboutToChangeSpy.count(), 0);
+        QCOMPARE(manager.zones()->count(), 3);
     }
 
     // The validators are kept across restarts
@@ -1090,6 +1146,20 @@ void GeoZoneTest::_testAltitudeLimits()
     QVERIFY(GeoZone::verticalOverlap(high, position(center, 310, 250), position(center, 310, 250)));
     QVERIFY(GeoZone::verticalOverlap(high, position(center, 9000, 250), position(center, 9000, 250)));
 
+    // Heights above the WGS84 ellipsoid are about 48 m higher than above mean sea level in Zurich
+    const QGeoCoordinate zurich(47.37, 8.54);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(zurich) - 47.3) < 2);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(42.39, -71.15)) + 28.6) < 2);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(5, 78)) + 104.7) < 2);
+    QVERIFY(qIsNaN(GeoZoneGeometry::geoidHeight(QGeoCoordinate())));
+    GeoZone::Volume ellipsoid = low;
+    ellipsoid.lowerLimit = 500;
+    ellipsoid.lowerReference = QStringLiteral("WGS84");
+    ellipsoid.upperLimit = 1000;
+    ellipsoid.upperReference = QStringLiteral("WGS84");
+    QVERIFY(GeoZone::verticalOverlap(ellipsoid, position(zurich, 460, 400), position(zurich, 460, 400)));
+    QVERIFY(!GeoZone::verticalOverlap(ellipsoid, position(zurich, 440, 400), position(zurich, 440, 400)));
+
     // Flight levels can't be compared
     GeoZone::Volume flightLevel = high;
     flightLevel.lowerReference = QStringLiteral("STD");
@@ -1112,6 +1182,54 @@ void GeoZoneTest::_testAltitudeLimits()
     QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, qQNaN()), position(east, 600, qQNaN()) }));
 }
 
+void GeoZoneTest::_testAreaIntersection()
+{
+    const QGeoCoordinate center(47, 8);
+    const auto square = [](const QGeoCoordinate &squareCenter, double halfSide) {
+        return QList<QGeoCoordinate>{ squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 45), squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 135),
+                                      squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 225), squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 315) };
+    };
+    const auto area = [](const QList<QGeoCoordinate> &polygon, double lowest, double highest, double maxTerrain = qQNaN(), double minTerrain = qQNaN()) {
+        return GeoZone::Area{ polygon, GeoZone::Position{ polygon.first(), lowest, maxTerrain }, GeoZone::Position{ polygon.first(), highest, minTerrain } };
+    };
+    const auto circleZone = [](const QGeoCoordinate &zoneCenter, double radius) {
+        GeoZone::Volume volume;
+        volume.isCircle = true;
+        volume.center = zoneCenter;
+        volume.radius = radius;
+        GeoZone::Data data;
+        data.volumes.append(volume);
+        return data;
+    };
+    const QList<QGeoCoordinate> survey = square(center, 500);
+
+    // A small zone between the flight lines of a survey
+    QVERIFY(GeoZone(circleZone(center, 20)).intersectsArea(area(survey, 100, 200)));
+    QVERIFY(GeoZone(circleZone(center.atDistanceAndAzimuth(540, 90), 50)).intersectsArea(area(survey, 100, 200)));
+    QVERIFY(!GeoZone(circleZone(center.atDistanceAndAzimuth(600, 90), 50)).intersectsArea(area(survey, 100, 200)));
+
+    // Polygon zones inside the area, around it, and with the area in a hole
+    GeoZone::Data small;
+    small.volumes.append(GeoZone::Volume{ false, { square(center.atDistanceAndAzimuth(200, 0), 10) } });
+    QVERIFY(GeoZone(small).intersectsArea(area(survey, 100, 200)));
+    GeoZone::Data large;
+    large.volumes.append(GeoZone::Volume{ false, { square(center, 2000) } });
+    QVERIFY(GeoZone(large).intersectsArea(area(survey, 100, 200)));
+    large.volumes[0].rings.append(square(center, 1000));
+    QVERIFY(!GeoZone(large).intersectsArea(area(survey, 100, 200)));
+    QVERIFY(!GeoZone(small).intersectsArea(area(square(center.atDistanceAndAzimuth(3000, 0), 500), 100, 200)));
+
+    // Vertical limits: 150 m above ground and higher, the area flown 80 to 150 m above the ground
+    GeoZone::Data elevated = circleZone(center, 100);
+    elevated.volumes[0].lowerLimit = 150;
+    elevated.volumes[0].lowerReference = QStringLiteral("AGL");
+    QVERIFY(GeoZone(elevated).intersectsArea(area(survey, 400, 450, 320, 300)));
+    elevated.volumes[0].lowerLimit = 160;
+    QVERIFY(!GeoZone(elevated).intersectsArea(area(survey, 400, 450, 320, 300)));
+    // Unknown terrain can't exclude the zone
+    QVERIFY(GeoZone(elevated).intersectsArea(area(survey, 400, 450)));
+}
+
 void GeoZoneTest::_testMissionCheck()
 {
     const QGeoCoordinate center(47, 8);
@@ -1121,6 +1239,8 @@ void GeoZoneTest::_testMissionCheck()
         _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
         _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(2000, 0), 300),
         _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(2000, 180), 300),
+        // On the leg from 1000 m east to 2000 m north
+        _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), center.atDistanceAndAzimuth(1118, 26.57), 200),
     });
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
@@ -1146,12 +1266,14 @@ void GeoZoneTest::_testMissionCheck()
     GeoZoneMissionCheck check(nullptr, &manager);
     check.setMissionController(missionController);
 
-    // Passes the no restriction zone only
+    // Passes the no restriction zone only, which is reported without a warning
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 180).atDistanceAndAzimuth(1000, 270), 1);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 180).atDistanceAndAzimuth(1000, 90), 2);
-    QTest::qWait(1000);
+    QTRY_COMPARE(check.permittedZones().count(), 1);
     QVERIFY(check.crossedZones().isEmpty());
     QVERIFY(check.warningText().isEmpty());
+    QVERIFY(check.uSpaceZones().isEmpty());
+    QVERIFY(check.infoText().startsWith(QStringLiteral("Areas without restriction: N.")));
 
     // Through the prohibited zone and then the conditional one, listed most restrictive first
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 3);
@@ -1161,8 +1283,29 @@ void GeoZoneTest::_testMissionCheck()
     QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[0])->identifier(), QStringLiteral("P"));
     QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[1])->identifier(), QStringLiteral("C"));
     QVERIFY(check.warningText().contains(QStringLiteral("P (Prohibited)")));
+    // The path north also passes through the U-space airspace
+    QCOMPARE(check.uSpaceZones().count(), 1);
+    QVERIFY(check.infoText().contains(QStringLiteral("U-space airspace: U.")));
     QVERIFY(check.crossedZonesBoundingBox().contains(center));
     QVERIFY(check.crossedZonesBoundingBox().contains(center.atDistanceAndAzimuth(2000, 0)));
+
+    // A survey whose area covers a zone its flight lines miss
+    const QGeoCoordinate surveyCenter = center.atDistanceAndAzimuth(5000, 180);
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("survey.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), surveyCenter.atDistanceAndAzimuth(395, 45), 2) }), errorString), qPrintable(errorString));
+    const int surveyIndex = missionController->visualItems()->count();
+    SurveyComplexItem *const survey = qobject_cast<SurveyComplexItem*>(missionController->insertComplexMissionItem(SurveyComplexItem::name, surveyCenter, surveyIndex));
+    QVERIFY(survey);
+    survey->surveyAreaPolygon()->clear();
+    survey->surveyAreaPolygon()->appendVertices({ surveyCenter.atDistanceAndAzimuth(424, 315), surveyCenter.atDistanceAndAzimuth(424, 45),
+                                                  surveyCenter.atDistanceAndAzimuth(424, 135), surveyCenter.atDistanceAndAzimuth(424, 225) });
+    const auto surveyZoneCrossed = [&check]() {
+        const QList<QObject*> crossed = check.crossedZones();
+        return std::any_of(crossed.cbegin(), crossed.cend(), [](const QObject *zone) {
+            return qobject_cast<const GeoZone*>(zone)->identifier() == QStringLiteral("S");
+        });
+    };
+    QTRY_VERIFY(surveyZoneCrossed());
 
     // Zones are released before the manager deletes them
     manager.clear();
@@ -1212,6 +1355,19 @@ void GeoZoneTest::_testMonitorAlerts()
     monitor.evaluate({ center.atDistanceAndAzimuth(390, 0) });
     QCOMPARE(alertSpy.count(), 2);
 
+    // Reloading changed zones doesn't repeat the approach alert of an unchanged zone
+    (void) _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(3000, 270), 300),
+        expired,
+        _circleFeature(QStringLiteral("NEW"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(9000, 0), 300),
+    });
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+    QVERIFY(monitor.nearbyZones().isEmpty());
+    monitor.evaluate({ center.atDistanceAndAzimuth(390, 0) });
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(monitor.nearbyZones().count(), 1);
+
     // Leaving the area resets the zone
     monitor.evaluate({ center.atDistanceAndAzimuth(1000, 0) });
     QVERIFY(monitor.nearbyZones().isEmpty());
@@ -1229,6 +1385,21 @@ void GeoZoneTest::_testMonitorAlerts()
     manager.clear();
     monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 3);
+
+    // U-space airspace alerts too, but a prohibited zone ahead decides the indicator color
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("uspace.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), center.atDistanceAndAzimuth(6000, 0), 3000),
+                    _circleFeature(QStringLiteral("P2"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(6380, 0), 300) }), errorString), qPrintable(errorString));
+    alertSpy.clear();
+    monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) });
+    QCOMPARE(alertSpy.count(), 1);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone U (U-space airspace)")));
+    QCOMPARE(monitor.alertRestriction(), static_cast<int>(GeoZone::USpace));
+    monitor.evaluate({ center.atDistanceAndAzimuth(6000, 0) });
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(monitor.alertRestriction(), static_cast<int>(GeoZone::Prohibited));
+    QVERIFY(monitor.inside());
+    manager.clear();
 
     // A zone from 120 m above ground: flying below it does not enter it, climbing towards it approaches it
     QJsonObject elevated = _circleFeature(QStringLiteral("H"), QStringLiteral("PROHIBITED"), center, 300);
@@ -1416,4 +1587,73 @@ void GeoZoneTest::_testMapModelShapeLimit()
     for (int i = 0; i < model.labelZones()->count(); i++) {
         QVERIFY(model.labelZones()->value<GeoZone*>(i)->identifier().mid(1).toInt() >= extraZones);
     }
+}
+
+void GeoZoneTest::_testSettings()
+{
+    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(),
+                                 settings->feedRefreshHours(), settings->liveFeedRefreshMinutes() };
+    const auto restoreDefaults = qScopeGuard([&facts]() {
+        for (Fact *fact : facts) {
+            fact->setRawValue(fact->rawDefaultValue());
+        }
+    });
+
+    // The map visibility of earlier versions is kept
+    QSettings qSettings;
+    qSettings.setValue(QStringLiteral("GeoZoneManager/visible"), false);
+    qSettings.remove(QStringLiteral("GeoZoneManager/showZones"));
+    {
+        const GeoZoneSettings migrated;
+    }
+    QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/visible")));
+    QCOMPARE(qSettings.value(QStringLiteral("GeoZoneManager/showZones")), QVariant(false));
+    qSettings.remove(QStringLiteral("GeoZoneManager/showZones"));
+
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QGeoCoordinate center(47, 8);
+    const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) });
+    QFile file(fileName);
+    QVERIFY(file.open(QIODevice::ReadWrite) && file.setFileTime(QDateTime::currentDateTimeUtc().addDays(-10), QFileDevice::FileModificationTime));
+    file.close();
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+
+    // The manager visibility is the setting
+    QSignalSpy visibleSpy(&manager, &GeoZoneManager::visibleChanged);
+    settings->showZones()->setRawValue(false);
+    QVERIFY(!manager.visible());
+    QCOMPARE(visibleSpy.count(), 1);
+    manager.setVisible(true);
+    QVERIFY(settings->showZones()->rawValue().toBool());
+
+    // Outdated data is reported at the configured age
+    QVERIFY(manager.validityWarning().isEmpty());
+    settings->staleDays()->setRawValue(7);
+    QCOMPARE(manager.validityWarning(), QStringLiteral("zones.json: Data is 10 days old"));
+
+    // Feeds are refreshed at the configured intervals
+    GeoZoneSource feed(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::ED318;
+    feed.setResult(result, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    settings->feedRefreshHours()->setRawValue(6);
+    QCOMPARE(feed.refreshIntervalSecs(), 6 * 3600);
+    result.format = GeoZoneParser::Format::FaaTfr;
+    feed.setResult(result, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    settings->liveFeedRefreshMinutes()->setRawValue(30);
+    QCOMPARE(feed.refreshIntervalSecs(), 30 * 60);
+
+    // Approach alerts at the configured distance
+    GeoZoneMonitor monitor(&manager);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    monitor.evaluate({ center.atDistanceAndAzimuth(500, 0) });
+    QCOMPARE(alertSpy.count(), 0);
+    settings->approachDistance()->setRawValue(250);
+    monitor.evaluate({ center.atDistanceAndAzimuth(500, 0) });
+    QCOMPARE(alertSpy.count(), 1);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));
 }

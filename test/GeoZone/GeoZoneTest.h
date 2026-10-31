@@ -18,6 +18,7 @@ class GeoZoneTest : public UnitTest
 private slots:
     void _testParseED269();
     void _testParseED318();
+    void _testParseFaaTfr();
     void _testParseErrors();
     void _testIsActiveAt();
     void _testDaylightEvents();
@@ -34,8 +35,10 @@ private slots:
     void _testGeoFenceImportPreview();
     void _testContainsAndPaths();
     void _testAltitudeLimits();
+    void _testAreaIntersection();
     void _testMissionCheck();
     void _testMonitorAlerts();
+    void _testSettings();
     void _testLabelZonesLimit();
     void _testShapeSimplification();
     void _testMapModel();

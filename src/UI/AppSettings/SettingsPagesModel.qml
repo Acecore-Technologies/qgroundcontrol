@@ -35,6 +35,13 @@ ListModel {
     }
 
     ListElement {
+        name: qsTr("Geozones")
+        url: "qrc:/qml/QGroundControl/AppSettings/GeoZoneSettings.qml"
+        iconUrl: "qrc:/qmlimages/GeoZone.svg"
+        pageVisible: function() { return QGroundControl.settingsManager.geoZoneSettings.visible }
+    }
+
+    ListElement {
         name: qsTr("Video")
         url: "qrc:/qml/QGroundControl/AppSettings/VideoSettings.qml"
         iconUrl: "qrc:/InstrumentValueIcons/camera.svg"

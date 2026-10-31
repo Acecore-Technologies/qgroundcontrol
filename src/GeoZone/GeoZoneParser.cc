@@ -10,6 +10,7 @@
 #include "GeoZoneParser.h"
 #include "QGCLoggingCategory.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -436,6 +437,43 @@ bool _ed318Feature(const QJsonObject &feature, GeoZone::Data &zone)
     return !zone.volumes.isEmpty();
 }
 
+/// FAA temporary flight restriction from the tfr.faa.gov WFS GeoJSON, which has no times or vertical limits
+bool _faaTfrFeature(const QJsonObject &feature, GeoZone::Data &zone)
+{
+    const QJsonObject properties = feature.value(QStringLiteral("properties")).toObject();
+    const QString notamKey = _text(properties.value(QStringLiteral("NOTAM_KEY")));
+    // Keys look like 6/4240-1-FDC-F, the NOTAM number is the part before the first dash
+    const QString notam = notamKey.section(QLatin1Char('-'), 0, 0);
+    zone.identifier = notamKey;
+    zone.country = QStringLiteral("USA");
+    zone.name = _text(properties.value(QStringLiteral("TITLE")));
+    if (zone.name.isEmpty()) {
+        zone.name = GeoZoneParser::tr("TFR %1").arg(notam);
+    }
+    zone.restrictionCode = QStringLiteral("TFR");
+    // Drone flights in most TFRs are prohibited unless specifically authorized
+    zone.restriction = GeoZone::Prohibited;
+    const QString type = _text(properties.value(QStringLiteral("LEGAL")));
+    if (!type.isEmpty()) {
+        zone.reasons.append(QStringLiteral("OTHER"));
+        zone.otherReasonInfo = type;
+    }
+    zone.message = GeoZoneParser::tr("Temporary flight restriction, FAA NOTAM %1. The NOTAM defines the times, altitudes and exceptions.").arg(notam);
+    zone.authorities.append(QStringLiteral("FAA"));
+
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), GeoZone::Volume(), 1.0, zone.volumes);
+    return !zone.volumes.isEmpty();
+}
+
+bool _isFaaTfr(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint)
+{
+    if (features.isEmpty()) {
+        // An empty list from the FAA means no restrictions are in effect, other GeoServer feeds have the same WFS counts
+        return (formatHint == GeoZoneParser::Format::FaaTfr) && root.contains(QStringLiteral("totalFeatures")) && root.contains(QStringLiteral("timeStamp"));
+    }
+    return features.first().toObject().value(QStringLiteral("properties")).toObject().contains(QStringLiteral("NOTAM_KEY"));
+}
+
 } // namespace
 
 bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &errorString)
@@ -448,7 +486,7 @@ bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &
     return parse(file.readAll(), result, errorString);
 }
 
-bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString)
+bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint)
 {
     result = Result();
     errorString.clear();
@@ -469,12 +507,19 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     const QJsonObject root = document.object();
     const QJsonValue featuresValue = root.value(QStringLiteral("features"));
     if (!document.isObject() || !featuresValue.isArray()) {
-        errorString = tr("Not a geozone file. Only EUROCAE ED-269 and ED-318 files are supported.");
+        errorString = tr("Not a geozone file. Only EUROCAE ED-269 and ED-318 files and FAA TFR GeoJSON are supported.");
         return false;
     }
     const QJsonArray features = featuresValue.toArray();
 
-    if (root.value(QStringLiteral("type")).toString() == QStringLiteral("FeatureCollection")) {
+    result.contentHash = QCryptographicHash::hash(QJsonDocument(features).toJson(QJsonDocument::Compact), QCryptographicHash::Sha1);
+
+    if (_isFaaTfr(root, features, formatHint)) {
+        result.format = Format::FaaTfr;
+        result.title = tr("FAA temporary flight restrictions");
+        result.provider = QStringLiteral("FAA");
+        result.issued = _dateTime(root.value(QStringLiteral("timeStamp")));
+    } else if (root.value(QStringLiteral("type")).toString() == QStringLiteral("FeatureCollection")) {
         result.format = Format::ED318;
         result.title = _text(root.value(QStringLiteral("name")));
         if (result.title.isEmpty()) {
@@ -490,16 +535,29 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     if (metadata.isEmpty()) {
         metadata = root.value(QStringLiteral("datasetMetadata")).toObject();
     }
-    result.provider = _text(metadata.value(QStringLiteral("provider")));
-    result.issued = _dateTime(metadata.value(QStringLiteral("issued")));
-    result.validFrom = _dateTime(metadata.value(QStringLiteral("validFrom")));
-    result.validTo = _dateTime(metadata.value(QStringLiteral("validTo")));
+    if (!metadata.isEmpty()) {
+        result.provider = _text(metadata.value(QStringLiteral("provider")));
+        result.issued = _dateTime(metadata.value(QStringLiteral("issued")));
+        result.validFrom = _dateTime(metadata.value(QStringLiteral("validFrom")));
+        result.validTo = _dateTime(metadata.value(QStringLiteral("validTo")));
+    }
 
     for (const QJsonValue &featureValue : features) {
         const QJsonObject feature = featureValue.toObject();
 
         GeoZone::Data zone;
-        const bool valid = (result.format == Format::ED318) ? _ed318Feature(feature, zone) : _ed269Feature(feature, zone);
+        bool valid = false;
+        switch (result.format) {
+        case Format::ED318:
+            valid = _ed318Feature(feature, zone);
+            break;
+        case Format::FaaTfr:
+            valid = _faaTfrFeature(feature, zone);
+            break;
+        default:
+            valid = _ed269Feature(feature, zone);
+            break;
+        }
         if (valid) {
             result.zones.append(zone);
         } else {
@@ -508,7 +566,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         }
     }
 
-    if (result.zones.isEmpty()) {
+    if (result.zones.isEmpty() && (result.format != Format::FaaTfr)) {
         errorString = tr("No geozones with a supported geometry were found in the %1 file.").arg(formatToString(result.format));
         return false;
     }
@@ -525,6 +583,8 @@ QString GeoZoneParser::formatToString(Format format)
         return QStringLiteral("ED-269");
     case Format::ED318:
         return QStringLiteral("ED-318");
+    case Format::FaaTfr:
+        return QStringLiteral("FAA TFR");
     case Format::Unknown:
     default:
         return tr("Unknown");

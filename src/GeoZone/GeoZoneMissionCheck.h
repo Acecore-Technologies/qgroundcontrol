@@ -22,7 +22,8 @@ class GeoZoneManager;
 class MissionController;
 
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
-/// altitudes. Zone schedules are not considered, since the mission may be flown at any time.
+/// altitudes. U-space airspaces and no restriction zones are reported separately, they never hide
+/// restricted zones. Zone schedules are not considered, since the mission may be flown at any time.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -32,6 +33,9 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QList<QObject*>      crossedZones        READ crossedZones                                   NOTIFY crossedZonesChanged)
     Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY crossedZonesChanged)
     Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged)
+    Q_PROPERTY(QList<QObject*>      uSpaceZones         READ uSpaceZones                                    NOTIFY crossedZonesChanged)     ///< U-space airspaces the mission enters
+    Q_PROPERTY(QList<QObject*>      permittedZones      READ permittedZones                                 NOTIFY crossedZonesChanged)     ///< No restriction zones the mission enters
+    Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged)
 
 public:
     /// @param manager Zones to check, GeoZoneManager::instance() when null
@@ -46,6 +50,10 @@ public:
 
     QList<QObject*> crossedZones() const;
     QString warningText() const;
+    QList<QObject*> uSpaceZones() const { return QList<QObject*>(_uSpaceZones.cbegin(), _uSpaceZones.cend()); }
+    QList<QObject*> permittedZones() const { return QList<QObject*>(_permittedZones.cbegin(), _permittedZones.cend()); }
+    /// U-space airspaces and no restriction zones entered, which don't prevent the flight
+    QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
 
     /// Re-evaluates immediately instead of after changes settle
@@ -73,10 +81,14 @@ private:
     void _scheduleUpdate();
     void _clearZones();
     QList<Segment> _missionSegments() const;
+    /// Survey, corridor and structure scan areas
+    QList<GeoZone::Area> _missionAreas() const;
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
     QList<GeoZone*> _crossedZones;
+    QList<GeoZone*> _uSpaceZones;
+    QList<GeoZone*> _permittedZones;
     QTimer _updateTimer;
 
     static constexpr int _updateDelayMSecs = 500;

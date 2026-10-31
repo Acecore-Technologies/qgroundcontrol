@@ -582,7 +582,9 @@ QGCFlickable {
                             anchors.right:  parent.right
                             wrapMode:       Text.WordWrap
                             font.pointSize: ScreenTools.smallFontPointSize
-                            text:           qsTr("Feeds are downloaded again every %1 hours.").arg(24)
+                            text:           qsTr("Feeds are checked for updates every %1 hours, temporary flight restrictions every %2 minutes.")
+                                            .arg(QGroundControl.settingsManager.geoZoneSettings.feedRefreshHours.rawValue)
+                                            .arg(QGroundControl.settingsManager.geoZoneSettings.liveFeedRefreshMinutes.rawValue)
                         }
 
                         QGCComboBox {

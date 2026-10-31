@@ -20,6 +20,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         FlightModeSettings.h
         FlyViewSettings.cc
         FlyViewSettings.h
+        GeoZoneSettings.cc
+        GeoZoneSettings.h
         NTRIPSettings.cc
         NTRIPSettings.h
         GimbalControllerSettings.cc

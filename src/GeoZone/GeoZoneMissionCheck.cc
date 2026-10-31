@@ -13,7 +13,10 @@
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
 #include "MissionController.h"
+#include "QGCMapPolygon.h"
 #include "QmlObjectListModel.h"
+#include "StructureScanComplexItem.h"
+#include "TransectStyleComplexItem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -60,22 +63,40 @@ QList<QObject*> GeoZoneMissionCheck::crossedZones() const
     return QList<QObject*>(_crossedZones.cbegin(), _crossedZones.cend());
 }
 
-QString GeoZoneMissionCheck::warningText() const
-{
-    if (_crossedZones.isEmpty()) {
-        return QString();
-    }
+namespace {
 
+QString _zoneNames(const QList<GeoZone*> &zones, bool withRestriction)
+{
     QStringList names;
-    for (qsizetype i = 0; i < std::min<qsizetype>(_crossedZones.count(), maxListedZones); i++) {
-        const GeoZone *const zone = _crossedZones[i];
-        names.append(QStringLiteral("%1 (%2)").arg(zone->name().isEmpty() ? zone->identifier() : zone->name(), zone->restrictionText()));
+    for (qsizetype i = 0; i < std::min<qsizetype>(zones.count(), GeoZoneMissionCheck::maxListedZones); i++) {
+        const GeoZone *const zone = zones[i];
+        const QString name = zone->name().isEmpty() ? zone->identifier() : zone->name();
+        names.append(withRestriction ? QStringLiteral("%1 (%2)").arg(name, zone->restrictionText()) : name);
     }
-    QString text = tr("The mission path enters restricted geozones: %1").arg(names.join(QStringLiteral(", ")));
-    if (_crossedZones.count() > maxListedZones) {
-        text += tr(" and %1 more").arg(_crossedZones.count() - maxListedZones);
+    QString text = names.join(QStringLiteral(", "));
+    if (zones.count() > GeoZoneMissionCheck::maxListedZones) {
+        text += GeoZoneMissionCheck::tr(" and %1 more").arg(zones.count() - GeoZoneMissionCheck::maxListedZones);
     }
     return text;
+}
+
+} // namespace
+
+QString GeoZoneMissionCheck::warningText() const
+{
+    return _crossedZones.isEmpty() ? QString() : tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, true));
+}
+
+QString GeoZoneMissionCheck::infoText() const
+{
+    QStringList lines;
+    if (!_uSpaceZones.isEmpty()) {
+        lines.append(tr("U-space airspace: %1. A flight authorisation from a U-space service provider is required.").arg(_zoneNames(_uSpaceZones, false)));
+    }
+    if (!_permittedZones.isEmpty()) {
+        lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(_zoneNames(_permittedZones, false)));
+    }
+    return lines.join(QStringLiteral("\n"));
 }
 
 QGeoRectangle GeoZoneMissionCheck::crossedZonesBoundingBox() const
@@ -97,8 +118,10 @@ void GeoZoneMissionCheck::_scheduleUpdate()
 void GeoZoneMissionCheck::_clearZones()
 {
     _updateTimer.stop();
-    if (!_crossedZones.isEmpty()) {
+    if (!_crossedZones.isEmpty() || !_uSpaceZones.isEmpty() || !_permittedZones.isEmpty()) {
         _crossedZones.clear();
+        _uSpaceZones.clear();
+        _permittedZones.clear();
         emit crossedZonesChanged();
     }
 }
@@ -107,14 +130,39 @@ void GeoZoneMissionCheck::update()
 {
     _updateTimer.stop();
 
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional };
+    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace, GeoZone::NoRestriction };
     QList<GeoZone*> zones = _manager->zonesCrossingPaths(restrictions, pathsFromSegments(_missionSegments()));
+    // Camera footprints and turns extend past the flight lines, so whole areas count
+    for (GeoZone *zone : _manager->zonesIntersectingAreas(restrictions, _missionAreas())) {
+        if (!zones.contains(zone)) {
+            zones.append(zone);
+        }
+    }
     std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
         return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
     });
 
-    if (zones != _crossedZones) {
-        _crossedZones = zones;
+    QList<GeoZone*> crossed;
+    QList<GeoZone*> uSpace;
+    QList<GeoZone*> permitted;
+    for (GeoZone *zone : std::as_const(zones)) {
+        switch (zone->restriction()) {
+        case GeoZone::USpace:
+            uSpace.append(zone);
+            break;
+        case GeoZone::NoRestriction:
+            permitted.append(zone);
+            break;
+        default:
+            crossed.append(zone);
+            break;
+        }
+    }
+
+    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones)) {
+        _crossedZones = crossed;
+        _uSpaceZones = uSpace;
+        _permittedZones = permitted;
         emit crossedZonesChanged();
     }
 }
@@ -154,6 +202,46 @@ QList<GeoZoneMissionCheck::Segment> GeoZoneMissionCheck::_missionSegments() cons
         }
     }
     return segments;
+}
+
+QList<GeoZone::Area> GeoZoneMissionCheck::_missionAreas() const
+{
+    QList<GeoZone::Area> areas;
+    const QmlObjectListModel *const visualItems = _missionController ? _missionController->visualItems() : nullptr;
+    for (int i = 0; visualItems && (i < visualItems->count()); i++) {
+        ComplexMissionItem *const complexItem = visualItems->value<ComplexMissionItem*>(i);
+        if (!complexItem) {
+            continue;
+        }
+
+        QList<QGeoCoordinate> polygon;
+        if (TransectStyleComplexItem *const transectItem = qobject_cast<TransectStyleComplexItem*>(complexItem)) {
+            polygon = transectItem->surveyAreaPolygon()->coordinateList();
+        } else if (StructureScanComplexItem *const structureItem = qobject_cast<StructureScanComplexItem*>(complexItem)) {
+            polygon = structureItem->flightPolygon()->coordinateList();
+        }
+        if (polygon.count() < 3) {
+            continue;
+        }
+
+        // Terrain along the item's flight path bounds the height above ground, it stays unknown without samples
+        double minTerrain = qQNaN();
+        double maxTerrain = qQNaN();
+        const QmlObjectListModel *const segments = complexItem->flightPathSegments();
+        for (int j = 0; j < segments->count(); j++) {
+            for (const QVariant &height : segments->value<const FlightPathSegment*>(j)->amslTerrainHeights()) {
+                const double terrain = height.toDouble();
+                minTerrain = qIsNaN(minTerrain) ? terrain : std::min(minTerrain, terrain);
+                maxTerrain = qIsNaN(maxTerrain) ? terrain : std::max(maxTerrain, terrain);
+            }
+        }
+
+        const QGeoCoordinate center = QGeoRectangle(polygon).center();
+        areas.append(GeoZone::Area{ polygon,
+                                    GeoZone::Position{ center, complexItem->minAMSLAltitude(), maxTerrain },
+                                    GeoZone::Position{ center, complexItem->maxAMSLAltitude(), minTerrain } });
+    }
+    return areas;
 }
 
 QList<QList<GeoZone::Position>> GeoZoneMissionCheck::pathsFromSegments(const QList<Segment> &segments)

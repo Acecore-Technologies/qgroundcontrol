@@ -413,9 +413,12 @@ bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const 
         if ((reference == QStringLiteral("AGL")) || (reference == QStringLiteral("SFC"))) {
             altitude1 -= from.terrainAMSL;
             altitude2 -= to.terrainAMSL;
-        } else if ((reference != QStringLiteral("AMSL")) && (reference != QStringLiteral("MSL")) && (reference != QStringLiteral("WGS84"))) {
-            // Flight levels and unknown references can't be compared. WGS84 heights differ from AMSL by the geoid
-            // separation of a few tens of meters, which is ignored.
+        } else if (reference == QStringLiteral("WGS84")) {
+            // Heights above the ellipsoid differ from mean sea level by the geoid height of up to about 100 m
+            altitude1 += GeoZoneGeometry::geoidHeight(from.coordinate);
+            altitude2 += GeoZoneGeometry::geoidHeight(to.coordinate);
+        } else if ((reference != QStringLiteral("AMSL")) && (reference != QStringLiteral("MSL"))) {
+            // Flight levels and unknown references can't be compared
             return std::nullopt;
         }
         if (qIsNaN(altitude1) || qIsNaN(altitude2)) {
@@ -474,6 +477,61 @@ double GeoZone::distanceTo(const Position &position, double verticalMargin) cons
         }
     }
     return minDistance;
+}
+
+bool GeoZone::intersectsArea(const Area &area) const
+{
+    if ((area.polygon.count() < 3) || !_boundingBox.isValid() || !QGeoRectangle(area.polygon).intersects(_boundingBox)) {
+        return false;
+    }
+
+    const GeoZoneGeometry::LocalProjection projection(area.polygon.first());
+    const QList<QPointF> polygon = projection.toLocal(area.polygon);
+    for (const Volume &volume : _data.volumes) {
+        if (!verticalOverlap(volume, area.lowest, area.highest)) {
+            continue;
+        }
+
+        if (volume.isCircle) {
+            if (!volume.center.isValid()) {
+                continue;
+            }
+            const QPointF center = projection.toLocal(volume.center);
+            if (GeoZoneGeometry::ringContains(polygon, center)) {
+                return true;
+            }
+            // The projection is affine, so measure the radius around the center
+            const GeoZoneGeometry::LocalProjection centerProjection(volume.center);
+            const QList<QPointF> centered = centerProjection.toLocal(area.polygon);
+            if (GeoZoneGeometry::distanceToRing(QPointF(0, 0), centered) <= volume.radius) {
+                return true;
+            }
+            continue;
+        }
+
+        if (volume.rings.isEmpty()) {
+            continue;
+        }
+        QList<QList<QPointF>> rings;
+        for (const QList<QGeoCoordinate> &ring : volume.rings) {
+            rings.append(projection.toLocal(ring));
+        }
+        // Edges crossing, the area inside the volume, or the volume inside the area
+        for (qsizetype i = 0; i < polygon.count(); i++) {
+            const QPointF &a = polygon[i];
+            const QPointF &b = polygon[(i + 1) % polygon.count()];
+            if (std::any_of(rings.cbegin(), rings.cend(), [&a, &b](const QList<QPointF> &ring) { return GeoZoneGeometry::segmentIntersectsRing(a, b, ring); })) {
+                return true;
+            }
+        }
+        const QPointF &areaPoint = polygon.first();
+        const bool areaInVolume = GeoZoneGeometry::ringContains(rings.first(), areaPoint) &&
+                                  std::none_of(rings.cbegin() + 1, rings.cend(), [&areaPoint](const QList<QPointF> &hole) { return GeoZoneGeometry::ringContains(hole, areaPoint); });
+        if (areaInVolume || GeoZoneGeometry::ringContains(polygon, rings.first().first())) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool GeoZone::intersectsPath(const QList<QGeoCoordinate> &path) const
