@@ -18,6 +18,7 @@
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 
+class GeoZoneShape;
 class QmlObjectListModel;
 class QTimer;
 
@@ -30,8 +31,6 @@ class GeoZoneManager : public QObject
     Q_MOC_INCLUDE("QmlObjectListModel.h")
 
     Q_PROPERTY(QmlObjectListModel*  zones               READ zones              CONSTANT)
-    Q_PROPERTY(QmlObjectListModel*  polygonShapes       READ polygonShapes      CONSTANT)   ///< GeoZoneMapShape polygons for map display
-    Q_PROPERTY(QmlObjectListModel*  circleShapes        READ circleShapes       CONSTANT)   ///< GeoZoneMapShape circles for map display
     Q_PROPERTY(QString              sourceName          READ sourceName         NOTIFY zonesChanged)
     Q_PROPERTY(QString              formatName          READ formatName         NOTIFY zonesChanged)
     Q_PROPERTY(int                  skippedCount        READ skippedCount       NOTIFY zonesChanged)
@@ -63,8 +62,8 @@ public:
     QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area) const;
 
     QmlObjectListModel *zones() const { return _zones; }
-    QmlObjectListModel *polygonShapes() const { return _polygonShapes; }
-    QmlObjectListModel *circleShapes() const { return _circleShapes; }
+    /// Polygons and circles of all zones for map display. Volumes sharing a footprint have one shape.
+    const QList<GeoZoneShape*> &shapes() const { return _shapes; }
     QString sourceName() const { return _sourceName; }
     QString formatName() const { return _formatName; }
     int skippedCount() const { return _skippedCount; }
@@ -77,6 +76,7 @@ public:
     QString storedFilePath() const;
 
 signals:
+    void zonesAboutToChange();  ///< Zones and shapes are about to be deleted
     void zonesChanged();
     void visibleChanged(bool visible);
 
@@ -90,8 +90,7 @@ private:
 
     QString _storageDir;
     QmlObjectListModel *_zones = nullptr;
-    QmlObjectListModel *_polygonShapes = nullptr;
-    QmlObjectListModel *_circleShapes = nullptr;
+    QList<GeoZoneShape*> _shapes;
     QTimer *_activeTimer = nullptr;
     QString _sourceName;
     QString _formatName;

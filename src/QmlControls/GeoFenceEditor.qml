@@ -17,6 +17,7 @@ QGCFlickable {
 
     property var    myGeoFenceController
     property var    flightMap
+    property int    geoZonesHiddenCount:    0   ///< Smallest geozones in the map view left out to limit the number of map items
 
     readonly property real  _editFieldWidth:    Math.min(width - _margin * 2, ScreenTools.defaultFontPixelWidth * 15)
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
@@ -382,6 +383,15 @@ QGCFlickable {
                         font.pointSize: ScreenTools.smallFontPointSize
                         text:           qsTr("%1 features without a supported geometry were skipped.").arg(_geoZoneManager.skippedCount)
                         visible:        _geoZonesLoaded && _geoZoneManager.skippedCount > 0
+                    }
+
+                    QGCLabel {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        wrapMode:       Text.WordWrap
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        text:           qsTr("%1 of the smallest zones in view are not shown. Zoom in to see them.").arg(geoZonesHiddenCount)
+                        visible:        _geoZonesLoaded && _geoZoneManager.visible && geoZonesHiddenCount > 0
                     }
 
                     QGCButton {

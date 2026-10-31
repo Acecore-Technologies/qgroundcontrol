@@ -502,7 +502,8 @@ Item {
             }
 
             GeoZoneMapVisuals {
-                map: editorMap
+                id:     geoZoneMapVisuals
+                map:    editorMap
             }
 
             GeoFenceMapVisuals {
@@ -789,6 +790,7 @@ Item {
                 anchors.right:          parent.right
                 myGeoFenceController:   _geoFenceController
                 flightMap:              editorMap
+                geoZonesHiddenCount:    geoZoneMapVisuals.hiddenZoneCount
                 visible:                _editingLayer == _layerGeoFence
             }
 

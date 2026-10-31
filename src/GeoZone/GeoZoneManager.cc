@@ -8,8 +8,8 @@
  ****************************************************************************/
 
 #include "GeoZoneManager.h"
-#include "GeoZoneMapShape.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneShape.h"
 #include "QGCApplication.h"
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
@@ -22,7 +22,6 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
-#include <QtPositioning/QGeoPolygon>
 
 #include <algorithm>
 
@@ -34,8 +33,6 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     : QObject(parent)
     , _storageDir(storageDir)
     , _zones(new QmlObjectListModel(this))
-    , _polygonShapes(new QmlObjectListModel(this))
-    , _circleShapes(new QmlObjectListModel(this))
     , _activeTimer(new QTimer(this))
 {
     if (_storageDir.isEmpty()) {
@@ -55,7 +52,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
 
 GeoZoneManager::~GeoZoneManager()
 {
-
+    qDeleteAll(_shapes);
 }
 
 GeoZoneManager *GeoZoneManager::instance()
@@ -192,10 +189,13 @@ void GeoZoneManager::clear()
 
 void GeoZoneManager::_clearZones()
 {
+    if (!_shapes.isEmpty() || (_zones->count() > 0)) {
+        emit zonesAboutToChange();
+    }
     _activeTimer->stop();
     _boundingBox = QGeoRectangle();
-    _polygonShapes->clearAndDeleteContents();
-    _circleShapes->clearAndDeleteContents();
+    qDeleteAll(_shapes);
+    _shapes.clear();
     _zones->clearAndDeleteContents();
 }
 
@@ -204,8 +204,6 @@ void GeoZoneManager::_setZones(const QList<GeoZone::Data> &zonesData)
     _clearZones();
 
     QList<QObject*> zones;
-    QList<QObject*> polygonShapes;
-    QList<QObject*> circleShapes;
     for (const GeoZone::Data &zoneData : zonesData) {
         GeoZone *const zone = new GeoZone(zoneData, this);
         zones.append(zone);
@@ -221,15 +219,11 @@ void GeoZoneManager::_setZones(const QList<GeoZone::Data> &zonesData)
                 const QGeoCircle circle(volume.center, volume.radius);
                 if (!drawnCircles.contains(circle)) {
                     drawnCircles.append(circle);
-                    circleShapes.append(new GeoZoneMapShape(zone, volume.center, volume.radius, this));
+                    _shapes.append(new GeoZoneShape(zone, volume.center, volume.radius));
                 }
             } else if (!drawnPolygons.contains(volume.rings)) {
                 drawnPolygons.append(volume.rings);
-                QGeoPolygon polygon(volume.rings.first());
-                for (qsizetype i = 1; i < volume.rings.count(); i++) {
-                    polygon.addHole(volume.rings[i]);
-                }
-                polygonShapes.append(new GeoZoneMapShape(zone, polygon, this));
+                _shapes.append(new GeoZoneShape(zone, volume.rings));
             }
         }
     }
@@ -237,12 +231,6 @@ void GeoZoneManager::_setZones(const QList<GeoZone::Data> &zonesData)
     // Appending an empty list would insert an invalid row range
     if (!zones.isEmpty()) {
         _zones->append(zones);
-    }
-    if (!polygonShapes.isEmpty()) {
-        _polygonShapes->append(polygonShapes);
-    }
-    if (!circleShapes.isEmpty()) {
-        _circleShapes->append(circleShapes);
     }
 
     if (_zones->count() > 0) {

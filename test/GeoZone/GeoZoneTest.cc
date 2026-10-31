@@ -11,7 +11,9 @@
 #include "GeoFenceController.h"
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMapModel.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneShape.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
@@ -21,13 +23,14 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
-#include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimeZone>
 #include <QtTest/QTest>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace {
 
@@ -44,6 +47,66 @@ GeoZoneParser::Result _parseResource(const QString &name)
 QDateTime _utc(const QDate &date, const QTime &time)
 {
     return QDateTime(date, time, QTimeZone::UTC);
+}
+
+QJsonObject _circleFeature(const QString &identifier, const QString &restriction, const QGeoCoordinate &center, double radius)
+{
+    return QJsonObject{
+        { "identifier", identifier },
+        { "restriction", restriction },
+        { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", QJsonObject{
+            { "type", "Circle" }, { "center", QJsonArray{ center.longitude(), center.latitude() } }, { "radius", radius } } } } } },
+    };
+}
+
+QJsonObject _polygonFeature(const QString &identifier, const QString &restriction, const QList<QGeoCoordinate> &ring)
+{
+    QJsonArray positions;
+    for (const QGeoCoordinate &coordinate : ring) {
+        positions.append(QJsonArray{ coordinate.longitude(), coordinate.latitude() });
+    }
+    positions.append(positions.first());
+    return QJsonObject{
+        { "identifier", identifier },
+        { "restriction", restriction },
+        { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", QJsonObject{
+            { "type", "Polygon" }, { "coordinates", QJsonArray{ positions } } } } } } },
+    };
+}
+
+/// Writes an ED-269 file with the features to the directory
+QString _writeFeatures(const QTemporaryDir &dir, const QString &name, const QJsonArray &features)
+{
+    const QString fileName = dir.filePath(name);
+    QFile file(fileName);
+    if (file.open(QIODevice::WriteOnly)) {
+        (void) file.write(QJsonDocument(QJsonObject{ { "features", features } }).toJson(QJsonDocument::Compact));
+    }
+    return fileName;
+}
+
+QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double radius, int vertexCount)
+{
+    QList<QGeoCoordinate> ring;
+    for (int i = 0; i < vertexCount; i++) {
+        ring.append(center.atDistanceAndAzimuth(radius, i * 360.0 / vertexCount));
+    }
+    return ring;
+}
+
+double _distanceToRing(const QPointF &point, const QList<QGeoCoordinate> &ring)
+{
+    double minDistance = std::numeric_limits<double>::max();
+    for (qsizetype i = 0; i < ring.count(); i++) {
+        const QPointF a = GeoZoneShape::toMercator(ring[i]);
+        const QPointF b = GeoZoneShape::toMercator(ring[(i + 1) % ring.count()]);
+        const QPointF ab = b - a;
+        const double lengthSquared = QPointF::dotProduct(ab, ab);
+        const double t = (lengthSquared > 0) ? std::clamp(QPointF::dotProduct(point - a, ab) / lengthSquared, 0.0, 1.0) : 0.0;
+        const QPointF offset = a + (t * ab) - point;
+        minDistance = qMin(minDistance, std::hypot(offset.x(), offset.y()));
+    }
+    return minDistance;
 }
 
 } // namespace
@@ -302,8 +365,8 @@ void GeoZoneTest::_testManagerLoadPersistClear()
         QString errorString;
         QVERIFY2(manager.loadFile(sourceFile, errorString), qPrintable(errorString));
         QCOMPARE(manager.zones()->count(), 3);
-        QCOMPARE(manager.polygonShapes()->count(), 4);
-        QCOMPARE(manager.circleShapes()->count(), 1);
+        QCOMPARE(manager.shapes().count(), 5);
+        QCOMPARE(std::count_if(manager.shapes().cbegin(), manager.shapes().cend(), [](const GeoZoneShape *shape) { return shape->isCircle(); }), 1);
         QCOMPARE(manager.formatName(), QStringLiteral("ED-318"));
         QCOMPARE(manager.sourceName(), QStringLiteral("Test GeoZones"));
         QCOMPARE(manager.skippedCount(), 1);
@@ -330,8 +393,7 @@ void GeoZoneTest::_testManagerLoadPersistClear()
 
         manager.clear();
         QCOMPARE(manager.zones()->count(), 0);
-        QCOMPARE(manager.polygonShapes()->count(), 0);
-        QCOMPARE(manager.circleShapes()->count(), 0);
+        QVERIFY(manager.shapes().isEmpty());
         QVERIFY(!QFile::exists(manager.storedFilePath()));
     }
 
@@ -385,22 +447,12 @@ void GeoZoneTest::_testLabelZonesLimit()
     QJsonArray features;
     const int zoneCount = GeoZoneManager::maxLabelCount * 2;
     for (int i = 0; i < zoneCount; i++) {
-        const double lon = 8.0 + (i % 40) * 0.01;
-        const double lat = 47.0 + (i / 40) * 0.01;
-        features.append(QJsonObject{
-            { "identifier", QStringLiteral("Z%1").arg(i) },
-            { "restriction", (i % 2) ? QStringLiteral("NO_RESTRICTION") : QStringLiteral("PROHIBITED") },
-            { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", QJsonObject{
-                { "type", "Circle" }, { "center", QJsonArray{ lon, lat } }, { "radius", 100 } } } } } },
-        });
+        const QGeoCoordinate center(47.0 + (i / 40) * 0.01, 8.0 + (i % 40) * 0.01);
+        features.append(_circleFeature(QStringLiteral("Z%1").arg(i), (i % 2) ? QStringLiteral("NO_RESTRICTION") : QStringLiteral("PROHIBITED"), center, 100));
     }
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    const QString fileName = dir.filePath(QStringLiteral("many.json"));
-    QFile file(fileName);
-    QVERIFY(file.open(QIODevice::WriteOnly));
-    (void) file.write(QJsonDocument(QJsonObject{ { "features", features } }).toJson(QJsonDocument::Compact));
-    file.close();
+    const QString fileName = _writeFeatures(dir, QStringLiteral("many.json"), features);
 
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
@@ -418,5 +470,135 @@ void GeoZoneTest::_testLabelZonesLimit()
     QCOMPARE(labels.count(), GeoZoneManager::maxLabelCount);
     for (const QObject *object : labels) {
         QCOMPARE(qobject_cast<const GeoZone*>(object)->restriction(), GeoZone::Prohibited);
+    }
+}
+
+void GeoZoneTest::_testShapeSimplification()
+{
+    // Dense 5 km circle with a 40 m hole
+    const QGeoCoordinate center(47.0, 8.0);
+    const QList<QGeoCoordinate> ring = _circleRing(center, 5000, 10000);
+    const GeoZoneShape shape(nullptr, { ring, _circleRing(center, 20, 8) });
+
+    const QGeoPolygon full = shape.polygon(GeoZoneShape::fullDetailZoomLevel);
+    QCOMPARE(full.perimeter().count(), ring.count());
+    QCOMPARE(full.holesCount(), 1);
+
+    const int zoomLevel = 10;
+    const QGeoPolygon simplified = shape.polygon(zoomLevel);
+    QVERIFY(simplified.perimeter().count() >= 3);
+    QVERIFY(simplified.perimeter().count() < 100);
+    QCOMPARE(simplified.holesCount(), 0); // The hole is under a pixel at this zoom level
+    QCOMPARE(shape.polygon(16).holesCount(), 1);
+
+    // Shapes under a pixel become a triangle spanning them instead of keeping every vertex
+    const QList<QGeoCoordinate> smallRing = _circleRing(center, 50, 200);
+    const GeoZoneShape smallShape(nullptr, { smallRing });
+    const QList<QGeoCoordinate> triangle = smallShape.polygon(5).perimeter();
+    QCOMPARE(triangle.count(), 3);
+    const QList<double> sides = { triangle[0].distanceTo(triangle[1]), triangle[1].distanceTo(triangle[2]), triangle[2].distanceTo(triangle[0]) };
+    QVERIFY(*std::max_element(sides.cbegin(), sides.cend()) > 95); // Spans the 100 m diameter
+    QVERIFY(*std::min_element(sides.cbegin(), sides.cend()) > 65);
+    QCOMPARE(smallShape.polygon(GeoZoneShape::fullDetailZoomLevel).perimeter().count(), smallRing.count());
+
+    // Simplified vertices are original vertices and every original vertex stays within half a pixel of the outline
+    const double tolerance = 0.5 / GeoZoneShape::mercatorPixels(zoomLevel);
+    for (const QGeoCoordinate &vertex : simplified.perimeter()) {
+        QVERIFY(ring.contains(vertex));
+    }
+    for (const QGeoCoordinate &vertex : ring) {
+        QVERIFY(_distanceToRing(GeoZoneShape::toMercator(vertex), simplified.perimeter()) <= tolerance * 1.0001);
+    }
+
+    // A 1 km circle is 2000 m / 104.26 m per pixel wide at zoom level 10 and 47 degrees latitude
+    const GeoZoneShape circle(nullptr, center, 1000);
+    const double widthPixels = circle.mercatorBounds().width() * GeoZoneShape::mercatorPixels(zoomLevel);
+    QVERIFY2(qAbs(widthPixels - 19.18) < 0.2, qPrintable(QString::number(widthPixels)));
+    QCOMPARE(circle.mercatorBounds().height(), circle.mercatorBounds().width());
+}
+
+void GeoZoneTest::_testMapModel()
+{
+    const QGeoRectangle view(QGeoCoordinate(47.1, 7.85), QGeoCoordinate(46.9, 8.15));
+    const QJsonArray features = {
+        _polygonFeature(QStringLiteral("BIG"), QStringLiteral("PROHIBITED"), _circleRing(QGeoCoordinate(47.0, 8.0), 4000, 2000)),
+        _circleFeature(QStringLiteral("TINY"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.01, 8.01), 20),
+        _circleFeature(QStringLiteral("NEAR"), QStringLiteral("CONDITIONAL"), QGeoCoordinate(47.0, 8.2), 500),     // Within the view margin
+        _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(50.0, 15.0), 1000),
+    };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString), qPrintable(errorString));
+
+    GeoZoneMapModel model(&manager);
+    const auto identifiers = [](const QmlObjectListModel *list) {
+        QStringList result;
+        for (int i = 0; i < list->count(); i++) {
+            result.append(list->value<GeoZoneMapItem*>(i)->zone()->identifier());
+        }
+        result.sort();
+        return result;
+    };
+
+    // Only shapes in or near the view
+    model.setView(view, 10, false);
+    QCOMPARE(identifiers(model.polygons()), QStringList({ QStringLiteral("BIG") }));
+    QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("NEAR"), QStringLiteral("TINY") }));
+    QCOMPARE(model.hiddenZoneCount(), 0);
+    QCOMPARE(model.labelZones()->count(), 0);
+
+    GeoZoneMapItem *const polygonItem = model.polygons()->value<GeoZoneMapItem*>(0);
+    const qsizetype lowDetailCount = QGeoPolygon(polygonItem->geoShape()).perimeter().count();
+    QVERIFY(lowDetailCount < 2000);
+
+    // Zooming in keeps the items and adds detail. Only zones centered in the view are labelled.
+    model.setView(view, 16, true);
+    QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
+    QCOMPARE(model.labelZones()->count(), 2);
+    QVERIFY(QGeoPolygon(polygonItem->geoShape()).perimeter().count() > lowDetailCount);
+
+    // Reloading zones replaces the items
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("other.json"),
+        { _circleFeature(QStringLiteral("OTHER"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 1000) }), errorString), qPrintable(errorString));
+    QCOMPARE(model.polygons()->count(), 0);
+    QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
+
+    model.setView(QGeoRectangle(), 16, true);
+    QCOMPARE(model.circles()->count(), 0);
+    QCOMPARE(model.labelZones()->count(), 0);
+
+    model.setView(view, 16, true);
+    manager.clear();
+    QCOMPARE(model.circles()->count(), 0);
+}
+
+void GeoZoneTest::_testMapModelShapeLimit()
+{
+    // More zones in view than can be shown, with growing radius
+    QJsonArray features;
+    const int extraZones = 10;
+    for (int i = 0; i < GeoZoneMapModel::maxShapeCount + extraZones; i++) {
+        const QGeoCoordinate center(47.0 + (i / 50) * 0.005, 8.0 + (i % 50) * 0.005);
+        features.append(_circleFeature(QStringLiteral("Z%1").arg(i), QStringLiteral("PROHIBITED"), center, 100 + i));
+    }
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString), qPrintable(errorString));
+
+    // The smallest zones are dropped and not labelled
+    GeoZoneMapModel model(&manager);
+    model.setView(manager.boundingBox(), 12, true);
+    QCOMPARE(model.circles()->count(), GeoZoneMapModel::maxShapeCount);
+    QCOMPARE(model.hiddenZoneCount(), extraZones);
+    for (int i = 0; i < model.circles()->count(); i++) {
+        QVERIFY(model.circles()->value<GeoZoneMapItem*>(i)->radius() >= 100 + extraZones);
+    }
+    QVERIFY(model.labelZones()->count() > 0);
+    for (int i = 0; i < model.labelZones()->count(); i++) {
+        QVERIFY(model.labelZones()->value<GeoZone*>(i)->identifier().mid(1).toInt() >= extraZones);
     }
 }

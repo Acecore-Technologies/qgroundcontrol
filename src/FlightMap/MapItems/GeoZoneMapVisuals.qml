@@ -23,8 +23,10 @@ Item {
     property var    map
     property real   labelMinZoomLevel:  11  ///< Zone labels are only shown from this zoom level up
 
+    readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
+
     readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
-    readonly property bool  _showZones:         _geoZoneManager.visible
+    readonly property bool  _showZones:         _geoZoneManager.visible && map.visible // Items are not kept for maps in hidden views
     readonly property bool  _showLabels:        _showZones && map.zoomLevel >= labelMinZoomLevel
     readonly property real  _activeFillAlpha:   0.25
     readonly property real  _inactiveFillAlpha: 0.08
@@ -52,6 +54,17 @@ Item {
         return Qt.rgba(color.r, color.g, color.b, zone.active ? _activeFillAlpha : _inactiveFillAlpha)
     }
 
+    // More restrictive zones are drawn on top
+    function _restrictionZ(restriction) {
+        switch (restriction) {
+        case GeoZone.Prohibited:        return 0.5
+        case GeoZone.ReqAuthorisation:  return 0.4
+        case GeoZone.Conditional:       return 0.3
+        case GeoZone.USpace:            return 0.2
+        default:                        return 0.1
+        }
+    }
+
     function _showZoneInfo(zone) {
         geoZoneInfoDialogComponent.createObject(mainWindow, { geoZone: zone }).open()
     }
@@ -62,18 +75,46 @@ Item {
         GeoZoneInfoDialog { }
     }
 
-    // Map items must be added to the map itself, so Instantiator is used instead of MapItemView.
-    // Visibility is controlled with active since Qt 6.8 ignores a model change to 0.
+    // Only shapes in or near the view are created, see GeoZoneMapModel
+    GeoZoneMapModel { id: _mapModel }
+
+    function _updateView() {
+        _mapModel.setView(_showZones ? map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle(), map.zoomLevel, _showLabels)
+    }
+
+    // Throttled so the zones follow a pan or zoom without updating on every frame
+    Timer {
+        id:             viewUpdateTimer
+        interval:       250
+        onTriggered:    _root._updateView()
+    }
+
+    function _scheduleViewUpdate() {
+        if (!viewUpdateTimer.running) {
+            viewUpdateTimer.start()
+        }
+    }
+
+    on_ShowZonesChanged:    _updateView()
+    on_ShowLabelsChanged:   _scheduleViewUpdate()
+
+    Connections {
+        target:                             map
+        function onVisibleRegionChanged()   { _root._scheduleViewUpdate() }
+    }
+
+    Component.onCompleted: _scheduleViewUpdate()
+
+    // Map items must be added to the map itself, so Instantiator is used instead of MapItemView
     Instantiator {
-        model:  _geoZoneManager.polygonShapes
-        active: _showZones
+        model: _mapModel.polygons
 
         delegate: MapPolygon {
             geoShape:       object.geoShape
             color:          _root._fillColor(object.zone)
             border.color:   _root.restrictionColor(object.zone.restriction)
             border.width:   object.zone.active ? 2 : 1
-            z:              QGroundControl.zOrderMapItems - 2
+            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
@@ -81,8 +122,7 @@ Item {
     }
 
     Instantiator {
-        model:  _geoZoneManager.circleShapes
-        active: _showZones
+        model: _mapModel.circles
 
         delegate: MapCircle {
             center:         object.center
@@ -90,56 +130,24 @@ Item {
             color:          _root._fillColor(object.zone)
             border.color:   _root.restrictionColor(object.zone.restriction)
             border.width:   object.zone.active ? 2 : 1
-            z:              QGroundControl.zOrderMapItems - 2
+            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
         onObjectRemoved:    (index, object) => _root.map.removeMapItem(object)
     }
 
-    // Labels are only created for zones in the visible map region, limited in number by the manager
-    property var _labelZones: []
-
-    function _updateLabelZones() {
-        const zones = _showLabels ? _geoZoneManager.labelZones(map.visibleRegion.boundingGeoRectangle()) : []
-        if (zones.length === _labelZones.length && zones.every((zone, index) => zone === _labelZones[index])) {
-            return
-        }
-        _labelZones = zones
-    }
-
-    on_ShowLabelsChanged: labelZonesTimer.restart()
-
-    Connections {
-        target:                             map
-        function onVisibleRegionChanged()   { labelZonesTimer.restart() }
-    }
-
-    Connections {
-        target:                     _geoZoneManager
-        function onZonesChanged()   { _root._labelZones = []; labelZonesTimer.restart() }
-    }
-
-    Timer {
-        id:             labelZonesTimer
-        interval:       250
-        onTriggered:    _root._updateLabelZones()
-    }
-
-    Component.onCompleted: labelZonesTimer.restart()
-
     // Clickable zone labels which show the zone details
     Instantiator {
-        model:  _root._labelZones
-        active: _showLabels
+        model: _mapModel.labelZones
 
         delegate: MapQuickItem {
-            coordinate:     modelData.center
+            coordinate:     object.center
             anchorPoint.x:  sourceItem.width / 2
             anchorPoint.y:  sourceItem.height / 2
             z:              QGroundControl.zOrderMapItems - 1
 
-            readonly property var _zone: modelData
+            readonly property var _zone: object
 
             sourceItem: Rectangle {
                 width:          zoneLabel.contentWidth + ScreenTools.defaultFontPixelWidth

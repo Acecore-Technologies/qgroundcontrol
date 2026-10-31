@@ -22,6 +22,7 @@
 #include "ADSBVehicleManager.h"
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMapModel.h"
 #include "MissionCommandTree.h"
 #include "HorizontalFactValueGrid.h"
 #include "FlightPathSegment.h"
@@ -97,6 +98,7 @@ void QGroundControlQmlGlobal::registerQmlTypes()
     qmlRegisterType<HorizontalFactValueGrid>            ("QGroundControl.Templates",             1, 0, "HorizontalFactValueGrid");
     qmlRegisterType<ParameterEditorController>          ("QGroundControl.Controllers",           1, 0, "ParameterEditorController");
     qmlRegisterType<QGCFileDialogController>            ("QGroundControl.Controllers",           1, 0, "QGCFileDialogController");
+    qmlRegisterType<GeoZoneMapModel>                    ("QGroundControl.FlightMap",             1, 0, "GeoZoneMapModel");
     qmlRegisterType<QGCMapCircle>                       ("QGroundControl.FlightMap",             1, 0, "QGCMapCircle");
     qmlRegisterType<QGCMapPalette>                      ("QGroundControl.Palette",               1, 0, "QGCMapPalette");
     qmlRegisterType<QGCPalette>                         ("QGroundControl.Palette",               1, 0, "QGCPalette");
