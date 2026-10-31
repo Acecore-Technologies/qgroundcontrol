@@ -18,6 +18,10 @@
 #include "QmlObjectListModel.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimeZone>
@@ -373,4 +377,46 @@ void GeoZoneTest::_testGeoFenceImport()
     QCOMPARE(geoFenceController->addGeoZoneExclusions(zones), 0);
     QCOMPARE(geoFenceController->polygons()->count(), 3);
     QCOMPARE(geoFenceController->circles()->count(), 1);
+}
+
+void GeoZoneTest::_testLabelZonesLimit()
+{
+    // Many zones centered in the same small area, alternating restrictions
+    QJsonArray features;
+    const int zoneCount = GeoZoneManager::maxLabelCount * 2;
+    for (int i = 0; i < zoneCount; i++) {
+        const double lon = 8.0 + (i % 40) * 0.01;
+        const double lat = 47.0 + (i / 40) * 0.01;
+        features.append(QJsonObject{
+            { "identifier", QStringLiteral("Z%1").arg(i) },
+            { "restriction", (i % 2) ? QStringLiteral("NO_RESTRICTION") : QStringLiteral("PROHIBITED") },
+            { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", QJsonObject{
+                { "type", "Circle" }, { "center", QJsonArray{ lon, lat } }, { "radius", 100 } } } } } },
+        });
+    }
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString fileName = dir.filePath(QStringLiteral("many.json"));
+    QFile file(fileName);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    (void) file.write(QJsonDocument(QJsonObject{ { "features", features } }).toJson(QJsonDocument::Compact));
+    file.close();
+
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+    QCOMPARE(manager.zones()->count(), zoneCount);
+
+    QVERIFY(manager.labelZones(QGeoRectangle()).isEmpty());
+
+    // Only zones centered in the region are labelled
+    const QGeoRectangle smallRegion(QGeoCoordinate(47.005, 7.995), QGeoCoordinate(46.995, 8.035));
+    QCOMPARE(manager.labelZones(smallRegion).count(), 4);
+
+    // The limit keeps the most restrictive zones
+    const QList<QObject*> labels = manager.labelZones(manager.boundingBox());
+    QCOMPARE(labels.count(), GeoZoneManager::maxLabelCount);
+    for (const QObject *object : labels) {
+        QCOMPARE(qobject_cast<const GeoZone*>(object)->restriction(), GeoZone::Prohibited);
+    }
 }

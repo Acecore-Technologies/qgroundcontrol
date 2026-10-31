@@ -24,4 +24,5 @@ private slots:
     void _testExclusionShapes();
     void _testManagerLoadPersistClear();
     void _testGeoFenceImport();
+    void _testLabelZonesLimit();
 };

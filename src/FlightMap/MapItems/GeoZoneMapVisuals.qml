@@ -97,18 +97,49 @@ Item {
         onObjectRemoved:    (index, object) => _root.map.removeMapItem(object)
     }
 
+    // Labels are only created for zones in the visible map region, limited in number by the manager
+    property var _labelZones: []
+
+    function _updateLabelZones() {
+        const zones = _showLabels ? _geoZoneManager.labelZones(map.visibleRegion.boundingGeoRectangle()) : []
+        if (zones.length === _labelZones.length && zones.every((zone, index) => zone === _labelZones[index])) {
+            return
+        }
+        _labelZones = zones
+    }
+
+    on_ShowLabelsChanged: labelZonesTimer.restart()
+
+    Connections {
+        target:                             map
+        function onVisibleRegionChanged()   { labelZonesTimer.restart() }
+    }
+
+    Connections {
+        target:                     _geoZoneManager
+        function onZonesChanged()   { _root._labelZones = []; labelZonesTimer.restart() }
+    }
+
+    Timer {
+        id:             labelZonesTimer
+        interval:       250
+        onTriggered:    _root._updateLabelZones()
+    }
+
+    Component.onCompleted: labelZonesTimer.restart()
+
     // Clickable zone labels which show the zone details
     Instantiator {
-        model:  _geoZoneManager.zones
+        model:  _root._labelZones
         active: _showLabels
 
         delegate: MapQuickItem {
-            coordinate:     object.center
+            coordinate:     modelData.center
             anchorPoint.x:  sourceItem.width / 2
             anchorPoint.y:  sourceItem.height / 2
             z:              QGroundControl.zOrderMapItems - 1
 
-            readonly property var _zone: object
+            readonly property var _zone: modelData
 
             sourceItem: Rectangle {
                 width:          zoneLabel.contentWidth + ScreenTools.defaultFontPixelWidth

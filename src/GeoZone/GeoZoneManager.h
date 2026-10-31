@@ -40,6 +40,8 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT)
 
 public:
+    static constexpr int maxLabelCount = 200;   ///< Limits the number of label items created on a map
+
     /// @param storageDir Directory in which a copy of the loaded file is kept. Empty for the default application data location.
     explicit GeoZoneManager(const QString &storageDir = QString(), QObject *parent = nullptr);
     ~GeoZoneManager();
@@ -52,6 +54,10 @@ public:
 
     /// Removes all zones and the stored copy of the file
     Q_INVOKABLE void clear();
+
+    /// @return Zones to label in the map region: those centered in it, limited to maxLabelCount
+    ///         preferring the most restrictive
+    Q_INVOKABLE QList<QObject*> labelZones(const QGeoRectangle &region) const;
 
     /// @return Zones matching one of the restrictions which intersect the area. An invalid area matches all zones.
     QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area) const;

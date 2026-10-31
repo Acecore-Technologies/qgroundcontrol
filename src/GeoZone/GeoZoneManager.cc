@@ -24,6 +24,8 @@
 #include <QtCore/QUrl>
 #include <QtPositioning/QGeoPolygon>
 
+#include <algorithm>
+
 QGC_LOGGING_CATEGORY(GeoZoneManagerLog, "qgc.geozone.geozonemanager")
 
 Q_APPLICATION_STATIC(GeoZoneManager, _geoZoneManager);
@@ -248,6 +250,39 @@ void GeoZoneManager::_setZones(const QList<GeoZone::Data> &zonesData)
     }
 
     emit zonesChanged();
+}
+
+QList<QObject*> GeoZoneManager::labelZones(const QGeoRectangle &region) const
+{
+    QList<GeoZone*> candidates;
+    if (region.isValid()) {
+        for (int i = 0; i < _zones->count(); i++) {
+            GeoZone *const zone = _zones->value<GeoZone*>(i);
+            if (region.contains(zone->center())) {
+                candidates.append(zone);
+            }
+        }
+    }
+
+    if (candidates.count() > maxLabelCount) {
+        static const auto priority = [](const GeoZone *zone) {
+            switch (zone->restriction()) {
+            case GeoZone::Prohibited:       return 0;
+            case GeoZone::ReqAuthorisation: return 1;
+            case GeoZone::Conditional:      return 2;
+            case GeoZone::USpace:           return 3;
+            case GeoZone::NoRestriction:    return 4;
+            case GeoZone::Unknown:
+            default:                        return 5;
+            }
+        };
+        std::stable_sort(candidates.begin(), candidates.end(), [](const GeoZone *a, const GeoZone *b) {
+            return priority(a) < priority(b);
+        });
+        candidates.resize(maxLabelCount);
+    }
+
+    return QList<QObject*>(candidates.cbegin(), candidates.cend());
 }
 
 void GeoZoneManager::_updateActive()
