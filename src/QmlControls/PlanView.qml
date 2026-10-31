@@ -553,6 +553,39 @@ Item {
             }
         }
 
+        GeoZoneMissionCheck {
+            id:                 geoZoneMissionCheck
+            missionController:  _missionController
+        }
+
+        // Warns when the mission path enters restricted geozones
+        Rectangle {
+            id:                 geoZoneMissionWarning
+            anchors.top:        parent.top
+            anchors.topMargin:  _toolsMargin
+            x:                  _left + ((_availableWidth - width) / 2)
+            width:              Math.min(geoZoneMissionWarningLabel.implicitWidth + (_margin * 2), _availableWidth)
+            height:             geoZoneMissionWarningLabel.height + (_margin * 2)
+            radius:             ScreenTools.defaultFontPixelWidth / 2
+            color:              qgcPal.window
+            border.color:       qgcPal.warningText
+            z:                  QGroundControl.zOrderWidgets
+            visible:            geoZoneMissionCheck.warningText !== ""
+
+            readonly property real _margin:         ScreenTools.defaultFontPixelWidth
+            readonly property real _left:           toolStrip.x + toolStrip.width + _toolsMargin
+            readonly property real _availableWidth: Math.max(rightPanel.x - _toolsMargin - _left, ScreenTools.defaultFontPixelWidth * 20)
+
+            QGCLabel {
+                id:                 geoZoneMissionWarningLabel
+                anchors.centerIn:   parent
+                width:              Math.min(implicitWidth, geoZoneMissionWarning._availableWidth - (geoZoneMissionWarning._margin * 2))
+                wrapMode:           Text.WordWrap
+                color:              qgcPal.warningText
+                text:               geoZoneMissionCheck.warningText
+            }
+        }
+
         //-----------------------------------------------------------
         // Left tool strip
         ToolStrip {

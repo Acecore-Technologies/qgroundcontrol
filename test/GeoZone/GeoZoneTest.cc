@@ -10,22 +10,35 @@
 #include "GeoZoneTest.h"
 #include "GeoFenceController.h"
 #include "GeoZone.h"
+#include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapModel.h"
+#include "GeoZoneMissionCheck.h"
+#include "GeoZoneMonitor.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneShape.h"
+#include "GeoZoneSource.h"
+#include "MissionController.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
+#include "SettingsManager.h"
+#include "UnitsSettings.h"
+#include "Vehicle.h"
 
+#include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QScopeGuard>
+#include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimeZone>
+#include <QtCore/QUrl>
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
 #include <algorithm>
@@ -176,6 +189,10 @@ void GeoZoneTest::_testParseED318()
 
     QVERIFY2(parsed, qPrintable(errorString));
     QCOMPARE(result.format, GeoZoneParser::Format::ED318);
+    QCOMPARE(result.provider, QStringLiteral("Test Authority"));
+    QCOMPARE(result.issued, _utc(QDate(2026, 8, 13), QTime(0, 0)));
+    QCOMPARE(result.validFrom, _utc(QDate(2026, 8, 13), QTime(0, 0)));
+    QCOMPARE(result.validTo, _utc(QDate(2099, 1, 1), QTime(0, 0)));
     QCOMPARE(result.title, QStringLiteral("Test GeoZones"));
     QCOMPARE(result.zones.count(), 3);
     QCOMPARE(result.skippedFeatures, 1); // LineString
@@ -303,17 +320,136 @@ void GeoZoneTest::_testIsActiveAt()
     QCOMPARE(offset.applicabilityText(), QStringLiteral("  MON 01:00-03:00 UTC+02:00"));
 }
 
+void GeoZoneTest::_testIsActiveDuring()
+{
+    const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
+    QCOMPARE(ed269.zones.count(), 3);
+
+    const GeoZone permanent(ed269.zones[0]);
+    QVERIFY(permanent.isActiveDuring(_utc(QDate(2035, 1, 1), QTime(0, 0)), _utc(QDate(2035, 1, 1), QTime(1, 0))));
+
+    // Mondays and Tuesdays 05:00-18:00 UTC between 2026-03-29 and 2026-10-25
+    const GeoZone scheduled(ed269.zones[2]);
+    const QDate monday(2026, 6, 1);
+    QVERIFY(!scheduled.isActiveDuring(_utc(monday, QTime(1, 0)), _utc(monday, QTime(4, 59))));
+    QVERIFY(scheduled.isActiveDuring(_utc(monday, QTime(4, 0)), _utc(monday, QTime(5, 30))));
+    QVERIFY(scheduled.isActiveDuring(_utc(monday, QTime(17, 30)), _utc(monday, QTime(20, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(monday.addDays(1), QTime(18, 1)), _utc(monday.addDays(5), QTime(23, 0))));
+    QVERIFY(scheduled.isActiveDuring(_utc(monday.addDays(2), QTime(0, 0)), _utc(monday.addDays(30), QTime(0, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(monday, QTime(20, 0)), _utc(monday, QTime(10, 0))));
+    // A window starting before the validity begins only overlaps the scheduled days inside it
+    QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 3, 25), QTime(0, 0)), _utc(QDate(2026, 3, 29), QTime(23, 0))));
+    QVERIFY(scheduled.isActiveDuring(_utc(QDate(2026, 3, 25), QTime(0, 0)), _utc(QDate(2026, 3, 30), QTime(6, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 10, 26), QTime(0, 0)), _utc(QDate(2026, 12, 1), QTime(0, 0))));
+
+    // Friday 22:00 to Saturday 02:00 UTC, and Monday 01:00-03:00 UTC+2 which is Sunday 23:00 to Monday 01:00 UTC
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "N", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["FRI"], "startTime": "22:00Z", "endTime": "02:00Z" },
+                                                               { "day": ["MON"], "startTime": "01:00+02:00", "endTime": "01:00Z" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8, 47], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone night(result.zones[0]);
+    const QDate friday(2026, 6, 5);
+    QVERIFY(!night.isActiveDuring(_utc(friday, QTime(19, 0)), _utc(friday, QTime(21, 59))));
+    QVERIFY(night.isActiveDuring(_utc(friday, QTime(21, 0)), _utc(friday, QTime(22, 30))));
+    QVERIFY(night.isActiveDuring(_utc(friday.addDays(1), QTime(1, 0)), _utc(friday.addDays(1), QTime(3, 0))));
+    QVERIFY(!night.isActiveDuring(_utc(friday.addDays(1), QTime(2, 1)), _utc(friday.addDays(2), QTime(22, 59))));
+    QVERIFY(night.isActiveDuring(_utc(friday.addDays(2), QTime(22, 30)), _utc(friday.addDays(2), QTime(23, 10))));
+    QVERIFY(!night.isActiveDuring(_utc(friday.addDays(3), QTime(1, 1)), _utc(friday.addDays(6), QTime(21, 0))));
+
+    // The manager filters zones by the activity window
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QVERIFY2(manager.loadFile(QStringLiteral(":/unittest/ed269_test.json"), errorString), qPrintable(errorString));
+    const QList<GeoZone::Restriction> all = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown };
+    QCOMPARE(manager.zonesInArea(all, QGeoRectangle()).count(), 3);
+    QCOMPARE(manager.zonesInArea(all, QGeoRectangle(), _utc(monday.addDays(2), QTime(10, 0))).count(), 2);
+    QCOMPARE(manager.zonesInArea(all, QGeoRectangle(), _utc(monday.addDays(2), QTime(10, 0)), _utc(monday.addDays(7), QTime(10, 0))).count(), 3);
+}
+
+void GeoZoneTest::_testOutwardSimplification()
+{
+    const auto verifyEncloses = [](const QList<QGeoCoordinate> &original, const QList<QGeoCoordinate> &simplified, double tolerance) {
+        const GeoZoneGeometry::LocalProjection projection(original.first());
+        const QList<QPointF> originalPoints = projection.toLocal(original);
+        const QList<QPointF> simplifiedPoints = projection.toLocal(simplified);
+        QVERIFY(GeoZoneGeometry::isSimple(simplifiedPoints));
+        for (qsizetype i = 0; i < originalPoints.count(); i++) {
+            QVERIFY(GeoZoneGeometry::ringContains(simplifiedPoints, originalPoints[i]));
+            QVERIFY(!GeoZoneGeometry::segmentIntersectsRing(originalPoints[i], originalPoints[(i + 1) % originalPoints.count()], simplifiedPoints));
+        }
+        // Expanded by no more than twice the tolerance
+        for (const QPointF &point : simplifiedPoints) {
+            QVERIFY(GeoZoneGeometry::distanceToRing(point, originalPoints) <= (2 * tolerance) + 1);
+        }
+    };
+
+    // Circle published as a polygon
+    const QList<QGeoCoordinate> circle = _circleRing(QGeoCoordinate(47, 8), 500, 64);
+    const QList<QGeoCoordinate> simplifiedCircle = GeoZoneGeometry::simplifyOutward(circle, 25);
+    QVERIFY(simplifiedCircle.count() < 20);
+    verifyEncloses(circle, simplifiedCircle, 25);
+
+    // Concave star with a jagged boundary
+    QList<QGeoCoordinate> star;
+    for (int i = 0; i < 200; i++) {
+        const double radius = ((i % 2) ? 400 : 395) + ((i % 40) < 20 ? 300 : 0);
+        star.append(QGeoCoordinate(47, 8).atDistanceAndAzimuth(radius, i * 360.0 / 200));
+    }
+    const QList<QGeoCoordinate> simplifiedStar = GeoZoneGeometry::simplifyOutward(star, 10);
+    QVERIFY(simplifiedStar.count() < star.count() / 2);
+    verifyEncloses(star, simplifiedStar, 10);
+
+    // U shape with a notch narrower than the tolerance and sharp corners
+    const QGeoCoordinate origin(47, 8);
+    QList<QGeoCoordinate> notch;
+    const QList<QPointF> notchPoints = { { 0, 0 }, { 1000, 0 }, { 1000, 1000 }, { 510, 1000 }, { 510, 100 }, { 500, 100 }, { 500, 1000 }, { 0, 1000 } };
+    const GeoZoneGeometry::LocalProjection projection(origin);
+    for (const QPointF &point : notchPoints) {
+        // Densify the edges so there is something to simplify
+        notch.append(projection.toGeo(point));
+    }
+    QList<QGeoCoordinate> denseNotch;
+    for (qsizetype i = 0; i < notch.count(); i++) {
+        const QPointF a = projection.toLocal(notch[i]);
+        const QPointF b = projection.toLocal(notch[(i + 1) % notch.count()]);
+        for (int step = 0; step < 10; step++) {
+            denseNotch.append(projection.toGeo(a + ((b - a) * (step / 10.0)) + QPointF((step % 2) * 2, 0)));
+        }
+    }
+    const QList<QGeoCoordinate> simplifiedNotch = GeoZoneGeometry::simplifyOutward(denseNotch, 25);
+    QVERIFY(simplifiedNotch.count() < denseNotch.count());
+    verifyEncloses(denseNotch, simplifiedNotch, 25);
+
+    // Nothing to do
+    QCOMPARE(GeoZoneGeometry::simplifyOutward(circle, 0), circle);
+    const QList<QGeoCoordinate> triangle = { QGeoCoordinate(47, 8), QGeoCoordinate(47.01, 8), QGeoCoordinate(47, 8.01) };
+    QCOMPARE(GeoZoneGeometry::simplifyOutward(triangle, 25), triangle);
+}
+
 void GeoZoneTest::_testDisplayText()
 {
     const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
     QCOMPARE(ed269.zones.count(), 3);
+
+    Fact *const verticalUnits = SettingsManager::instance()->unitsSettings()->verticalDistanceUnits();
+    const QVariant savedVerticalUnits = verticalUnits->rawValue();
+    const auto restoreVerticalUnits = qScopeGuard([verticalUnits, savedVerticalUnits] { verticalUnits->setRawValue(savedVerticalUnits); });
+    verticalUnits->setRawValue(UnitsSettings::VerticalDistanceUnitsMeters);
 
     const GeoZone prohibited(ed269.zones[0]);
     QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 120 m AGL\n120 m AGL - Unlimited"));
     QCOMPARE(prohibited.applicabilityText(), QStringLiteral("Permanent"));
     QCOMPARE(prohibited.reasonText(), QStringLiteral("Air traffic, Sensitive area"));
 
+    // Limits are shown in the user's units with the published value when it differs
     const GeoZone circle(ed269.zones[1]);
+    QCOMPARE(circle.verticalLimitsText(), QStringLiteral("GND - 122 m AGL (400 ft)"));
+
+    verticalUnits->setRawValue(UnitsSettings::VerticalDistanceUnitsFeet);
+    QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 394 ft AGL (120 m)\n394 ft AGL (120 m) - Unlimited"));
     QCOMPARE(circle.verticalLimitsText(), QStringLiteral("GND - 400 ft AGL"));
 
     const GeoZone scheduled(ed269.zones[2]);
@@ -355,50 +491,218 @@ void GeoZoneTest::_testManagerLoadPersistClear()
     const QTemporaryDir storageDir;
     const QTemporaryDir sourceDir;
     QVERIFY(storageDir.isValid() && sourceDir.isValid());
-    const QString sourceFile = sourceDir.filePath(QStringLiteral("zones.json"));
-    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), sourceFile));
+    const QString ed318File = sourceDir.filePath(QStringLiteral("zones.json"));
+    const QString ed269File = sourceDir.filePath(QStringLiteral("other.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), ed318File));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed269_test.json"), ed269File));
+    const auto storedFiles = [&storageDir]() {
+        return QDir(storageDir.path()).entryList({ QStringLiteral("*.json") }, QDir::Files);
+    };
 
     {
         GeoZoneManager manager(storageDir.path());
+        manager.loadStoredSources(false);
         QCOMPARE(manager.zones()->count(), 0);
+        QCOMPARE(manager.sources()->count(), 0);
 
         QString errorString;
-        QVERIFY2(manager.loadFile(sourceFile, errorString), qPrintable(errorString));
+        QVERIFY2(manager.loadFile(ed318File, errorString), qPrintable(errorString));
         QCOMPARE(manager.zones()->count(), 3);
         QCOMPARE(manager.shapes().count(), 5);
         QCOMPARE(std::count_if(manager.shapes().cbegin(), manager.shapes().cend(), [](const GeoZoneShape *shape) { return shape->isCircle(); }), 1);
-        QCOMPARE(manager.formatName(), QStringLiteral("ED-318"));
-        QCOMPARE(manager.sourceName(), QStringLiteral("Test GeoZones"));
-        QCOMPARE(manager.skippedCount(), 1);
         QVERIFY(manager.boundingBox().isValid());
-        QVERIFY(QFile::exists(manager.storedFilePath()));
+
+        QCOMPARE(manager.sources()->count(), 1);
+        const GeoZoneSource *const ed318Source = manager.sources()->value<GeoZoneSource*>(0);
+        QCOMPARE(ed318Source->key(), QStringLiteral("zones.json"));
+        QVERIFY(!ed318Source->isFeed());
+        QCOMPARE(ed318Source->name(), QStringLiteral("Test GeoZones"));
+        QCOMPARE(ed318Source->formatName(), QStringLiteral("ED-318"));
+        QCOMPARE(ed318Source->provider(), QStringLiteral("Test Authority"));
+        QCOMPARE(ed318Source->skippedCount(), 1);
+        QCOMPARE(ed318Source->dataDate(), _utc(QDate(2026, 8, 13), QTime(0, 0)));
+        QVERIFY(ed318Source->detailsText().contains(QStringLiteral("issued 2026-08-13")));
+        QVERIFY(QFile::exists(QDir(storageDir.path()).filePath(ed318Source->storedFileName())));
 
         // A failed load keeps the current zones
         QVERIFY(!manager.loadFile(sourceDir.filePath(QStringLiteral("missing.json")), errorString));
         QVERIFY(!errorString.isEmpty());
         QCOMPARE(manager.zones()->count(), 3);
+        QCOMPARE(manager.sources()->count(), 1);
 
         QCOMPARE(manager.zonesInArea({ GeoZone::Prohibited }, QGeoRectangle()).count(), 1);
         const QGeoRectangle ireland(QGeoCoordinate(52.0, -9.0), QGeoCoordinate(51.0, -8.0));
         const QList<GeoZone*> zonesInArea = manager.zonesInArea({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::USpace }, ireland);
         QCOMPARE(zonesInArea.count(), 1);
         QCOMPARE(zonesInArea[0]->name(), QStringLiteral("Control zone"));
+
+        // Another file adds its zones, loading a file with the same name again replaces its zones
+        QVERIFY2(manager.loadFile(ed269File, errorString), qPrintable(errorString));
+        QCOMPARE(manager.sources()->count(), 2);
+        QCOMPARE(manager.zones()->count(), 6);
+        const QString previousStoredFile = ed318Source->storedFileName();
+        QVERIFY2(manager.loadFile(ed318File, errorString), qPrintable(errorString));
+        QCOMPARE(manager.sources()->count(), 2);
+        QCOMPARE(manager.zones()->count(), 6);
+        QVERIFY(ed318Source->storedFileName() != previousStoredFile);
+        QCOMPARE(storedFiles().count(), 3);
     }
 
+    // Unreferenced files are removed on startup
+    QFile strayFile(QDir(storageDir.path()).filePath(QStringLiteral("stray.json")));
+    QVERIFY(strayFile.open(QIODevice::WriteOnly));
+    strayFile.close();
+
     {
-        // Stored copy is reloaded on startup
+        // Stored copies are reloaded in order on startup
         GeoZoneManager manager(storageDir.path());
+        manager.loadStoredSources(false);
+        QCOMPARE(manager.sources()->count(), 2);
+        QCOMPARE(manager.zones()->count(), 6);
+        QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("zones.json"));
+        QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-318"));
+        QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->key(), QStringLiteral("other.json"));
+        QVERIFY(!strayFile.exists());
+
+        manager.removeSource(0);
+        QCOMPARE(manager.sources()->count(), 1);
         QCOMPARE(manager.zones()->count(), 3);
-        QCOMPARE(manager.sourceName(), QStringLiteral("Test GeoZones"));
+        QCOMPARE(storedFiles().count(), 2);
 
         manager.clear();
         QCOMPARE(manager.zones()->count(), 0);
         QVERIFY(manager.shapes().isEmpty());
-        QVERIFY(!QFile::exists(manager.storedFilePath()));
+        QVERIFY(storedFiles().isEmpty());
     }
 
     GeoZoneManager manager(storageDir.path());
-    QCOMPARE(manager.zones()->count(), 0);
+    manager.loadStoredSources(false);
+    QCOMPARE(manager.sources()->count(), 0);
+
+    // The single file kept by earlier versions is migrated
+    const QTemporaryDir legacyDir;
+    QVERIFY(legacyDir.isValid());
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), legacyDir.filePath(QStringLiteral("geozones.json"))));
+    QSettings settings;
+    settings.setValue(QStringLiteral("GeoZoneManager/sourceName"), QStringLiteral("Legacy zones"));
+    {
+        GeoZoneManager legacyManager(legacyDir.path());
+        legacyManager.loadStoredSources(false);
+        QCOMPARE(legacyManager.sources()->count(), 1);
+        QCOMPARE(legacyManager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("Legacy zones"));
+        QCOMPARE(legacyManager.zones()->count(), 3);
+        QVERIFY(!settings.contains(QStringLiteral("GeoZoneManager/sourceName")));
+    }
+    GeoZoneManager migratedManager(legacyDir.path());
+    migratedManager.loadStoredSources(false);
+    QCOMPARE(migratedManager.zones()->count(), 3);
+}
+
+void GeoZoneTest::_testManagerBackgroundLoad()
+{
+    const QTemporaryDir storageDir;
+    const QTemporaryDir sourceDir;
+    QVERIFY(storageDir.isValid() && sourceDir.isValid());
+    const QString ed318File = sourceDir.filePath(QStringLiteral("zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), ed318File));
+    QVERIFY(QDir(sourceDir.path()).mkdir(QStringLiteral("newer")));
+    const QString ed269File = sourceDir.filePath(QStringLiteral("newer/zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed269_test.json"), ed269File));
+
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.addFile(ed318File);
+    QVERIFY(manager.busy());
+    QVERIFY(addedSpy.wait(10000));
+    QVERIFY(!manager.busy());
+    QCOMPARE(manager.zones()->count(), 3);
+
+    // Only the most recent load of a file name is applied
+    addedSpy.clear();
+    manager.addFile(ed318File);
+    manager.addFile(ed269File);
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(addedSpy.count(), 1);
+    QCOMPARE(manager.sources()->count(), 1);
+    QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-269"));
+
+    // Removing all sources drops loads in progress
+    manager.addFile(ed318File);
+    manager.clear();
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.sources()->count(), 0);
+
+    // Feeds keep their URL as key and can be refreshed
+    const QString feedUrl = QUrl::fromLocalFile(ed318File).toString();
+    addedSpy.clear();
+    manager.addUrl(feedUrl);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    GeoZoneSource *const feed = manager.source(feedUrl);
+    QVERIFY(feed);
+    QVERIFY(feed->isFeed());
+    QCOMPARE(feed->url(), feedUrl);
+    QCOMPARE(manager.zones()->count(), 3);
+    // The user's file is read in place, never removed
+    QVERIFY(QFile::exists(ed318File));
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QVERIFY(!feed->refreshDue(now, GeoZoneManager::refreshIntervalHours));
+    QVERIFY(feed->refreshDue(now.addSecs(25 * 3600), GeoZoneManager::refreshIntervalHours));
+
+    // A failed refresh keeps the previous data
+    QVERIFY(QFile::remove(ed318File));
+    manager.refreshFeeds();
+    QVERIFY(feed->busy());
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(!feed->busy());
+    QVERIFY(!feed->errorString().isEmpty());
+    QCOMPARE(manager.zones()->count(), 3);
+
+    // Stored sources load in the background in their original order
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(true);
+    QCOMPARE(restarted.sources()->count(), 1);
+    QVERIFY(restarted.busy());
+    QTRY_VERIFY(!restarted.busy());
+    QCOMPARE(restarted.zones()->count(), 3);
+    QVERIFY(restarted.source(feedUrl)->isFeed());
+}
+
+void GeoZoneTest::_testSourceValidity()
+{
+    GeoZoneSource source(QStringLiteral("zones.json"), QString());
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::ED269;
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+
+    // Without an issue date the file date counts
+    source.setResult(result, now, now.addDays(-10));
+    QVERIFY(source.validityText().isEmpty());
+    source.setResult(result, now, now.addDays(-30));
+    QCOMPARE(source.validityText(), QStringLiteral("Data is 30 days old"));
+
+    result.issued = now.addDays(-1);
+    source.setResult(result, now, now.addDays(-30));
+    QVERIFY(source.validityText().isEmpty());
+
+    result.validTo = now.addDays(-2);
+    source.setResult(result, now, now);
+    QVERIFY(source.validityText().startsWith(QStringLiteral("Expired on")));
+
+    result.validTo = QDateTime();
+    result.validFrom = now.addDays(2);
+    source.setResult(result, now, now);
+    QVERIFY(source.validityText().startsWith(QStringLiteral("Not valid until")));
+    source.updateValidity(now.addDays(3));
+    QVERIFY(source.validityText().isEmpty());
+
+    // The manager summarizes outdated sources
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.path());
+    QString errorString;
+    QVERIFY2(manager.loadFile(QStringLiteral(":/unittest/ed318_test.json"), errorString), qPrintable(errorString));
+    QVERIFY(manager.validityWarning().startsWith(QStringLiteral("Test GeoZones: Data is")));
 }
 
 void GeoZoneTest::_testGeoFenceImport()
@@ -439,6 +743,201 @@ void GeoZoneTest::_testGeoFenceImport()
     QCOMPARE(geoFenceController->addGeoZoneExclusions(zones), 0);
     QCOMPARE(geoFenceController->polygons()->count(), 3);
     QCOMPARE(geoFenceController->circles()->count(), 1);
+}
+
+void GeoZoneTest::_testGeoFenceImportPreview()
+{
+    // Two circular zones published as 40 vertex polygons
+    QObject zoneParent;
+    QList<GeoZone*> zones;
+    for (int i = 0; i < 2; i++) {
+        GeoZone::Volume volume;
+        volume.rings.append(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40));
+        GeoZone::Data data;
+        data.identifier = QStringLiteral("Z%1").arg(i);
+        data.restriction = GeoZone::Prohibited;
+        data.volumes.append(volume);
+        zones.append(new GeoZone(data, &zoneParent));
+    }
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    QVERIFY(masterController.managerVehicle()->px4Firmware());
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+
+    // Exceeds the PX4 fence storage
+    QVariantMap preview = geoFenceController->geoZoneExclusionsPreview(zones);
+    QCOMPARE(preview[QStringLiteral("fenceCount")].toInt(), 2);
+    QCOMPARE(preview[QStringLiteral("pointCount")].toInt(), 80);
+    QCOMPARE(preview[QStringLiteral("totalPointCount")].toInt(), 80);
+    QVERIFY(!preview[QStringLiteral("limitWarning")].toString().isEmpty());
+
+    // Simplified polygons fit
+    preview = geoFenceController->geoZoneExclusionsPreview(zones, 25);
+    const int simplifiedPointCount = preview[QStringLiteral("pointCount")].toInt();
+    QCOMPARE(preview[QStringLiteral("fenceCount")].toInt(), 2);
+    QVERIFY(simplifiedPointCount < GeoFenceController::px4MaxFencePoints);
+    QVERIFY(preview[QStringLiteral("limitWarning")].toString().isEmpty());
+
+    QCOMPARE(geoFenceController->addGeoZoneExclusions(zones, 25), 2);
+    QCOMPARE(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->count() + geoFenceController->polygons()->value<QGCFencePolygon*>(1)->count(), simplifiedPointCount);
+
+    // Existing fences count towards the total but are not added again
+    preview = geoFenceController->geoZoneExclusionsPreview(zones, 25);
+    QCOMPARE(preview[QStringLiteral("fenceCount")].toInt(), 0);
+    QCOMPARE(preview[QStringLiteral("totalPointCount")].toInt(), simplifiedPointCount);
+    preview = geoFenceController->geoZoneExclusionsPreview(zones);
+    QCOMPARE(preview[QStringLiteral("totalPointCount")].toInt(), simplifiedPointCount + 80);
+}
+
+void GeoZoneTest::_testContainsAndPaths()
+{
+    GeoZone::Volume polygonVolume;
+    // 1 km square with a 200 m hole in the middle
+    const QGeoCoordinate center(47, 8);
+    polygonVolume.rings.append({ center.atDistanceAndAzimuth(707.1, 45), center.atDistanceAndAzimuth(707.1, 135),
+                                 center.atDistanceAndAzimuth(707.1, 225), center.atDistanceAndAzimuth(707.1, 315) });
+    polygonVolume.rings.append({ center.atDistanceAndAzimuth(141.4, 45), center.atDistanceAndAzimuth(141.4, 135),
+                                 center.atDistanceAndAzimuth(141.4, 225), center.atDistanceAndAzimuth(141.4, 315) });
+    GeoZone::Data polygonData;
+    polygonData.volumes.append(polygonVolume);
+    const GeoZone polygon(polygonData);
+
+    QVERIFY(polygon.contains(center.atDistanceAndAzimuth(300, 0)));
+    QVERIFY(!polygon.contains(center));
+    QVERIFY(!polygon.contains(center.atDistanceAndAzimuth(600, 0)));
+    QCOMPARE(polygon.distanceTo(center.atDistanceAndAzimuth(300, 0)), 0.0);
+    QVERIFY(qAbs(polygon.distanceTo(center.atDistanceAndAzimuth(600, 0)) - 100) < 1);
+    QVERIFY(qAbs(polygon.distanceTo(center) - 100) < 1);
+
+    // Paths through the zone, inside the hole only, and passing by
+    QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }));
+    QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(300, 0) }));
+    QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(50, 270), center.atDistanceAndAzimuth(50, 90) }));
+    QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 90) }));
+
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = center;
+    circleVolume.radius = 500;
+    GeoZone::Data circleData;
+    circleData.volumes.append(circleVolume);
+    const GeoZone circle(circleData);
+    QVERIFY(qAbs(circle.distanceTo(center.atDistanceAndAzimuth(600, 30)) - 100) < 1);
+    QVERIFY(circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(400, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(400, 0) }));
+    QVERIFY(!circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(600, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(600, 0) }));
+
+    // Connected segments form one path, long legs get points along the great circle
+    const QGeoCoordinate a(47, 8);
+    const QGeoCoordinate b = a.atDistanceAndAzimuth(500, 0);
+    const QGeoCoordinate c = b.atDistanceAndAzimuth(500, 90);
+    const QGeoCoordinate d = a.atDistanceAndAzimuth(5000, 180);
+    const QList<QList<QGeoCoordinate>> paths = GeoZoneMissionCheck::pathsFromSegments({ { a, b }, { b, c }, { QGeoCoordinate(), d }, { d, a } });
+    QCOMPARE(paths.count(), 2);
+    QCOMPARE(paths[0], QList<QGeoCoordinate>({ a, b, c }));
+    QCOMPARE(paths[1].count(), 6);
+    QCOMPARE(paths[1].first(), d);
+    QCOMPARE(paths[1].last(), a);
+    QVERIFY(qAbs(paths[1][1].distanceTo(d) - 1000) < 1);
+}
+
+void GeoZoneTest::_testMissionCheck()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(2000, 0), 300),
+        _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(2000, 180), 300),
+    });
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+
+    GeoZoneMissionCheck check(nullptr, &manager);
+    check.setMissionController(missionController);
+
+    // Passes the no restriction zone only
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 180).atDistanceAndAzimuth(1000, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 180).atDistanceAndAzimuth(1000, 90), 2);
+    QTest::qWait(1000);
+    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.warningText().isEmpty());
+
+    // Through the prohibited zone and then the conditional one, listed most restrictive first
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 3);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 4);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 0), 5);
+    QTRY_COMPARE(check.crossedZones().count(), 2);
+    QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[0])->identifier(), QStringLiteral("P"));
+    QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[1])->identifier(), QStringLiteral("C"));
+    QVERIFY(check.warningText().contains(QStringLiteral("P (Prohibited)")));
+
+    // Zones are released before the manager deletes them
+    manager.clear();
+    QVERIFY(check.crossedZones().isEmpty());
+}
+
+void GeoZoneTest::_testMonitorAlerts()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QJsonObject expired = _circleFeature(QStringLiteral("E"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(3000, 90), 300);
+    expired[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2020-01-01T00:00:00Z" }, { "endDateTime", "2020-01-02T00:00:00Z" } } };
+    const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(3000, 270), 300),
+        expired,
+    });
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+
+    // Far away, then approaching, then inside, each alerting once
+    monitor.evaluate(center.atDistanceAndAzimuth(1000, 0));
+    QCOMPARE(alertSpy.count(), 0);
+    monitor.evaluate(center.atDistanceAndAzimuth(380, 0));
+    QCOMPARE(alertSpy.count(), 1);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));
+    monitor.evaluate(center.atDistanceAndAzimuth(350, 0));
+    QCOMPARE(alertSpy.count(), 1);
+    monitor.evaluate(center.atDistanceAndAzimuth(250, 0));
+    QCOMPARE(alertSpy.count(), 2);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone P")));
+
+    // Jitter across the boundary and the approach distance does not alert again
+    monitor.evaluate(center.atDistanceAndAzimuth(310, 0));
+    monitor.evaluate(center.atDistanceAndAzimuth(290, 0));
+    monitor.evaluate(center.atDistanceAndAzimuth(410, 0));
+    monitor.evaluate(center.atDistanceAndAzimuth(390, 0));
+    QCOMPARE(alertSpy.count(), 2);
+
+    // Leaving the area resets the zone
+    monitor.evaluate(center.atDistanceAndAzimuth(1000, 0));
+    monitor.evaluate(center.atDistanceAndAzimuth(250, 0));
+    QCOMPARE(alertSpy.count(), 3);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone P")));
+
+    // Unrestricted and inactive zones don't alert
+    monitor.evaluate(center.atDistanceAndAzimuth(3000, 270));
+    monitor.evaluate(center.atDistanceAndAzimuth(3000, 90));
+    QCOMPARE(alertSpy.count(), 3);
+
+    // Zones are forgotten before the manager deletes them
+    manager.clear();
+    monitor.evaluate(center);
+    QCOMPARE(alertSpy.count(), 3);
 }
 
 void GeoZoneTest::_testLabelZonesLimit()
@@ -559,9 +1058,12 @@ void GeoZoneTest::_testMapModel()
     QCOMPARE(model.labelZones()->count(), 2);
     QVERIFY(QGeoPolygon(polygonItem->geoShape()).perimeter().count() > lowDetailCount);
 
-    // Reloading zones replaces the items
+    // Another file adds items, removing a source removes its items
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("other.json"),
         { _circleFeature(QStringLiteral("OTHER"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 1000) }), errorString), qPrintable(errorString));
+    QCOMPARE(model.polygons()->count(), 1);
+    QVERIFY(identifiers(model.circles()).contains(QStringLiteral("OTHER")));
+    manager.removeSource(0);
     QCOMPARE(model.polygons()->count(), 0);
     QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
 

@@ -8,14 +8,20 @@
  ****************************************************************************/
 
 #include "GeoZone.h"
+#include "FactMetaData.h"
+#include "GeoZoneGeometry.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QTimeZone>
 
 #include <algorithm>
+#include <limits>
+#include <optional>
 
 namespace {
 
 constexpr double kUnlimitedSentinel = 99999.0; // Published as upper limit when a zone has no ceiling
+constexpr double kMetersPerFoot = 0.3048;
 
 QString _formatDateTime(const QDateTime &dateTime)
 {
@@ -75,6 +81,37 @@ bool _dailyPeriodContains(const GeoZone::DailyPeriod &period, const QDateTime &u
     }
     // The period wraps past midnight, so the early morning part belongs to the previous day
     return (dayMatches(date) && (time >= period.startTime)) || (dayMatches(date.addDays(-1)) && (time <= period.endTime));
+}
+
+bool _dailyPeriodOverlaps(const GeoZone::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc)
+{
+    const bool eventBased = !period.startTime.isValid() || !period.endTime.isValid();
+    const QDate firstDate = startUtc.addSecs(period.utcOffsetSecs).date().addDays(-1);
+    // The schedule repeats weekly, so a week past the first date covers every window of longer intervals
+    const QDate lastDate = std::min(endUtc.addSecs(period.utcOffsetSecs).date(), firstDate.addDays(8));
+    for (QDate date = firstDate; date <= lastDate; date = date.addDays(1)) {
+        if (!period.days.isEmpty() && !period.days.contains(date.dayOfWeek())) {
+            continue;
+        }
+
+        QDateTime windowStart;
+        QDateTime windowEnd;
+        if (eventBased) {
+            // Treated as applicable all day like in _dailyPeriodContains
+            windowStart = QDateTime(date, QTime(0, 0), QTimeZone::UTC);
+            windowEnd = QDateTime(date, QTime(23, 59, 59, 999), QTimeZone::UTC);
+        } else {
+            windowStart = QDateTime(date, period.startTime, QTimeZone::UTC);
+            windowEnd = QDateTime((period.startTime <= period.endTime) ? date : date.addDays(1), period.endTime, QTimeZone::UTC);
+        }
+        windowStart = windowStart.addSecs(-period.utcOffsetSecs);
+        windowEnd = windowEnd.addSecs(-period.utcOffsetSecs);
+
+        if ((windowStart <= endUtc) && (windowEnd >= startUtc)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool _isClockwise(const QList<QGeoCoordinate> &ring)
@@ -155,8 +192,61 @@ bool GeoZone::isActiveAt(const QDateTime &dateTime) const
     return false;
 }
 
-QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons() const
+bool GeoZone::isActiveDuring(const QDateTime &start, const QDateTime &end) const
 {
+    if (_data.applicability.isEmpty()) {
+        return true;
+    }
+
+    const QDateTime startUtc = start.toUTC();
+    const QDateTime endUtc = end.toUTC();
+    if (endUtc < startUtc) {
+        return false;
+    }
+
+    for (const TimePeriod &period : _data.applicability) {
+        if (period.permanent) {
+            return true;
+        }
+
+        // Limit the interval to the period's validity
+        const QDateTime overlapStart = (period.start.isValid() && (period.start > startUtc)) ? period.start.toUTC() : startUtc;
+        const QDateTime overlapEnd = (period.end.isValid() && (period.end < endUtc)) ? period.end.toUTC() : endUtc;
+        if (overlapEnd < overlapStart) {
+            continue;
+        }
+        if (period.schedule.isEmpty()) {
+            return true;
+        }
+        for (const DailyPeriod &dailyPeriod : period.schedule) {
+            if (_dailyPeriodOverlaps(dailyPeriod, overlapStart, overlapEnd)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance) const
+{
+    if (simplifyTolerance > 0) {
+        const auto cached = _simplifiedPolygons.constFind(simplifyTolerance);
+        if (cached != _simplifiedPolygons.constEnd()) {
+            return cached.value();
+        }
+
+        QList<QList<QGeoCoordinate>> simplified;
+        for (const QList<QGeoCoordinate> &polygon : exclusionPolygons()) {
+            const QList<QGeoCoordinate> ring = GeoZoneGeometry::simplifyOutward(polygon, simplifyTolerance);
+            if (!simplified.contains(ring)) {
+                simplified.append(ring);
+            }
+        }
+        _simplifiedPolygons.insert(simplifyTolerance, simplified);
+        return simplified;
+    }
+
     QList<QList<QGeoCoordinate>> polygons;
     for (const Volume &volume : _data.volumes) {
         if (volume.isCircle || volume.rings.isEmpty() || (volume.rings.first().count() < 3)) {
@@ -188,6 +278,125 @@ QList<QGeoCircle> GeoZone::exclusionCircles() const
         }
     }
     return circles;
+}
+
+bool GeoZone::contains(const QGeoCoordinate &coordinate) const
+{
+    if (!coordinate.isValid() || !_boundingBox.contains(coordinate)) {
+        return false;
+    }
+
+    const GeoZoneGeometry::LocalProjection projection(coordinate);
+    const QPointF point(0, 0);
+    for (const Volume &volume : _data.volumes) {
+        if (volume.isCircle) {
+            if (volume.center.isValid() && (volume.center.distanceTo(coordinate) <= volume.radius)) {
+                return true;
+            }
+            continue;
+        }
+        if (volume.rings.isEmpty() || !GeoZoneGeometry::ringContains(projection.toLocal(volume.rings.first()), point)) {
+            continue;
+        }
+        const bool inHole = std::any_of(volume.rings.cbegin() + 1, volume.rings.cend(), [&projection, &point](const QList<QGeoCoordinate> &hole) {
+            return GeoZoneGeometry::ringContains(projection.toLocal(hole), point);
+        });
+        if (!inHole) {
+            return true;
+        }
+    }
+    return false;
+}
+
+double GeoZone::distanceTo(const QGeoCoordinate &coordinate) const
+{
+    if (contains(coordinate)) {
+        return 0;
+    }
+
+    const GeoZoneGeometry::LocalProjection projection(coordinate);
+    double minDistance = std::numeric_limits<double>::max();
+    for (const Volume &volume : _data.volumes) {
+        if (volume.isCircle) {
+            if (volume.center.isValid()) {
+                minDistance = std::min(minDistance, std::max(0.0, volume.center.distanceTo(coordinate) - volume.radius));
+            }
+            continue;
+        }
+        for (const QList<QGeoCoordinate> &ring : volume.rings) {
+            minDistance = std::min(minDistance, GeoZoneGeometry::distanceToRing(QPointF(0, 0), projection.toLocal(ring)));
+        }
+    }
+    return minDistance;
+}
+
+bool GeoZone::intersectsPath(const QList<QGeoCoordinate> &path) const
+{
+    if (path.isEmpty() || !_boundingBox.isValid()) {
+        return false;
+    }
+
+    // QGeoRectangle can't represent a single point or a meridian segment, so compare the ranges directly
+    const double north = _boundingBox.topLeft().latitude();
+    const double south = _boundingBox.bottomLeft().latitude();
+    const double west = _boundingBox.topLeft().longitude();
+    const double east = _boundingBox.bottomRight().longitude();
+    const auto overlapsBoundingBox = [north, south, west, east](const QGeoCoordinate &a, const QGeoCoordinate &b) {
+        return (std::max(a.latitude(), b.latitude()) >= south) && (std::min(a.latitude(), b.latitude()) <= north) &&
+               (std::max(a.longitude(), b.longitude()) >= west) && (std::min(a.longitude(), b.longitude()) <= east);
+    };
+
+    if (path.count() == 1) {
+        return contains(path.first());
+    }
+
+    // Projected lazily since most segments are far from the zone
+    QList<std::pair<const Volume*, QList<QList<QPointF>>>> projectedRings;
+    std::optional<GeoZoneGeometry::LocalProjection> projection;
+    for (qsizetype i = 1; i < path.count(); i++) {
+        const QGeoCoordinate &from = path[i - 1];
+        const QGeoCoordinate &to = path[i];
+        if (!overlapsBoundingBox(from, to)) {
+            continue;
+        }
+        if (contains(from) || contains(to)) {
+            return true;
+        }
+
+        if (!projection) {
+            projection.emplace(path.first());
+            for (const Volume &volume : _data.volumes) {
+                QList<QList<QPointF>> rings;
+                if (!volume.isCircle) {
+                    for (const QList<QGeoCoordinate> &ring : volume.rings) {
+                        rings.append(projection->toLocal(ring));
+                    }
+                }
+                projectedRings.append({ &volume, rings });
+            }
+        }
+
+        const QPointF a = projection->toLocal(from);
+        const QPointF b = projection->toLocal(to);
+        for (const auto &[volume, rings] : std::as_const(projectedRings)) {
+            if (volume->isCircle) {
+                if (volume->center.isValid()) {
+                    const GeoZoneGeometry::LocalProjection centerProjection(volume->center);
+                    if (GeoZoneGeometry::distanceToSegment(QPointF(0, 0), centerProjection.toLocal(from), centerProjection.toLocal(to)) <= volume->radius) {
+                        return true;
+                    }
+                }
+                continue;
+            }
+            // Neither end is inside, so the segment enters the volume only by crossing a ring edge
+            for (const QList<QPointF> &ring : rings) {
+                if (GeoZoneGeometry::segmentIntersectsRing(a, b, ring)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 QString GeoZone::reasonText() const
@@ -273,7 +482,17 @@ QString GeoZone::_limitToString(double limit, const QString &reference, bool fee
     if ((limit == 0) && (reference.compare(QStringLiteral("AGL"), Qt::CaseInsensitive) == 0)) {
         return tr("GND");
     }
-    return QStringLiteral("%1 %2 %3").arg(limit).arg(feet ? QStringLiteral("ft") : QStringLiteral("m"), reference);
+
+    const QString publishedUnits = feet ? QStringLiteral("ft") : QStringLiteral("m");
+    const QString userUnits = FactMetaData::appSettingsVerticalDistanceUnitsString();
+    if (userUnits == publishedUnits) {
+        return QStringLiteral("%1 %2 %3").arg(limit).arg(publishedUnits, reference);
+    }
+
+    // Show the published value too since the converted value is rounded
+    const double meters = feet ? (limit * kMetersPerFoot) : limit;
+    const double converted = FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble();
+    return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, reference).arg(limit).arg(publishedUnits);
 }
 
 GeoZone::Restriction GeoZone::restrictionFromString(const QString &restriction)
@@ -314,5 +533,24 @@ QString GeoZone::restrictionToString(Restriction restriction)
     case Unknown:
     default:
         return tr("Unknown");
+    }
+}
+
+int GeoZone::restrictionSeverity(Restriction restriction)
+{
+    switch (restriction) {
+    case Prohibited:
+        return 0;
+    case ReqAuthorisation:
+        return 1;
+    case Conditional:
+        return 2;
+    case USpace:
+        return 3;
+    case NoRestriction:
+        return 4;
+    case Unknown:
+    default:
+        return 5;
     }
 }

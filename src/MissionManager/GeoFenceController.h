@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QLoggingCategory>
+#include <QtPositioning/QGeoCircle>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
@@ -68,12 +69,25 @@ public:
     /// whole outer boundary is excluded. Fences identical to existing ones are not added again.
     ///     @param restrictions: GeoZone::Restriction values of the zones to import
     ///     @param area: Only zones intersecting this area are imported. Invalid to import zones anywhere.
+    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours. Negative to ignore zone schedules.
+    ///     @param simplifyTolerance: Meters. When positive, polygons are reduced to fewer vertices which still enclose the zone.
     /// @return Number of fence polygons and circles added
-    Q_INVOKABLE int importGeoZones(const QVariantList& restrictions, const QGeoRectangle& area);
+    Q_INVOKABLE int importGeoZones(const QVariantList& restrictions, const QGeoRectangle& area, int activeWithinHours = -1, double simplifyTolerance = 0);
+
+    /// Summarizes the fences importGeoZones would add with the same arguments
+    /// @return Map with fenceCount, pointCount (polygon vertices plus one per circle), totalPointCount (including the
+    ///         existing fence) and limitWarning (empty unless the vehicle likely can't store the resulting fence)
+    Q_INVOKABLE QVariantMap geoZoneImportPreview(const QVariantList& restrictions, const QGeoRectangle& area, int activeWithinHours = -1, double simplifyTolerance = 0) const;
+
+    /// Summarizes the fences addGeoZoneExclusions would add, see geoZoneImportPreview
+    QVariantMap geoZoneExclusionsPreview(const QList<GeoZone*>& zones, double simplifyTolerance = 0) const;
 
     /// Adds exclusion fences for the specified geozones, skipping fences identical to existing ones
     /// @return Number of fence polygons and circles added
-    int addGeoZoneExclusions(const QList<GeoZone*>& zones);
+    int addGeoZoneExclusions(const QList<GeoZone*>& zones, double simplifyTolerance = 0);
+
+    static constexpr int px4MaxFencePoints = 64;                ///< PX4 dataman fence storage (DM_KEY_FENCE_POINTS_MAX)
+    static constexpr int arduPilotMaxPolygonVertices = 255;     ///< ArduPilot stores the polygon vertex count in 8 bits
 
 #ifdef QGC_UTM_ADAPTER
     Q_INVOKABLE void loadFlightPlanData(void);
@@ -129,6 +143,14 @@ private slots:
 
 private:
     void _init(void);
+
+    /// Fences for the zones which don't already exist in the fence
+    struct GeoZoneFences {
+        QList<QList<QGeoCoordinate>> polygons;
+        QList<QGeoCircle> circles;
+    };
+    GeoZoneFences _newGeoZoneFences(const QList<GeoZone*>& zones, double simplifyTolerance) const;
+    static QList<GeoZone*> _geoZonesToImport(const QVariantList& restrictions, const QGeoRectangle& area, int activeWithinHours);
 
     Vehicle*            _managerVehicle =               nullptr;
     GeoFenceManager*    _geoFenceManager =              nullptr;

@@ -60,15 +60,31 @@ _QGroundControl_ can load UAS geographical zone (geozone) files published by avi
 The zones are shown on the map in both the Plan and Fly views, colored by restriction: prohibited (red), authorisation required (orange), conditional (yellow), no restriction (green) and U-space airspace (blue).
 Zones that are not active at the current time are drawn with a fainter fill.
 
-To load geozones:
+To add geozones:
 
 1. Navigate to the Plan View and select the _Geofence_ radio button.
 1. Expand the **Geozones (ED-269 / ED-318)** section of the GeoFence panel.
-1. Press **Load Geozone File...** and select the `.json` or `.geojson` file.
+1. Press **Add File...** and select a `.json` or `.geojson` file, or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**.
 
-The most recently loaded file is kept by _QGroundControl_ and reloaded automatically on startup.
-Use **Show geozones on map** to hide or show the zones, and **Remove Geozones** to remove them.
-When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits, applicability schedule, reason, message and responsible authority).
+Several files and feeds can be loaded at the same time. Loading a file with the same name, or a feed with the same URL, replaces its zones.
+Files are loaded in the background and the map is moved to the new zones if they are not in view.
+_QGroundControl_ keeps a copy of each source and reloads them automatically on startup. Feeds are downloaded again when they are older than 24 hours, and **Refresh Feeds** downloads them immediately. If a download fails, the previous data is kept and the error is shown below the source.
+
+Each source shows its format, zone count and date. A warning is shown if the data has expired (ED-318 `validTo`), is not valid yet, or is more than 28 days old (based on the ED-318 issue date, or the file or download date). Outdated sources are also reported once when _QGroundControl_ starts.
+
+Use **Show geozones on map** to hide or show the zones, **Remove** to remove a source and **Remove All** to remove all of them.
+When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits in your units, applicability schedule, reason, message and responsible authority).
+
+### Mission and Flight Checks
+
+When the planned mission path enters a prohibited, authorisation required or conditional zone, a warning listing the zones is shown at the top of the Plan View map.
+The check is horizontal only and ignores zone schedules, since the mission may be flown at another time.
+
+While flying, _QGroundControl_ warns once (with a message and audio) when the active vehicle comes within 100 m of an active prohibited, authorisation required or conditional zone, and again when it enters the zone. Altitude limits are not considered.
+
+::: warning
+These checks are advisory. Always check the official sources and obtain any required authorisation before flying.
+:::
 
 ### Add Geozones to the GeoFence
 
@@ -76,11 +92,15 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 
 1. Check the zone types to add (**Prohibited**, **Authorisation required**, **Conditional**).
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
-1. Press **Add Exclusion Fences**. Fences that already exist are not added again.
+1. Select when the zones must be **Active**: **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
+1. Select a **Simplify** tolerance to reduce the number of fence points. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
+1. Check the number of fences and points that will be added, then press **Add Exclusion Fences**. Fences that already exist are not added again.
+
+If the resulting fence likely exceeds what the vehicle can store (64 fence points in total on PX4, 255 vertices per polygon on ArduPilot), you are asked to confirm before the fences are added.
 
 ::: warning
 GeoFences have no altitude limits, so a zone's vertical limits are not transferred and the whole zone is excluded at all altitudes.
-Holes in zone polygons are also dropped. Vehicles can store only a limited number of fence points, so only add the zones you need.
+Holes in zone polygons are also dropped. ArduPilot fence storage depends on the flight controller and can be much smaller than the polygon limit, so only add the zones you need.
 :::
 
 ## Remaining tools

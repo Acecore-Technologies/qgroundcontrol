@@ -24,6 +24,7 @@ QGCFlickable {
     readonly property real  _radius:            ScreenTools.defaultFontPixelWidth / 2
     readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
     readonly property bool  _geoZonesLoaded:    _geoZoneManager.zones.count > 0
+    readonly property real  _maxFenceListHeight: ScreenTools.defaultFontPixelHeight * 16
 
     Rectangle {
         id:     geoFenceEditorRect
@@ -148,7 +149,9 @@ QGCFlickable {
                         id:             polygonSection
                         anchors.left:   parent.left
                         anchors.right:  parent.right
-                        text:           qsTr("Polygon Fences")
+                        text:           myGeoFenceController.polygons.count > 0 ?
+                                            qsTr("Polygon Fences (%1)").arg(myGeoFenceController.polygons.count) :
+                                            qsTr("Polygon Fences")
                     }
 
                     QGCLabel {
@@ -156,74 +159,103 @@ QGCFlickable {
                         visible:    polygonSection.checked && myGeoFenceController.polygons.count === 0
                     }
 
-                    GridLayout {
-                        Layout.fillWidth:   true
-                        columns:            3
-                        flow:               GridLayout.TopToBottom
-                        visible:            polygonSection.checked && myGeoFenceController.polygons.count > 0
+                    // Long lists scroll on their own so the sections below stay within reach
+                    QGCFlickable {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        height:         Math.min(polygonGrid.implicitHeight, _maxFenceListHeight)
+                        contentWidth:   width
+                        contentHeight:  polygonGrid.implicitHeight
+                        visible:        polygonSection.checked && myGeoFenceController.polygons.count > 0
 
-                        QGCLabel {
-                            text:               qsTr("Inclusion")
-                            Layout.column:      0
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
+                        GridLayout {
+                            id:                 polygonGrid
+                            width:              parent.width
+                            columns:            3
+                            flow:               GridLayout.TopToBottom
 
-                        Repeater {
-                            model: myGeoFenceController.polygons
-
-                            QGCCheckBox {
-                                checked:            object.inclusion
-                                onClicked:          object.inclusion = checked
+                            QGCLabel {
+                                text:               qsTr("Inclusion")
+                                Layout.column:      0
                                 Layout.alignment:   Qt.AlignHCenter
                             }
-                        }
 
-                        QGCLabel {
-                            text:               qsTr("Edit")
-                            Layout.column:      1
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
+                            Repeater {
+                                model: myGeoFenceController.polygons
 
-                        Repeater {
-                            model: myGeoFenceController.polygons
-
-                            QGCRadioButton {
-                                checked:            _interactive
-                                Layout.alignment:   Qt.AlignHCenter
-
-                                property bool _interactive: object.interactive
-
-                                on_InteractiveChanged: checked = _interactive
-
-                                onClicked: {
-                                    myGeoFenceController.clearAllInteractive()
-                                    object.interactive = checked
+                                QGCCheckBox {
+                                    checked:            object.inclusion
+                                    onClicked:          object.inclusion = checked
+                                    Layout.alignment:   Qt.AlignHCenter
                                 }
                             }
-                        }
 
-                        QGCLabel {
-                            text:               qsTr("Delete")
-                            Layout.column:      2
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
-
-                        Repeater {
-                            model: myGeoFenceController.polygons
-
-                            QGCButton {
-                                text:               qsTr("Del")
+                            QGCLabel {
+                                text:               qsTr("Edit")
+                                Layout.column:      1
                                 Layout.alignment:   Qt.AlignHCenter
-                                onClicked:          myGeoFenceController.deletePolygon(index)
                             }
+
+                            Repeater {
+                                model: myGeoFenceController.polygons
+
+                                QGCRadioButton {
+                                    checked:            _interactive
+                                    Layout.alignment:   Qt.AlignHCenter
+
+                                    property bool _interactive: object.interactive
+
+                                    on_InteractiveChanged: checked = _interactive
+
+                                    onClicked: {
+                                        myGeoFenceController.clearAllInteractive()
+                                        object.interactive = checked
+                                    }
+                                }
+                            }
+
+                            QGCLabel {
+                                text:               qsTr("Delete")
+                                Layout.column:      2
+                                Layout.alignment:   Qt.AlignHCenter
+                            }
+
+                            Repeater {
+                                model: myGeoFenceController.polygons
+
+                                QGCButton {
+                                    text:               qsTr("Del")
+                                    Layout.alignment:   Qt.AlignHCenter
+                                    onClicked:          myGeoFenceController.deletePolygon(index)
+                                }
+                            }
+                        } // GridLayout
+                    }
+
+                    QGCButton {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        text:           qsTr("Delete All Polygon Fences")
+                        visible:        polygonSection.checked && myGeoFenceController.polygons.count > 1
+                        onClicked: {
+                            mainWindow.showMessageDialog(text,
+                                                         qsTr("Delete all %1 polygon fences?").arg(myGeoFenceController.polygons.count),
+                                                         Dialog.Ok | Dialog.Cancel,
+                                                         function() {
+                                                             for (var i = myGeoFenceController.polygons.count - 1; i >= 0; i--) {
+                                                                 myGeoFenceController.deletePolygon(i)
+                                                             }
+                                                         })
                         }
-                    } // GridLayout
+                    }
 
                     SectionHeader {
                         id:             circleSection
                         anchors.left:   parent.left
                         anchors.right:  parent.right
-                        text:           qsTr("Circular Fences")
+                        text:           myGeoFenceController.circles.count > 0 ?
+                                            qsTr("Circular Fences (%1)").arg(myGeoFenceController.circles.count) :
+                                            qsTr("Circular Fences")
                     }
 
                     QGCLabel {
@@ -231,85 +263,110 @@ QGCFlickable {
                         visible:    circleSection.checked && myGeoFenceController.circles.count === 0
                     }
 
-                    GridLayout {
-                        anchors.left:       parent.left
-                        anchors.right:      parent.right
-                        columns:            4
-                        flow:               GridLayout.TopToBottom
-                        visible:            polygonSection.checked && myGeoFenceController.circles.count > 0
+                    QGCFlickable {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        height:         Math.min(circleGrid.implicitHeight, _maxFenceListHeight)
+                        contentWidth:   width
+                        contentHeight:  circleGrid.implicitHeight
+                        visible:        circleSection.checked && myGeoFenceController.circles.count > 0
 
-                        QGCLabel {
-                            text:               qsTr("Inclusion")
-                            Layout.column:      0
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
+                        GridLayout {
+                            id:                 circleGrid
+                            width:              parent.width
+                            columns:            4
+                            flow:               GridLayout.TopToBottom
 
-                        Repeater {
-                            model: myGeoFenceController.circles
-
-                            QGCCheckBox {
-                                checked:            object.inclusion
-                                onClicked:          object.inclusion = checked
+                            QGCLabel {
+                                text:               qsTr("Inclusion")
+                                Layout.column:      0
                                 Layout.alignment:   Qt.AlignHCenter
                             }
-                        }
 
-                        QGCLabel {
-                            text:               qsTr("Edit")
-                            Layout.column:      1
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
+                            Repeater {
+                                model: myGeoFenceController.circles
 
-                        Repeater {
-                            model: myGeoFenceController.circles
-
-                            QGCRadioButton {
-                                checked:            _interactive
-                                Layout.alignment:   Qt.AlignHCenter
-
-                                property bool _interactive: object.interactive
-
-                                on_InteractiveChanged: checked = _interactive
-
-                                onClicked: {
-                                    myGeoFenceController.clearAllInteractive()
-                                    object.interactive = checked
+                                QGCCheckBox {
+                                    checked:            object.inclusion
+                                    onClicked:          object.inclusion = checked
+                                    Layout.alignment:   Qt.AlignHCenter
                                 }
                             }
-                        }
 
-                        QGCLabel {
-                            text:               qsTr("Radius")
-                            Layout.column:      2
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
-
-                        Repeater {
-                            model: myGeoFenceController.circles
-
-                            FactTextField {
-                                fact:               object.radius
-                                Layout.fillWidth:   true
+                            QGCLabel {
+                                text:               qsTr("Edit")
+                                Layout.column:      1
                                 Layout.alignment:   Qt.AlignHCenter
                             }
-                        }
 
-                        QGCLabel {
-                            text:               qsTr("Delete")
-                            Layout.column:      3
-                            Layout.alignment:   Qt.AlignHCenter
-                        }
+                            Repeater {
+                                model: myGeoFenceController.circles
 
-                        Repeater {
-                            model: myGeoFenceController.circles
+                                QGCRadioButton {
+                                    checked:            _interactive
+                                    Layout.alignment:   Qt.AlignHCenter
 
-                            QGCButton {
-                                text:               qsTr("Del")
-                                Layout.alignment:   Qt.AlignHCenter
-                                onClicked:          myGeoFenceController.deleteCircle(index)
+                                    property bool _interactive: object.interactive
+
+                                    on_InteractiveChanged: checked = _interactive
+
+                                    onClicked: {
+                                        myGeoFenceController.clearAllInteractive()
+                                        object.interactive = checked
+                                    }
+                                }
                             }
+
+                            QGCLabel {
+                                text:               qsTr("Radius")
+                                Layout.column:      2
+                                Layout.alignment:   Qt.AlignHCenter
+                            }
+
+                            Repeater {
+                                model: myGeoFenceController.circles
+
+                                FactTextField {
+                                    fact:               object.radius
+                                    Layout.fillWidth:   true
+                                    Layout.alignment:   Qt.AlignHCenter
+                                }
+                            }
+
+                            QGCLabel {
+                                text:               qsTr("Delete")
+                                Layout.column:      3
+                                Layout.alignment:   Qt.AlignHCenter
+                            }
+
+                            Repeater {
+                                model: myGeoFenceController.circles
+
+                                QGCButton {
+                                    text:               qsTr("Del")
+                                    Layout.alignment:   Qt.AlignHCenter
+                                    onClicked:          myGeoFenceController.deleteCircle(index)
+                                }
+                            }
+                        } // GridLayout
+                    }
+
+                    QGCButton {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        text:           qsTr("Delete All Circular Fences")
+                        visible:        circleSection.checked && myGeoFenceController.circles.count > 1
+                        onClicked: {
+                            mainWindow.showMessageDialog(text,
+                                                         qsTr("Delete all %1 circular fences?").arg(myGeoFenceController.circles.count),
+                                                         Dialog.Ok | Dialog.Cancel,
+                                                         function() {
+                                                             for (var i = myGeoFenceController.circles.count - 1; i >= 0; i--) {
+                                                                 myGeoFenceController.deleteCircle(i)
+                                                             }
+                                                         })
                         }
-                    } // GridLayout
+                    }
 
                     SectionHeader {
                         id:             breachReturnSection
@@ -371,18 +428,70 @@ QGCFlickable {
                         anchors.right:  parent.right
                         wrapMode:       Text.WordWrap
                         font.pointSize: ScreenTools.smallFontPointSize
-                        text:           _geoZonesLoaded ?
-                                            qsTr("%1 zones loaded from %2 file: %3").arg(_geoZoneManager.zones.count).arg(_geoZoneManager.formatName).arg(_geoZoneManager.sourceName) :
-                                            qsTr("Load an EUROCAE ED-269 or ED-318 file to show UAS geographical zones on the map.")
+                        text:           qsTr("Add EUROCAE ED-269 or ED-318 files or national feeds to show UAS geographical zones on the map.")
+                        visible:        _geoZoneManager.sources.count === 0
                     }
 
-                    QGCLabel {
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        wrapMode:       Text.WordWrap
-                        font.pointSize: ScreenTools.smallFontPointSize
-                        text:           qsTr("%1 features without a supported geometry were skipped.").arg(_geoZoneManager.skippedCount)
-                        visible:        _geoZonesLoaded && _geoZoneManager.skippedCount > 0
+                    Repeater {
+                        model: _geoZoneManager.sources
+
+                        Column {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            spacing:        _margin / 2
+
+                            RowLayout {
+                                anchors.left:   parent.left
+                                anchors.right:  parent.right
+                                spacing:        _margin
+
+                                QGCLabel {
+                                    Layout.fillWidth:   true
+                                    elide:              Text.ElideRight
+                                    text:               object.name
+                                }
+
+                                BusyIndicator {
+                                    Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight
+                                    Layout.preferredHeight: ScreenTools.defaultFontPixelHeight
+                                    running:                object.busy
+                                    visible:                object.busy
+                                }
+
+                                QGCButton {
+                                    text:       qsTr("Remove")
+                                    onClicked:  _geoZoneManager.removeSource(index)
+                                }
+                            }
+
+                            QGCLabel {
+                                anchors.left:   parent.left
+                                anchors.right:  parent.right
+                                wrapMode:       Text.WordWrap
+                                font.pointSize: ScreenTools.smallFontPointSize
+                                text:           object.detailsText !== "" ? object.detailsText : qsTr("Loading...")
+                            }
+
+                            QGCLabel {
+                                anchors.left:   parent.left
+                                anchors.right:  parent.right
+                                wrapMode:       Text.WordWrap
+                                font.pointSize: ScreenTools.smallFontPointSize
+                                color:          qgcPal.warningText
+                                text:           object.validityText
+                                visible:        text !== ""
+                            }
+
+                            QGCLabel {
+                                anchors.left:   parent.left
+                                anchors.right:  parent.right
+                                wrapMode:       Text.WordWrap
+                                font.pointSize: ScreenTools.smallFontPointSize
+                                color:          qgcPal.warningText
+                                text:           qsTr("Last update failed: %1").arg(object.errorString)
+                                visible:        object.errorString !== ""
+                            }
+                        }
                     }
 
                     QGCLabel {
@@ -394,19 +503,144 @@ QGCFlickable {
                         visible:        _geoZonesLoaded && _geoZoneManager.visible && geoZonesHiddenCount > 0
                     }
 
-                    QGCButton {
+                    Column {
                         anchors.left:   parent.left
                         anchors.right:  parent.right
-                        text:           qsTr("Load Geozone File...")
-                        onClicked:      geoZoneFileDialog.openForLoad()
+                        spacing:        _margin / 2
+                        visible:        _geoZoneManager.busy
+
+                        QGCLabel {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            wrapMode:       Text.WordWrap
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            text:           _geoZoneManager.progressText
+                        }
+
+                        Rectangle {
+                            id:             geoZoneProgressBar
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            height:         ScreenTools.defaultFontPixelHeight / 2
+                            radius:         height / 2
+                            color:          qgcPal.button
+
+                            readonly property bool _indeterminate: _geoZoneManager.progress < 0
+
+                            Rectangle {
+                                x:          parent._indeterminate ? _indeterminateX : 0
+                                width:      parent._indeterminate ? parent.width / 4 : parent.width * _geoZoneManager.progress
+                                height:     parent.height
+                                radius:     parent.radius
+                                color:      qgcPal.buttonHighlight
+
+                                property real _indeterminateX: 0
+
+                                // Parsing and unknown download sizes have no measurable progress
+                                SequentialAnimation on _indeterminateX {
+                                    running:    geoZoneProgressBar.visible && geoZoneProgressBar._indeterminate
+                                    loops:      Animation.Infinite
+                                    NumberAnimation { from: 0; to: geoZoneProgressBar.width * 0.75; duration: 800; easing.type: Easing.InOutQuad }
+                                    NumberAnimation { from: geoZoneProgressBar.width * 0.75; to: 0; duration: 800; easing.type: Easing.InOutQuad }
+                                }
+                            }
+                        }
                     }
 
-                    QGCButton {
+                    RowLayout {
                         anchors.left:   parent.left
                         anchors.right:  parent.right
-                        text:           qsTr("Remove Geozones")
+                        spacing:        _margin
+
+                        QGCButton {
+                            Layout.fillWidth:   true
+                            text:               qsTr("Add File...")
+                            onClicked:          geoZoneFileDialog.openForLoad()
+                        }
+
+                        QGCButton {
+                            Layout.fillWidth:   true
+                            text:               qsTr("Add Feed...")
+                            checkable:          true
+                            checked:            feedEntry.visible
+                            onClicked:          feedEntry.visible = !feedEntry.visible
+                        }
+                    }
+
+                    Column {
+                        id:             feedEntry
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        spacing:        _margin
+                        visible:        false
+
+                        QGCLabel {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            wrapMode:       Text.WordWrap
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            text:           qsTr("Feeds are downloaded again every %1 hours.").arg(24)
+                        }
+
+                        QGCComboBox {
+                            id:             feedPresetCombo
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            model:          _geoZoneManager.feedPresets.map(preset => preset.name).concat([ qsTr("Other URL") ])
+
+                            readonly property bool customUrl: currentIndex === _geoZoneManager.feedPresets.length
+                        }
+
+                        QGCTextField {
+                            id:                 feedUrlField
+                            anchors.left:       parent.left
+                            anchors.right:      parent.right
+                            placeholderText:    "https://"
+                            visible:            feedPresetCombo.customUrl
+                        }
+
+                        QGCButton {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            text:           qsTr("Download")
+                            enabled:        !feedPresetCombo.customUrl || feedUrlField.text.trim() !== ""
+                            onClicked: {
+                                root._fitMapOnSourceAdded = true
+                                _geoZoneManager.addUrl(feedPresetCombo.customUrl ? feedUrlField.text : _geoZoneManager.feedPresets[feedPresetCombo.currentIndex].url)
+                                feedEntry.visible = false
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        anchors.left:   parent.left
+                        anchors.right:  parent.right
+                        spacing:        _margin
                         visible:        _geoZonesLoaded
-                        onClicked:      _geoZoneManager.clear()
+
+                        QGCButton {
+                            Layout.fillWidth:   true
+                            text:               qsTr("Refresh Feeds")
+                            visible:            _hasFeeds
+                            enabled:            !_geoZoneManager.busy
+                            onClicked:          _geoZoneManager.refreshFeeds()
+
+                            property bool _hasFeeds: {
+                                for (var i = 0; i < _geoZoneManager.sources.count; i++) {
+                                    if (_geoZoneManager.sources.get(i).url !== "") {
+                                        return true
+                                    }
+                                }
+                                return false
+                            }
+                        }
+
+                        QGCButton {
+                            Layout.fillWidth:   true
+                            text:               qsTr("Remove All")
+                            visible:            _geoZoneManager.sources.count > 1
+                            onClicked:          _geoZoneManager.clear()
+                        }
                     }
 
                     QGCCheckBox {
@@ -434,24 +668,84 @@ QGCFlickable {
                             id:         importProhibitedCheck
                             text:       qsTr("Prohibited")
                             checked:    true
+                            onCheckedChanged: importPreviewTimer.restart()
                         }
 
                         QGCCheckBox {
                             id:         importReqAuthorisationCheck
                             text:       qsTr("Authorisation required")
                             checked:    true
+                            onCheckedChanged: importPreviewTimer.restart()
                         }
 
                         QGCCheckBox {
                             id:         importConditionalCheck
                             text:       qsTr("Conditional")
                             checked:    false
+                            onCheckedChanged: importPreviewTimer.restart()
                         }
 
                         QGCCheckBox {
                             id:         importMapViewOnlyCheck
                             text:       qsTr("Only zones in current map view")
                             checked:    true
+                            onCheckedChanged: importPreviewTimer.restart()
+                        }
+
+                        GridLayout {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            columns:        2
+                            columnSpacing:  _margin
+                            rowSpacing:     _margin
+
+                            QGCLabel { text: qsTr("Active") }
+                            QGCComboBox {
+                                id:                 importActiveCombo
+                                Layout.fillWidth:   true
+                                model:              [ qsTr("Any time"), qsTr("Now"), qsTr("Next 3 hours"), qsTr("Next 24 hours") ]
+                                onActivated:        importPreviewTimer.restart()
+
+                                readonly property var hours: [ -1, 0, 3, 24 ]
+                            }
+
+                            QGCLabel { text: qsTr("Simplify") }
+                            QGCComboBox {
+                                id:                 importSimplifyCombo
+                                Layout.fillWidth:   true
+                                currentIndex:       2
+                                model:              tolerances.map(meters => meters === 0 ? qsTr("Off") : root._horizontalDistanceText(meters))
+                                onActivated:        importPreviewTimer.restart()
+
+                                readonly property var tolerances: [ 0, 10, 25, 50, 100 ]
+                            }
+                        }
+
+                        QGCLabel {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            wrapMode:       Text.WordWrap
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            text:           qsTr("Simplified fences have fewer points and enclose the zone, extending up to twice the tolerance beyond it.")
+                            visible:        importSimplifyCombo.currentIndex > 0
+                        }
+
+                        QGCLabel {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            wrapMode:       Text.WordWrap
+                            text:           _importPreview.fenceCount > 0 ?
+                                                qsTr("Adds %1 fences with %2 points (%3 fence points in total).").arg(_importPreview.fenceCount).arg(_importPreview.pointCount).arg(_importPreview.totalPointCount) :
+                                                qsTr("No new matching zones.")
+                        }
+
+                        QGCLabel {
+                            anchors.left:   parent.left
+                            anchors.right:  parent.right
+                            wrapMode:       Text.WordWrap
+                            color:          qgcPal.warningText
+                            text:           _importPreview.limitWarning
+                            visible:        text !== ""
                         }
 
                         QGCButton {
@@ -467,7 +761,45 @@ QGCFlickable {
         }
     } // Rectangle
 
-    function _importGeoZones() {
+    property var _importPreview: ({ fenceCount: 0, pointCount: 0, totalPointCount: 0, limitWarning: "" })
+    readonly property bool _importVisible: geoZoneSection.checked && _geoZonesLoaded && myGeoFenceController.supported
+
+    on_ImportVisibleChanged: importPreviewTimer.restart()
+
+    // Previews are computed after changes settle since simplifying many zones takes a moment
+    Timer {
+        id:             importPreviewTimer
+        interval:       300
+        onTriggered:    root._updateImportPreview()
+    }
+
+    Connections {
+        target:                 flightMap
+        enabled:                importMapViewOnlyCheck.checked
+        function onVisibleRegionChanged() { importPreviewTimer.restart() }
+    }
+
+    Connections {
+        target:                 _geoZoneManager
+        function onZonesChanged() { importPreviewTimer.restart() }
+    }
+
+    Connections {
+        target:                 myGeoFenceController.polygons
+        function onCountChanged() { importPreviewTimer.restart() }
+    }
+
+    Connections {
+        target:                 myGeoFenceController.circles
+        function onCountChanged() { importPreviewTimer.restart() }
+    }
+
+    function _horizontalDistanceText(meters) {
+        var distance = QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)
+        return Math.round(distance) + " " + QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
+    }
+
+    function _importRestrictions() {
         var restrictions = []
         if (importProhibitedCheck.checked) {
             restrictions.push(GeoZone.Prohibited)
@@ -478,12 +810,42 @@ QGCFlickable {
         if (importConditionalCheck.checked) {
             restrictions.push(GeoZone.Conditional)
         }
-        var area = importMapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
-        var fenceCount = myGeoFenceController.importGeoZones(restrictions, area)
-        mainWindow.showMessageDialog(qsTr("Geozones"),
-                                     fenceCount > 0 ?
-                                         qsTr("%1 exclusion fences added.").arg(fenceCount) :
-                                         qsTr("No new matching zones found."))
+        return restrictions
+    }
+
+    function _importArea() {
+        return importMapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
+    }
+
+    function _updateImportPreview() {
+        if (!_importVisible) {
+            return
+        }
+        _importPreview = myGeoFenceController.geoZoneImportPreview(_importRestrictions(), _importArea(),
+                                                                   importActiveCombo.hours[importActiveCombo.currentIndex],
+                                                                   importSimplifyCombo.tolerances[importSimplifyCombo.currentIndex])
+    }
+
+    function _importGeoZones() {
+        var restrictions = _importRestrictions()
+        var area = _importArea()
+        var activeWithinHours = importActiveCombo.hours[importActiveCombo.currentIndex]
+        var tolerance = importSimplifyCombo.tolerances[importSimplifyCombo.currentIndex]
+        var doImport = function() {
+            var fenceCount = myGeoFenceController.importGeoZones(restrictions, area, activeWithinHours, tolerance)
+            mainWindow.showMessageDialog(qsTr("Geozones"),
+                                         fenceCount > 0 ?
+                                             qsTr("%1 exclusion fences added.").arg(fenceCount) :
+                                             qsTr("No new matching zones found."))
+        }
+
+        var preview = myGeoFenceController.geoZoneImportPreview(restrictions, area, activeWithinHours, tolerance)
+        if (preview.limitWarning !== "") {
+            mainWindow.showMessageDialog(qsTr("Geozones"), preview.limitWarning + "\n\n" + qsTr("Add the fences anyway?"),
+                                         Dialog.Ok | Dialog.Cancel, doImport)
+        } else {
+            doImport()
+        }
     }
 
     QGCFileDialog {
@@ -493,13 +855,26 @@ QGCFlickable {
         nameFilters:    _geoZoneManager.fileDialogFilters
 
         onAcceptedForLoad: (file) => {
-            if (_geoZoneManager.loadFile(file)) {
-                var mapRegion = flightMap.visibleRegion.boundingGeoRectangle()
-                if (!mapRegion.intersects(_geoZoneManager.boundingBox)) {
-                    flightMap.fitViewportToGeoShape(_geoZoneManager.boundingBox, ScreenTools.defaultFontPixelHeight)
-                }
-            }
+            root._fitMapOnSourceAdded = true
+            _geoZoneManager.addFile(file)
             close()
+        }
+    }
+
+    property bool _fitMapOnSourceAdded: false
+
+    // Shows zones added by the user when they are outside the map view
+    Connections {
+        target: _geoZoneManager
+        function onSourceAdded(source) {
+            if (!root._fitMapOnSourceAdded) {
+                return
+            }
+            root._fitMapOnSourceAdded = false
+            var mapRegion = flightMap.visibleRegion.boundingGeoRectangle()
+            if (source.boundingBox.isValid && !mapRegion.intersects(source.boundingBox)) {
+                flightMap.fitViewportToGeoShape(source.boundingBox, ScreenTools.defaultFontPixelHeight)
+            }
         }
     }
 }

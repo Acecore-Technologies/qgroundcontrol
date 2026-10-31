@@ -20,10 +20,18 @@ private slots:
     void _testParseED318();
     void _testParseErrors();
     void _testIsActiveAt();
+    void _testIsActiveDuring();
+    void _testOutwardSimplification();
     void _testDisplayText();
     void _testExclusionShapes();
     void _testManagerLoadPersistClear();
+    void _testManagerBackgroundLoad();
+    void _testSourceValidity();
     void _testGeoFenceImport();
+    void _testGeoFenceImportPreview();
+    void _testContainsAndPaths();
+    void _testMissionCheck();
+    void _testMonitorAlerts();
     void _testLabelZonesLimit();
     void _testShapeSimplification();
     void _testMapModel();

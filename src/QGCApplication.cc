@@ -41,6 +41,8 @@
 #include "ESP8266ComponentController.h"
 #include "FollowMe.h"
 #include "GeoTagController.h"
+#include "GeoZoneManager.h"
+#include "GeoZoneMonitor.h"
 #include "GimbalController.h"
 #include "GPSRtk.h"
 #include "JoystickConfigController.h"
@@ -355,6 +357,8 @@ void QGCApplication::_initForNormalAppBoot()
 
     AudioOutput::instance()->init(SettingsManager::instance()->appSettings()->audioMuted());
     FollowMe::instance()->init();
+    GeoZoneManager::instance()->init();
+    (void) GeoZoneMonitor::instance();
     QGCPositionManager::instance()->init();
     LinkManager::instance()->init();
     VideoManager::instance()->init(mainRootWindow());

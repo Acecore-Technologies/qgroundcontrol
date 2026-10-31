@@ -2,8 +2,10 @@
   "type": "FeatureCollection",
   "name": "Test GeoZones",
   "metadata": {
+    "provider": [ { "text": "Test Authority", "lang": "en-GB" } ],
     "issued": "2026-08-13T00:00:00Z",
-    "validFrom": "2026-08-13T00:00:00Z"
+    "validFrom": "2026-08-13T00:00:00Z",
+    "validTo": "2099-01-01T00:00:00Z"
   },
   "features": [
     {

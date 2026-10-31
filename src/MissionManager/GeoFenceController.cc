@@ -489,22 +489,76 @@ void GeoFenceController::clearAllInteractive(void)
     }
 }
 
-int GeoFenceController::importGeoZones(const QVariantList& restrictions, const QGeoRectangle& area)
+QList<GeoZone*> GeoFenceController::_geoZonesToImport(const QVariantList& restrictions, const QGeoRectangle& area, int activeWithinHours)
 {
     QList<GeoZone::Restriction> restrictionList;
     for (const QVariant& restriction : restrictions) {
         restrictionList.append(static_cast<GeoZone::Restriction>(restriction.toInt()));
     }
 
-    const QList<GeoZone*> zones = GeoZoneManager::instance()->zonesInArea(restrictionList, area);
-    const int added = addGeoZoneExclusions(zones);
+    QDateTime activeFrom;
+    QDateTime activeTo;
+    if (activeWithinHours >= 0) {
+        activeFrom = QDateTime::currentDateTimeUtc();
+        if (activeWithinHours > 0) {
+            activeTo = activeFrom.addSecs(activeWithinHours * 3600);
+        }
+    }
+
+    return GeoZoneManager::instance()->zonesInArea(restrictionList, area, activeFrom, activeTo);
+}
+
+int GeoFenceController::importGeoZones(const QVariantList& restrictions, const QGeoRectangle& area, int activeWithinHours, double simplifyTolerance)
+{
+    const QList<GeoZone*> zones = _geoZonesToImport(restrictions, area, activeWithinHours);
+    const int added = addGeoZoneExclusions(zones, simplifyTolerance);
 
     qCDebug(GeoFenceControllerLog) << "importGeoZones zones:fences" << zones.count() << added;
 
     return added;
 }
 
-int GeoFenceController::addGeoZoneExclusions(const QList<GeoZone*>& zones)
+QVariantMap GeoFenceController::geoZoneImportPreview(const QVariantList& restrictions, const QGeoRectangle& area, int activeWithinHours, double simplifyTolerance) const
+{
+    return geoZoneExclusionsPreview(_geoZonesToImport(restrictions, area, activeWithinHours), simplifyTolerance);
+}
+
+QVariantMap GeoFenceController::geoZoneExclusionsPreview(const QList<GeoZone*>& zones, double simplifyTolerance) const
+{
+    const GeoZoneFences fences = _newGeoZoneFences(zones, simplifyTolerance);
+
+    int pointCount = fences.circles.count();
+    qsizetype maxPolygonVertexCount = 0;
+    for (const QList<QGeoCoordinate>& polygon : fences.polygons) {
+        pointCount += polygon.count();
+        maxPolygonVertexCount = qMax(maxPolygonVertexCount, polygon.count());
+    }
+
+    int totalPointCount = pointCount + _circles.count() + (_breachReturnPoint.isValid() ? 1 : 0);
+    for (int i=0; i<_polygons.count(); i++) {
+        totalPointCount += _polygons.value<QGCFencePolygon*>(i)->count();
+    }
+
+    QString limitWarning;
+    if (pointCount > 0) {
+        if (_managerVehicle->px4Firmware() && (totalPointCount > px4MaxFencePoints)) {
+            limitWarning = tr("The fence will have %1 points. PX4 vehicles can store at most %2 fence points, so the upload will likely be rejected. Import fewer zones or increase the simplification.")
+                               .arg(totalPointCount).arg(px4MaxFencePoints);
+        } else if (_managerVehicle->apmFirmware() && (maxPolygonVertexCount > arduPilotMaxPolygonVertices)) {
+            limitWarning = tr("A fence polygon will have %1 vertices. ArduPilot vehicles support at most %2 vertices per polygon and the total fence storage of many boards is much smaller. Increase the simplification.")
+                               .arg(maxPolygonVertexCount).arg(arduPilotMaxPolygonVertices);
+        }
+    }
+
+    return QVariantMap{
+        { QStringLiteral("fenceCount"),         fences.polygons.count() + fences.circles.count() },
+        { QStringLiteral("pointCount"),         pointCount },
+        { QStringLiteral("totalPointCount"),    totalPointCount },
+        { QStringLiteral("limitWarning"),       limitWarning },
+    };
+}
+
+GeoFenceController::GeoZoneFences GeoFenceController::_newGeoZoneFences(const QList<GeoZone*>& zones, double simplifyTolerance) const
 {
     QList<QList<QGeoCoordinate>> existingPolygons;
     for (int i=0; i<_polygons.count(); i++) {
@@ -516,30 +570,36 @@ int GeoFenceController::addGeoZoneExclusions(const QList<GeoZone*>& zones)
         existingCircles.append(QGeoCircle(circle->center(), circle->radius()->rawValue().toDouble()));
     }
 
-    int added = 0;
+    GeoZoneFences fences;
     for (const GeoZone* zone : zones) {
-        for (const QList<QGeoCoordinate>& vertices : zone->exclusionPolygons()) {
-            if (existingPolygons.contains(vertices)) {
-                continue;
+        for (const QList<QGeoCoordinate>& vertices : zone->exclusionPolygons(simplifyTolerance)) {
+            if (!existingPolygons.contains(vertices) && !fences.polygons.contains(vertices)) {
+                fences.polygons.append(vertices);
             }
-            existingPolygons.append(vertices);
-
-            QGCFencePolygon* polygon = new QGCFencePolygon(false /* inclusion */, this);
-            polygon->appendVertices(vertices);
-            _polygons.append(polygon);
-            added++;
         }
         for (const QGeoCircle& geoCircle : zone->exclusionCircles()) {
-            if (existingCircles.contains(geoCircle)) {
-                continue;
+            if (!existingCircles.contains(geoCircle) && !fences.circles.contains(geoCircle)) {
+                fences.circles.append(geoCircle);
             }
-            existingCircles.append(geoCircle);
-
-            _circles.append(new QGCFenceCircle(geoCircle.center(), geoCircle.radius(), false /* inclusion */, this));
-            added++;
         }
     }
+    return fences;
+}
 
+int GeoFenceController::addGeoZoneExclusions(const QList<GeoZone*>& zones, double simplifyTolerance)
+{
+    const GeoZoneFences fences = _newGeoZoneFences(zones, simplifyTolerance);
+
+    for (const QList<QGeoCoordinate>& vertices : fences.polygons) {
+        QGCFencePolygon* polygon = new QGCFencePolygon(false /* inclusion */, this);
+        polygon->appendVertices(vertices);
+        _polygons.append(polygon);
+    }
+    for (const QGeoCircle& geoCircle : fences.circles) {
+        _circles.append(new QGCFenceCircle(geoCircle.center(), geoCircle.radius(), false /* inclusion */, this));
+    }
+
+    const int added = fences.polygons.count() + fences.circles.count();
     if (added > 0) {
         clearAllInteractive();
     }

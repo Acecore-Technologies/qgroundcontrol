@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QDateTime>
+#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
@@ -120,15 +121,33 @@ public:
     ///         events (sunrise/sunset) cannot be evaluated and are treated as applicable.
     bool isActiveAt(const QDateTime &dateTime) const;
 
+    /// @return true if the zone applies at any time between start and end inclusive. Daylight
+    ///         event periods are treated as applicable all day.
+    bool isActiveDuring(const QDateTime &start, const QDateTime &end) const;
+
     /// Outer boundaries of all polygon volumes, clockwise and without duplicates. Holes are dropped
     /// so that excluding these polygons is always conservative.
-    QList<QList<QGeoCoordinate>> exclusionPolygons() const;
+    /// @param simplifyTolerance Meters. When positive, polygons are reduced to fewer vertices which still enclose
+    ///                          the zone, see GeoZoneGeometry::simplifyOutward.
+    QList<QList<QGeoCoordinate>> exclusionPolygons(double simplifyTolerance = 0) const;
 
     /// Circle volumes without duplicates
     QList<QGeoCircle> exclusionCircles() const;
 
+    /// @return true if the coordinate is inside the horizontal projection of a volume. Altitude is ignored.
+    bool contains(const QGeoCoordinate &coordinate) const;
+
+    /// @return Horizontal distance in meters from the coordinate to the closest volume, 0 when inside
+    double distanceTo(const QGeoCoordinate &coordinate) const;
+
+    /// @return true if the path enters the horizontal projection of a volume. Altitude is ignored.
+    bool intersectsPath(const QList<QGeoCoordinate> &path) const;
+
     static Restriction restrictionFromString(const QString &restriction);
     static QString restrictionToString(Restriction restriction);
+
+    /// @return 0 for the most restrictive zones, increasing for less restrictive ones
+    static int restrictionSeverity(Restriction restriction);
 
 signals:
     void activeChanged(bool active);
@@ -139,4 +158,5 @@ private:
     const Data _data;
     QGeoRectangle _boundingBox;
     bool _active = true;
+    mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance
 };

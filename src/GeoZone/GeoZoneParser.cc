@@ -485,6 +485,16 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         result.title = _text(root.value(QStringLiteral("title")));
     }
 
+    // ED-318 names the dataset metadata "metadata", some publishers use "datasetMetadata"
+    QJsonObject metadata = root.value(QStringLiteral("metadata")).toObject();
+    if (metadata.isEmpty()) {
+        metadata = root.value(QStringLiteral("datasetMetadata")).toObject();
+    }
+    result.provider = _text(metadata.value(QStringLiteral("provider")));
+    result.issued = _dateTime(metadata.value(QStringLiteral("issued")));
+    result.validFrom = _dateTime(metadata.value(QStringLiteral("validFrom")));
+    result.validTo = _dateTime(metadata.value(QStringLiteral("validTo")));
+
     for (const QJsonValue &featureValue : features) {
         const QJsonObject feature = featureValue.toObject();
 

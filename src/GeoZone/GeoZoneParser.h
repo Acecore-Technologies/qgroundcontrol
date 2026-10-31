@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
 #include <QtCore/QLoggingCategory>
 
 #include "GeoZone.h"
@@ -31,6 +32,10 @@ public:
     struct Result {
         Format format = Format::Unknown;
         QString title;
+        QString provider;       ///< ED-318 dataset metadata
+        QDateTime issued;
+        QDateTime validFrom;
+        QDateTime validTo;
         QList<GeoZone::Data> zones;
         int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry
     };

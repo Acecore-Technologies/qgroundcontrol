@@ -1,0 +1,120 @@
+/****************************************************************************
+ *
+ * (c) 2009-2024 QGROUNDCONTROL PROJECT <http://www.qgroundcontrol.org>
+ *
+ * QGroundControl is licensed according to the terms in the file
+ * COPYING.md in the root of the source code directory.
+ *
+ ****************************************************************************/
+
+#pragma once
+
+#include <QtCore/QDateTime>
+#include <QtCore/QList>
+#include <QtCore/QObject>
+#include <QtPositioning/QGeoRectangle>
+
+#include "GeoZoneParser.h"
+
+class GeoZone;
+class GeoZoneShape;
+
+/// Zones loaded from one geozone file or downloaded feed
+class GeoZoneSource : public QObject
+{
+    Q_OBJECT
+
+    Q_PROPERTY(QString      key             READ key            CONSTANT)                   ///< File name, or the URL of a feed
+    Q_PROPERTY(QString      url             READ url            CONSTANT)                   ///< Empty for files
+    Q_PROPERTY(QString      name            READ name           NOTIFY changed)
+    Q_PROPERTY(QString      formatName      READ formatName     NOTIFY changed)
+    Q_PROPERTY(QString      provider        READ provider       NOTIFY changed)
+    Q_PROPERTY(int          zoneCount       READ zoneCount      NOTIFY changed)
+    Q_PROPERTY(int          skippedCount    READ skippedCount   NOTIFY changed)
+    Q_PROPERTY(QDateTime    loadedAt        READ loadedAt       NOTIFY changed)             ///< When the file was loaded or the feed downloaded
+    Q_PROPERTY(QDateTime    dataDate        READ dataDate       NOTIFY changed)             ///< When the data was issued, or the file date
+    Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed)
+    Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged)     ///< Warning about outdated data, empty when current
+    Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged)
+    Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged)  ///< Why the last refresh failed
+    Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed)
+
+public:
+    static constexpr int staleDays = 28;
+
+    GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
+    ~GeoZoneSource();
+
+    QString key() const { return _key; }
+    /// @return true once zones were loaded
+    bool loaded() const { return _format != GeoZoneParser::Format::Unknown; }
+    QString url() const { return _url; }
+    bool isFeed() const { return !_url.isEmpty(); }
+    QString name() const;
+    QString formatName() const;
+    QString provider() const { return _provider; }
+    int zoneCount() const { return static_cast<int>(_zones.count()); }
+    int skippedCount() const { return _skippedCount; }
+    QDateTime loadedAt() const { return _loadedAt; }
+    QDateTime fileDate() const { return _fileDate; }
+    QDateTime dataDate() const { return _issued.isValid() ? _issued : _fileDate; }
+    QDateTime validFrom() const { return _validFrom; }
+    QDateTime validTo() const { return _validTo; }
+    QString detailsText() const;
+    QString validityText() const { return _validityText; }
+    bool busy() const { return _busy; }
+    QString errorString() const { return _errorString; }
+
+    const QList<GeoZone*> &zones() const { return _zones; }
+    /// Volumes sharing a footprint have one shape
+    const QList<GeoZoneShape*> &shapes() const { return _shapes; }
+    QGeoRectangle boundingBox() const { return _boundingBox; }
+
+    /// Name of the stored copy in the manager's storage directory
+    QString storedFileName() const { return _storedFileName; }
+    void setStoredFileName(const QString &storedFileName) { _storedFileName = storedFileName; }
+
+    /// Sets the dates of the stored copy before it is loaded
+    void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate);
+
+    /// Replaces the zones. The previous zones are deleted.
+    /// @param fileDate Date of the data when the file has no issue date: file modification or download time
+    void setResult(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate);
+    void setBusy(bool busy);
+    void setErrorString(const QString &errorString);
+
+    /// Re-evaluates expiry and staleness against the specified UTC time
+    void updateValidity(const QDateTime &now);
+
+    /// @return true if a feed should be downloaded again
+    bool refreshDue(const QDateTime &now, int refreshIntervalHours) const;
+
+signals:
+    void changed();
+    void validityChanged();
+    void busyChanged(bool busy);
+    void errorStringChanged();
+
+private:
+    void _clearZones();
+
+    const QString _key;
+    const QString _url;
+    QString _title;
+    GeoZoneParser::Format _format = GeoZoneParser::Format::Unknown;
+    QString _provider;
+    int _skippedCount = 0;
+    QDateTime _loadedAt;
+    QDateTime _fileDate;
+    QDateTime _issued;
+    QDateTime _validFrom;
+    QDateTime _validTo;
+    QString _validityText;
+    bool _busy = false;
+    QString _errorString;
+    QString _storedFileName;
+
+    QList<GeoZone*> _zones;
+    QList<GeoZoneShape*> _shapes;
+    QGeoRectangle _boundingBox;
+};
