@@ -334,9 +334,7 @@ FlightMap {
     }
 
     GeoZoneMapVisuals {
-        map:                _root
-        controlVisible:     !pipMode
-        controlPosition:    toolInsets ? Qt.point(toolInsets.leftEdgeTopInset + _toolsMargin, toolInsets.topEdgeCenterInset + _toolsMargin) : Qt.point(_toolsMargin, _toolsMargin)
+        map: _root
     }
 
     GeoFenceMapVisuals {

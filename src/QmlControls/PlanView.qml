@@ -514,7 +514,6 @@ Item {
                 map:                editorMap
                 highlightedZones:   geoZoneMissionBanner.crossedZones
                 fitToAddedSources:  true
-                controlPosition:    Qt.point(toolStrip.x + toolStrip.width + _toolsMargin, _toolsMargin)
             }
 
             GeoFenceMapVisuals {
@@ -570,7 +569,7 @@ Item {
             anchors.topMargin:  _toolsMargin
             missionController:  _missionController
             map:                editorMap
-            leftLimit:          Math.max(toolStrip.x + toolStrip.width, geoZoneMapVisuals.controlRight) + _toolsMargin
+            leftLimit:          toolStrip.x + toolStrip.width + _toolsMargin
             rightLimit:         rightPanel.x - _toolsMargin
         }
 
@@ -676,6 +675,12 @@ Item {
                         enabled:            true
                         visible:            true
                         dropPanelComponent: centerMapDropPanel
+                    },
+                    ToolStripAction {
+                        text:               qsTr("Geozones")
+                        iconSource:         "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
+                        visible:            QGroundControl.geoZoneManager.zones.count > 0
+                        dropPanelComponent: geoZoneDropPanel
                     }
                 ]
             }
@@ -948,6 +953,20 @@ Item {
         CenterMapDropPanel {
             map:            editorMap
             fitFunctions:   mapFitFunctions
+        }
+    }
+
+    Component {
+        id: geoZoneDropPanel
+
+        GeoZoneMapPanel {
+            hiddenZoneCount:    geoZoneMapVisuals.hiddenZoneCount
+            showCrossedZones:   geoZoneMissionBanner.crossedZones.length > 0
+
+            onManageRequested: {
+                dropPanel.hide()
+                mainWindow.showSettingsTool(qsTr("Geozones"))
+            }
         }
     }
 

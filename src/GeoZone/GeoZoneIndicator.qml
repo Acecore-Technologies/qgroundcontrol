@@ -12,35 +12,34 @@ import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
+import QGroundControl.FactControls
 import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
-/// Shows whether the active vehicle is in or near restricted geozones
+/// Shows whether the active vehicle is in or near restricted geozones, with the map legend and geozone options
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
     anchors.top:    parent.top
     anchors.bottom: parent.bottom
 
-    property bool showIndicator: _monitor.monitoring
+    property bool showIndicator: QGroundControl.geoZoneManager.zones.count > 0
 
-    readonly property var _monitor: QGroundControl.geoZoneMonitor
+    readonly property var _monitor:         QGroundControl.geoZoneMonitor
+    readonly property var _geoZoneSettings: QGroundControl.settingsManager.geoZoneSettings
+    readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
 
     function _restrictionColor(restriction) {
-        switch (restriction) {
-        case GeoZone.Prohibited:        return qgcPal.colorRed
-        case GeoZone.ReqAuthorisation:  return qgcPal.colorOrange
-        case GeoZone.Conditional:       return qgcPal.colorYellow
-        case GeoZone.USpace:            return qgcPal.colorBlue
-        default:                        return qgcPal.text
-        }
+        return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
     }
 
     function _distanceText(meters) {
         return Math.round(QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)) + " " +
                 QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
     }
+
+    QGCPalette { id: qgcPal }
 
     QGCColoredImage {
         id:                 geoZoneIcon
@@ -50,7 +49,8 @@ Item {
         source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
-        color:              control._restrictionColor(_monitor.alertRestriction)
+        color:              control._restrictionColor(_monitor.monitoring ? _monitor.alertRestriction : -1)
+        opacity:            _monitor.monitoring ? 1 : 0.5
     }
 
     MouseArea {
@@ -62,21 +62,24 @@ Item {
         id: geoZonePage
 
         ToolIndicatorPage {
+            showExpand: true
+
             contentComponent: Component {
                 ColumnLayout {
                     spacing: ScreenTools.defaultFontPixelHeight / 2
 
                     SettingsGroupLayout {
-                        heading:            qsTr("Geozones")
-                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1, considering altitude limits.").arg(control._distanceText(QGroundControl.settingsManager.geoZoneSettings.approachDistance.rawValue))
+                        heading:            qsTr("Nearby Geozones")
+                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1 of the active vehicle, considering altitude limits.").arg(control._distanceText(_geoZoneSettings.approachDistance.rawValue))
 
                         QGCLabel {
-                            text:       qsTr("No zones nearby")
-                            visible:    _monitor.nearbyZones.length === 0
+                            text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
+                                      (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
+                            visible: !_monitor.monitoring || _monitor.nearbyZones.length === 0
                         }
 
                         Repeater {
-                            model: _monitor.nearbyZones
+                            model: _monitor.monitoring ? _monitor.nearbyZones : []
 
                             RowLayout {
                                 spacing: ScreenTools.defaultFontPixelWidth
@@ -102,6 +105,81 @@ Item {
                                     text:           modelData.zone.restrictionText + "\n" + modelData.zone.verticalLimitsText
                                 }
                             }
+                        }
+                    }
+
+                    SettingsGroupLayout {
+                        heading: qsTr("Map")
+
+                        GeoZoneLegend { }
+
+                        GeoZoneSummary {
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+
+            expandedComponent: Component {
+                ColumnLayout {
+                    spacing: ScreenTools.defaultFontPixelHeight / 2
+
+                    SettingsGroupLayout {
+                        Layout.fillWidth: true
+
+                        FactCheckBoxSlider {
+                            Layout.fillWidth:   true
+                            text:               fact.shortDescription
+                            fact:               _geoZoneSettings.showZones
+                            visible:            fact.visible
+                        }
+
+                        FactCheckBoxSlider {
+                            Layout.fillWidth:   true
+                            text:               fact.shortDescription
+                            fact:               _geoZoneSettings.alertsEnabled
+                            visible:            fact.visible
+                        }
+
+                        FactCheckBoxSlider {
+                            Layout.fillWidth:   true
+                            text:               fact.shortDescription
+                            fact:               _geoZoneSettings.audioAlerts
+                            visible:            fact.visible
+                            enabled:            control._alertsEnabled
+                        }
+
+                        FactCheckBoxSlider {
+                            Layout.fillWidth:   true
+                            text:               fact.shortDescription
+                            fact:               _geoZoneSettings.logAlerts
+                            visible:            fact.visible
+                            enabled:            control._alertsEnabled
+                        }
+
+                        LabelledFactTextField {
+                            Layout.fillWidth:   true
+                            label:              fact.shortDescription
+                            fact:               _geoZoneSettings.approachDistance
+                            visible:            fact.visible
+                            enabled:            control._alertsEnabled
+                        }
+
+                        LabelledFactTextField {
+                            Layout.fillWidth:   true
+                            label:              fact.shortDescription
+                            fact:               _geoZoneSettings.approachVerticalDistance
+                            visible:            fact.visible
+                            enabled:            control._alertsEnabled
+                        }
+                    }
+
+                    QGCButton {
+                        Layout.fillWidth:   true
+                        text:               qsTr("Manage Geozones...")
+                        onClicked: {
+                            mainWindow.closeIndicatorDrawer()
+                            mainWindow.showSettingsTool(qsTr("Geozones"))
                         }
                     }
                 }

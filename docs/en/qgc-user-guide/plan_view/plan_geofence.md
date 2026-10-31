@@ -65,11 +65,11 @@ _QGroundControl_ can load UAS geographical zone (geozone) files published by avi
 The zones are shown on the map in both the Plan and Fly views, colored by restriction: prohibited (red), authorisation required (orange), conditional (yellow), no restriction (green) and U-space airspace (blue).
 Zones that are not active at the current time are drawn with a fainter fill. Schedules based on sunrise, sunset or civil twilight are computed for the location of each zone.
 
-The **Geozones** button at the top left of the Plan and Fly View maps (next to the tool strip) opens a panel with a color legend, a **Show geozones** switch to hide or show the zones, the number of loaded zones and sources, any outdated data warning, and **Manage Geozones...** to open the geozone settings. The button is shown when zones are loaded.
+When zones are loaded, the **Geozones** button in the Plan View tool strip and the geozone indicator in the Fly View toolbar show a color legend, the number of loaded zones and sources, and any outdated data warning. The Plan View panel also has a **Show geozones** switch, and the expanded Fly View indicator has the display and flight alert settings. Both have **Manage Geozones...** to open the geozone settings.
 
 To add geozones:
 
-1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the **Geozones** map panel.
+1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the Plan View **Geozones** panel or the Fly View geozone indicator.
 1. Press **Add File...** and select a `.json` or `.geojson` file, or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**.
 
 Several files and feeds can be loaded at the same time. Files and downloads larger than 100 MB are rejected. Loading a file with the same name, or a feed with the same URL, replaces its zones.
@@ -80,9 +80,9 @@ The **United States TFRs (FAA)** feed lists the current temporary flight restric
 
 Each source shows its format, zone count and date. A warning is shown if the data has expired (ED-318 `validTo`), is not valid yet, or is more than 28 days old by default (2 hours for TFRs, based on the ED-318 or FAA issue time, or the file or download date). Outdated sources are also reported once when _QGroundControl_ starts and in the Plan View warning, since they can miss zones.
 
-Use **Remove** to remove a source and **Remove All** to remove all of them. **Show geozones** in the map panel (or **Show geozones on maps** in the settings) hides or shows the zones.
+Use **Remove** to remove a source and **Remove All** to remove all of them. **Show geozones** in the Plan View **Geozones** panel (or **Show geozones on maps** in the expanded Fly View indicator and the settings) hides or shows the zones.
 When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits in your units, applicability schedule, reason, message, responsible authority and the source it was loaded from).
-When many small zones are in view, the smallest are left out until you zoom in, and the map panel shows how many are hidden.
+When many small zones are in view, the smallest are left out until you zoom in, and the Plan View **Geozones** panel shows how many are hidden.
 
 ### Mission and Flight Checks
 
@@ -93,7 +93,7 @@ The altitude profile below the Plan View map shades the restricted zones and U-s
 The check compares the planned altitudes with the zone altitude limits, using the terrain elevation along the path for limits above ground. When the terrain or altitude is not known, the zone is assumed to apply. Zone schedules are ignored, since the mission may be flown at another time.
 
 While flying, _QGroundControl_ warns once (with a message and audio) when a connected vehicle comes within 100 m (or 30 m vertically, by default) of an active prohibited, authorisation required, conditional or U-space zone, and again when it enters the zone. Limits above ground use the vehicle's height above terrain. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude.
-Every connected vehicle is monitored, and alerts name the vehicle when several are connected. The geozone indicator in the Fly View toolbar turns red, orange or yellow when the active vehicle is near or inside a zone. Click it to see the nearby zones.
+Every connected vehicle is monitored, and alerts name the vehicle when several are connected. The geozone indicator in the Fly View toolbar turns red, orange, yellow or blue when the active vehicle is near or inside a zone, and is dimmed while no vehicle is monitored. Click it to see the nearby zones; expand it to change the display and flight alert settings.
 
 Alerts are also appended to a `GeoZoneAlerts-<date>.csv` file per day (UTC) in the _Telemetry_ folder of the application load/save path, with the time, vehicle, position, altitude, terrain elevation, event, distance and zone, for reviewing flights.
 
@@ -104,7 +104,7 @@ Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 ge
 Besides the sources, the **Geozones** page of the _Application Settings_ sets:
 
 - **Show geozones on maps**.
-- **Flight alerts**: turns the flight alerts and the toolbar indicator on or off, **Speak flight alerts** turns their audio on or off and **Log flight alerts** the CSV log.
+- **Flight alerts**: turns the flight alerts and the nearby zones of the toolbar indicator on or off, **Speak flight alerts** turns their audio on or off and **Log flight alerts** the CSV log.
 - **Approach alert distance** and **Approach alert height margin**: how close horizontally and vertically the vehicle can come to a zone before it is alerted.
 - **Feed refresh interval** and **Live restrictions refresh interval** (TFRs): how often feeds are downloaded again.
 - **Outdated data warning** and **Outdated live restrictions warning** (TFRs): the data age at which a source is reported as outdated.
