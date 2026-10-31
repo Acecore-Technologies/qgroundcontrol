@@ -13,7 +13,7 @@ import QtPositioning
 
 import QGroundControl
 import QGroundControl.Controls
-import QGroundControl.FlightMap
+import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 
 /// Map visuals for the ED-269 / ED-318 geozones loaded by GeoZoneManager
@@ -23,6 +23,7 @@ Item {
     property var    map
     property real   labelMinZoomLevel:  11  ///< Zone labels are only shown from this zoom level up
     property var    highlightedZones:   []  ///< Zones drawn with a white border
+    property bool   fitToAddedSources:  false   ///< Moves the map to the zones of files and feeds the user adds when they are out of view or too small to see
 
     readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
 
@@ -74,6 +75,38 @@ Item {
         id: geoZoneInfoDialogComponent
 
         GeoZoneInfoDialog { }
+    }
+
+    property var _boxToFit: null
+
+    function _fitAddedSource() {
+        if (!_boxToFit || !map.visible) {
+            return
+        }
+        const box = _boxToFit
+        _boxToFit = null
+        const view = map.visibleRegion.boundingGeoRectangle()
+        // Also when the zones would only be a few pixels wide
+        const tooSmall = (box.width * 20 < view.width) && (box.height * 20 < view.height)
+        if (box.isValid && (!view.intersects(box) || tooSmall)) {
+            map.fitViewportToGeoShape(box, ScreenTools.defaultFontPixelHeight)
+        }
+    }
+
+    Connections {
+        target:     _geoZoneManager
+        enabled:    _root.fitToAddedSources
+        function onSourceAdded(source) {
+            _root._boxToFit = source.boundingBox
+            _root._fitAddedSource()
+        }
+    }
+
+    // Sources can be added while the map's view is hidden
+    Connections {
+        target:     map
+        enabled:    _root._boxToFit !== null
+        function onVisibleChanged() { _root._fitAddedSource() }
     }
 
     // Only shapes in or near the view are created, see GeoZoneMapModel

@@ -1,0 +1,97 @@
+name: Geozone Sanitizers
+
+# Runs the geozone tests, which parse untrusted files and feeds, with AddressSanitizer and UndefinedBehaviorSanitizer.
+# The build needs the same dependencies as the Linux workflow.
+
+on:
+  push:
+    branches:
+      - master
+      - 'Stable*'
+    paths:
+      - '.github/workflows/geozone-sanitizers.yml'
+      - 'src/GeoZone/**'
+      - 'test/GeoZone/**'
+  pull_request:
+    paths:
+      - '.github/workflows/geozone-sanitizers.yml'
+      - 'src/GeoZone/**'
+      - 'src/Settings/GeoZone*'
+      - 'test/GeoZone/**'
+
+jobs:
+  sanitizers:
+    runs-on: ubuntu-22.04
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      QT_VERSION: 6.8.3
+      SANITIZER_FLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Initial Setup
+        uses: ./.github/actions/common
+
+      - name: Install Dependencies
+        run: |
+          chmod a+x ./tools/setup/install-dependencies-debian.sh
+          sudo ./tools/setup/install-dependencies-debian.sh
+
+      - name: Setup Caching
+        uses: ./.github/actions/cache
+        with:
+          host: linux
+          target: linux_gcc_64
+          build-type: Sanitizers
+          cpm-modules: ${{ runner.temp }}/shadow_build_dir/cpm_modules
+
+      - name: Install Qt for Linux (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          dir: ${{ runner.temp }}
+          modules: qtcharts qtlocation qtpositioning qtspeech qt5compat qtmultimedia qtserialport qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors
+          cache: true
+
+      - name: Configure
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: ${{ env.QT_ROOT_DIR }}/bin/qt-cmake -S ${{ github.workspace }} -B . -G Ninja
+              -DCMAKE_BUILD_TYPE=Debug
+              -DQGC_BUILD_TESTING=ON
+              "-DCMAKE_C_FLAGS=${{ env.SANITIZER_FLAGS }}"
+              "-DCMAKE_CXX_FLAGS=${{ env.SANITIZER_FLAGS }}"
+              "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+
+      - name: Build
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: cmake --build . --target all --config Debug
+
+      - name: Run geozone tests
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        env:
+          # Leaks of Qt and other subsystems at exit are not geozone errors
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -o pipefail
+          # GeoZoneFlightTest is not run: MockLink copies short strings into fixed size MAVLink fields, which
+          # AddressSanitizer reports as overflows
+          ./Debug/QGroundControl --unittest:GeoZoneTest 2>&1 | tee GeoZoneTest.log
+          # Undefined behavior elsewhere in QGroundControl is reported but only fails the job in geozone code
+          if grep -h "src/GeoZone/.*runtime error" GeoZoneTest.log; then
+            exit 1
+          fi

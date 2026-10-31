@@ -19,6 +19,7 @@ import QGroundControl.Controllers
 import QGroundControl.Controls
 import QGroundControl.FlightDisplay
 import QGroundControl.FlightMap
+import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.Vehicle

@@ -17,6 +17,7 @@ import QtQuick.Window
 
 import QGroundControl
 import QGroundControl.FlightMap
+import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Controls
 import QGroundControl.FactSystem
@@ -199,22 +200,7 @@ Item {
             if (!checkReadyForSaveUpload(false /* save */)) {
                 return
             }
-
-            // The warning banner updates after changes settle, so check the current plan
-            geoZoneMissionCheck.update()
-            var prohibitedZones = geoZoneMissionCheck.crossedZones.filter(zone => zone.restriction === GeoZone.Prohibited)
-            if (prohibitedZones.length > 0) {
-                var names = prohibitedZones.slice(0, 5).map(zone => zone.name !== "" ? zone.name : zone.identifier).join(", ")
-                if (prohibitedZones.length > 5) {
-                    names += qsTr(" and %1 more").arg(prohibitedZones.length - 5)
-                }
-                mainWindow.showMessageDialog(qsTr("Plan Upload"),
-                                             qsTr("The mission path enters prohibited geozones: %1\n\nClick 'Ok' to upload the Plan anyway.").arg(names),
-                                             Dialog.Ok | Dialog.Cancel,
-                                             function() { _uploadAfterGeoZoneCheck() })
-                return
-            }
-            _uploadAfterGeoZoneCheck()
+            geoZoneMissionBanner.confirmUpload(_uploadAfterGeoZoneCheck)
         }
 
         function _uploadAfterGeoZoneCheck() {
@@ -523,7 +509,8 @@ Item {
             GeoZoneMapVisuals {
                 id:                 geoZoneMapVisuals
                 map:                editorMap
-                highlightedZones:   geoZoneMissionCheck.crossedZones
+                highlightedZones:   geoZoneMissionBanner.crossedZones
+                fitToAddedSources:  true
             }
 
             GeoFenceMapVisuals {
@@ -573,86 +560,14 @@ Item {
             }
         }
 
-        GeoZoneMissionCheck {
-            id:                 geoZoneMissionCheck
-            missionController:  _missionController
-        }
-
-        // Warns when the mission path enters restricted geozones
-        Rectangle {
-            id:                 geoZoneMissionWarning
+        GeoZoneMissionBanner {
+            id:                 geoZoneMissionBanner
             anchors.top:        parent.top
             anchors.topMargin:  _toolsMargin
-            x:                  _left + ((_availableWidth - width) / 2)
-            width:              Math.min(Math.max(geoZoneMissionWarningLabel.implicitWidth, geoZoneMissionInfoLabel.implicitWidth, geoZoneMissionOutdatedLabel.implicitWidth, geoZoneMissionHintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
-            height:             geoZoneMissionWarningColumn.height + (_margin * 2)
-            radius:             ScreenTools.defaultFontPixelWidth / 2
-            color:              qgcPal.window
-            border.color:       (geoZoneMissionCheck.warningText !== "" || _outdatedText !== "") ? qgcPal.warningText : qgcPal.text
-            z:                  QGroundControl.zOrderWidgets
-            visible:            geoZoneMissionCheck.warningText !== "" || geoZoneMissionCheck.infoText !== "" || _outdatedText !== ""
-
-            // Outdated data, like an old list of temporary restrictions, can miss zones the mission enters
-            readonly property string _outdatedText: QGroundControl.geoZoneManager.validityWarning !== "" ?
-                                                        qsTr("Geozone data may be outdated: %1").arg(QGroundControl.geoZoneManager.validityWarning.replace(/\n/g, "; ")) : ""
-
-            readonly property real _margin:         ScreenTools.defaultFontPixelWidth
-            readonly property real _left:           toolStrip.x + toolStrip.width + _toolsMargin
-            readonly property real _availableWidth: Math.max(rightPanel.x - _toolsMargin - _left, ScreenTools.defaultFontPixelWidth * 20)
-
-            Column {
-                id:                 geoZoneMissionWarningColumn
-                anchors.centerIn:   parent
-                width:              parent.width - (geoZoneMissionWarning._margin * 2)
-
-                QGCLabel {
-                    id:                     geoZoneMissionWarningLabel
-                    width:                  parent.width
-                    wrapMode:               Text.WordWrap
-                    horizontalAlignment:    Text.AlignHCenter
-                    color:                  qgcPal.warningText
-                    text:                   geoZoneMissionCheck.warningText
-                    visible:                text !== ""
-                }
-
-                QGCLabel {
-                    id:                     geoZoneMissionOutdatedLabel
-                    width:                  parent.width
-                    wrapMode:               Text.WordWrap
-                    horizontalAlignment:    Text.AlignHCenter
-                    color:                  qgcPal.warningText
-                    text:                   geoZoneMissionWarning._outdatedText
-                    visible:                text !== ""
-                }
-
-                QGCLabel {
-                    id:                     geoZoneMissionInfoLabel
-                    width:                  parent.width
-                    wrapMode:               Text.WordWrap
-                    horizontalAlignment:    Text.AlignHCenter
-                    text:                   geoZoneMissionCheck.infoText
-                    visible:                text !== ""
-                }
-
-                QGCLabel {
-                    id:                     geoZoneMissionHintLabel
-                    width:                  parent.width
-                    horizontalAlignment:    Text.AlignHCenter
-                    font.pointSize:         ScreenTools.smallFontPointSize
-                    text:                   qsTr("Click to show the zones")
-                    visible:                geoZoneMissionCheck.warningText !== ""
-                }
-            }
-
-            QGCMouseArea {
-                anchors.fill:   parent
-                onClicked: {
-                    QGroundControl.geoZoneManager.visible = true
-                    if (geoZoneMissionCheck.crossedZonesBoundingBox.isValid) {
-                        editorMap.fitViewportToGeoShape(geoZoneMissionCheck.crossedZonesBoundingBox, ScreenTools.defaultFontPixelHeight * 2)
-                    }
-                }
-            }
+            missionController:  _missionController
+            map:                editorMap
+            leftLimit:          toolStrip.x + toolStrip.width + _toolsMargin
+            rightLimit:         rightPanel.x - _toolsMargin
         }
 
         //-----------------------------------------------------------

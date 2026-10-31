@@ -14,6 +14,7 @@ import QGroundControl
 import QGroundControl.ScreenTools
 import QGroundControl.Controls
 import QGroundControl.Palette
+import QGroundControl.GeoZone
 
 Rectangle {
     id:         root
@@ -114,6 +115,12 @@ Rectangle {
                 height:             chart.plotArea.height
                 visibleWidth:       chart.plotArea.width
                 missionController:  root.missionController
+
+                GeoZoneProfileOverlay {
+                    anchors.fill:       parent
+                    terrainProfile:     terrainProfile
+                    missionController:  root.missionController
+                }
 
                 Repeater {
                     model: missionController.visualItems

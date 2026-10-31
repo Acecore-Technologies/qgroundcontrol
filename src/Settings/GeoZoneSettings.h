@@ -21,6 +21,7 @@ public:
     DEFINE_SETTINGFACT(showZones)
     DEFINE_SETTINGFACT(alertsEnabled)
     DEFINE_SETTINGFACT(audioAlerts)
+    DEFINE_SETTINGFACT(logAlerts)
     DEFINE_SETTINGFACT(approachDistance)
     DEFINE_SETTINGFACT(approachVerticalDistance)
     DEFINE_SETTINGFACT(feedRefreshHours)

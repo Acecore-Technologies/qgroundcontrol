@@ -12,6 +12,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 import QGroundControl
+import QGroundControl.AppSettings
 import QGroundControl.FactSystem
 import QGroundControl.FactControls
 import QGroundControl.Controls
@@ -21,8 +22,17 @@ SettingsPage {
 
     SettingsGroupLayout {
         Layout.fillWidth:   true
+        heading:            qsTr("Sources")
+        headingDescription: qsTr("Zones are shown on the maps, checked against missions and alerted in flight. Plan View > Fence > Geozones adds them as exclusion fences.")
+
+        GeoZoneSourcesPanel {
+            Layout.fillWidth: true
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:   true
         heading:            qsTr("Display")
-        headingDescription: qsTr("Geozone files and feeds are loaded in Plan View > Fence > Geozones.")
 
         FactCheckBoxSlider {
             Layout.fillWidth:   true
@@ -48,6 +58,14 @@ SettingsPage {
             Layout.fillWidth:   true
             text:               fact.shortDescription
             fact:               _geoZoneSettings.audioAlerts
+            visible:            fact.visible
+            enabled:            _geoZoneSettings.alertsEnabled.rawValue
+        }
+
+        FactCheckBoxSlider {
+            Layout.fillWidth:   true
+            text:               fact.shortDescription
+            fact:               _geoZoneSettings.logAlerts
             visible:            fact.visible
             enabled:            _geoZoneSettings.alertsEnabled.rawValue
         }

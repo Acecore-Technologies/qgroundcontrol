@@ -128,7 +128,6 @@
         <file alias="MapTypeBlack.svg">src/FlightMap/Images/MapTypeBlack.svg</file>
         <file alias="MAVLinkConsoleIcon.svg">src/AnalyzeView/MAVLinkConsoleIcon.svg</file>
         <file alias="MAVLinkInspector.svg">src/AnalyzeView/MAVLinkInspector.svg</file>
-        <file alias="GeoZone.svg">src/UI/toolbar/Images/GeoZone.svg</file>
         <file alias="Megaphone.svg">src/UI/toolbar/Images/Megaphone.svg</file>
         <file alias="MotorComponentIcon.svg">src/AutoPilotPlugins/Common/Images/MotorComponentIcon.svg</file>
         <file alias="no-logging-light.svg">src/AutoPilotPlugins/PX4/Images/no-logging-light.svg</file>

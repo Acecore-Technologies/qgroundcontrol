@@ -20,10 +20,7 @@
 #include "PositionManager.h"
 #include "QGCMapEngineManager.h"
 #include "ADSBVehicleManager.h"
-#include "GeoZone.h"
 #include "GeoZoneManager.h"
-#include "GeoZoneMapModel.h"
-#include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
 #include "MissionCommandTree.h"
 #include "HorizontalFactValueGrid.h"
@@ -89,7 +86,6 @@ void QGroundControlQmlGlobal::registerQmlTypes()
     qmlRegisterUncreatableType<FactValueGrid>           ("QGroundControl.Templates",             1, 0, "FactValueGrid",       "Reference only");
     qmlRegisterUncreatableType<FlightPathSegment>       ("QGroundControl",                       1, 0, "FlightPathSegment",   "Reference only");
     qmlRegisterUncreatableType<InstrumentValueData>     ("QGroundControl",                       1, 0, "InstrumentValueData", "Reference only");
-    qmlRegisterUncreatableType<GeoZone>                 ("QGroundControl.FlightMap",             1, 0, "GeoZone",             "Reference only");
     qmlRegisterUncreatableType<QGCGeoBoundingCube>      ("QGroundControl.FlightMap",             1, 0, "QGCGeoBoundingCube",  "Reference only");
     qmlRegisterUncreatableType<QGCMapPolygon>           ("QGroundControl.FlightMap",             1, 0, "QGCMapPolygon",       "Reference only");
     qmlRegisterUncreatableType<QmlObjectListModel>      ("QGroundControl",                       1, 0, "QmlObjectListModel",  "Reference only");
@@ -100,9 +96,6 @@ void QGroundControlQmlGlobal::registerQmlTypes()
     qmlRegisterType<HorizontalFactValueGrid>            ("QGroundControl.Templates",             1, 0, "HorizontalFactValueGrid");
     qmlRegisterType<ParameterEditorController>          ("QGroundControl.Controllers",           1, 0, "ParameterEditorController");
     qmlRegisterType<QGCFileDialogController>            ("QGroundControl.Controllers",           1, 0, "QGCFileDialogController");
-    qmlRegisterType<GeoZoneMapModel>                    ("QGroundControl.FlightMap",             1, 0, "GeoZoneMapModel");
-    qmlRegisterUncreatableType<GeoZoneMonitor>          ("QGroundControl.FlightMap",             1, 0, "GeoZoneMonitor",      "Reference only");
-    qmlRegisterType<GeoZoneMissionCheck>                ("QGroundControl.FlightMap",             1, 0, "GeoZoneMissionCheck");
     qmlRegisterType<QGCMapCircle>                       ("QGroundControl.FlightMap",             1, 0, "QGCMapCircle");
     qmlRegisterType<QGCMapPalette>                      ("QGroundControl.Palette",               1, 0, "QGCMapPalette");
     qmlRegisterType<QGCPalette>                         ("QGroundControl.Palette",               1, 0, "QGCPalette");

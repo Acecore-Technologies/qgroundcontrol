@@ -9,6 +9,7 @@
 
 #include "GeoZoneFlightTest.h"
 #include "GeoZone.h"
+#include "GeoZoneAlertLog.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
@@ -21,6 +22,7 @@
 #include "SimpleMissionItem.h"
 #include "Vehicle.h"
 
+#include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -124,7 +126,7 @@ QStringList spiedAlerts(const QSignalSpy &spy)
 void restoreSettingDefaults()
 {
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
-    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts() }) {
+    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->logAlerts() }) {
         fact->setRawValue(fact->rawDefaultValue());
     }
 }
@@ -222,9 +224,12 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
     settings->audioAlerts()->setRawValue(false);
 
-    // Monitors the active vehicle like the application
+    // Monitors the vehicles like the application
     GeoZoneMonitor monitor;
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    const QTemporaryDir logDir;
+    QVERIFY(logDir.isValid() && monitor.alertLog());
+    monitor.alertLog()->setDirectory(logDir.path());
     QVERIFY(!monitor.monitoring());
 
     _connectMockLink(MAV_AUTOPILOT_PX4);
@@ -243,6 +248,14 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QStringList entered = spiedAlerts(alertSpy).filter(QStringLiteral("Entered"));
     entered.sort();
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));
+
+    // The alerts are logged with the vehicle
+    QFile log(monitor.alertLog()->filePath(QDateTime::currentDateTimeUtc().date()));
+    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QStringList logLines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    QCOMPARE(logLines.count(), alertSpy.count() + 1);
+    QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
+    QVERIFY(logLines.last().section(QLatin1Char(','), 1, 1) == QString::number(vehicle->id()));
 
     // Alerts can be turned off in flight
     settings->alertsEnabled()->setRawValue(false);

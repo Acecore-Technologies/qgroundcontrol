@@ -39,12 +39,16 @@ public:
     using Callback = std::function<void(const Result &result)>;
 
     static constexpr int timeoutSecs = 120;
+    static constexpr qint64 defaultMaxBytes = 100 * 1024 * 1024;   ///< Several times the largest national file
 
     explicit GeoZoneDownloader(QObject *parent = nullptr);
 
     /// Starts a download. The callback is called once, unless the downloader is destroyed first.
     /// @param etag, lastModified Validators of the previous download, empty to download unconditionally
     void get(const QString &url, const QString &etag, const QString &lastModified, Callback callback);
+
+    /// Downloads larger than this fail without being read
+    void setMaxBytes(qint64 maxBytes) { _maxBytes = maxBytes; }
 
     int count() const { return static_cast<int>(_downloads.count()); }
     /// @return Fraction of the downloads received, negative when a size is unknown
@@ -60,8 +64,10 @@ private:
         QString url;
         qint64 received = 0;
         qint64 total = -1;      ///< Negative when the size is unknown
+        bool tooLarge = false;
     };
 
     QNetworkAccessManager *_networkManager = nullptr;
     QHash<const QObject*, Download> _downloads;  ///< Keyed by reply
+    qint64 _maxBytes = defaultMaxBytes;
 };

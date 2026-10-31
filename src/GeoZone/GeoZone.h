@@ -19,6 +19,8 @@
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
+#include "GeoZoneSchedule.h"
+
 /// A UAS geographical zone loaded from an EUROCAE ED-269 or ED-318 data file.
 class GeoZone : public QObject
 {
@@ -50,6 +52,15 @@ public:
     };
     Q_ENUM(Restriction)
 
+    /// Datum of a vertical limit
+    enum class VerticalReference {
+        Unknown,        ///< Missing or unsupported, the limit can't be compared
+        Ground,         ///< AGL or SFC
+        MeanSeaLevel,   ///< AMSL or MSL
+        Ellipsoid,      ///< WGS84
+        FlightLevel,    ///< STD, pressure altitude which depends on the weather
+    };
+
     /// Horizontal projection plus vertical limits of one airspace volume of a zone
     struct Volume {
         bool isCircle = false;
@@ -58,9 +69,14 @@ public:
         double radius = 0;                  ///< Circle only, meters
         double lowerLimit = qQNaN();        ///< As published, in feet when \c feet is set. NaN when not specified.
         double upperLimit = qQNaN();
-        QString lowerReference;             ///< AGL, AMSL or WGS84
-        QString upperReference;
+        VerticalReference lowerReference = VerticalReference::Unknown;
+        VerticalReference upperReference = VerticalReference::Unknown;
+        QString lowerReferenceCode;         ///< As published, for display
+        QString upperReferenceCode;
         bool feet = false;
+
+        /// Sets the references from the published codes
+        void setReferences(const QString &lowerCode, const QString &upperCode);
 
         QGeoRectangle boundingBox() const;
     };
@@ -72,21 +88,8 @@ public:
         double terrainAMSL = qQNaN();   ///< Ground elevation for limits relative to the ground, NaN when unknown
     };
 
-    struct DailyPeriod {
-        QList<int> days;        ///< Qt::DayOfWeek values, empty for any day
-        QTime startTime;        ///< Invalid when not given or given as a daylight event. Ends before the start wrap past midnight.
-        QTime endTime;
-        int utcOffsetSecs = 0;  ///< Offset from UTC of the days and times as published
-        QString startEvent;     ///< Daylight event code (BMCT, SR, SS, EECT), used instead of the time when given
-        QString endEvent;
-    };
-
-    struct TimePeriod {
-        bool permanent = false;
-        QDateTime start;    ///< Invalid when open ended
-        QDateTime end;
-        QList<DailyPeriod> schedule;
-    };
+    using DailyPeriod = GeoZoneSchedule::DailyPeriod;
+    using TimePeriod = GeoZoneSchedule::TimePeriod;
 
     struct Data {
         QString identifier;
@@ -134,12 +137,6 @@ public:
     /// @return true if the zone applies at any time between start and end inclusive
     bool isActiveDuring(const QDateTime &start, const QDateTime &end) const;
 
-    /// Time of a daylight event used by schedules: BMCT (begin of morning civil twilight), SR (sunrise),
-    /// SS (sunset) or EECT (end of evening civil twilight)
-    /// @return UTC time of the event on the date at the location. Invalid for unknown events and when the
-    ///         sun doesn't cross the event altitude that day.
-    static QDateTime daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location);
-
     /// Outer boundaries of all polygon volumes, clockwise and without duplicates. Holes are dropped
     /// so that excluding these polygons is always conservative.
     /// @param simplifyTolerance Meters. When positive, polygons are reduced to fewer vertices which still enclose
@@ -177,6 +174,15 @@ public:
     ///         the margin. Unknown altitudes, limits and references overlap.
     static bool verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin = 0);
 
+    /// @return true if the coordinate is inside the horizontal projection of the volume
+    static bool volumeContains(const Volume &volume, const QGeoCoordinate &coordinate);
+
+    /// @return Lower or upper limit of the volume in meters above mean sea level at the position, using its terrain
+    ///         elevation for limits above ground. NaN when the zone extends to the ground or has no ceiling, or the
+    ///         limit can't be converted, like flight levels or limits above unknown terrain.
+    static double limitAMSL(const Volume &volume, bool upper, const Position &position);
+
+    static VerticalReference verticalReferenceFromString(const QString &reference);
     static Restriction restrictionFromString(const QString &restriction);
     static QString restrictionToString(Restriction restriction);
 
@@ -187,8 +193,7 @@ signals:
     void activeChanged(bool active);
 
 private:
-    static QString _limitToString(double limit, const QString &reference, bool feet);
-    bool _volumeContains(const Volume &volume, const QGeoCoordinate &coordinate) const;
+    static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet);
 
     const Data _data;
     QGeoRectangle _boundingBox;

@@ -12,7 +12,6 @@
 #include "GeoZoneGeometry.h"
 
 #include <QtCore/QHash>
-#include <QtCore/QTimeZone>
 
 #include <cmath>
 
@@ -24,194 +23,6 @@ namespace {
 
 constexpr double kUnlimitedSentinel = 99999.0; // Published as upper limit when a zone has no ceiling
 constexpr double kMetersPerFoot = 0.3048;
-
-QString _formatDateTime(const QDateTime &dateTime)
-{
-    return dateTime.toUTC().toString(QStringLiteral("yyyy-MM-dd HH:mm 'UTC'"));
-}
-
-QString _dayToString(int day)
-{
-    static const QStringList days = { QStringLiteral("MON"), QStringLiteral("TUE"), QStringLiteral("WED"), QStringLiteral("THU"),
-                                      QStringLiteral("FRI"), QStringLiteral("SAT"), QStringLiteral("SUN") };
-    return ((day >= Qt::Monday) && (day <= Qt::Sunday)) ? days[day - 1] : QString();
-}
-
-QString _utcOffsetToString(int utcOffsetSecs)
-{
-    if (utcOffsetSecs == 0) {
-        return QStringLiteral("UTC");
-    }
-    const int absSecs = qAbs(utcOffsetSecs);
-    return QStringLiteral("UTC%1%2:%3").arg(utcOffsetSecs < 0 ? QLatin1Char('-') : QLatin1Char('+'))
-                                       .arg(absSecs / 3600, 2, 10, QLatin1Char('0'))
-                                       .arg((absSecs % 3600) / 60, 2, 10, QLatin1Char('0'));
-}
-
-QString _eventToString(const QString &event)
-{
-    static const QHash<QString, const char*> eventNames = {
-        { QStringLiteral("BMCT"),   QT_TRANSLATE_NOOP("GeoZone", "morning twilight") },
-        { QStringLiteral("SR"),     QT_TRANSLATE_NOOP("GeoZone", "sunrise") },
-        { QStringLiteral("SS"),     QT_TRANSLATE_NOOP("GeoZone", "sunset") },
-        { QStringLiteral("EECT"),   QT_TRANSLATE_NOOP("GeoZone", "evening twilight") },
-    };
-    const auto it = eventNames.constFind(event.trimmed().toUpper());
-    return (it != eventNames.constEnd()) ? GeoZone::tr(it.value()) : event;
-}
-
-QString _dailyPeriodToString(const GeoZone::DailyPeriod &period)
-{
-    QStringList days;
-    for (const int day : period.days) {
-        days.append(_dayToString(day));
-    }
-    const QString dayString = days.isEmpty() ? GeoZone::tr("Every day") : days.join(QStringLiteral(", "));
-    const QString start = !period.startEvent.isEmpty() ? _eventToString(period.startEvent) : (period.startTime.isValid() ? period.startTime.toString(QStringLiteral("HH:mm")) : QString());
-    const QString end = !period.endEvent.isEmpty() ? _eventToString(period.endEvent) : (period.endTime.isValid() ? period.endTime.toString(QStringLiteral("HH:mm")) : QString());
-    if (start.isEmpty() && end.isEmpty()) {
-        return dayString;
-    }
-    const bool timesUsed = (period.startEvent.isEmpty() && period.startTime.isValid()) || (period.endEvent.isEmpty() && period.endTime.isValid());
-    const QString text = QStringLiteral("%1 %2-%3").arg(dayString, start.isEmpty() ? QStringLiteral("00:00") : start, end.isEmpty() ? QStringLiteral("24:00") : end);
-    return timesUsed ? QStringLiteral("%1 %2").arg(text, _utcOffsetToString(period.utcOffsetSecs)) : text;
-}
-
-struct SunEvent {
-    bool known = false;     ///< Event code is supported and the location valid
-    bool alwaysUp = false;  ///< The sun stays above the event altitude all day
-    QDateTime time;         ///< Invalid when the event doesn't occur that day
-};
-
-/// Sunrise equation, accurate to about a minute outside polar regions
-SunEvent _sunEvent(const QString &event, const QDate &date, const QGeoCoordinate &location)
-{
-    SunEvent result;
-    const QString code = event.trimmed().toUpper();
-    double sunAltitude = 0;
-    bool rising = true;
-    if (code == QStringLiteral("BMCT")) {
-        sunAltitude = -6;
-    } else if (code == QStringLiteral("SR")) {
-        sunAltitude = -0.833;
-    } else if (code == QStringLiteral("SS")) {
-        sunAltitude = -0.833;
-        rising = false;
-    } else if (code == QStringLiteral("EECT")) {
-        sunAltitude = -6;
-        rising = false;
-    } else {
-        return result;
-    }
-    if (!location.isValid() || !date.isValid()) {
-        return result;
-    }
-    result.known = true;
-
-    constexpr double degrees = M_PI / 180.0;
-    constexpr double julianDate2000 = 2451545.0;
-    const double meanSolarTime = static_cast<double>(date.toJulianDay() - static_cast<qint64>(julianDate2000)) - (location.longitude() / 360.0);
-    const double meanAnomaly = std::fmod(357.5291 + (0.98560028 * meanSolarTime), 360.0) * degrees;
-    const double center = (1.9148 * std::sin(meanAnomaly)) + (0.02 * std::sin(2 * meanAnomaly)) + (0.0003 * std::sin(3 * meanAnomaly));
-    const double eclipticLongitude = std::fmod((meanAnomaly / degrees) + center + 180.0 + 102.9372, 360.0) * degrees;
-    const double solarTransit = julianDate2000 + meanSolarTime + (0.0053 * std::sin(meanAnomaly)) - (0.0069 * std::sin(2 * eclipticLongitude));
-    const double sinDeclination = std::sin(eclipticLongitude) * std::sin(23.4397 * degrees);
-    const double cosDeclination = std::cos(std::asin(sinDeclination));
-    const double latitude = location.latitude() * degrees;
-    const double cosHourAngle = (std::sin(sunAltitude * degrees) - (std::sin(latitude) * sinDeclination)) / (std::cos(latitude) * cosDeclination);
-    if (cosHourAngle < -1) {
-        result.alwaysUp = true;
-        return result;
-    }
-    if (cosHourAngle > 1) {
-        return result;
-    }
-
-    const double hourAngle = std::acos(cosHourAngle) / degrees;
-    const double julianDate = solarTransit + ((rising ? -hourAngle : hourAngle) / 360.0);
-    result.time = QDateTime::fromMSecsSinceEpoch(std::llround((julianDate - 2440587.5) * 86400000.0), QTimeZone::UTC);
-    return result;
-}
-
-/// @return UTC start and end of a daily period on the date in the period's offset, nothing when it doesn't
-///         apply that day. Ends before the start wrap past midnight.
-std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZone::DailyPeriod &period, const QDate &date, const QGeoCoordinate &location)
-{
-    if (!period.days.isEmpty() && !period.days.contains(date.dayOfWeek())) {
-        return std::nullopt;
-    }
-
-    const QDateTime dayStart = QDateTime(date, QTime(0, 0), QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
-    const QDateTime dayEnd = dayStart.addDays(1).addMSecs(-1);
-
-    // Time of an event. When the sun stays above or below the event altitude all day, rising events happen
-    // at the start of the day and setting events at its end, or the other way around, so that daylight periods
-    // cover the whole day during polar day and none of it during polar night. Unknown events are ignored.
-    const auto eventTime = [&date, &location, &dayStart, &dayEnd](const QString &code, bool isStart) {
-        const SunEvent event = _sunEvent(code, date, location);
-        if (event.time.isValid()) {
-            return event.time;
-        }
-        if (!event.known) {
-            return isStart ? dayStart : dayEnd;
-        }
-        const QString upperCode = code.trimmed().toUpper();
-        const bool risingEvent = (upperCode == QStringLiteral("BMCT")) || (upperCode == QStringLiteral("SR"));
-        return (risingEvent == event.alwaysUp) ? dayStart : dayEnd;
-    };
-
-    QDateTime start = dayStart;
-    if (!period.startEvent.isEmpty()) {
-        start = eventTime(period.startEvent, true);
-    } else if (period.startTime.isValid()) {
-        start = QDateTime(date, period.startTime, QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
-    }
-
-    QDateTime end = dayEnd;
-    if (!period.endEvent.isEmpty()) {
-        end = eventTime(period.endEvent, false);
-    } else if (period.endTime.isValid()) {
-        end = QDateTime(date, period.endTime, QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
-    }
-
-    if ((start == dayEnd) && (end == dayStart)) {
-        // No daylight, or no darkness, that day
-        return std::nullopt;
-    }
-    if (end < start) {
-        end = end.addDays(1);
-    }
-    return std::make_pair(start, end);
-}
-
-bool _dailyPeriodContains(const GeoZone::DailyPeriod &period, const QDateTime &utc, const QGeoCoordinate &location)
-{
-    // Days and times are published in the period's offset. A period wrapping past midnight started the day before,
-    // and a sunrise east of the offset's meridian can be before midnight.
-    const QDate date = utc.addSecs(period.utcOffsetSecs).date();
-    for (const QDate &day : { date.addDays(-1), date, date.addDays(1) }) {
-        const auto window = _dailyWindow(period, day, location);
-        if (window && (utc >= window->first) && (utc <= window->second)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool _dailyPeriodOverlaps(const GeoZone::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc, const QGeoCoordinate &location)
-{
-    const QDate firstDate = startUtc.addSecs(period.utcOffsetSecs).date().addDays(-1);
-    // Windows can start before their date when a sunrise is before midnight. The schedule repeats weekly, so
-    // a week past the first date covers every window of longer intervals.
-    const QDate lastDate = std::min(endUtc.addSecs(period.utcOffsetSecs).date().addDays(1), firstDate.addDays(9));
-    for (QDate date = firstDate; date <= lastDate; date = date.addDays(1)) {
-        const auto window = _dailyWindow(period, date, location);
-        if (window && (window->first <= endUtc) && (window->second >= startUtc)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 bool _isClockwise(const QList<QGeoCoordinate> &ring)
 {
@@ -225,11 +36,6 @@ bool _isClockwise(const QList<QGeoCoordinate> &ring)
 }
 
 } // namespace
-
-QDateTime GeoZone::daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location)
-{
-    return _sunEvent(event, date, location).time;
-}
 
 QGeoRectangle GeoZone::Volume::boundingBox() const
 {
@@ -257,6 +63,16 @@ GeoZone::GeoZone(const Data &data, QObject *parent)
     _active = isActiveAt(QDateTime::currentDateTimeUtc());
 }
 
+bool GeoZone::isActiveAt(const QDateTime &dateTime) const
+{
+    return GeoZoneSchedule::isActiveAt(_data.applicability, dateTime, _boundingBox.center());
+}
+
+bool GeoZone::isActiveDuring(const QDateTime &start, const QDateTime &end) const
+{
+    return GeoZoneSchedule::isActiveDuring(_data.applicability, start, end, _boundingBox.center());
+}
+
 void GeoZone::updateActive(const QDateTime &now)
 {
     const bool active = isActiveAt(now);
@@ -264,72 +80,6 @@ void GeoZone::updateActive(const QDateTime &now)
         _active = active;
         emit activeChanged(_active);
     }
-}
-
-bool GeoZone::isActiveAt(const QDateTime &dateTime) const
-{
-    if (_data.applicability.isEmpty()) {
-        return true;
-    }
-
-    const QDateTime utc = dateTime.toUTC();
-    for (const TimePeriod &period : _data.applicability) {
-        if (period.permanent) {
-            return true;
-        }
-        if (period.start.isValid() && (utc < period.start)) {
-            continue;
-        }
-        if (period.end.isValid() && (utc > period.end)) {
-            continue;
-        }
-        if (period.schedule.isEmpty()) {
-            return true;
-        }
-        for (const DailyPeriod &dailyPeriod : period.schedule) {
-            if (_dailyPeriodContains(dailyPeriod, utc, _boundingBox.center())) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-bool GeoZone::isActiveDuring(const QDateTime &start, const QDateTime &end) const
-{
-    if (_data.applicability.isEmpty()) {
-        return true;
-    }
-
-    const QDateTime startUtc = start.toUTC();
-    const QDateTime endUtc = end.toUTC();
-    if (endUtc < startUtc) {
-        return false;
-    }
-
-    for (const TimePeriod &period : _data.applicability) {
-        if (period.permanent) {
-            return true;
-        }
-
-        // Limit the interval to the period's validity
-        const QDateTime overlapStart = (period.start.isValid() && (period.start > startUtc)) ? period.start.toUTC() : startUtc;
-        const QDateTime overlapEnd = (period.end.isValid() && (period.end < endUtc)) ? period.end.toUTC() : endUtc;
-        if (overlapEnd < overlapStart) {
-            continue;
-        }
-        if (period.schedule.isEmpty()) {
-            return true;
-        }
-        for (const DailyPeriod &dailyPeriod : period.schedule) {
-            if (_dailyPeriodOverlaps(dailyPeriod, overlapStart, overlapEnd, _boundingBox.center())) {
-                return true;
-            }
-        }
-    }
-
-    return false;
 }
 
 QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance) const
@@ -384,7 +134,7 @@ QList<QGeoCircle> GeoZone::exclusionCircles() const
     return circles;
 }
 
-bool GeoZone::_volumeContains(const Volume &volume, const QGeoCoordinate &coordinate) const
+bool GeoZone::volumeContains(const Volume &volume, const QGeoCoordinate &coordinate)
 {
     if (volume.isCircle) {
         return volume.center.isValid() && (volume.center.distanceTo(coordinate) <= volume.radius);
@@ -407,18 +157,24 @@ bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const 
 {
     const double scale = volume.feet ? kMetersPerFoot : 1.0;
     // The altitude range of the positions in the reference of a limit, empty when unknown
-    const auto altitudeRange = [&from, &to](const QString &reference) -> std::optional<std::pair<double, double>> {
+    const auto altitudeRange = [&from, &to](VerticalReference reference) -> std::optional<std::pair<double, double>> {
         double altitude1 = from.altitudeAMSL;
         double altitude2 = to.altitudeAMSL;
-        if ((reference == QStringLiteral("AGL")) || (reference == QStringLiteral("SFC"))) {
+        switch (reference) {
+        case VerticalReference::Ground:
             altitude1 -= from.terrainAMSL;
             altitude2 -= to.terrainAMSL;
-        } else if (reference == QStringLiteral("WGS84")) {
+            break;
+        case VerticalReference::Ellipsoid:
             // Heights above the ellipsoid differ from mean sea level by the geoid height of up to about 100 m
             altitude1 += GeoZoneGeometry::geoidHeight(from.coordinate);
             altitude2 += GeoZoneGeometry::geoidHeight(to.coordinate);
-        } else if ((reference != QStringLiteral("AMSL")) && (reference != QStringLiteral("MSL"))) {
-            // Flight levels and unknown references can't be compared
+            break;
+        case VerticalReference::MeanSeaLevel:
+            break;
+        case VerticalReference::FlightLevel:
+        case VerticalReference::Unknown:
+            // Flight levels depend on the air pressure and unknown references can't be compared
             return std::nullopt;
         }
         if (qIsNaN(altitude1) || qIsNaN(altitude2)) {
@@ -428,7 +184,7 @@ bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const 
     };
 
     // Zones from the ground have no floor, vehicles on the ground or terrain data errors can be slightly below it
-    const bool fromGround = ((volume.lowerReference == QStringLiteral("AGL")) || (volume.lowerReference == QStringLiteral("SFC"))) && (volume.lowerLimit <= 0);
+    const bool fromGround = (volume.lowerReference == VerticalReference::Ground) && (volume.lowerLimit <= 0);
     if (!qIsNaN(volume.lowerLimit) && !fromGround) {
         const auto range = altitudeRange(volume.lowerReference);
         if (range && (range->second < ((volume.lowerLimit * scale) - margin))) {
@@ -444,6 +200,29 @@ bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const 
     return true;
 }
 
+double GeoZone::limitAMSL(const Volume &volume, bool upper, const Position &position)
+{
+    const double limit = upper ? volume.upperLimit : volume.lowerLimit;
+    const VerticalReference reference = upper ? volume.upperReference : volume.lowerReference;
+    if (qIsNaN(limit) || (upper && (limit >= kUnlimitedSentinel)) || (!upper && (reference == VerticalReference::Ground) && (limit <= 0))) {
+        return qQNaN();
+    }
+
+    const double meters = limit * (volume.feet ? kMetersPerFoot : 1.0);
+    switch (reference) {
+    case VerticalReference::Ground:
+        return meters + position.terrainAMSL;
+    case VerticalReference::MeanSeaLevel:
+        return meters;
+    case VerticalReference::Ellipsoid:
+        return meters - GeoZoneGeometry::geoidHeight(position.coordinate);
+    case VerticalReference::FlightLevel:
+    case VerticalReference::Unknown:
+        break;
+    }
+    return qQNaN();
+}
+
 bool GeoZone::contains(const Position &position) const
 {
     if (!position.coordinate.isValid() || !_boundingBox.contains(position.coordinate)) {
@@ -451,7 +230,7 @@ bool GeoZone::contains(const Position &position) const
     }
 
     return std::any_of(_data.volumes.cbegin(), _data.volumes.cend(), [this, &position](const Volume &volume) {
-        return verticalOverlap(volume, position, position) && _volumeContains(volume, position.coordinate);
+        return verticalOverlap(volume, position, position) && volumeContains(volume, position.coordinate);
     });
 }
 
@@ -463,7 +242,7 @@ double GeoZone::distanceTo(const Position &position, double verticalMargin) cons
         if (!verticalOverlap(volume, position, position, verticalMargin)) {
             continue;
         }
-        if (_volumeContains(volume, position.coordinate)) {
+        if (volumeContains(volume, position.coordinate)) {
             return 0;
         }
         if (volume.isCircle) {
@@ -654,29 +433,7 @@ QString GeoZone::reasonText() const
 
 QString GeoZone::applicabilityText() const
 {
-    if (_data.applicability.isEmpty()) {
-        return tr("Permanent");
-    }
-
-    QStringList lines;
-    for (const TimePeriod &period : _data.applicability) {
-        if (period.permanent) {
-            lines.append(tr("Permanent"));
-        } else if (period.start.isValid() && period.end.isValid()) {
-            lines.append(tr("From %1 to %2").arg(_formatDateTime(period.start), _formatDateTime(period.end)));
-        } else if (period.start.isValid()) {
-            lines.append(tr("From %1").arg(_formatDateTime(period.start)));
-        } else if (period.end.isValid()) {
-            lines.append(tr("Until %1").arg(_formatDateTime(period.end)));
-        } else if (period.schedule.isEmpty()) {
-            lines.append(tr("Permanent"));
-        }
-
-        for (const DailyPeriod &dailyPeriod : period.schedule) {
-            lines.append(QStringLiteral("  %1").arg(_dailyPeriodToString(dailyPeriod)));
-        }
-    }
-    return lines.join(QStringLiteral("\n"));
+    return GeoZoneSchedule::text(_data.applicability);
 }
 
 QString GeoZone::verticalLimitsText() const
@@ -687,8 +444,8 @@ QString GeoZone::verticalLimitsText() const
         if (qIsNaN(volume.lowerLimit) && qIsNaN(volume.upperLimit)) {
             line = tr("Not specified");
         } else {
-            line = QStringLiteral("%1 - %2").arg(_limitToString(volume.lowerLimit, volume.lowerReference, volume.feet),
-                                                 _limitToString(volume.upperLimit, volume.upperReference, volume.feet));
+            line = QStringLiteral("%1 - %2").arg(_limitToString(volume.lowerLimit, volume.lowerReference, volume.lowerReferenceCode, volume.feet),
+                                                 _limitToString(volume.upperLimit, volume.upperReference, volume.upperReferenceCode, volume.feet));
         }
         if (!lines.contains(line)) {
             lines.append(line);
@@ -697,7 +454,7 @@ QString GeoZone::verticalLimitsText() const
     return lines.join(QStringLiteral("\n"));
 }
 
-QString GeoZone::_limitToString(double limit, const QString &reference, bool feet)
+QString GeoZone::_limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet)
 {
     if (qIsNaN(limit)) {
         return tr("not specified");
@@ -705,20 +462,46 @@ QString GeoZone::_limitToString(double limit, const QString &reference, bool fee
     if (limit >= kUnlimitedSentinel) {
         return tr("Unlimited");
     }
-    if ((limit == 0) && (reference.compare(QStringLiteral("AGL"), Qt::CaseInsensitive) == 0)) {
+    if ((limit == 0) && (reference == VerticalReference::Ground)) {
         return tr("GND");
     }
 
     const QString publishedUnits = feet ? QStringLiteral("ft") : QStringLiteral("m");
     const QString userUnits = FactMetaData::appSettingsVerticalDistanceUnitsString();
     if (userUnits == publishedUnits) {
-        return QStringLiteral("%1 %2 %3").arg(limit).arg(publishedUnits, reference);
+        return QStringLiteral("%1 %2 %3").arg(limit).arg(publishedUnits, referenceCode);
     }
 
     // Show the published value too since the converted value is rounded
     const double meters = feet ? (limit * kMetersPerFoot) : limit;
     const double converted = FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble();
-    return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, reference).arg(limit).arg(publishedUnits);
+    return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, referenceCode).arg(limit).arg(publishedUnits);
+}
+
+void GeoZone::Volume::setReferences(const QString &lowerCode, const QString &upperCode)
+{
+    lowerReferenceCode = lowerCode.trimmed().toUpper();
+    upperReferenceCode = upperCode.trimmed().toUpper();
+    lowerReference = verticalReferenceFromString(lowerReferenceCode);
+    upperReference = verticalReferenceFromString(upperReferenceCode);
+}
+
+GeoZone::VerticalReference GeoZone::verticalReferenceFromString(const QString &reference)
+{
+    const QString value = reference.trimmed().toUpper();
+    if ((value == QStringLiteral("AGL")) || (value == QStringLiteral("SFC"))) {
+        return VerticalReference::Ground;
+    }
+    if ((value == QStringLiteral("AMSL")) || (value == QStringLiteral("MSL"))) {
+        return VerticalReference::MeanSeaLevel;
+    }
+    if (value == QStringLiteral("WGS84")) {
+        return VerticalReference::Ellipsoid;
+    }
+    if (value == QStringLiteral("STD")) {
+        return VerticalReference::FlightLevel;
+    }
+    return VerticalReference::Unknown;
 }
 
 GeoZone::Restriction GeoZone::restrictionFromString(const QString &restriction)

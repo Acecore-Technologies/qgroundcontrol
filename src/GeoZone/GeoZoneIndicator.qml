@@ -12,7 +12,7 @@ import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
-import QGroundControl.FlightMap
+import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
@@ -47,7 +47,7 @@ Item {
         width:              height
         anchors.top:        parent.top
         anchors.bottom:     parent.bottom
-        source:             "/qmlimages/GeoZone.svg"
+        source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
         color:              control._restrictionColor(_monitor.alertRestriction)

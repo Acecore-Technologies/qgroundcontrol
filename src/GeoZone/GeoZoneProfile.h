@@ -1,0 +1,86 @@
+/****************************************************************************
+ *
+ * (c) 2009-2024 QGROUNDCONTROL PROJECT <http://www.qgroundcontrol.org>
+ *
+ * QGroundControl is licensed according to the terms in the file
+ * COPYING.md in the root of the source code directory.
+ *
+ ****************************************************************************/
+
+#pragma once
+
+#include <QtCore/QObject>
+#include <QtCore/QPointer>
+#include <QtCore/QTimer>
+#include <QtCore/QVariantList>
+#include <QtPositioning/QGeoCoordinate>
+
+#include "GeoZone.h"
+
+class GeoZoneManager;
+class MissionController;
+
+/// Vertical extent of the restricted geozones and U-space airspaces along the planned flight path, for the
+/// altitude profile of the Plan View. Distances follow the mission items like TerrainProfile.
+class GeoZoneProfile : public QObject
+{
+    Q_OBJECT
+    Q_MOC_INCLUDE("MissionController.h")
+
+    Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged)
+    /// One map per zone volume and stretch of the path inside its horizontal projection: restriction (GeoZone::Restriction),
+    /// name, and points, a list of maps with distance (meters from the start), floor and ceiling (meters AMSL, NaN when
+    /// the zone extends to the ground or has no ceiling, or the limit is unknown)
+    Q_PROPERTY(QVariantList         bands               READ bands                                          NOTIFY bandsChanged)
+    /// The bands are only computed while active, like while the profile is shown
+    Q_PROPERTY(bool                 active              READ active             WRITE setActive             NOTIFY activeChanged)
+
+public:
+    /// @param manager Zones to show, GeoZoneManager::instance() when null
+    explicit GeoZoneProfile(QObject *parent = nullptr, GeoZoneManager *manager = nullptr);
+
+    static constexpr double minSampleSpacing = 5;   ///< Meters between samples along short paths
+    static constexpr int maxSamples = 20000;        ///< About the samples along the whole path, which sets the spacing of long paths
+    static constexpr double projectionStretch = 2000;   ///< Meters of a segment sharing a flat projection of the zones
+
+    MissionController *missionController() const;
+    void setMissionController(MissionController *missionController);
+
+    QVariantList bands() const { return _bands; }
+    bool active() const { return _active; }
+    void setActive(bool active);
+
+    /// Flight path segment between two mission items, in path order
+    struct Segment {
+        QGeoCoordinate from;
+        QGeoCoordinate to;
+        double distance = 0;        ///< Meters along the profile, which can differ slightly from the great circle
+        QList<double> terrainAMSL;  ///< Ground elevation from the start to the end at even spacing, empty when unknown
+        double terrainSpacing = 0;
+        double terrainFinalSpacing = 0; ///< Spacing of the last two samples
+    };
+
+    /// @return Bands of the zones along consecutive segments, see the bands property. Segments with a zero distance
+    ///         and invalid coordinates only advance the distance.
+    static QVariantList bandsForSegments(const QList<Segment> &segments, const GeoZoneManager *manager);
+
+    /// Re-evaluates immediately instead of after changes settle
+    Q_INVOKABLE void update();
+
+signals:
+    void missionControllerChanged();
+    void bandsChanged();
+    void activeChanged();
+
+private:
+    QList<Segment> _missionSegments() const;
+    void _clear();
+
+    GeoZoneManager *_manager = nullptr;
+    QPointer<MissionController> _missionController;
+    QVariantList _bands;
+    bool _active = true;
+    QTimer _updateTimer;
+
+    static constexpr int _updateDelayMSecs = 500;
+};

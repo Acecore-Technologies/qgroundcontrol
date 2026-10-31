@@ -365,8 +365,7 @@ GeoZone::Volume _ed318Layer(const QJsonValue &value, const GeoZone::Volume &fall
     volume.feet = layer.value(QStringLiteral("uom")).toString().compare(QStringLiteral("ft"), Qt::CaseInsensitive) == 0;
     volume.lowerLimit = _number(layer.value(QStringLiteral("lower")));
     volume.upperLimit = _number(layer.value(QStringLiteral("upper")));
-    volume.lowerReference = layer.value(QStringLiteral("lowerReference")).toString().toUpper();
-    volume.upperReference = layer.value(QStringLiteral("upperReference")).toString().toUpper();
+    volume.setReferences(layer.value(QStringLiteral("lowerReference")).toString(), layer.value(QStringLiteral("upperReference")).toString());
     return volume;
 }
 
@@ -413,8 +412,7 @@ bool _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
         layer.feet = geometry.value(QStringLiteral("uomDimensions")).toString().compare(QStringLiteral("FT"), Qt::CaseInsensitive) == 0;
         layer.lowerLimit = _number(geometry.value(QStringLiteral("lowerLimit")));
         layer.upperLimit = _number(geometry.value(QStringLiteral("upperLimit")));
-        layer.lowerReference = geometry.value(QStringLiteral("lowerVerticalReference")).toString().toUpper();
-        layer.upperReference = geometry.value(QStringLiteral("upperVerticalReference")).toString().toUpper();
+        layer.setReferences(geometry.value(QStringLiteral("lowerVerticalReference")).toString(), geometry.value(QStringLiteral("upperVerticalReference")).toString());
 
         // ED-269 expresses all dimensions, including the circle radius, in uomDimensions
         _appendHorizontalGeometry(geometry.value(QStringLiteral("horizontalProjection")).toObject(), layer, layer.feet ? kMetersPerFoot : 1.0, zone.volumes);

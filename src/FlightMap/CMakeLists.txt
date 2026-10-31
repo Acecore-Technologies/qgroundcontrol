@@ -7,7 +7,6 @@ qt_add_qml_module(FlightMapModule
     QML_FILES
         MapItems/CameraTriggerIndicator.qml
         MapItems/CustomMapItems.qml
-        MapItems/GeoZoneMapVisuals.qml
         MapItems/MapLineArrow.qml
         MapItems/MissionItemIndicator.qml
         MapItems/MissionItemIndicatorDrag.qml

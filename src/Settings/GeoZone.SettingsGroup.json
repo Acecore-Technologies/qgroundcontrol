@@ -12,13 +12,20 @@
 {
     "name":         "alertsEnabled",
     "shortDesc":    "Flight alerts",
-    "longDesc":     "Alert when the active vehicle approaches or enters an active restricted geozone or U-space airspace.",
+    "longDesc":     "Alert when a connected vehicle approaches or enters an active restricted geozone or U-space airspace.",
     "type":         "bool",
     "default":      true
 },
 {
     "name":         "audioAlerts",
     "shortDesc":    "Speak flight alerts",
+    "type":         "bool",
+    "default":      true
+},
+{
+    "name":         "logAlerts",
+    "shortDesc":    "Log flight alerts",
+    "longDesc":     "Append flight alerts to a CSV file per day in the telemetry folder of the application load/save path.",
     "type":         "bool",
     "default":      true
 },

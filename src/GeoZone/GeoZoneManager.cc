@@ -8,6 +8,11 @@
  ****************************************************************************/
 
 #include "GeoZoneManager.h"
+#include "GeoZoneFenceImporter.h"
+#include "GeoZoneMapModel.h"
+#include "GeoZoneMissionCheck.h"
+#include "GeoZoneMonitor.h"
+#include "GeoZoneProfile.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
@@ -22,11 +27,13 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
+#include <QtCore/QLocale>
 #include <QtCore/QMap>
 #include <QtCore/QSet>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtQml/QQmlEngine>
 
 #include <algorithm>
 #include <numeric>
@@ -77,6 +84,16 @@ GeoZoneManager::~GeoZoneManager()
 GeoZoneManager *GeoZoneManager::instance()
 {
     return _geoZoneManager();
+}
+
+void GeoZoneManager::registerQmlTypes()
+{
+    (void) qmlRegisterUncreatableType<GeoZone>("QGroundControl.GeoZone", 1, 0, "GeoZone", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneMonitor>("QGroundControl.GeoZone", 1, 0, "GeoZoneMonitor", "Reference only");
+    (void) qmlRegisterType<GeoZoneMapModel>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapModel");
+    (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
+    (void) qmlRegisterType<GeoZoneFenceImporter>("QGroundControl.GeoZone", 1, 0, "GeoZoneFenceImporter");
+    (void) qmlRegisterType<GeoZoneProfile>("QGroundControl.GeoZone", 1, 0, "GeoZoneProfile");
 }
 
 void GeoZoneManager::init()
@@ -143,6 +160,7 @@ void GeoZoneManager::addFile(const QString &fileName)
     job.loadedAt = QDateTime::currentDateTimeUtc();
     job.fileDate = info.lastModified().toUTC();
     job.userInitiated = true;
+    job.added = true;
     job.generation = ++_generations[job.key];
     _startLoad(job, true /* background */);
 }
@@ -181,7 +199,7 @@ void GeoZoneManager::addUrl(const QString &url)
         qgcApp()->showAppMessage(tr("Geozone download failed. %1 is not a valid http, https or file address.").arg(trimmedUrl));
         return;
     }
-    _download(trimmedUrl, true /* userInitiated */);
+    _download(trimmedUrl, true /* userInitiated */, true /* added */);
 }
 
 void GeoZoneManager::refreshFeeds()
@@ -205,7 +223,7 @@ void GeoZoneManager::_refreshDueFeeds()
     }
 }
 
-void GeoZoneManager::_download(const QString &url, bool userInitiated)
+void GeoZoneManager::_download(const QString &url, bool userInitiated, bool added)
 {
     const int generation = ++_generations[url];
     if (GeoZoneSource *const existing = source(url)) {
@@ -226,6 +244,7 @@ void GeoZoneManager::_download(const QString &url, bool userInitiated)
         job.loadedAt = QDateTime::currentDateTimeUtc();
         job.fileDate = info.lastModified().toUTC();
         job.userInitiated = userInitiated;
+        job.added = added;
         job.generation = generation;
         _startLoad(job, true /* background */);
         return;
@@ -239,8 +258,8 @@ void GeoZoneManager::_download(const QString &url, bool userInitiated)
     }
 
     _setPending(1);
-    _downloader->get(url, etag, lastModified, [this, url, generation, userInitiated](const GeoZoneDownloader::Result &download) {
-        _downloadComplete(download, url, generation, userInitiated);
+    _downloader->get(url, etag, lastModified, [this, url, generation, userInitiated, added](const GeoZoneDownloader::Result &download) {
+        _downloadComplete(download, url, generation, userInitiated, added);
         _setPending(-1);
     });
 }
@@ -259,7 +278,7 @@ QString GeoZoneManager::progressText() const
     return _downloader->progressText();
 }
 
-void GeoZoneManager::_downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated)
+void GeoZoneManager::_downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated, bool added)
 {
     if (_generations.value(url) != generation) {
         // Removed or downloaded again in the meantime
@@ -304,6 +323,7 @@ void GeoZoneManager::_downloadComplete(const GeoZoneDownloader::Result &download
     job.loadedAt = QDateTime::currentDateTimeUtc();
     job.fileDate = job.loadedAt;
     job.userInitiated = userInitiated;
+    job.added = added;
     job.generation = generation;
     _startLoad(job, true /* background */);
 }
@@ -317,6 +337,10 @@ GeoZoneManager::LoadResult GeoZoneManager::_runLoad(const LoadJob &job, const Ge
         QFile file(job.sourcePath);
         if (!file.open(QIODevice::ReadOnly)) {
             loadResult.errorString = tr("Unable to open file %1: %2").arg(job.sourcePath, file.errorString());
+            return loadResult;
+        }
+        if (file.size() > GeoZoneDownloader::defaultMaxBytes) {
+            loadResult.errorString = tr("The file %1 is larger than %2.").arg(job.sourcePath, QLocale().formattedDataSize(GeoZoneDownloader::defaultMaxBytes));
             return loadResult;
         }
         bytes = file.readAll();
@@ -417,6 +441,9 @@ void GeoZoneManager::_applyLoad(const LoadJob &job, const LoadResult &loadResult
 
     if (job.userInitiated) {
         setVisible(true);
+    }
+    // Maps move to added sources, which refreshing the feeds must not do
+    if (job.added) {
         emit sourceAdded(source);
     }
 }
@@ -460,7 +487,7 @@ void GeoZoneManager::_idle()
         _startupCheckPending = false;
         _updateValidity();
         if (!_validityWarning.isEmpty()) {
-            qgcApp()->showAppMessage(tr("Some geozone data may be outdated. Load current files in Plan View > Fence > Geozones.\n\n%1").arg(_validityWarning), tr("Geozones"));
+            qgcApp()->showAppMessage(tr("Some geozone data may be outdated. Load current files in Application Settings > Geozones.\n\n%1").arg(_validityWarning), tr("Geozones"));
         }
     }
 }

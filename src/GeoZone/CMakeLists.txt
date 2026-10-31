@@ -2,8 +2,12 @@ target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
         GeoZone.cc
         GeoZone.h
+        GeoZoneAlertLog.cc
+        GeoZoneAlertLog.h
         GeoZoneDownloader.cc
         GeoZoneDownloader.h
+        GeoZoneFenceImporter.cc
+        GeoZoneFenceImporter.h
         GeoZoneGeometry.cc
         GeoZoneGeometry.h
         GeoZoneIndex.cc
@@ -18,6 +22,10 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneMonitor.h
         GeoZoneParser.cc
         GeoZoneParser.h
+        GeoZoneProfile.cc
+        GeoZoneProfile.h
+        GeoZoneSchedule.cc
+        GeoZoneSchedule.h
         GeoZoneShape.cc
         GeoZoneShape.h
         GeoZoneSource.cc
@@ -27,3 +35,27 @@ target_sources(${CMAKE_PROJECT_NAME}
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+qt_add_library(GeoZoneModule STATIC)
+
+qt_add_qml_module(GeoZoneModule
+    URI QGroundControl.GeoZone
+    VERSION 1.0
+    RESOURCE_PREFIX /qml
+    QML_FILES
+        GeoZoneAlertPopup.qml
+        GeoZoneFencePanel.qml
+        GeoZoneIndicator.qml
+        GeoZoneInfoDialog.qml
+        GeoZoneMapVisuals.qml
+        GeoZoneMissionBanner.qml
+        GeoZoneProfileOverlay.qml
+        GeoZoneSettingsPage.qml
+        GeoZoneSourcesPanel.qml
+    RESOURCES
+        GeoZone.svg
+    NO_PLUGIN # Required by Qt 6.6.3. TODO: Remove when no longer supported.
+)
+
+# Explicitly linked like the other QML modules, needed by Qt 6.6.3
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE GeoZoneModule)

@@ -10,6 +10,7 @@
 #include "GeoZoneMonitor.h"
 #include "AudioOutput.h"
 #include "GeoZone.h"
+#include "GeoZoneAlertLog.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSettings.h"
 #include "MultiVehicleManager.h"
@@ -20,9 +21,10 @@
 
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QSet>
-
-#include <cmath>
 #include <QtPositioning/QGeoCircle>
+
+#include <algorithm>
+#include <cmath>
 
 QGC_LOGGING_CATEGORY(GeoZoneMonitorLog, "qgc.geozone.geozonemonitor")
 
@@ -31,40 +33,25 @@ Q_APPLICATION_STATIC(GeoZoneMonitor, _geoZoneMonitor);
 GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     : GeoZoneMonitor(GeoZoneManager::instance(), parent)
 {
+    _alertLog = new GeoZoneAlertLog(this);
+    (void) connect(this, &GeoZoneMonitor::alertEvent, _alertLog, &GeoZoneAlertLog::append);
+
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
-    (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::_evaluateVehicle);
+    (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::_evaluateVehicles);
 
-    (void) connect(this, &GeoZoneMonitor::alert, this, &GeoZoneMonitor::_showAlert);
-    (void) connect(MultiVehicleManager::instance(), &MultiVehicleManager::activeVehicleChanged, this, &GeoZoneMonitor::_activeVehicleChanged);
+    (void) connect(this, &GeoZoneMonitor::alert, this, &GeoZoneMonitor::_speak);
     (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateEvaluateTimer);
     (void) connect(SettingsManager::instance()->geoZoneSettings()->alertsEnabled(), &Fact::rawValueChanged, this, &GeoZoneMonitor::_alertsEnabledChanged);
-    _activeVehicleChanged(MultiVehicleManager::instance()->activeVehicle());
-}
 
-void GeoZoneMonitor::_alertsEnabledChanged()
-{
-    _reset();
-    emit monitoringChanged();
-}
-
-void GeoZoneMonitor::_updateEvaluateTimer()
-{
-    if (monitoring()) {
-        if (!_evaluateTimer.isActive()) {
-            _evaluateTimer.start();
-            _evaluateVehicle();
-        }
-    } else {
-        _evaluateTimer.stop();
+    MultiVehicleManager *const multiVehicleManager = MultiVehicleManager::instance();
+    (void) connect(multiVehicleManager, &MultiVehicleManager::vehicleAdded, this, &GeoZoneMonitor::_vehicleAdded);
+    (void) connect(multiVehicleManager, &MultiVehicleManager::vehicleRemoved, this, &GeoZoneMonitor::_vehicleRemoved);
+    (void) connect(multiVehicleManager, &MultiVehicleManager::activeVehicleChanged, this, &GeoZoneMonitor::_activeVehicleChanged);
+    for (int i = 0; i < multiVehicleManager->vehicles()->count(); i++) {
+        _vehicleAdded(multiVehicleManager->vehicles()->value<Vehicle*>(i));
     }
-}
-
-void GeoZoneMonitor::_evaluateVehicle()
-{
-    if (_vehicle && _vehicle->coordinate().isValid()) {
-        evaluate(vehiclePosition(_vehicle, _vehicle->coordinate()));
-    }
+    _activeVehicleChanged(multiVehicleManager->activeVehicle());
 }
 
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
@@ -76,15 +63,99 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::monitoringChanged);
 }
 
+GeoZoneMonitor *GeoZoneMonitor::instance()
+{
+    return _geoZoneMonitor();
+}
+
+void GeoZoneMonitor::_vehicleAdded(Vehicle *vehicle)
+{
+    if (!vehicle || _trackers.contains(vehicle->id())) {
+        return;
+    }
+    _vehicles.append(vehicle);
+    _trackers.insert(vehicle->id(), Tracker());
+    emit monitoringChanged();
+}
+
+void GeoZoneMonitor::_vehicleRemoved(Vehicle *vehicle)
+{
+    _vehicles.removeIf([vehicle](const QPointer<Vehicle> &monitored) { return !monitored || (monitored == vehicle); });
+    if (vehicle) {
+        removeVehicle(vehicle->id());
+    }
+    emit monitoringChanged();
+}
+
+void GeoZoneMonitor::_activeVehicleChanged(Vehicle *vehicle)
+{
+    setActiveVehicleId(vehicle ? vehicle->id() : noVehicle);
+}
+
+void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
+{
+    if (vehicleId != _activeVehicleId) {
+        _activeVehicleId = vehicleId;
+        emit nearbyZonesChanged();
+    }
+}
+
+void GeoZoneMonitor::removeVehicle(int vehicleId)
+{
+    const auto it = _trackers.find(vehicleId);
+    if (it == _trackers.end()) {
+        return;
+    }
+    const bool hadNearby = !it->nearby.isEmpty();
+    _trackers.erase(it);
+    if (hadNearby && (vehicleId == _activeVehicleId)) {
+        emit nearbyZonesChanged();
+    }
+}
+
+void GeoZoneMonitor::_updateEvaluateTimer()
+{
+    if (monitoring()) {
+        if (!_evaluateTimer.isActive()) {
+            _evaluateTimer.start();
+            _evaluateVehicles();
+        }
+    } else {
+        _evaluateTimer.stop();
+    }
+}
+
+void GeoZoneMonitor::_evaluateVehicles()
+{
+    for (const QPointer<Vehicle> &vehicle : std::as_const(_vehicles)) {
+        if (vehicle && vehicle->coordinate().isValid()) {
+            evaluate(vehiclePosition(vehicle, vehicle->coordinate()), vehicle->id());
+        }
+    }
+}
+
+void GeoZoneMonitor::_alertsEnabledChanged()
+{
+    _resetTrackers();
+    emit monitoringChanged();
+}
+
 bool GeoZoneMonitor::monitoring() const
 {
-    return _vehicle && (_manager->zones()->count() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
+    return !_vehicles.isEmpty() && (_manager->zones()->count() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
+}
+
+const QList<GeoZoneMonitor::Nearby> &GeoZoneMonitor::_activeNearby() const
+{
+    static const QList<Nearby> none;
+    const auto it = _trackers.constFind(_activeVehicleId);
+    return (it != _trackers.constEnd()) ? it->nearby : none;
 }
 
 QVariantList GeoZoneMonitor::nearbyZones() const
 {
     QVariantList zones;
-    for (const Nearby &nearby : _nearby) {
+    for (const Nearby &nearby : _activeNearby()) {
         zones.append(QVariantMap{
             { QStringLiteral("zone"), QVariant::fromValue(static_cast<QObject*>(nearby.zone)) },
             { QStringLiteral("inside"), nearby.inside },
@@ -96,32 +167,14 @@ QVariantList GeoZoneMonitor::nearbyZones() const
 
 int GeoZoneMonitor::alertRestriction() const
 {
-    return _nearby.isEmpty() ? -1 : static_cast<int>(_nearby.first().zone->restriction());
+    const QList<Nearby> &nearby = _activeNearby();
+    return nearby.isEmpty() ? -1 : static_cast<int>(nearby.first().zone->restriction());
 }
 
 bool GeoZoneMonitor::inside() const
 {
-    return std::any_of(_nearby.cbegin(), _nearby.cend(), [](const Nearby &nearby) { return nearby.inside; });
-}
-
-void GeoZoneMonitor::_setNearby(const QList<Nearby> &nearby)
-{
-    if (nearby != _nearby) {
-        _nearby = nearby;
-        emit nearbyZonesChanged();
-    }
-}
-
-GeoZoneMonitor *GeoZoneMonitor::instance()
-{
-    return _geoZoneMonitor();
-}
-
-void GeoZoneMonitor::_activeVehicleChanged(Vehicle *vehicle)
-{
-    _reset();
-    _vehicle = vehicle;
-    emit monitoringChanged();
+    const QList<Nearby> &nearby = _activeNearby();
+    return std::any_of(nearby.cbegin(), nearby.cend(), [](const Nearby &zone) { return zone.inside; });
 }
 
 GeoZone::Position GeoZoneMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate)
@@ -146,15 +199,26 @@ GeoZone::Position GeoZoneMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCo
     return position;
 }
 
-void GeoZoneMonitor::_reset()
+void GeoZoneMonitor::_resetTrackers()
 {
-    _states.clear();
-    _setNearby({});
+    const bool hadNearby = !_activeNearby().isEmpty();
+    for (Tracker &tracker : _trackers) {
+        tracker = Tracker();
+    }
+    if (hadNearby) {
+        emit nearbyZonesChanged();
+    }
 }
 
 void GeoZoneMonitor::_forgetZones()
 {
-    _setNearby({});
+    const bool hadNearby = !_activeNearby().isEmpty();
+    for (Tracker &tracker : _trackers) {
+        tracker.nearby.clear();
+    }
+    if (hadNearby) {
+        emit nearbyZonesChanged();
+    }
 }
 
 QString GeoZoneMonitor::_zoneKey(const GeoZone *zone)
@@ -162,7 +226,16 @@ QString GeoZoneMonitor::_zoneKey(const GeoZone *zone)
     return QStringLiteral("%1\x1f%2\x1f%3\x1f%4").arg(zone->identifier(), zone->name(), zone->sourceText().section(QStringLiteral(" ("), 0, 0)).arg(static_cast<int>(zone->restriction()));
 }
 
-void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
+QString GeoZoneMonitor::_vehicleLabel(int vehicleId) const
+{
+    if (vehicleId == noVehicle) {
+        return QString();
+    }
+    const qsizetype vehicleCount = std::count_if(_trackers.keyBegin(), _trackers.keyEnd(), [](int id) { return id != noVehicle; });
+    return (vehicleCount > 1) ? tr("Vehicle %1").arg(vehicleId) : QString();
+}
+
+void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId)
 {
     if (!position.coordinate.isValid()) {
         return;
@@ -175,6 +248,9 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
     const double approachVerticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
     const QGeoRectangle area = QGeoCircle(position.coordinate, approachDistance + hysteresisDistance).boundingGeoRectangle();
 
+    Tracker &tracker = _trackers[vehicleId];
+    const QString vehicleLabel = _vehicleLabel(vehicleId);
+
     QSet<QString> nearbyZones;
     QList<Nearby> nearby;
     for (GeoZone *zone : _manager->zonesInArea(restrictions, area)) {
@@ -183,7 +259,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
         }
 
         const QString key = _zoneKey(zone);
-        const State previous = _states.value(key, State::Away);
+        const State previous = tracker.states.value(key, State::Away);
         const double insideDistance = zone->distanceTo(position, (previous == State::Inside) ? hysteresisDistance : 0);
         const double nearDistance = zone->distanceTo(position, approachVerticalDistance + ((previous != State::Away) ? hysteresisDistance : 0));
         const double distance = std::min(insideDistance, nearDistance);
@@ -198,23 +274,39 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
         }
 
         nearbyZones.insert(key);
-        _states[key] = state;
+        tracker.states[key] = state;
         nearby.append(Nearby{ zone, state == State::Inside, static_cast<int>(std::lround(distance)) });
         if (state <= previous) {
             continue;
         }
 
         const QString name = zone->name().isEmpty() ? zone->identifier() : zone->name();
-        const QString message = (state == State::Inside) ?
+        QString message = (state == State::Inside) ?
             tr("Entered geozone %1 (%2)").arg(name, zone->restrictionText()) :
             tr("Approaching geozone %1 (%2)").arg(name, zone->restrictionText());
+        if (!vehicleLabel.isEmpty()) {
+            message = QStringLiteral("%1: %2").arg(vehicleLabel, message);
+        }
         qCDebug(GeoZoneMonitorLog) << message << "distance" << distance;
+
+        AlertEvent event;
+        event.time = QDateTime::currentDateTimeUtc();
+        event.vehicleId = vehicleId;
+        event.position = position;
+        event.inside = (state == State::Inside);
+        event.distance = event.inside ? 0 : distance;
+        event.zoneIdentifier = zone->identifier();
+        event.zoneName = zone->name();
+        event.restriction = zone->restriction();
+        event.sourceText = zone->sourceText();
+        event.message = message;
+        emit alertEvent(event);
         emit alert(message);
     }
 
     // Zones out of range or no longer active can alert again
-    for (auto it = _states.begin(); it != _states.end();) {
-        it = nearbyZones.contains(it.key()) ? std::next(it) : _states.erase(it);
+    for (auto it = tracker.states.begin(); it != tracker.states.end();) {
+        it = nearbyZones.contains(it.key()) ? std::next(it) : tracker.states.erase(it);
     }
 
     // The most restrictive first, so being inside large U-space airspace doesn't hide a prohibited zone ahead,
@@ -230,10 +322,16 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position)
         }
         return a.distance < b.distance;
     });
-    _setNearby(nearby);
+
+    if (nearby != tracker.nearby) {
+        tracker.nearby = nearby;
+        if (vehicleId == _activeVehicleId) {
+            emit nearbyZonesChanged();
+        }
+    }
 }
 
-void GeoZoneMonitor::_showAlert(const QString &message)
+void GeoZoneMonitor::_speak(const QString &message)
 {
     // MainWindow shows the message without blocking the user
     if (SettingsManager::instance()->geoZoneSettings()->audioAlerts()->rawValue().toBool()) {

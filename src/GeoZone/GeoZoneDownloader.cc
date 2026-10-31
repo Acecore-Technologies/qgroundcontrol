@@ -45,21 +45,31 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
 
     (void) connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64 received, qint64 total) {
         const auto it = _downloads.find(reply);
-        if (it != _downloads.end()) {
-            it->received = received;
-            it->total = total;
-            emit progressChanged();
+        if (it == _downloads.end()) {
+            return;
         }
+        it->received = received;
+        it->total = total;
+        // Untrusted servers could otherwise exhaust the memory
+        if (!it->tooLarge && ((received > _maxBytes) || (total > _maxBytes))) {
+            it->tooLarge = true;
+            reply->abort();
+            return;
+        }
+        emit progressChanged();
     });
     const bool conditional = !etag.isEmpty() || !lastModified.isEmpty();
     (void) connect(reply, &QNetworkReply::finished, this, [this, reply, conditional, callback = std::move(callback)]() {
         reply->deleteLater();
+        const bool tooLarge = _downloads.value(reply).tooLarge;
         (void) _downloads.remove(reply);
         emit progressChanged();
 
         Result result;
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() != QNetworkReply::NoError) {
+        if (tooLarge) {
+            result.errorString = tr("The download is larger than %1.").arg(QLocale().formattedDataSize(_maxBytes));
+        } else if (reply->error() != QNetworkReply::NoError) {
             result.errorString = reply->errorString();
         } else if ((statusCode == 304) && conditional) {
             result.status = Result::Status::NotModified;

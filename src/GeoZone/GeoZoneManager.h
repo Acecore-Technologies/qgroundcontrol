@@ -59,6 +59,7 @@ public:
     ~GeoZoneManager();
 
     static GeoZoneManager *instance();
+    static void registerQmlTypes();
 
     /// Loads the stored sources in the background, then downloads outdated feeds, warns about outdated data
     /// and refreshes feeds periodically
@@ -127,7 +128,7 @@ signals:
     void busyChanged(bool busy);
     void progressChanged();
     void validityWarningChanged();
-    void sourceAdded(GeoZoneSource *source);    ///< A source added by addFile or addUrl was loaded
+    void sourceAdded(GeoZoneSource *source);    ///< A source added by addFile or addUrl was loaded, not emitted when feeds are refreshed
 
 private slots:
     void _updateActive();
@@ -147,6 +148,7 @@ private:
         QString etag;               ///< HTTP validators of a downloaded feed
         QString lastModified;
         bool userInitiated = false;
+        bool added = false;         ///< Added by addFile or addUrl, not refreshed
         int generation = 0;
     };
     struct LoadResult {
@@ -158,8 +160,8 @@ private:
     void _startLoad(LoadJob job, bool background);
     void _applyLoad(const LoadJob &job, const LoadResult &loadResult);
     void _setStoredFileName(GeoZoneSource *source, const QString &storedFileName);
-    void _download(const QString &url, bool userInitiated);
-    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated);
+    void _download(const QString &url, bool userInitiated, bool added = false);
+    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated, bool added);
     void _idle();
     void _setPending(int delta);
     void _beginZonesChange();

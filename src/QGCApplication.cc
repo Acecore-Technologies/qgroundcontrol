@@ -273,6 +273,7 @@ void QGCApplication::init()
     LinkManager::registerQmlTypes();
     ParameterManager::registerQmlTypes();
     QGroundControlQmlGlobal::registerQmlTypes();
+    GeoZoneManager::registerQmlTypes();
     MissionManager::registerQmlTypes();
     QGCCameraManager::registerQmlTypes();
     MultiVehicleManager::registerQmlTypes();
