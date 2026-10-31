@@ -78,6 +78,17 @@ QString GeoZoneMissionCheck::warningText() const
     return text;
 }
 
+QGeoRectangle GeoZoneMissionCheck::crossedZonesBoundingBox() const
+{
+    QGeoRectangle boundingBox;
+    for (const GeoZone *zone : _crossedZones) {
+        if (zone->boundingBox().isValid()) {
+            boundingBox = boundingBox.isValid() ? boundingBox.united(zone->boundingBox()) : zone->boundingBox();
+        }
+    }
+    return boundingBox;
+}
+
 void GeoZoneMissionCheck::_scheduleUpdate()
 {
     _updateTimer.start();
@@ -108,19 +119,29 @@ void GeoZoneMissionCheck::update()
     }
 }
 
-QList<std::pair<QGeoCoordinate, QGeoCoordinate>> GeoZoneMissionCheck::_missionSegments() const
+QList<GeoZoneMissionCheck::Segment> GeoZoneMissionCheck::_missionSegments() const
 {
-    QList<std::pair<QGeoCoordinate, QGeoCoordinate>> segments;
+    QList<Segment> segments;
     if (!_missionController) {
         return segments;
     }
 
     const auto appendSegments = [&segments](const QmlObjectListModel *model) {
         for (int i = 0; i < model->count(); i++) {
-            const FlightPathSegment *const segment = model->value<const FlightPathSegment*>(i);
-            if (segment) {
-                segments.append({ segment->coordinate1(), segment->coordinate2() });
+            const FlightPathSegment *const flightPathSegment = model->value<const FlightPathSegment*>(i);
+            if (!flightPathSegment) {
+                continue;
             }
+            Segment segment;
+            segment.from = flightPathSegment->coordinate1();
+            segment.to = flightPathSegment->coordinate2();
+            segment.fromAltitudeAMSL = flightPathSegment->coord1AMSLAlt();
+            segment.toAltitudeAMSL = flightPathSegment->coord2AMSLAlt();
+            for (const QVariant &height : flightPathSegment->amslTerrainHeights()) {
+                segment.terrainAMSL.append(height.toDouble());
+            }
+            segment.terrainSpacing = flightPathSegment->distanceBetween();
+            segments.append(segment);
         }
     };
 
@@ -135,25 +156,69 @@ QList<std::pair<QGeoCoordinate, QGeoCoordinate>> GeoZoneMissionCheck::_missionSe
     return segments;
 }
 
-QList<QList<QGeoCoordinate>> GeoZoneMissionCheck::pathsFromSegments(const QList<std::pair<QGeoCoordinate, QGeoCoordinate>> &segments)
+QList<QList<GeoZone::Position>> GeoZoneMissionCheck::pathsFromSegments(const QList<Segment> &segments)
 {
-    QList<QList<QGeoCoordinate>> paths;
-    for (const auto &[from, to] : segments) {
-        if (!from.isValid() || !to.isValid()) {
+    QList<QList<GeoZone::Position>> paths;
+    for (const Segment &segment : segments) {
+        if (!segment.from.isValid() || !segment.to.isValid()) {
             continue;
         }
-        if (paths.isEmpty() || (paths.last().last() != from)) {
-            paths.append({ from });
+
+        const double distance = segment.from.distanceTo(segment.to);
+        const double azimuth = segment.from.azimuthTo(segment.to);
+        const bool terrainKnown = (segment.terrainAMSL.count() >= 2) && (segment.terrainSpacing > 0);
+
+        // Distance along the segment, fraction of the segment and the terrain elevation there
+        struct Sample {
+            double along;
+            double fraction;
+            double terrain;
+        };
+        QList<Sample> samples;
+        if (terrainKnown) {
+            const qsizetype lastIndex = segment.terrainAMSL.count() - 1;
+            for (qsizetype i = 0; i <= lastIndex; i++) {
+                const double along = (i == lastIndex) ? distance : std::min(i * segment.terrainSpacing, distance);
+                samples.append({ along, (distance > 0) ? (along / distance) : (static_cast<double>(i) / lastIndex), segment.terrainAMSL[i] });
+            }
+        } else {
+            // Vehicles fly long legs along the great circle, which zone checks only follow with intermediate points
+            const int steps = std::max(1, std::min(static_cast<int>(std::ceil(distance / maxStepDistance)), maxStepsPerSegment));
+            for (int step = 0; step <= steps; step++) {
+                samples.append({ distance * step / steps, static_cast<double>(step) / steps, qQNaN() });
+            }
         }
 
-        // Vehicles fly long legs along the great circle, which zone checks only follow with intermediate points
-        const double distance = from.distanceTo(to);
-        const double azimuth = from.azimuthTo(to);
-        const int steps = std::min(static_cast<int>(std::ceil(distance / maxStepDistance)), maxStepsPerSegment);
-        for (int step = 1; step < steps; step++) {
-            paths.last().append(from.atDistanceAndAzimuth(distance * step / steps, azimuth));
+        QList<GeoZone::Position> positions;
+        for (const auto &[along, fraction, terrain] : std::as_const(samples)) {
+            GeoZone::Position position;
+            if (along <= 0) {
+                position.coordinate = segment.from;
+            } else if (along >= distance) {
+                position.coordinate = segment.to;
+            } else {
+                position.coordinate = segment.from.atDistanceAndAzimuth(along, azimuth);
+            }
+            position.altitudeAMSL = segment.fromAltitudeAMSL + ((segment.toAltitudeAMSL - segment.fromAltitudeAMSL) * fraction);
+            position.terrainAMSL = terrain;
+            positions.append(position);
         }
-        paths.last().append(to);
+
+        // Continue the previous path, keeping both ends when the altitude changes at the shared waypoint
+        if (!paths.isEmpty() && (paths.last().last().coordinate == segment.from)) {
+            GeoZone::Position &last = paths.last().last();
+            const bool sameAltitude = (last.altitudeAMSL == positions.first().altitudeAMSL) ||
+                                      (qIsNaN(last.altitudeAMSL) && qIsNaN(positions.first().altitudeAMSL));
+            if (sameAltitude) {
+                if (qIsNaN(last.terrainAMSL)) {
+                    last.terrainAMSL = positions.first().terrainAMSL;
+                }
+                positions.removeFirst();
+            }
+            paths.last().append(positions);
+        } else {
+            paths.append(positions);
+        }
     }
     return paths;
 }

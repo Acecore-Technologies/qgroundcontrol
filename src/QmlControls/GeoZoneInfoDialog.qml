@@ -94,5 +94,10 @@ QGCPopupDialog {
             label:  qsTr("Identifier")
             value:  geoZone.country !== "" ? qsTr("%1 (%2)").arg(geoZone.identifier).arg(geoZone.country) : geoZone.identifier
         }
+
+        InfoRow {
+            label:  qsTr("Source")
+            value:  geoZone.sourceText
+        }
     }
 }

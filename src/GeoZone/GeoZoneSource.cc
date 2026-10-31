@@ -55,12 +55,8 @@ QString GeoZoneSource::detailsText() const
     }
 
     QStringList parts = { formatName(), tr("zones: %1").arg(zoneCount()) };
-    if (_issued.isValid()) {
-        parts.append(tr("issued %1").arg(_formatDate(_issued)));
-    } else if (isFeed()) {
-        parts.append(tr("downloaded %1").arg(_formatDate(_loadedAt)));
-    } else if (_fileDate.isValid()) {
-        parts.append(tr("file from %1").arg(_formatDate(_fileDate)));
+    if (!_dateText().isEmpty()) {
+        parts.append(_dateText());
     }
     if (!_provider.isEmpty()) {
         parts.append(_provider);
@@ -69,6 +65,20 @@ QString GeoZoneSource::detailsText() const
         parts.append(tr("unsupported features skipped: %1").arg(_skippedCount));
     }
     return parts.join(QStringLiteral(", "));
+}
+
+QString GeoZoneSource::_dateText() const
+{
+    if (_issued.isValid()) {
+        return tr("issued %1").arg(_formatDate(_issued));
+    }
+    if (isFeed() && _loadedAt.isValid()) {
+        return tr("downloaded %1").arg(_formatDate(_loadedAt));
+    }
+    if (_fileDate.isValid()) {
+        return tr("file from %1").arg(_formatDate(_fileDate));
+    }
+    return QString();
 }
 
 void GeoZoneSource::_clearZones()
@@ -87,6 +97,7 @@ void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &f
 {
     _loadedAt = loadedAt;
     _fileDate = fileDate;
+    updateValidity(QDateTime::currentDateTimeUtc());
     emit changed();
 }
 
@@ -104,8 +115,10 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
     _loadedAt = loadedAt;
     _fileDate = fileDate;
 
+    const QString sourceText = _dateText().isEmpty() ? name() : QStringLiteral("%1 (%2)").arg(name(), _dateText());
     for (const GeoZone::Data &zoneData : result.zones) {
         GeoZone *const zone = new GeoZone(zoneData, this);
+        zone->setSourceText(sourceText);
         _zones.append(zone);
         if (zone->boundingBox().isValid()) {
             _boundingBox = _boundingBox.isValid() ? _boundingBox.united(zone->boundingBox()) : zone->boundingBox();

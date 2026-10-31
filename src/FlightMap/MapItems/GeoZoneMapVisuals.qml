@@ -22,6 +22,7 @@ Item {
 
     property var    map
     property real   labelMinZoomLevel:  11  ///< Zone labels are only shown from this zoom level up
+    property var    highlightedZones:   []  ///< Zones drawn with a white border
 
     readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
 
@@ -112,9 +113,11 @@ Item {
         delegate: MapPolygon {
             geoShape:       object.geoShape
             color:          _root._fillColor(object.zone)
-            border.color:   _root.restrictionColor(object.zone.restriction)
-            border.width:   object.zone.active ? 2 : 1
+            border.color:   _highlighted ? "white" : _root.restrictionColor(object.zone.restriction)
+            border.width:   _highlighted ? 3 : (object.zone.active ? 2 : 1)
             z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
+
+            readonly property bool _highlighted: _root.highlightedZones.indexOf(object.zone) >= 0
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
@@ -128,9 +131,11 @@ Item {
             center:         object.center
             radius:         object.radius
             color:          _root._fillColor(object.zone)
-            border.color:   _root.restrictionColor(object.zone.restriction)
-            border.width:   object.zone.active ? 2 : 1
+            border.color:   _highlighted ? "white" : _root.restrictionColor(object.zone.restriction)
+            border.width:   _highlighted ? 3 : (object.zone.active ? 2 : 1)
             z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
+
+            readonly property bool _highlighted: _root.highlightedZones.indexOf(object.zone) >= 0
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)

@@ -74,8 +74,13 @@ public:
     QString storedFileName() const { return _storedFileName; }
     void setStoredFileName(const QString &storedFileName) { _storedFileName = storedFileName; }
 
-    /// Sets the dates of the stored copy before it is loaded
+    /// Sets the dates of the stored copy before it is loaded, or when a feed is confirmed unchanged
     void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate);
+
+    /// HTTP validators of a feed for downloading it only when it changed
+    QString etag() const { return _etag; }
+    QString lastModified() const { return _lastModified; }
+    void setValidators(const QString &etag, const QString &lastModified) { _etag = etag; _lastModified = lastModified; }
 
     /// Replaces the zones. The previous zones are deleted.
     /// @param fileDate Date of the data when the file has no issue date: file modification or download time
@@ -97,6 +102,7 @@ signals:
 
 private:
     void _clearZones();
+    QString _dateText() const;
 
     const QString _key;
     const QString _url;
@@ -113,6 +119,8 @@ private:
     bool _busy = false;
     QString _errorString;
     QString _storedFileName;
+    QString _etag;
+    QString _lastModified;
 
     QList<GeoZone*> _zones;
     QList<GeoZoneShape*> _shapes;

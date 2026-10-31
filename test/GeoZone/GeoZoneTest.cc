@@ -11,6 +11,7 @@
 #include "GeoFenceController.h"
 #include "GeoZone.h"
 #include "GeoZoneGeometry.h"
+#include "GeoZoneIndex.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
@@ -38,6 +39,8 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrl>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -286,10 +289,15 @@ void GeoZoneTest::_testIsActiveAt()
     QVERIFY(!scheduled.isActiveAt(_utc(monday.addDays(2), QTime(10, 0))));
     QVERIFY(!scheduled.isActiveAt(_utc(QDate(2026, 11, 2), QTime(10, 0))));
 
-    // Daylight events cannot be evaluated, so they apply all day within the date range
+    // Sunrise to sunset at the zone in southern Sweden, within the date range
     const GeoZone daylight(ed318.zones[0]);
-    QVERIFY(daylight.isActiveAt(_utc(QDate(2026, 6, 1), QTime(23, 30))));
+    QVERIFY(daylight.isActiveAt(_utc(QDate(2026, 6, 1), QTime(12, 0))));
+    QVERIFY(!daylight.isActiveAt(_utc(QDate(2026, 6, 1), QTime(23, 30))));
+    QVERIFY(!daylight.isActiveAt(_utc(QDate(2026, 12, 1), QTime(7, 0))));
     QVERIFY(!daylight.isActiveAt(_utc(QDate(2027, 1, 2), QTime(12, 0))));
+    QVERIFY(daylight.isActiveDuring(_utc(QDate(2026, 6, 1), QTime(22, 0)), _utc(QDate(2026, 6, 2), QTime(3, 0))));
+    QVERIFY(!daylight.isActiveDuring(_utc(QDate(2026, 12, 1), QTime(16, 0)), _utc(QDate(2026, 12, 2), QTime(6, 0))));
+    QCOMPARE(daylight.applicabilityText(), QStringLiteral("From 2026-01-01 00:00 UTC to 2026-12-31 23:59 UTC\n  Every day sunrise-sunset"));
 
     // Schedules wrapping past midnight continue into the morning after the listed day
     GeoZoneParser::Result result;
@@ -318,6 +326,68 @@ void GeoZoneTest::_testIsActiveAt()
     QVERIFY(!offset.isActiveAt(_utc(monday, QTime(1, 30))));
     QVERIFY(!offset.isActiveAt(_utc(monday, QTime(23, 30))));
     QCOMPARE(offset.applicabilityText(), QStringLiteral("  MON 01:00-03:00 UTC+02:00"));
+}
+
+void GeoZoneTest::_testDaylightEvents()
+{
+    const auto minutesFrom = [](const QDateTime &time, const QDateTime &expected) {
+        return qAbs(time.secsTo(expected)) / 60.0;
+    };
+
+    // Published times for Zurich at midsummer and London at midwinter
+    const QGeoCoordinate zurich(47.37, 8.54);
+    const QDate midsummer(2026, 6, 21);
+    QVERIFY(minutesFrom(GeoZone::daylightEventTime(QStringLiteral("SR"), midsummer, zurich), _utc(midsummer, QTime(3, 30))) < 3);
+    QVERIFY(minutesFrom(GeoZone::daylightEventTime(QStringLiteral("SS"), midsummer, zurich), _utc(midsummer, QTime(19, 26))) < 3);
+    QVERIFY(GeoZone::daylightEventTime(QStringLiteral("BMCT"), midsummer, zurich) < GeoZone::daylightEventTime(QStringLiteral("SR"), midsummer, zurich));
+    QVERIFY(GeoZone::daylightEventTime(QStringLiteral("EECT"), midsummer, zurich) > GeoZone::daylightEventTime(QStringLiteral("SS"), midsummer, zurich));
+    const QGeoCoordinate london(51.5, -0.13);
+    const QDate midwinter(2026, 12, 21);
+    QVERIFY(minutesFrom(GeoZone::daylightEventTime(QStringLiteral("SR"), midwinter, london), _utc(midwinter, QTime(8, 4))) < 3);
+    QVERIFY(minutesFrom(GeoZone::daylightEventTime(QStringLiteral("SS"), midwinter, london), _utc(midwinter, QTime(15, 54))) < 3);
+    QVERIFY(!GeoZone::daylightEventTime(QStringLiteral("XX"), midwinter, london).isValid());
+
+    // North of the arctic circle the sun doesn't set at midsummer and doesn't rise at midwinter
+    const QGeoCoordinate tromso(69.65, 18.96);
+    QVERIFY(!GeoZone::daylightEventTime(QStringLiteral("SR"), midsummer, tromso).isValid());
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "D", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SR", "endEvent": "SS" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [18.96, 69.65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone arctic(result.zones[0]);
+    QVERIFY(arctic.isActiveAt(_utc(midsummer, QTime(23, 0))));
+    QVERIFY(!arctic.isActiveAt(_utc(midwinter, QTime(11, 0))));
+    QVERIFY(!arctic.isActiveDuring(_utc(midwinter, QTime(0, 0)), _utc(midwinter, QTime(23, 0))));
+
+    // Night periods cover the whole polar night and none of the polar day
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "N", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SS", "endEvent": "SR" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [18.96, 69.65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone arcticNight(result.zones[0]);
+    QVERIFY(arcticNight.isActiveAt(_utc(midwinter, QTime(11, 0))));
+    QVERIFY(!arcticNight.isActiveAt(_utc(midsummer, QTime(23, 0))));
+
+    // In Finland the midsummer sunrise is before midnight UTC
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "F", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SR", "endEvent": "SS" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [25, 65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone finland(result.zones[0]);
+    QVERIFY(GeoZone::daylightEventTime(QStringLiteral("SR"), midsummer, QGeoCoordinate(65, 25)) < _utc(midsummer, QTime(0, 0)));
+    QVERIFY(finland.isActiveAt(_utc(midsummer.addDays(-1), QTime(23, 45))));
+    QVERIFY(finland.isActiveDuring(_utc(midsummer.addDays(-1), QTime(23, 40)), _utc(midsummer.addDays(-1), QTime(23, 50))));
+    QVERIFY(!finland.isActiveAt(_utc(midsummer.addDays(-1), QTime(22, 30))));
+
+    // Mixed time and event: 08:00 local time to sunset
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "M", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startTime": "08:00+02:00", "endEvent": "SS" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8.54, 47.37], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone mixed(result.zones[0]);
+    QVERIFY(!mixed.isActiveAt(_utc(midsummer, QTime(5, 30))));
+    QVERIFY(mixed.isActiveAt(_utc(midsummer, QTime(6, 30))));
+    QVERIFY(mixed.isActiveAt(_utc(midsummer, QTime(19, 0))));
+    QVERIFY(!mixed.isActiveAt(_utc(midsummer, QTime(20, 0))));
+    QCOMPARE(mixed.applicabilityText(), QStringLiteral("  Every day 08:00-sunset UTC+02:00"));
 }
 
 void GeoZoneTest::_testIsActiveDuring()
@@ -429,6 +499,53 @@ void GeoZoneTest::_testOutwardSimplification()
     QCOMPARE(GeoZoneGeometry::simplifyOutward(triangle, 25), triangle);
 }
 
+void GeoZoneTest::_testSpatialIndex()
+{
+    // Random circles from a few meters to a hundred kilometers, and a box crossing many cells
+    QObject zoneParent;
+    QList<GeoZone*> zones;
+    quint32 seed = 12345;
+    const auto random = [&seed]() {
+        seed = (seed * 1103515245u) + 12345u;
+        return static_cast<double>((seed >> 8) & 0xFFFF) / 0xFFFF;
+    };
+    for (int i = 0; i < 3000; i++) {
+        GeoZone::Volume volume;
+        volume.isCircle = true;
+        volume.center = QGeoCoordinate(45 + (random() * 5), 5 + (random() * 8));
+        volume.radius = (i % 500 == 0) ? 100000 : (10 + (random() * 3000));
+        GeoZone::Data data;
+        data.identifier = QString::number(i);
+        data.restriction = (i % 2) ? GeoZone::Prohibited : GeoZone::Conditional;
+        data.volumes.append(volume);
+        zones.append(new GeoZone(data, &zoneParent));
+    }
+
+    GeoZoneIndex index;
+    index.build(zones);
+    for (int i = 0; i < 200; i++) {
+        const double south = 44 + (random() * 7);
+        const double west = 4 + (random() * 10);
+        const double size = (i % 20 == 0) ? 10 : (random() * 0.5);
+        const QGeoRectangle area(QGeoCoordinate(south + size, west), QGeoCoordinate(south, west + size));
+
+        QList<int> expected;
+        for (int j = 0; j < zones.count(); j++) {
+            const QGeoRectangle box = zones[j]->boundingBox();
+            if ((box.topLeft().longitude() <= area.bottomRight().longitude()) && (area.topLeft().longitude() <= box.bottomRight().longitude()) &&
+                (box.bottomRight().latitude() <= area.topLeft().latitude()) && (area.bottomRight().latitude() <= box.topLeft().latitude())) {
+                expected.append(j);
+            }
+        }
+        QCOMPARE(index.query(area), expected);
+    }
+
+    // A point query matches the zones containing it in their bounding box
+    const QGeoCoordinate point = zones[1]->data().volumes[0].center;
+    QVERIFY(index.query(point.latitude(), point.longitude(), point.latitude(), point.longitude()).contains(1));
+    QVERIFY(index.query(QGeoRectangle()).isEmpty());
+}
+
 void GeoZoneTest::_testDisplayText()
 {
     const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
@@ -522,6 +639,7 @@ void GeoZoneTest::_testManagerLoadPersistClear()
         QCOMPARE(ed318Source->skippedCount(), 1);
         QCOMPARE(ed318Source->dataDate(), _utc(QDate(2026, 8, 13), QTime(0, 0)));
         QVERIFY(ed318Source->detailsText().contains(QStringLiteral("issued 2026-08-13")));
+        QCOMPARE(manager.zones()->value<GeoZone*>(0)->sourceText(), QStringLiteral("Test GeoZones (issued 2026-08-13)"));
         QVERIFY(QFile::exists(QDir(storageDir.path()).filePath(ed318Source->storedFileName())));
 
         // A failed load keeps the current zones
@@ -666,6 +784,77 @@ void GeoZoneTest::_testManagerBackgroundLoad()
     QTRY_VERIFY(!restarted.busy());
     QCOMPARE(restarted.zones()->count(), 3);
     QVERIFY(restarted.source(feedUrl)->isFeed());
+}
+
+void GeoZoneTest::_testFeedNotModified()
+{
+    QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QByteArray body = fixture.readAll();
+
+    // Serves the feed with an ETag and answers matching conditional requests with 304 Not Modified
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    int requestCount = 0;
+    int notModifiedCount = 0;
+    (void) connect(&server, &QTcpServer::newConnection, &server, [&]() {
+        while (QTcpSocket *const socket = server.nextPendingConnection()) {
+            (void) connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
+                const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", request);
+                if (!request.contains("\r\n\r\n")) {
+                    return;
+                }
+                requestCount++;
+                // Header names are case insensitive, Qt sends them in lower case
+                if (request.toLower().contains("if-none-match: \"v1\"")) {
+                    notModifiedCount++;
+                    (void) socket->write("HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                } else {
+                    (void) socket->write(QByteArray("HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nLast-Modified: Sat, 31 Oct 2026 10:00:00 GMT\r\n"
+                                                    "Content-Type: application/json\r\nConnection: close\r\nContent-Length: ") +
+                                         QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                }
+                socket->disconnectFromHost();
+            });
+            (void) connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+    const QString url = QStringLiteral("http://127.0.0.1:%1/zones.json").arg(server.serverPort());
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        GeoZoneSource *const feed = manager.source(url);
+        QVERIFY(feed);
+        QCOMPARE(feed->etag(), QStringLiteral("\"v1\""));
+        QCOMPARE(feed->lastModified(), QStringLiteral("Sat, 31 Oct 2026 10:00:00 GMT"));
+        QCOMPARE(requestCount, 1);
+
+        // An unchanged feed is not downloaded again but counts as current
+        const QDateTime loadedAt = feed->loadedAt();
+        QTest::qWait(10);
+        manager.refreshFeeds();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(notModifiedCount, 1);
+        QCOMPARE(manager.zones()->count(), 3);
+        QVERIFY(feed->loadedAt() > loadedAt);
+        QVERIFY(feed->errorString().isEmpty());
+    }
+
+    // The validators are kept across restarts
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(false);
+    QCOMPARE(restarted.source(url)->etag(), QStringLiteral("\"v1\""));
+    restarted.refreshFeeds();
+    QTRY_VERIFY(!restarted.busy());
+    QCOMPARE(notModifiedCount, 2);
+    QCOMPARE(restarted.zones()->count(), 3);
 }
 
 void GeoZoneTest::_testSourceValidity()
@@ -833,13 +1022,94 @@ void GeoZoneTest::_testContainsAndPaths()
     const QGeoCoordinate b = a.atDistanceAndAzimuth(500, 0);
     const QGeoCoordinate c = b.atDistanceAndAzimuth(500, 90);
     const QGeoCoordinate d = a.atDistanceAndAzimuth(5000, 180);
-    const QList<QList<QGeoCoordinate>> paths = GeoZoneMissionCheck::pathsFromSegments({ { a, b }, { b, c }, { QGeoCoordinate(), d }, { d, a } });
+    const auto coordinates = [](const QList<GeoZone::Position> &path) {
+        QList<QGeoCoordinate> result;
+        for (const GeoZone::Position &position : path) {
+            result.append(position.coordinate);
+        }
+        return result;
+    };
+    QList<QList<GeoZone::Position>> paths = GeoZoneMissionCheck::pathsFromSegments({ { a, b }, { b, c }, { QGeoCoordinate(), d }, { d, a } });
     QCOMPARE(paths.count(), 2);
-    QCOMPARE(paths[0], QList<QGeoCoordinate>({ a, b, c }));
+    QCOMPARE(coordinates(paths[0]), QList<QGeoCoordinate>({ a, b, c }));
     QCOMPARE(paths[1].count(), 6);
-    QCOMPARE(paths[1].first(), d);
-    QCOMPARE(paths[1].last(), a);
-    QVERIFY(qAbs(paths[1][1].distanceTo(d) - 1000) < 1);
+    QCOMPARE(paths[1].first().coordinate, d);
+    QCOMPARE(paths[1].last().coordinate, a);
+    QVERIFY(qAbs(paths[1][1].coordinate.distanceTo(d) - 1000) < 1);
+
+    // Positions at the terrain samples with interpolated altitudes, and a climb at a shared waypoint is kept
+    GeoZoneMissionCheck::Segment climb{ a, a, 400, 500 };
+    GeoZoneMissionCheck::Segment leg{ a, b, 500, 600, { 300, 350, 320 }, 300 };
+    paths = GeoZoneMissionCheck::pathsFromSegments({ climb, leg });
+    QCOMPARE(paths.count(), 1);
+    QCOMPARE(paths[0].count(), 4);
+    QCOMPARE(paths[0][0].altitudeAMSL, 400.0);
+    QCOMPARE(paths[0][1].altitudeAMSL, 500.0);
+    QCOMPARE(paths[0][1].terrainAMSL, 300.0);
+    QCOMPARE(paths[0][2].altitudeAMSL, 560.0);
+    QCOMPARE(paths[0][2].terrainAMSL, 350.0);
+    QVERIFY(qAbs(paths[0][2].coordinate.distanceTo(a) - 300) < 1);
+    QCOMPARE(paths[0][3].coordinate, b);
+    QCOMPARE(paths[0][3].terrainAMSL, 320.0);
+}
+
+void GeoZoneTest::_testAltitudeLimits()
+{
+    const QGeoCoordinate center(47, 8);
+    const auto position = [](const QGeoCoordinate &coordinate, double altitudeAMSL, double terrainAMSL) {
+        return GeoZone::Position{ coordinate, altitudeAMSL, terrainAMSL };
+    };
+
+    // Ground to 120 m above ground
+    GeoZone::Volume low;
+    low.isCircle = true;
+    low.center = center;
+    low.radius = 500;
+    low.lowerLimit = 0;
+    low.lowerReference = QStringLiteral("AGL");
+    low.upperLimit = 120;
+    low.upperReference = QStringLiteral("AGL");
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 450, 400), position(center, 450, 400)));
+    QVERIFY(!GeoZone::verticalOverlap(low, position(center, 600, 400), position(center, 600, 400)));
+    // Slightly below the ground is still inside a zone from the ground
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 399.9, 400), position(center, 399.9, 400)));
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 600, 400), position(center, 600, 400), 100));
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 450, 400), position(center, 700, 400)));
+    // Unknown terrain or altitude can't be excluded
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 600, qQNaN()), position(center, 600, qQNaN())));
+    QVERIFY(GeoZone::verticalOverlap(low, GeoZone::Position{ center }, GeoZone::Position{ center }));
+
+    // 1000 ft above mean sea level and higher, published in feet
+    GeoZone::Volume high = low;
+    high.feet = true;
+    high.lowerLimit = 1000;
+    high.lowerReference = QStringLiteral("AMSL");
+    high.upperLimit = 99999;
+    high.upperReference = QStringLiteral("AMSL");
+    QVERIFY(!GeoZone::verticalOverlap(high, position(center, 300, 250), position(center, 300, 250)));
+    QVERIFY(GeoZone::verticalOverlap(high, position(center, 310, 250), position(center, 310, 250)));
+    QVERIFY(GeoZone::verticalOverlap(high, position(center, 9000, 250), position(center, 9000, 250)));
+
+    // Flight levels can't be compared
+    GeoZone::Volume flightLevel = high;
+    flightLevel.lowerReference = QStringLiteral("STD");
+    QVERIFY(GeoZone::verticalOverlap(flightLevel, position(center, 0, 0), position(center, 0, 0)));
+
+    GeoZone::Data data;
+    data.volumes.append(low);
+    const GeoZone zone(data);
+    QVERIFY(zone.contains(position(center, 450, 400)));
+    QVERIFY(!zone.contains(position(center, 600, 400)));
+    QCOMPARE(zone.distanceTo(position(center.atDistanceAndAzimuth(600, 0), 450, 400)), zone.distanceTo(center.atDistanceAndAzimuth(600, 0)));
+    QVERIFY(qIsInf(zone.distanceTo(position(center, 600, 400))));
+    QCOMPARE(zone.distanceTo(position(center, 600, 400), 100), 0.0);
+
+    // Paths above the ceiling pass, paths descending into the zone enter it
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(1000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(1000, 90);
+    QVERIFY(!zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(east, 600, 400) }));
+    QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(east, 450, 400) }));
+    QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, qQNaN()), position(east, 600, qQNaN()) }));
 }
 
 void GeoZoneTest::_testMissionCheck()
@@ -855,6 +1125,18 @@ void GeoZoneTest::_testMissionCheck()
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
     QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+
+    // Far above the planned altitudes
+    QJsonObject high = _circleFeature(QStringLiteral("HIGH"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(500, 90), 300);
+    QJsonArray geometry = high[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("lowerLimit")] = 5000;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
+    layer[QStringLiteral("upperLimit")] = 6000;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
+    geometry[0] = layer;
+    high[QStringLiteral("geometry")] = geometry;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("high.json"), QJsonArray{ high }), errorString), qPrintable(errorString));
 
     PlanMasterController masterController;
     masterController.setFlyView(false);
@@ -879,6 +1161,8 @@ void GeoZoneTest::_testMissionCheck()
     QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[0])->identifier(), QStringLiteral("P"));
     QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[1])->identifier(), QStringLiteral("C"));
     QVERIFY(check.warningText().contains(QStringLiteral("P (Prohibited)")));
+    QVERIFY(check.crossedZonesBoundingBox().contains(center));
+    QVERIFY(check.crossedZonesBoundingBox().contains(center.atDistanceAndAzimuth(2000, 0)));
 
     // Zones are released before the manager deletes them
     manager.clear();
@@ -905,39 +1189,68 @@ void GeoZoneTest::_testMonitorAlerts()
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
 
     // Far away, then approaching, then inside, each alerting once
-    monitor.evaluate(center.atDistanceAndAzimuth(1000, 0));
+    monitor.evaluate({ center.atDistanceAndAzimuth(1000, 0) });
     QCOMPARE(alertSpy.count(), 0);
-    monitor.evaluate(center.atDistanceAndAzimuth(380, 0));
+    monitor.evaluate({ center.atDistanceAndAzimuth(380, 0) });
     QCOMPARE(alertSpy.count(), 1);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));
-    monitor.evaluate(center.atDistanceAndAzimuth(350, 0));
+    QCOMPARE(monitor.nearbyZones().count(), 1);
+    QVERIFY(!monitor.inside());
+    QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("distance")].toInt(), 80);
+    QCOMPARE(monitor.alertRestriction(), static_cast<int>(GeoZone::Prohibited));
+    monitor.evaluate({ center.atDistanceAndAzimuth(350, 0) });
     QCOMPARE(alertSpy.count(), 1);
-    monitor.evaluate(center.atDistanceAndAzimuth(250, 0));
+    monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) });
     QCOMPARE(alertSpy.count(), 2);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone P")));
+    QVERIFY(monitor.inside());
 
     // Jitter across the boundary and the approach distance does not alert again
-    monitor.evaluate(center.atDistanceAndAzimuth(310, 0));
-    monitor.evaluate(center.atDistanceAndAzimuth(290, 0));
-    monitor.evaluate(center.atDistanceAndAzimuth(410, 0));
-    monitor.evaluate(center.atDistanceAndAzimuth(390, 0));
+    monitor.evaluate({ center.atDistanceAndAzimuth(310, 0) });
+    monitor.evaluate({ center.atDistanceAndAzimuth(290, 0) });
+    monitor.evaluate({ center.atDistanceAndAzimuth(410, 0) });
+    monitor.evaluate({ center.atDistanceAndAzimuth(390, 0) });
     QCOMPARE(alertSpy.count(), 2);
 
     // Leaving the area resets the zone
-    monitor.evaluate(center.atDistanceAndAzimuth(1000, 0));
-    monitor.evaluate(center.atDistanceAndAzimuth(250, 0));
+    monitor.evaluate({ center.atDistanceAndAzimuth(1000, 0) });
+    QVERIFY(monitor.nearbyZones().isEmpty());
+    QCOMPARE(monitor.alertRestriction(), -1);
+    monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) });
     QCOMPARE(alertSpy.count(), 3);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone P")));
 
     // Unrestricted and inactive zones don't alert
-    monitor.evaluate(center.atDistanceAndAzimuth(3000, 270));
-    monitor.evaluate(center.atDistanceAndAzimuth(3000, 90));
+    monitor.evaluate({ center.atDistanceAndAzimuth(3000, 270) });
+    monitor.evaluate({ center.atDistanceAndAzimuth(3000, 90) });
     QCOMPARE(alertSpy.count(), 3);
 
     // Zones are forgotten before the manager deletes them
     manager.clear();
-    monitor.evaluate(center);
+    monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 3);
+
+    // A zone from 120 m above ground: flying below it does not enter it, climbing towards it approaches it
+    QJsonObject elevated = _circleFeature(QStringLiteral("H"), QStringLiteral("PROHIBITED"), center, 300);
+    QJsonArray geometry = elevated[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("lowerLimit")] = 120;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
+    layer[QStringLiteral("upperLimit")] = 500;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AGL");
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    geometry[0] = layer;
+    elevated[QStringLiteral("geometry")] = geometry;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("elevated.json"), QJsonArray{ elevated }), errorString), qPrintable(errorString));
+    alertSpy.clear();
+    monitor.evaluate({ center, 450, 400 });
+    QCOMPARE(alertSpy.count(), 0);
+    monitor.evaluate({ center, 500, 400 });
+    QCOMPARE(alertSpy.count(), 1);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone H")));
+    monitor.evaluate({ center, 530, 400 });
+    QCOMPARE(alertSpy.count(), 2);
+    QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone H")));
 }
 
 void GeoZoneTest::_testLabelZonesLimit()

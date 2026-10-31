@@ -14,13 +14,15 @@
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtPositioning/QGeoCoordinate>
+#include <QtPositioning/QGeoRectangle>
 
-class GeoZone;
+#include "GeoZone.h"
+
 class GeoZoneManager;
 class MissionController;
 
-/// Checks whether the planned mission's flight path enters restricted geozones. Altitudes and zone
-/// schedules are not considered, since the mission may be flown at any time.
+/// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
+/// altitudes. Zone schedules are not considered, since the mission may be flown at any time.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -29,6 +31,7 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged)
     Q_PROPERTY(QList<QObject*>      crossedZones        READ crossedZones                                   NOTIFY crossedZonesChanged)
     Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY crossedZonesChanged)
+    Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged)
 
 public:
     /// @param manager Zones to check, GeoZoneManager::instance() when null
@@ -43,13 +46,24 @@ public:
 
     QList<QObject*> crossedZones() const;
     QString warningText() const;
+    QGeoRectangle crossedZonesBoundingBox() const;
 
     /// Re-evaluates immediately instead of after changes settle
-    void update();
+    Q_INVOKABLE void update();
 
-    /// Splits flight path segments into connected paths. Legs longer than maxStepDistance get intermediate
-    /// points along the great circle.
-    static QList<QList<QGeoCoordinate>> pathsFromSegments(const QList<std::pair<QGeoCoordinate, QGeoCoordinate>> &segments);
+    /// Straight flight path segment between two mission items
+    struct Segment {
+        QGeoCoordinate from;
+        QGeoCoordinate to;
+        double fromAltitudeAMSL = qQNaN();
+        double toAltitudeAMSL = qQNaN();
+        QList<double> terrainAMSL;  ///< Ground elevation every terrainSpacing meters from the start, the last sample at the end
+        double terrainSpacing = 0;
+    };
+
+    /// Splits flight path segments into connected paths with a position at each terrain sample, or along the great
+    /// circle every maxStepDistance without terrain samples. Altitudes are interpolated.
+    static QList<QList<GeoZone::Position>> pathsFromSegments(const QList<Segment> &segments);
 
 signals:
     void missionControllerChanged();
@@ -58,7 +72,7 @@ signals:
 private:
     void _scheduleUpdate();
     void _clearZones();
-    QList<std::pair<QGeoCoordinate, QGeoCoordinate>> _missionSegments() const;
+    QList<Segment> _missionSegments() const;
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;

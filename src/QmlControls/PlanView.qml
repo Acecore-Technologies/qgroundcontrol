@@ -199,6 +199,25 @@ Item {
             if (!checkReadyForSaveUpload(false /* save */)) {
                 return
             }
+
+            // The warning banner updates after changes settle, so check the current plan
+            geoZoneMissionCheck.update()
+            var prohibitedZones = geoZoneMissionCheck.crossedZones.filter(zone => zone.restriction === GeoZone.Prohibited)
+            if (prohibitedZones.length > 0) {
+                var names = prohibitedZones.slice(0, 5).map(zone => zone.name !== "" ? zone.name : zone.identifier).join(", ")
+                if (prohibitedZones.length > 5) {
+                    names += qsTr(" and %1 more").arg(prohibitedZones.length - 5)
+                }
+                mainWindow.showMessageDialog(qsTr("Plan Upload"),
+                                             qsTr("The mission path enters prohibited geozones: %1\n\nClick 'Ok' to upload the Plan anyway.").arg(names),
+                                             Dialog.Ok | Dialog.Cancel,
+                                             function() { _uploadAfterGeoZoneCheck() })
+                return
+            }
+            _uploadAfterGeoZoneCheck()
+        }
+
+        function _uploadAfterGeoZoneCheck() {
             switch (_missionController.sendToVehiclePreCheck()) {
                 case MissionController.SendToVehiclePreCheckStateOk:
                     sendToVehicle()
@@ -502,8 +521,9 @@ Item {
             }
 
             GeoZoneMapVisuals {
-                id:     geoZoneMapVisuals
-                map:    editorMap
+                id:                 geoZoneMapVisuals
+                map:                editorMap
+                highlightedZones:   geoZoneMissionCheck.crossedZones
             }
 
             GeoFenceMapVisuals {
@@ -564,8 +584,8 @@ Item {
             anchors.top:        parent.top
             anchors.topMargin:  _toolsMargin
             x:                  _left + ((_availableWidth - width) / 2)
-            width:              Math.min(geoZoneMissionWarningLabel.implicitWidth + (_margin * 2), _availableWidth)
-            height:             geoZoneMissionWarningLabel.height + (_margin * 2)
+            width:              Math.min(Math.max(geoZoneMissionWarningLabel.implicitWidth, geoZoneMissionHintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+            height:             geoZoneMissionWarningColumn.height + (_margin * 2)
             radius:             ScreenTools.defaultFontPixelWidth / 2
             color:              qgcPal.window
             border.color:       qgcPal.warningText
@@ -576,13 +596,35 @@ Item {
             readonly property real _left:           toolStrip.x + toolStrip.width + _toolsMargin
             readonly property real _availableWidth: Math.max(rightPanel.x - _toolsMargin - _left, ScreenTools.defaultFontPixelWidth * 20)
 
-            QGCLabel {
-                id:                 geoZoneMissionWarningLabel
+            Column {
+                id:                 geoZoneMissionWarningColumn
                 anchors.centerIn:   parent
-                width:              Math.min(implicitWidth, geoZoneMissionWarning._availableWidth - (geoZoneMissionWarning._margin * 2))
-                wrapMode:           Text.WordWrap
-                color:              qgcPal.warningText
-                text:               geoZoneMissionCheck.warningText
+                width:              parent.width - (geoZoneMissionWarning._margin * 2)
+
+                QGCLabel {
+                    id:                     geoZoneMissionWarningLabel
+                    width:                  parent.width
+                    wrapMode:               Text.WordWrap
+                    horizontalAlignment:    Text.AlignHCenter
+                    color:                  qgcPal.warningText
+                    text:                   geoZoneMissionCheck.warningText
+                }
+
+                QGCLabel {
+                    id:                     geoZoneMissionHintLabel
+                    width:                  parent.width
+                    horizontalAlignment:    Text.AlignHCenter
+                    font.pointSize:         ScreenTools.smallFontPointSize
+                    text:                   qsTr("Click to show the zones")
+                }
+            }
+
+            QGCMouseArea {
+                anchors.fill:   parent
+                onClicked: {
+                    QGroundControl.geoZoneManager.visible = true
+                    editorMap.fitViewportToGeoShape(geoZoneMissionCheck.crossedZonesBoundingBox, ScreenTools.defaultFontPixelHeight * 2)
+                }
             }
         }
 

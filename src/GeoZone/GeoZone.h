@@ -37,6 +37,7 @@ class GeoZone : public QObject
     Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT)
     Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT)
     Q_PROPERTY(bool             active                  READ active                 NOTIFY activeChanged)
+    Q_PROPERTY(QString          sourceText              READ sourceText             CONSTANT)   ///< File or feed the zone was loaded from
 
 public:
     enum Restriction {
@@ -64,12 +65,19 @@ public:
         QGeoRectangle boundingBox() const;
     };
 
+    /// Horizontal position with optional altitudes
+    struct Position {
+        QGeoCoordinate coordinate;
+        double altitudeAMSL = qQNaN();  ///< NaN when unknown
+        double terrainAMSL = qQNaN();   ///< Ground elevation for limits relative to the ground, NaN when unknown
+    };
+
     struct DailyPeriod {
         QList<int> days;        ///< Qt::DayOfWeek values, empty for any day
-        QTime startTime;        ///< Invalid when not given or given as a daylight event. Ends before startTime wrap past midnight.
+        QTime startTime;        ///< Invalid when not given or given as a daylight event. Ends before the start wrap past midnight.
         QTime endTime;
         int utcOffsetSecs = 0;  ///< Offset from UTC of the days and times as published
-        QString startEvent;     ///< Daylight event code (BMCT, SR, SS, EECT) when used instead of a time
+        QString startEvent;     ///< Daylight event code (BMCT, SR, SS, EECT), used instead of the time when given
         QString endEvent;
     };
 
@@ -113,17 +121,24 @@ public:
     QGeoCoordinate center() const { return _boundingBox.center(); }
     QGeoRectangle boundingBox() const { return _boundingBox; }
     bool active() const { return _active; }
+    QString sourceText() const { return _sourceText; }
+    /// Set by the source before the zone is published
+    void setSourceText(const QString &sourceText) { _sourceText = sourceText; }
 
     /// Re-evaluates the active state against the specified UTC time
     void updateActive(const QDateTime &now);
 
-    /// @return true if the zone applies at the specified time. Daily periods defined by daylight
-    ///         events (sunrise/sunset) cannot be evaluated and are treated as applicable.
+    /// @return true if the zone applies at the specified time. Daylight events are computed at the zone center.
     bool isActiveAt(const QDateTime &dateTime) const;
 
-    /// @return true if the zone applies at any time between start and end inclusive. Daylight
-    ///         event periods are treated as applicable all day.
+    /// @return true if the zone applies at any time between start and end inclusive
     bool isActiveDuring(const QDateTime &start, const QDateTime &end) const;
+
+    /// Time of a daylight event used by schedules: BMCT (begin of morning civil twilight), SR (sunrise),
+    /// SS (sunset) or EECT (end of evening civil twilight)
+    /// @return UTC time of the event on the date at the location. Invalid for unknown events and when the
+    ///         sun doesn't cross the event altitude that day.
+    static QDateTime daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location);
 
     /// Outer boundaries of all polygon volumes, clockwise and without duplicates. Holes are dropped
     /// so that excluding these polygons is always conservative.
@@ -134,14 +149,23 @@ public:
     /// Circle volumes without duplicates
     QList<QGeoCircle> exclusionCircles() const;
 
-    /// @return true if the coordinate is inside the horizontal projection of a volume. Altitude is ignored.
-    bool contains(const QGeoCoordinate &coordinate) const;
+    /// @return true if the position is inside a volume. Unknown altitudes are inside all vertical limits.
+    bool contains(const Position &position) const;
+    bool contains(const QGeoCoordinate &coordinate) const { return contains(Position{ coordinate }); }
 
-    /// @return Horizontal distance in meters from the coordinate to the closest volume, 0 when inside
-    double distanceTo(const QGeoCoordinate &coordinate) const;
+    /// @return Horizontal distance in meters from the position to the closest volume whose vertical limits are
+    ///         within verticalMargin meters of the position's altitude. 0 when inside, infinity without such a volume.
+    double distanceTo(const Position &position, double verticalMargin = 0) const;
+    double distanceTo(const QGeoCoordinate &coordinate) const { return distanceTo(Position{ coordinate }); }
 
-    /// @return true if the path enters the horizontal projection of a volume. Altitude is ignored.
+    /// @return true if the path enters a volume. Altitudes are interpolated between the positions, so paths
+    ///         following terrain need a position at each terrain sample.
+    bool intersectsPath(const QList<Position> &path) const;
     bool intersectsPath(const QList<QGeoCoordinate> &path) const;
+
+    /// @return true if the vertical limits of the volume overlap the altitudes between the positions, extended by
+    ///         the margin. Unknown altitudes, limits and references overlap.
+    static bool verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin = 0);
 
     static Restriction restrictionFromString(const QString &restriction);
     static QString restrictionToString(Restriction restriction);
@@ -154,9 +178,11 @@ signals:
 
 private:
     static QString _limitToString(double limit, const QString &reference, bool feet);
+    bool _volumeContains(const Volume &volume, const QGeoCoordinate &coordinate) const;
 
     const Data _data;
     QGeoRectangle _boundingBox;
     bool _active = true;
+    QString _sourceText;
     mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance
 };

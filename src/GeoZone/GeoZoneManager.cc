@@ -25,6 +25,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QMap>
 #include <QtCore/QSaveFile>
 #include <QtCore/QSet>
 #include <QtCore/QSettings>
@@ -37,6 +38,7 @@
 #include <QtNetwork/QNetworkRequest>
 
 #include <algorithm>
+#include <numeric>
 
 QGC_LOGGING_CATEGORY(GeoZoneManagerLog, "qgc.geozone.geozonemanager")
 
@@ -250,6 +252,16 @@ void GeoZoneManager::_download(const QString &url, bool userInitiated)
     QNetworkRequest request(parsedUrl);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     request.setTransferTimeout(downloadTimeoutSecs * 1000);
+    // Servers answer 304 Not Modified instead of sending an unchanged feed again
+    const GeoZoneSource *const existing = source(url);
+    if (existing && existing->loaded()) {
+        if (!existing->etag().isEmpty()) {
+            request.setRawHeader("If-None-Match", existing->etag().toUtf8());
+        }
+        if (!existing->lastModified().isEmpty()) {
+            request.setRawHeader("If-Modified-Since", existing->lastModified().toUtf8());
+        }
+    }
 
     _setPending(1);
     QNetworkReply *const reply = _networkManager->get(request);
@@ -268,15 +280,7 @@ void GeoZoneManager::_download(const QString &url, bool userInitiated)
         reply->deleteLater();
         (void) _downloads.remove(reply);
         emit progressChanged();
-
-        QString errorString;
-        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() != QNetworkReply::NoError) {
-            errorString = reply->errorString();
-        } else if ((statusCode < 200) || (statusCode >= 300)) {
-            errorString = tr("The server responded with status %1.").arg(statusCode);
-        }
-        _downloadComplete(url, generation, (errorString.isEmpty() ? reply->readAll() : QByteArray()), errorString, userInitiated);
+        _downloadComplete(reply, url, generation, userInitiated);
     });
 }
 
@@ -317,7 +321,7 @@ QString GeoZoneManager::progressText() const
     return tr("Downloading %1: %2").arg(name, size);
 }
 
-void GeoZoneManager::_downloadComplete(const QString &url, int generation, const QByteArray &data, const QString &errorString, bool userInitiated)
+void GeoZoneManager::_downloadComplete(QNetworkReply *reply, const QString &url, int generation, bool userInitiated)
 {
     if (_generations.value(url) != generation) {
         // Removed or downloaded again in the meantime
@@ -325,10 +329,34 @@ void GeoZoneManager::_downloadComplete(const QString &url, int generation, const
         return;
     }
 
+    GeoZoneSource *const existing = source(url);
+    const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if ((reply->error() == QNetworkReply::NoError) && (statusCode == 304) && existing) {
+        qCDebug(GeoZoneManagerLog) << "Feed not modified" << url;
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        existing->setStoredDates(now, now);
+        existing->setBusy(false);
+        existing->setErrorString(QString());
+        _saveIndex();
+        _updateValidity();
+        _setPending(-1);
+        return;
+    }
+
+    QString errorString;
+    QByteArray data;
+    if (reply->error() != QNetworkReply::NoError) {
+        errorString = reply->errorString();
+    } else if ((statusCode < 200) || (statusCode >= 300)) {
+        errorString = tr("The server responded with status %1.").arg(statusCode);
+    } else {
+        data = reply->readAll();
+    }
+
     if (!errorString.isEmpty() || data.isEmpty()) {
         const QString error = errorString.isEmpty() ? tr("No data was received.") : errorString;
         qCWarning(GeoZoneManagerLog) << "Download failed" << url << error;
-        if (GeoZoneSource *const existing = source(url)) {
+        if (existing) {
             existing->setBusy(false);
             existing->setErrorString(error);
         }
@@ -343,6 +371,8 @@ void GeoZoneManager::_downloadComplete(const QString &url, int generation, const
     job.key = url;
     job.url = url;
     job.data = data;
+    job.etag = QString::fromUtf8(reply->rawHeader("ETag"));
+    job.lastModified = QString::fromUtf8(reply->rawHeader("Last-Modified"));
     job.storedFileName = _newStoredFileName();
     job.loadedAt = QDateTime::currentDateTimeUtc();
     job.fileDate = job.loadedAt;
@@ -445,6 +475,9 @@ void GeoZoneManager::_applyLoad(const LoadJob &job, const LoadResult &loadResult
     }
     source->setResult(loadResult.result, job.loadedAt, job.fileDate);
     source->setErrorString(QString());
+    if (source->isFeed() && !job.data.isEmpty()) {
+        source->setValidators(job.etag, job.lastModified);
+    }
     _endZonesChange();
 
     _saveIndex();
@@ -536,6 +569,8 @@ void GeoZoneManager::_beginZonesChange()
     emit zonesAboutToChange();
     _activeTimer->stop();
     _zones->clear();
+    _zoneList.clear();
+    _index.clear();
     _shapes.clear();
     _boundingBox = QGeoRectangle();
 }
@@ -546,11 +581,14 @@ void GeoZoneManager::_endZonesChange()
     for (int i = 0; i < _sources->count(); i++) {
         const GeoZoneSource *const source = _sources->value<GeoZoneSource*>(i);
         zones.append(QList<QObject*>(source->zones().cbegin(), source->zones().cend()));
+        _zoneList.append(source->zones());
         _shapes.append(source->shapes());
         if (source->boundingBox().isValid()) {
             _boundingBox = _boundingBox.isValid() ? _boundingBox.united(source->boundingBox()) : source->boundingBox();
         }
     }
+
+    _index.build(_zoneList);
 
     // Appending an empty list would insert an invalid row range
     if (!zones.isEmpty()) {
@@ -596,6 +634,8 @@ void GeoZoneManager::loadStoredSources(bool background)
         job.sourcePath = _storedPath(storedFileName);
         job.loadedAt = QDateTime::fromString(entry.value(QStringLiteral("loadedAt")).toString(), Qt::ISODate);
         job.fileDate = QDateTime::fromString(entry.value(QStringLiteral("fileDate")).toString(), Qt::ISODate);
+        job.etag = entry.value(QStringLiteral("etag")).toString();
+        job.lastModified = entry.value(QStringLiteral("lastModified")).toString();
         if (job.key.isEmpty() || storedFileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
             qCWarning(GeoZoneManagerLog) << "Skipping stored geozone source" << job.key << storedFileName;
             continue;
@@ -606,6 +646,7 @@ void GeoZoneManager::loadStoredSources(bool background)
         GeoZoneSource *const placeholder = new GeoZoneSource(job.key, job.url, this);
         placeholder->setStoredFileName(storedFileName);
         placeholder->setStoredDates(job.loadedAt, job.fileDate);
+        placeholder->setValidators(job.etag, job.lastModified);
         _sources->append(placeholder);
         jobs.append(job);
     }
@@ -634,6 +675,12 @@ void GeoZoneManager::_saveIndex() const
         };
         if (source->isFeed()) {
             entry.insert(QStringLiteral("url"), source->url());
+            if (!source->etag().isEmpty()) {
+                entry.insert(QStringLiteral("etag"), source->etag());
+            }
+            if (!source->lastModified().isEmpty()) {
+                entry.insert(QStringLiteral("lastModified"), source->lastModified());
+            }
         }
         entries.append(entry);
     }
@@ -698,12 +745,10 @@ void GeoZoneManager::_updateValidity()
 QList<QObject*> GeoZoneManager::labelZones(const QGeoRectangle &region) const
 {
     QList<GeoZone*> candidates;
-    if (region.isValid()) {
-        for (int i = 0; i < _zones->count(); i++) {
-            GeoZone *const zone = _zones->value<GeoZone*>(i);
-            if (region.contains(zone->center())) {
-                candidates.append(zone);
-            }
+    for (const int index : _index.query(region)) {
+        GeoZone *const zone = _zoneList[index];
+        if (region.contains(zone->center())) {
+            candidates.append(zone);
         }
     }
 
@@ -720,13 +765,18 @@ QList<QObject*> GeoZoneManager::labelZones(const QGeoRectangle &region) const
 QList<GeoZone*> GeoZoneManager::zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
                                             const QDateTime &activeFrom, const QDateTime &activeTo) const
 {
+    QList<int> candidates;
+    if (area.isValid()) {
+        candidates = _index.query(area);
+    } else {
+        candidates.resize(_zoneList.count());
+        std::iota(candidates.begin(), candidates.end(), 0);
+    }
+
     QList<GeoZone*> zones;
-    for (int i = 0; i < _zones->count(); i++) {
-        GeoZone *const zone = _zones->value<GeoZone*>(i);
+    for (const int index : std::as_const(candidates)) {
+        GeoZone *const zone = _zoneList[index];
         if (!restrictions.contains(zone->restriction())) {
-            continue;
-        }
-        if (area.isValid() && !area.intersects(zone->boundingBox())) {
             continue;
         }
         if (activeFrom.isValid() && !(activeTo.isValid() ? zone->isActiveDuring(activeFrom, activeTo) : zone->isActiveAt(activeFrom))) {
@@ -737,19 +787,34 @@ QList<GeoZone*> GeoZoneManager::zonesInArea(const QList<GeoZone::Restriction> &r
     return zones;
 }
 
-QList<GeoZone*> GeoZoneManager::zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<QGeoCoordinate>> &paths) const
+QList<GeoZone*> GeoZoneManager::zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const
 {
-    QList<GeoZone*> zones;
-    if (paths.isEmpty()) {
-        return zones;
+    // Candidates near any segment, checked once per path
+    QMap<int, QList<int>> candidatePaths;
+    for (int pathIndex = 0; pathIndex < paths.count(); pathIndex++) {
+        const QList<GeoZone::Position> &path = paths[pathIndex];
+        for (qsizetype i = 0; i < path.count(); i++) {
+            const QGeoCoordinate &from = path[std::max<qsizetype>(i - 1, 0)].coordinate;
+            const QGeoCoordinate &to = path[i].coordinate;
+            const QList<int> candidates = _index.query(std::min(from.latitude(), to.latitude()), std::min(from.longitude(), to.longitude()),
+                                                       std::max(from.latitude(), to.latitude()), std::max(from.longitude(), to.longitude()));
+            for (const int index : candidates) {
+                QList<int> &candidatePathList = candidatePaths[index];
+                if (candidatePathList.isEmpty() || (candidatePathList.last() != pathIndex)) {
+                    candidatePathList.append(pathIndex);
+                }
+            }
+        }
     }
 
-    for (int i = 0; i < _zones->count(); i++) {
-        GeoZone *const zone = _zones->value<GeoZone*>(i);
+    QList<GeoZone*> zones;
+    for (auto it = candidatePaths.cbegin(); it != candidatePaths.cend(); ++it) {
+        GeoZone *const zone = _zoneList[it.key()];
         if (!restrictions.contains(zone->restriction())) {
             continue;
         }
-        if (std::any_of(paths.cbegin(), paths.cend(), [zone](const QList<QGeoCoordinate> &path) { return zone->intersectsPath(path); })) {
+        const QList<int> &pathIndexes = it.value();
+        if (std::any_of(pathIndexes.cbegin(), pathIndexes.cend(), [zone, &paths](int pathIndex) { return zone->intersectsPath(paths[pathIndex]); })) {
             zones.append(zone);
         }
     }

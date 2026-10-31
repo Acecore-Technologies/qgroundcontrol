@@ -58,7 +58,7 @@ The GeoFence is uploaded in the same way as a mission, using **File** in the [Pl
 
 _QGroundControl_ can load UAS geographical zone (geozone) files published by aviation authorities in the EUROCAE ED-269 (JSON) or ED-318 (GeoJSON) format.
 The zones are shown on the map in both the Plan and Fly views, colored by restriction: prohibited (red), authorisation required (orange), conditional (yellow), no restriction (green) and U-space airspace (blue).
-Zones that are not active at the current time are drawn with a fainter fill.
+Zones that are not active at the current time are drawn with a fainter fill. Schedules based on sunrise, sunset or civil twilight are computed for the location of each zone.
 
 To add geozones:
 
@@ -68,19 +68,23 @@ To add geozones:
 
 Several files and feeds can be loaded at the same time. Loading a file with the same name, or a feed with the same URL, replaces its zones.
 Files are loaded in the background and the map is moved to the new zones if they are not in view.
-_QGroundControl_ keeps a copy of each source and reloads them automatically on startup. Feeds are downloaded again when they are older than 24 hours, and **Refresh Feeds** downloads them immediately. If a download fails, the previous data is kept and the error is shown below the source.
+_QGroundControl_ keeps a copy of each source and reloads them automatically on startup. Feeds are checked for updates when they are older than 24 hours, and **Refresh Feeds** checks them immediately. Feeds which have not changed on the server are not downloaded again. If a download fails, the previous data is kept and the error is shown below the source.
 
 Each source shows its format, zone count and date. A warning is shown if the data has expired (ED-318 `validTo`), is not valid yet, or is more than 28 days old (based on the ED-318 issue date, or the file or download date). Outdated sources are also reported once when _QGroundControl_ starts.
 
 Use **Show geozones on map** to hide or show the zones, **Remove** to remove a source and **Remove All** to remove all of them.
-When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits in your units, applicability schedule, reason, message and responsible authority).
+When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits in your units, applicability schedule, reason, message, responsible authority and the source it was loaded from).
 
 ### Mission and Flight Checks
 
-When the planned mission path enters a prohibited, authorisation required or conditional zone, a warning listing the zones is shown at the top of the Plan View map.
-The check is horizontal only and ignores zone schedules, since the mission may be flown at another time.
+When the planned mission path enters a prohibited, authorisation required or conditional zone, a warning listing the zones is shown at the top of the Plan View map and the zones are outlined in white. Click the warning to show the zones on the map.
+Uploading a mission which enters a prohibited zone asks for confirmation.
+The check compares the planned altitudes with the zone altitude limits, using the terrain elevation along the path for limits above ground. When the terrain or altitude is not known, the zone is assumed to apply. Zone schedules are ignored, since the mission may be flown at another time.
 
-While flying, _QGroundControl_ warns once (with a message and audio) when the active vehicle comes within 100 m of an active prohibited, authorisation required or conditional zone, and again when it enters the zone. Altitude limits are not considered.
+While flying, _QGroundControl_ warns once (with a message and audio) when the active vehicle comes within 100 m (or 30 m vertically) of an active prohibited, authorisation required or conditional zone, and again when it enters the zone. Limits above ground use the vehicle's height above terrain. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude.
+The geozone indicator in the Fly View toolbar turns red, orange or yellow when the vehicle is near or inside a zone. Click it to see the nearby zones.
+
+Altitude limits relative to WGS84 are treated as above mean sea level, which differs by a few tens of meters.
 
 ::: warning
 These checks are advisory. Always check the official sources and obtain any required authorisation before flying.

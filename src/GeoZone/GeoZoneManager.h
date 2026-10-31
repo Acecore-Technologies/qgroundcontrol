@@ -19,6 +19,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZone.h"
+#include "GeoZoneIndex.h"
 #include "GeoZoneParser.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
@@ -26,6 +27,7 @@ Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 class GeoZoneShape;
 class GeoZoneSource;
 class QNetworkAccessManager;
+class QNetworkReply;
 class QmlObjectListModel;
 class QTimer;
 
@@ -97,8 +99,8 @@ public:
     QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
                                 const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime()) const;
 
-    /// @return Zones matching one of the restrictions which one of the paths enters horizontally
-    QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<QGeoCoordinate>> &paths) const;
+    /// @return Zones matching one of the restrictions which one of the paths enters, see GeoZone::intersectsPath
+    QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const;
 
     QmlObjectListModel *zones() const { return _zones; }
     QmlObjectListModel *sources() const { return _sources; }
@@ -140,6 +142,8 @@ private:
         QString storedFileName;     ///< Name of the copy to write in the storage directory, empty to not copy
         QDateTime loadedAt;
         QDateTime fileDate;
+        QString etag;               ///< HTTP validators of a downloaded feed
+        QString lastModified;
         bool userInitiated = false;
         int generation = 0;
     };
@@ -152,7 +156,7 @@ private:
     void _startLoad(LoadJob job, bool background);
     void _applyLoad(const LoadJob &job, const LoadResult &loadResult);
     void _download(const QString &url, bool userInitiated);
-    void _downloadComplete(const QString &url, int generation, const QByteArray &data, const QString &errorString, bool userInitiated);
+    void _downloadComplete(QNetworkReply *reply, const QString &url, int generation, bool userInitiated);
     void _idle();
     GeoZoneSource *_sourceForJob(const QString &key, const QString &url);
     void _setPending(int delta);
@@ -176,6 +180,8 @@ private:
     QmlObjectListModel *_zones = nullptr;
     QmlObjectListModel *_sources = nullptr;
     QList<GeoZoneShape*> _shapes;
+    QList<GeoZone*> _zoneList;          ///< Same as _zones, indexed by _index
+    GeoZoneIndex _index;
     QTimer *_activeTimer = nullptr;
     QTimer *_refreshTimer = nullptr;
     QGeoRectangle _boundingBox;

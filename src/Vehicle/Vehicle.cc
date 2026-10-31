@@ -3766,6 +3766,8 @@ void Vehicle::_altitudeAboveTerrainReceived(bool success, QList<double> heights)
 {
     if (!success) {
         qCDebug(VehicleLog) << "_altitudeAboveTerrainReceived: terrain data not available for vehicle coordinate";
+        // The previous value is for another position
+        _altitudeAboveTerrFact.setRawValue(qQNaN());
     } else {
         // Query was succesful, save the data.
         double terrainAltitude = heights[0];

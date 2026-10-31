@@ -451,13 +451,6 @@ QGCFlickable {
                                     text:               object.name
                                 }
 
-                                BusyIndicator {
-                                    Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight
-                                    Layout.preferredHeight: ScreenTools.defaultFontPixelHeight
-                                    running:                object.busy
-                                    visible:                object.busy
-                                }
-
                                 QGCButton {
                                     text:       qsTr("Remove")
                                     onClicked:  _geoZoneManager.removeSource(index)
@@ -470,6 +463,16 @@ QGCFlickable {
                                 wrapMode:       Text.WordWrap
                                 font.pointSize: ScreenTools.smallFontPointSize
                                 text:           object.detailsText !== "" ? object.detailsText : qsTr("Loading...")
+                            }
+
+                            QGCLabel {
+                                anchors.left:   parent.left
+                                anchors.right:  parent.right
+                                wrapMode:       Text.WordWrap
+                                font.pointSize: ScreenTools.smallFontPointSize
+                                font.italic:    true
+                                text:           qsTr("Updating...")
+                                visible:        object.busy && object.detailsText !== ""
                             }
 
                             QGCLabel {

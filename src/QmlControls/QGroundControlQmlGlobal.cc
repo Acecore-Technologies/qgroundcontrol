@@ -24,6 +24,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneMonitor.h"
 #include "MissionCommandTree.h"
 #include "HorizontalFactValueGrid.h"
 #include "FlightPathSegment.h"
@@ -100,6 +101,7 @@ void QGroundControlQmlGlobal::registerQmlTypes()
     qmlRegisterType<ParameterEditorController>          ("QGroundControl.Controllers",           1, 0, "ParameterEditorController");
     qmlRegisterType<QGCFileDialogController>            ("QGroundControl.Controllers",           1, 0, "QGCFileDialogController");
     qmlRegisterType<GeoZoneMapModel>                    ("QGroundControl.FlightMap",             1, 0, "GeoZoneMapModel");
+    qmlRegisterUncreatableType<GeoZoneMonitor>          ("QGroundControl.FlightMap",             1, 0, "GeoZoneMonitor",      "Reference only");
     qmlRegisterType<GeoZoneMissionCheck>                ("QGroundControl.FlightMap",             1, 0, "GeoZoneMissionCheck");
     qmlRegisterType<QGCMapCircle>                       ("QGroundControl.FlightMap",             1, 0, "QGCMapCircle");
     qmlRegisterType<QGCMapPalette>                      ("QGroundControl.Palette",               1, 0, "QGCMapPalette");
@@ -120,6 +122,7 @@ QGroundControlQmlGlobal::QGroundControlQmlGlobal(QObject *parent)
     , _mapEngineManager(QGCMapEngineManager::instance())
     , _adsbVehicleManager(ADSBVehicleManager::instance())
     , _geoZoneManager(GeoZoneManager::instance())
+    , _geoZoneMonitor(GeoZoneMonitor::instance())
     , _qgcPositionManager(QGCPositionManager::instance())
     , _missionCommandTree(MissionCommandTree::instance())
     , _videoManager(VideoManager::instance())

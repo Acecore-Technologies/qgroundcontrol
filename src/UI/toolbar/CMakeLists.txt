@@ -11,6 +11,7 @@ qt_add_qml_module(ToolbarModule
         APMSupportForwardingIndicator.qml
         ArmedIndicator.qml
         GCSControlIndicator.qml
+        GeoZoneIndicator.qml
         GimbalIndicator.qml
         JoystickIndicator.qml
         LinkIndicator.qml
