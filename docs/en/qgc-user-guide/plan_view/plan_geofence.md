@@ -65,9 +65,11 @@ _QGroundControl_ can load UAS geographical zone (geozone) files published by avi
 The zones are shown on the map in both the Plan and Fly views, colored by restriction: prohibited (red), authorisation required (orange), conditional (yellow), no restriction (green) and U-space airspace (blue).
 Zones that are not active at the current time are drawn with a fainter fill. Schedules based on sunrise, sunset or civil twilight are computed for the location of each zone.
 
+The **Geozones** button at the top left of the Plan and Fly View maps (next to the tool strip) opens a panel with a color legend, a **Show geozones** switch to hide or show the zones, the number of loaded zones and sources, any outdated data warning, and **Manage Geozones...** to open the geozone settings. The button is shown when zones are loaded.
+
 To add geozones:
 
-1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the **Geozones** section of the Plan View GeoFence panel.
+1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the **Geozones** map panel.
 1. Press **Add File...** and select a `.json` or `.geojson` file, or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**.
 
 Several files and feeds can be loaded at the same time. Files and downloads larger than 100 MB are rejected. Loading a file with the same name, or a feed with the same URL, replaces its zones.
@@ -78,8 +80,9 @@ The **United States TFRs (FAA)** feed lists the current temporary flight restric
 
 Each source shows its format, zone count and date. A warning is shown if the data has expired (ED-318 `validTo`), is not valid yet, or is more than 28 days old by default (2 hours for TFRs, based on the ED-318 or FAA issue time, or the file or download date). Outdated sources are also reported once when _QGroundControl_ starts and in the Plan View warning, since they can miss zones.
 
-Use **Remove** to remove a source and **Remove All** to remove all of them. **Show geozones on map** in the GeoFence panel (or **Show geozones on maps** in the settings) hides or shows the zones.
+Use **Remove** to remove a source and **Remove All** to remove all of them. **Show geozones** in the map panel (or **Show geozones on maps** in the settings) hides or shows the zones.
 When the map is zoomed in, each zone shows a label; click it to see the zone details (restriction, altitude limits in your units, applicability schedule, reason, message, responsible authority and the source it was loaded from).
+When many small zones are in view, the smallest are left out until you zoom in, and the map panel shows how many are hidden.
 
 ### Mission and Flight Checks
 
@@ -112,13 +115,13 @@ These checks are advisory. Always check the official sources and obtain any requ
 
 ### Add Geozones to the GeoFence
 
-If the vehicle supports GeoFences, loaded zones can be converted into exclusion fences:
+If the vehicle supports GeoFences, loaded zones can be converted into exclusion fences. Press **From Geozones...** below **Polygon Fence** and **Circular Fence** in the GeoFence panel, then in the dialog:
 
 1. Check the zone types to add (**Prohibited**, **Authorisation required**, **Conditional**).
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
 1. Select when the zones must be **Active**: **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
 1. Select a **Simplify** tolerance to reduce the number of fence points. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
-1. Check the number of fences and points that will be added, then press **Add Exclusion Fences**. Fences that already exist are not added again.
+1. Check the number of fences and points that will be added, then press **Ok**. Fences that already exist are not added again.
 
 If the resulting fence likely exceeds what the vehicle can store (64 fence points in total on PX4, 255 vertices per polygon on ArduPilot), you are asked to confirm before the fences are added.
 

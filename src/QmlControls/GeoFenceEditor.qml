@@ -17,7 +17,6 @@ QGCFlickable {
 
     property var    myGeoFenceController
     property var    flightMap
-    property int    geoZonesHiddenCount:    0   ///< Smallest geozones in the map view left out to limit the number of map items
 
     readonly property real  _editFieldWidth:    Math.min(width - _margin * 2, ScreenTools.defaultFontPixelWidth * 15)
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
@@ -148,6 +147,14 @@ QGCFlickable {
                         }
                     }
 
+                    QGCButton {
+                        Layout.fillWidth:   true
+                        text:               qsTr("From Geozones...")
+                        visible:            QGroundControl.geoZoneManager.zones.count > 0
+
+                        onClicked: geoZoneFenceImportDialogComponent.createObject(mainWindow, { geoFenceController: myGeoFenceController, flightMap: root.flightMap }).open()
+                    }
+
                     SectionHeader {
                         id:             fenceListSection
                         anchors.left:   parent.left
@@ -206,23 +213,13 @@ QGCFlickable {
                     }
 
                 }
-
-                SectionHeader {
-                    id:             geoZoneSection
-                    anchors.left:   parent.left
-                    anchors.right:  parent.right
-                    text:           qsTr("Geozones")
-                }
-
-                GeoZoneFencePanel {
-                    anchors.left:       parent.left
-                    anchors.right:      parent.right
-                    visible:            geoZoneSection.checked
-                    geoFenceController: myGeoFenceController
-                    flightMap:          root.flightMap
-                    hiddenZoneCount:    root.geoZonesHiddenCount
-                }
             }
         }
     } // Rectangle
+
+    Component {
+        id: geoZoneFenceImportDialogComponent
+
+        GeoZoneFenceImportDialog { }
+    }
 }

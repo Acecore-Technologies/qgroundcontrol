@@ -44,7 +44,7 @@ qt_add_qml_module(GeoZoneModule
     RESOURCE_PREFIX /qml
     QML_FILES
         GeoZoneAlertPopup.qml
-        GeoZoneFencePanel.qml
+        GeoZoneFenceImportDialog.qml
         GeoZoneIndicator.qml
         GeoZoneInfoDialog.qml
         GeoZoneMapVisuals.qml

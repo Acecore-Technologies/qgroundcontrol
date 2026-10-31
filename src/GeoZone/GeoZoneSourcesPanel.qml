@@ -133,9 +133,11 @@ ColumnLayout {
         }
     }
 
+    // Both button rows split at the middle, whatever the text lengths
     RowLayout {
         Layout.fillWidth:   true
         spacing:            _margin
+        uniformCellSizes:   true
 
         QGCButton {
             Layout.fillWidth:   true
@@ -196,13 +198,13 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth:   true
         spacing:            _margin
+        uniformCellSizes:   true
         visible:            _geoZoneManager.sources.count > 0
 
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Refresh Feeds")
-            visible:            _hasFeeds
-            enabled:            !_geoZoneManager.busy
+            enabled:            _hasFeeds && !_geoZoneManager.busy
             onClicked:          _geoZoneManager.refreshFeeds()
 
             property bool _hasFeeds: {
@@ -218,7 +220,6 @@ ColumnLayout {
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Remove All")
-            visible:            _geoZoneManager.sources.count > 1
             onClicked:          _geoZoneManager.clear()
         }
     }

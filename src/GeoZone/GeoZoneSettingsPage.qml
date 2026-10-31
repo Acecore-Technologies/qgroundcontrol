@@ -23,7 +23,7 @@ SettingsPage {
     SettingsGroupLayout {
         Layout.fillWidth:   true
         heading:            qsTr("Sources")
-        headingDescription: qsTr("Zones are shown on the maps, checked against missions and alerted in flight. Plan View > Fence > Geozones adds them as exclusion fences.")
+        headingDescription: qsTr("Zones are shown on the maps, checked against missions and alerted in flight. Plan View > Fence > From Geozones... adds them as exclusion fences.")
 
         GeoZoneSourcesPanel {
             Layout.fillWidth: true

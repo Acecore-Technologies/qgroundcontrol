@@ -514,6 +514,7 @@ Item {
                 map:                editorMap
                 highlightedZones:   geoZoneMissionBanner.crossedZones
                 fitToAddedSources:  true
+                controlPosition:    Qt.point(toolStrip.x + toolStrip.width + _toolsMargin, _toolsMargin)
             }
 
             GeoFenceMapVisuals {
@@ -569,7 +570,7 @@ Item {
             anchors.topMargin:  _toolsMargin
             missionController:  _missionController
             map:                editorMap
-            leftLimit:          toolStrip.x + toolStrip.width + _toolsMargin
+            leftLimit:          Math.max(toolStrip.x + toolStrip.width, geoZoneMapVisuals.controlRight) + _toolsMargin
             rightLimit:         rightPanel.x - _toolsMargin
         }
 
@@ -811,7 +812,6 @@ Item {
                 anchors.right:          parent.right
                 myGeoFenceController:   _geoFenceController
                 flightMap:              editorMap
-                geoZonesHiddenCount:    geoZoneMapVisuals.hiddenZoneCount
                 visible:                _editingLayer == _layerGeoFence
             }
 
