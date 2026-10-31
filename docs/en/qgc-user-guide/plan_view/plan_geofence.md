@@ -41,14 +41,19 @@ You can create multiple regions by pressing the buttons multiple times, allowing
   - Create new vertices by clicking the "unfilled" dots on the lines between the filled vertices.
 
 1. By default new regions are created as _inclusion_ zones (vehicles must stay within the region).
-   Change them to exclusion zones (where the vehicle can't travel) by unchecking the associated _Inclusion_ checkbox in the fence panel.
+   Change them to exclusion zones (where the vehicle can't travel) by selecting the fence and unchecking **Inclusion fence** in the fence panel.
 
 ## Edit/Delete a GeoFence
 
-You can select a geofence region to edit by selecting its _Edit_ radio button in the GeoFence panel.
-You can then edit the region on the map as described in the previous section.
+The **Fences** section of the GeoFence panel lists the polygon and circular fences, with their number of points and area or radius.
+Exclusion fences have a filled icon. Fences added from geozones are named after their zones and listed separately.
 
-Regions can be deleted by pressing the associated **Del** button.
+Select a fence to edit by clicking it in the list, which also moves the map to it, or by clicking it on the map. Clicking where fences overlap selects them in turn.
+You can then edit the region on the map as described in the previous section, change whether it is an inclusion fence and, for circles, set the radius.
+
+Fences are deleted with their trash icon, **Delete Geozone Fences** deletes the fences added from geozones and **Delete All Fences** deletes all of them.
+
+The panel also shows the number of fence points (polygon vertices, one point per circle and the breach return point). For PX4 vehicles, which store at most 64 points, it shows how much of the storage the fence uses. For ArduPilot vehicles, it warns about polygons with more than 255 vertices.
 
 ## Upload a GeoFence
 

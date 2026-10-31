@@ -397,6 +397,9 @@ Item {
                     }
 
                     break
+                case _layerGeoFence:
+                    geoFenceEditor.selectFenceAt(coordinate)
+                    break
                 case _layerRallyPoints:
                     if (_rallyPointController.supported && addWaypointRallyPointAction.checked) {
                         _rallyPointController.addPoint(coordinate)
@@ -800,6 +803,7 @@ Item {
             }
             // GeoFence Editor
             GeoFenceEditor {
+                id:                     geoFenceEditor
                 anchors.top:            rightControls.bottom
                 anchors.topMargin:      ScreenTools.defaultFontPixelHeight * 0.25
                 anchors.bottom:         parent.bottom

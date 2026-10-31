@@ -121,14 +121,17 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<GeoZon
 
     Fences fences;
     for (const GeoZone *zone : zones) {
+        const QString name = zone->name().isEmpty() ? zone->identifier() : zone->name();
         for (const QList<QGeoCoordinate> &vertices : zone->exclusionPolygons(simplifyTolerance)) {
             if (!existingPolygons.contains(vertices) && !fences.polygons.contains(vertices)) {
                 fences.polygons.append(vertices);
+                fences.polygonNames.append(name);
             }
         }
         for (const QGeoCircle &geoCircle : zone->exclusionCircles()) {
             if (!existingCircles.contains(geoCircle) && !fences.circles.contains(geoCircle)) {
                 fences.circles.append(geoCircle);
+                fences.circleNames.append(name);
             }
         }
     }
@@ -143,13 +146,18 @@ int GeoZoneFenceImporter::addExclusions(const QList<GeoZone*> &zones, double sim
 
     const Fences fences = _newFences(zones, simplifyTolerance);
 
-    for (const QList<QGeoCoordinate> &vertices : fences.polygons) {
+    for (qsizetype i = 0; i < fences.polygons.count(); i++) {
         QGCFencePolygon *const polygon = new QGCFencePolygon(false /* inclusion */, _geoFenceController);
-        polygon->appendVertices(vertices);
+        polygon->appendVertices(fences.polygons[i]);
+        polygon->setName(fences.polygonNames[i]);
+        polygon->setGeoZone(true);
         _geoFenceController->polygons()->append(polygon);
     }
-    for (const QGeoCircle &geoCircle : fences.circles) {
-        _geoFenceController->circles()->append(new QGCFenceCircle(geoCircle.center(), geoCircle.radius(), false /* inclusion */, _geoFenceController));
+    for (qsizetype i = 0; i < fences.circles.count(); i++) {
+        QGCFenceCircle *const circle = new QGCFenceCircle(fences.circles[i].center(), fences.circles[i].radius(), false /* inclusion */, _geoFenceController);
+        circle->setName(fences.circleNames[i]);
+        circle->setGeoZone(true);
+        _geoFenceController->circles()->append(circle);
     }
 
     const int added = fences.polygons.count() + fences.circles.count();

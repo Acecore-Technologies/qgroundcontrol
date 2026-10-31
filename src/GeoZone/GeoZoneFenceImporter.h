@@ -11,6 +11,7 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QStringList>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtPositioning/QGeoCircle>
@@ -62,10 +63,12 @@ signals:
     void geoFenceControllerChanged();
 
 private:
-    /// Fences for the zones which don't already exist in the fence
+    /// Fences for the zones which don't already exist in the fence, with the names of their zones
     struct Fences {
         QList<QList<QGeoCoordinate>> polygons;
+        QStringList polygonNames;
         QList<QGeoCircle> circles;
+        QStringList circleNames;
     };
 
     Fences _newFences(const QList<GeoZone*> &zones, double simplifyTolerance) const;

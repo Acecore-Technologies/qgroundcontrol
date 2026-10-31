@@ -1003,6 +1003,39 @@ void GeoZoneTest::_testGeoFenceImport()
     QCOMPARE(circle->center(), QGeoCoordinate(47.5, 8.5));
     QCOMPARE(circle->radius()->rawValue().toDouble(), 1000 * 0.3048);
 
+    // Fences are named after their zones and marked as added from geozones
+    const auto zoneName = [](const GeoZone *zone) { return zone->name().isEmpty() ? zone->identifier() : zone->name(); };
+    QCOMPARE(polygon->name(), zoneName(zones[0]));
+    QVERIFY(polygon->geoZone());
+    QCOMPARE(circle->name(), zoneName(zones[1]));
+    QVERIFY(circle->geoZone());
+
+    // Which the plan file keeps, while fences of other plans load without them
+    QString errorString;
+    QJsonObject polygonJson;
+    const_cast<QGCFencePolygon*>(polygon)->saveToJson(polygonJson);
+    QGCFencePolygon loadedPolygon(true);
+    QVERIFY2(loadedPolygon.loadFromJson(polygonJson, true, errorString), qPrintable(errorString));
+    QCOMPARE(loadedPolygon.name(), polygon->name());
+    QVERIFY(loadedPolygon.geoZone());
+    // Loading an unchanged exclusion polygon leaves it clean
+    QGCFencePolygon reloadedPolygon(false);
+    QVERIFY2(reloadedPolygon.loadFromJson(polygonJson, true, errorString), qPrintable(errorString));
+    QVERIFY(!reloadedPolygon.dirty());
+    QJsonObject circleJson;
+    circle->saveToJson(circleJson);
+    QGCFenceCircle loadedCircle;
+    QVERIFY2(loadedCircle.loadFromJson(circleJson, errorString), qPrintable(errorString));
+    QCOMPARE(loadedCircle.name(), circle->name());
+    QVERIFY(loadedCircle.geoZone());
+    polygonJson.remove(QStringLiteral("name"));
+    polygonJson.remove(QStringLiteral("geoZone"));
+    QVERIFY2(loadedPolygon.loadFromJson(polygonJson, true, errorString), qPrintable(errorString));
+    QVERIFY(loadedPolygon.name().isEmpty());
+    QVERIFY(!loadedPolygon.geoZone());
+    QJsonObject drawnJson;
+    loadedPolygon.saveToJson(drawnJson);
+    QVERIFY(!drawnJson.contains(QStringLiteral("name")) && !drawnJson.contains(QStringLiteral("geoZone")));
 
     // Importing the same zones again does not duplicate fences
     QCOMPARE(importer.addExclusions(zones), 0);

@@ -24,6 +24,11 @@ QGCFlickable {
     readonly property real  _radius:            ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _maxFenceListHeight: ScreenTools.defaultFontPixelHeight * 16
 
+    /// Selects a fence at the coordinate, see GeoFenceList.selectFenceAt
+    function selectFenceAt(coordinate) {
+        return fenceList.selectFenceAt(coordinate)
+    }
+
     Rectangle {
         id:     geoFenceEditorRect
         anchors.left:   parent.left
@@ -144,226 +149,20 @@ QGCFlickable {
                     }
 
                     SectionHeader {
-                        id:             polygonSection
+                        id:             fenceListSection
                         anchors.left:   parent.left
                         anchors.right:  parent.right
-                        text:           myGeoFenceController.polygons.count > 0 ?
-                                            qsTr("Polygon Fences (%1)").arg(myGeoFenceController.polygons.count) :
-                                            qsTr("Polygon Fences")
+                        text:           fenceList.fenceCount > 0 ? qsTr("Fences (%1)").arg(fenceList.fenceCount) : qsTr("Fences")
                     }
 
-                    QGCLabel {
-                        text:       qsTr("None")
-                        visible:    polygonSection.checked && myGeoFenceController.polygons.count === 0
-                    }
-
-                    // Long lists scroll on their own so the sections below stay within reach
-                    QGCFlickable {
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        height:         Math.min(polygonGrid.implicitHeight, _maxFenceListHeight)
-                        contentWidth:   width
-                        contentHeight:  polygonGrid.implicitHeight
-                        visible:        polygonSection.checked && myGeoFenceController.polygons.count > 0
-
-                        GridLayout {
-                            id:                 polygonGrid
-                            width:              parent.width
-                            columns:            3
-                            flow:               GridLayout.TopToBottom
-
-                            QGCLabel {
-                                text:               qsTr("Inclusion")
-                                Layout.column:      0
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.polygons
-
-                                QGCCheckBox {
-                                    checked:            object.inclusion
-                                    onClicked:          object.inclusion = checked
-                                    Layout.alignment:   Qt.AlignHCenter
-                                }
-                            }
-
-                            QGCLabel {
-                                text:               qsTr("Edit")
-                                Layout.column:      1
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.polygons
-
-                                QGCRadioButton {
-                                    checked:            _interactive
-                                    Layout.alignment:   Qt.AlignHCenter
-
-                                    property bool _interactive: object.interactive
-
-                                    on_InteractiveChanged: checked = _interactive
-
-                                    onClicked: {
-                                        myGeoFenceController.clearAllInteractive()
-                                        object.interactive = checked
-                                    }
-                                }
-                            }
-
-                            QGCLabel {
-                                text:               qsTr("Delete")
-                                Layout.column:      2
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.polygons
-
-                                QGCButton {
-                                    text:               qsTr("Del")
-                                    Layout.alignment:   Qt.AlignHCenter
-                                    onClicked:          myGeoFenceController.deletePolygon(index)
-                                }
-                            }
-                        } // GridLayout
-                    }
-
-                    QGCButton {
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        text:           qsTr("Delete All Polygon Fences")
-                        visible:        polygonSection.checked && myGeoFenceController.polygons.count > 1
-                        onClicked: {
-                            mainWindow.showMessageDialog(text,
-                                                         qsTr("Delete all %1 polygon fences?").arg(myGeoFenceController.polygons.count),
-                                                         Dialog.Ok | Dialog.Cancel,
-                                                         function() {
-                                                             for (var i = myGeoFenceController.polygons.count - 1; i >= 0; i--) {
-                                                                 myGeoFenceController.deletePolygon(i)
-                                                             }
-                                                         })
-                        }
-                    }
-
-                    SectionHeader {
-                        id:             circleSection
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        text:           myGeoFenceController.circles.count > 0 ?
-                                            qsTr("Circular Fences (%1)").arg(myGeoFenceController.circles.count) :
-                                            qsTr("Circular Fences")
-                    }
-
-                    QGCLabel {
-                        text:       qsTr("None")
-                        visible:    circleSection.checked && myGeoFenceController.circles.count === 0
-                    }
-
-                    QGCFlickable {
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        height:         Math.min(circleGrid.implicitHeight, _maxFenceListHeight)
-                        contentWidth:   width
-                        contentHeight:  circleGrid.implicitHeight
-                        visible:        circleSection.checked && myGeoFenceController.circles.count > 0
-
-                        GridLayout {
-                            id:                 circleGrid
-                            width:              parent.width
-                            columns:            4
-                            flow:               GridLayout.TopToBottom
-
-                            QGCLabel {
-                                text:               qsTr("Inclusion")
-                                Layout.column:      0
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.circles
-
-                                QGCCheckBox {
-                                    checked:            object.inclusion
-                                    onClicked:          object.inclusion = checked
-                                    Layout.alignment:   Qt.AlignHCenter
-                                }
-                            }
-
-                            QGCLabel {
-                                text:               qsTr("Edit")
-                                Layout.column:      1
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.circles
-
-                                QGCRadioButton {
-                                    checked:            _interactive
-                                    Layout.alignment:   Qt.AlignHCenter
-
-                                    property bool _interactive: object.interactive
-
-                                    on_InteractiveChanged: checked = _interactive
-
-                                    onClicked: {
-                                        myGeoFenceController.clearAllInteractive()
-                                        object.interactive = checked
-                                    }
-                                }
-                            }
-
-                            QGCLabel {
-                                text:               qsTr("Radius")
-                                Layout.column:      2
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.circles
-
-                                FactTextField {
-                                    fact:               object.radius
-                                    Layout.fillWidth:   true
-                                    Layout.alignment:   Qt.AlignHCenter
-                                }
-                            }
-
-                            QGCLabel {
-                                text:               qsTr("Delete")
-                                Layout.column:      3
-                                Layout.alignment:   Qt.AlignHCenter
-                            }
-
-                            Repeater {
-                                model: myGeoFenceController.circles
-
-                                QGCButton {
-                                    text:               qsTr("Del")
-                                    Layout.alignment:   Qt.AlignHCenter
-                                    onClicked:          myGeoFenceController.deleteCircle(index)
-                                }
-                            }
-                        } // GridLayout
-                    }
-
-                    QGCButton {
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        text:           qsTr("Delete All Circular Fences")
-                        visible:        circleSection.checked && myGeoFenceController.circles.count > 1
-                        onClicked: {
-                            mainWindow.showMessageDialog(text,
-                                                         qsTr("Delete all %1 circular fences?").arg(myGeoFenceController.circles.count),
-                                                         Dialog.Ok | Dialog.Cancel,
-                                                         function() {
-                                                             for (var i = myGeoFenceController.circles.count - 1; i >= 0; i--) {
-                                                                 myGeoFenceController.deleteCircle(i)
-                                                             }
-                                                         })
-                        }
+                    GeoFenceList {
+                        id:                 fenceList
+                        anchors.left:       parent.left
+                        anchors.right:      parent.right
+                        visible:            fenceListSection.checked
+                        geoFenceController: myGeoFenceController
+                        flightMap:          root.flightMap
+                        maxListHeight:      _maxFenceListHeight
                     }
 
                     SectionHeader {
