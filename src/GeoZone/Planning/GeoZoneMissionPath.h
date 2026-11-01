@@ -147,11 +147,14 @@ public:
     /// @return Return altitude above home in meters from the vehicle's parameters, 0 to return at the current
     ///         altitude, NaN when unknown like for the offline vehicle
     static double returnAltitude(Vehicle *vehicle);
-    /// @return The parameters the vehicle returns with, GeoZoneReturnModel::Autopilot::Unknown without its parameters
-    ///         like for the offline vehicle
+    /// @return The parameters the vehicle returns with. Without them, like for the offline vehicle or before they are
+    ///         loaded, the defaults of its firmware and vehicle class, see GeoZoneReturnModel::defaultParameters.
+    ///         GeoZoneReturnModel::Autopilot::Unknown without vehicle.
     static GeoZoneReturnModel::Parameters returnParameters(Vehicle *vehicle);
-    /// @return Description of the return, like "the return to rally point 2", for paths and their labels
-    static QString returnDescription(const GeoZoneReturnModel::Path &path, bool definite, bool breach = false);
+    /// @return Description of the return with the parameters, like "the return to rally point 2", for paths and their
+    ///         labels, saying when the altitude is unknown or assumed
+    static QString returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, bool definite,
+                                     bool breach = false);
 
     /// @return Closed path around the center at the radius, the altitude and terrain
     static QList<GeoZone::Position> circle(const QGeoCoordinate &center, double radius, double altitudeAMSL, double terrainAMSL);

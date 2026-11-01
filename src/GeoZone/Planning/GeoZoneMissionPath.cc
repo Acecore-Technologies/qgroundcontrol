@@ -12,6 +12,7 @@
 #include "FlightPathSegment.h"
 #include "GeoFenceController.h"
 #include "GeoZoneBox.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneTerrain.h"
 #include "LandingComplexItem.h"
 #include "MissionController.h"
@@ -592,7 +593,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
     if (!returnPath.isValid() || !flies) {
         return;
     }
-    const QString label = returnDescription(returnPath, true);
+    const QString label = returnDescription(returnPath, returnParameters, true);
     appendPath(_modelPositions(returnPath.positions, GeoZoneTerrain::defaultSpacing), returnItem, label, flightDistance());
     appendPath(returnPath.loiter, returnItem, label, flightDistance());
 }
@@ -686,15 +687,15 @@ void GeoZoneMissionPath::_appendContingencies(const QList<int> &coordinateItems,
     for (qsizetype i = 0; i < _contingencyStarts.count(); i++) {
         const GeoZoneReturnModel::Start start{ _contingencyStarts[i].position, _contingencyStarts[i].toSequenceNumber };
         const GeoZoneReturnModel::Path returnPath = GeoZoneReturnModel::returnPath(returnParameters, destinations, start);
-        appendContingency(returnPath, static_cast<int>(i), returnDescription(returnPath, false));
+        appendContingency(returnPath, static_cast<int>(i), returnDescription(returnPath, returnParameters, false));
         if (returnParameters.breachAction == GeoZoneReturnModel::BreachAction::ReturnPoint) {
             const GeoZoneReturnModel::Path breachPath = GeoZoneReturnModel::breachPath(returnParameters, destinations, start);
-            appendContingency(breachPath, static_cast<int>(i), returnDescription(breachPath, false, true));
+            appendContingency(breachPath, static_cast<int>(i), returnDescription(breachPath, returnParameters, false, true));
         }
     }
 }
 
-QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &path, bool definite, bool breach)
+QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, bool definite, bool breach)
 {
     using Destination = GeoZoneReturnModel::Destination;
     const int rallyPoint = path.destinationIndex + 1;
@@ -730,7 +731,16 @@ QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &pa
             break;
         }
     }
-    return path.altitudeKnown ? description : tr("%1 at an unknown altitude").arg(description);
+    if (!path.altitudeKnown) {
+        return tr("%1 at an unknown altitude").arg(description);
+    }
+    if (parameters.assumed) {
+        // Like "assuming the PX4 default return altitude of 30 m"
+        const QString altitude = QStringLiteral("%1 %2").arg(qRound(GeoZoneEnvironment::metersToVerticalDistanceUnits(parameters.returnAltitude)))
+                                                         .arg(GeoZoneEnvironment::verticalDistanceUnits());
+        return tr("%1 assuming the %2 default return altitude of %3").arg(description, GeoZoneReturnModel::autopilotName(parameters.autopilot), altitude);
+    }
+    return description;
 }
 
 QString GeoZoneMissionPath::startsText(QList<int> starts) const
@@ -769,7 +779,7 @@ QString GeoZoneMissionPath::startsText(QList<int> starts) const
 
 GeoZoneReturnModel::Parameters GeoZoneMissionPath::returnParameters(Vehicle *vehicle)
 {
-    if (!vehicle || vehicle->isOfflineEditingVehicle() || !vehicle->parameterManager() || !vehicle->parameterManager()->parametersReady()) {
+    if (!vehicle) {
         return GeoZoneReturnModel::Parameters();
     }
     using Firmware = GeoZoneReturnModel::Firmware;
@@ -783,7 +793,11 @@ GeoZoneReturnModel::Parameters GeoZoneMissionPath::returnParameters(Vehicle *veh
     } else if (vehicle->multiRotor()) {
         vehicleClass = VehicleClass::Multirotor;
     }
+    // The firmware's defaults for the plan's firmware and vehicle class until the vehicle's parameters are known
     ParameterManager *const parameterManager = vehicle->parameterManager();
+    if (vehicle->isOfflineEditingVehicle() || !parameterManager || !parameterManager->parametersReady()) {
+        return GeoZoneReturnModel::defaultParameters(firmware, vehicleClass);
+    }
     return GeoZoneReturnModel::parametersFrom(firmware, vehicleClass, [parameterManager](const QString &name) -> std::optional<double> {
         if (!parameterManager->parameterExists(ParameterManager::defaultComponentId, name)) {
             return std::nullopt;

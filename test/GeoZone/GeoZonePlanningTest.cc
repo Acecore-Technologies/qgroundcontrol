@@ -650,7 +650,8 @@ void GeoZonePlanningTest::_testMissionCheck()
 void GeoZonePlanningTest::_testMissionCoverage()
 {
     const ScopedEnvironment environment;
-    // L under a loiter circle away from the legs, V past a back transition, and R on the way home above the mission
+    // L under a loiter circle away from the legs, V past a back transition, and R on the way home above the drawn flight
+    // path, which descends home, at the altitude of the return
     const QGeoCoordinate home(47, 8);
     const QGeoCoordinate loiter = home.atDistanceAndAzimuth(2000, 90);
     const QGeoCoordinate last = loiter.atDistanceAndAzimuth(2000, 0);
@@ -658,7 +659,7 @@ void GeoZonePlanningTest::_testMissionCoverage()
     QJsonArray geometry = returnZone[QStringLiteral("geometry")].toArray();
     QJsonObject layer = geometry[0].toObject();
     layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
-    layer[QStringLiteral("lowerLimit")] = 1000;
+    layer[QStringLiteral("lowerLimit")] = 440;
     layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
     layer[QStringLiteral("upperLimit")] = 2000;
     layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
@@ -690,7 +691,8 @@ void GeoZonePlanningTest::_testMissionCoverage()
     SimpleMissionItem *const returnItem = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(last, 4));
     returnItem->setCommand(MAV_CMD_NAV_RETURN_TO_LAUNCH);
 
-    // The drawn flight path enters none of them, the vehicle's return altitude is unknown offline
+    // The drawn flight path enters none of them. Offline the PX4 multicopter returns at its default altitude, 30 m above
+    // home, which is below the items 50 m high.
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
@@ -701,7 +703,7 @@ void GeoZonePlanningTest::_testMissionCoverage()
     };
     QCOMPARE(check.pathLabels(zone(QStringLiteral("L"))), QStringList({ QStringLiteral("the loiter at item 1") }));
     QCOMPARE(check.pathLabels(zone(QStringLiteral("V"))), QStringList({ QStringLiteral("the VTOL transition at item 3") }));
-    QCOMPARE(check.pathLabels(zone(QStringLiteral("R"))), QStringList({ QStringLiteral("the return to launch at an unknown altitude") }));
+    QCOMPARE(check.pathLabels(zone(QStringLiteral("R"))), QStringList({ QStringLiteral("the return to launch assuming the PX4 default return altitude of 30 m") }));
     QVERIFY2(check.warningText().contains(QStringLiteral("Only the loiter at item 1 enters L.")), qPrintable(check.warningText()));
 
     // A smaller loiter stays clear of L
@@ -846,7 +848,7 @@ void GeoZonePlanningTest::_testMissionContingencies()
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        withAmslLimits(_circleFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), offsetFrom(home, 1000, 1000), 100), 470, 1000),
+        withAmslLimits(_circleFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), offsetFrom(home, 1000, 1000), 100), 440, 1000),
         _circleFeature(QStringLiteral("R"), QStringLiteral("PROHIBITED"), offsetFrom(home, 2000, 2500), 50),
     }), errorString), qPrintable(errorString));
 
@@ -859,8 +861,8 @@ void GeoZonePlanningTest::_testMissionContingencies()
     (void) missionController->insertSimpleMissionItem(offsetFrom(home, 2000, 2000), 2);
     (void) missionController->insertSimpleMissionItem(offsetFrom(home, 0, 2000), 3);
 
-    // The offline vehicle returns home at an unknown altitude. The mission doesn't enter X, returns from around the
-    // second item would.
+    // The offline PX4 multicopter returns home at the altitude of the items, 50 m above home, higher than its default
+    // return altitude. The mission doesn't enter X, returns from around the second item would.
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
@@ -868,8 +870,8 @@ void GeoZonePlanningTest::_testMissionContingencies()
     QVERIFY(check.crossedZones().isEmpty());
     QVERIFY(check.warningText().isEmpty());
     const GeoZone *const x = check.contingencyZones().first();
-    QCOMPARE(check.contingencyLabels(x), QStringList{ QStringLiteral(u"a return to launch at an unknown altitude from items 1\u20133") });
-    QCOMPARE(check.contingencyText(), QStringLiteral(u"A return to launch at an unknown altitude from items 1\u20133 would enter X (Prohibited)."));
+    QCOMPARE(check.contingencyLabels(x), QStringList{ QStringLiteral(u"a return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133") });
+    QCOMPARE(check.contingencyText(), QStringLiteral(u"A return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133 would enter X (Prohibited)."));
 
     // The starts are grouped into ranges of items
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController, true);
@@ -893,7 +895,7 @@ void GeoZonePlanningTest::_testMissionContingencies()
     RallyPointController *const rallyPointController = masterController.rallyPointController();
     rallyPointController->addPoint(offsetFrom(home, 2000, 3000));
     QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("R") });
-    QVERIFY(check.contingencyLabels(check.contingencyZones().first()).first().startsWith(QStringLiteral("a return to rally point 1 at an unknown altitude from items")));
+    QVERIFY(check.contingencyLabels(check.contingencyZones().first()).first().startsWith(QStringLiteral("a return to rally point 1 assuming the PX4 default return altitude of 30 m from items")));
     // Moved away it isn't closer anymore
     rallyPointController->points()->value<RallyPoint*>(0)->setCoordinate(offsetFrom(home, 6000, 6000));
     QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
@@ -934,14 +936,22 @@ void GeoZonePlanningTest::_testMissionReturnParameters()
         return GeoZoneMissionCheck::evaluate(manager.catalog(), GeoZoneMissionPath::fromMission(missionController, parameters, true));
     };
 
+    // Of unknown firmware at an unknown altitude, entering X
+    GeoZoneMissionCheck::Evaluation evaluation = contingencies(GeoZoneReturnModel::Parameters());
+    QCOMPARE(zoneIdentifiers(evaluation.contingencyZones), QStringList{ QStringLiteral("X") });
+    QCOMPARE(evaluation.contingencyLabels.value(evaluation.contingencyZones.first()),
+             QStringList{ QStringLiteral(u"a return to launch at an unknown altitude from items 1\u20133") });
+
     // ArduCopter at 60 m stays below X, at 100 m it enters it
     GeoZoneReturnModel::Parameters copter;
     copter.autopilot = GeoZoneReturnModel::Autopilot::ArduCopter;
     copter.multicopter = true;
     copter.returnAltitude = 60;
-    GeoZoneMissionCheck::Evaluation evaluation = contingencies(copter);
+    evaluation = contingencies(copter);
     QVERIFY(evaluation.zones.isEmpty());
     QVERIFY(evaluation.contingencyZones.isEmpty());
+    QVERIFY(contingencies(GeoZoneReturnModel::defaultParameters(GeoZoneReturnModel::Firmware::ArduPilot, GeoZoneReturnModel::VehicleClass::Multirotor))
+                .contingencyZones.isEmpty());
     copter.returnAltitude = 100;
     evaluation = contingencies(copter);
     QCOMPARE(zoneIdentifiers(evaluation.contingencyZones), QStringList{ QStringLiteral("X") });

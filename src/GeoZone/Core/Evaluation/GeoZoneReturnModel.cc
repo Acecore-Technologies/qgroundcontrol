@@ -9,6 +9,7 @@
 
 #include "GeoZoneReturnModel.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QtMath>
 
 #include <algorithm>
@@ -462,6 +463,70 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::parametersFrom(Firmware firmw
     }
     parameters.breachAction = fenceEnabled ? breachAction(Autopilot::ArduPlane, qRound(value("FENCE_ACTION", 0)), legacyFence) : BreachAction::None;
     return parameters;
+}
+
+GeoZoneReturnModel::Parameters GeoZoneReturnModel::defaultParameters(Firmware firmware, VehicleClass vehicleClass)
+{
+    QHash<QString, double> defaults;
+    if (firmware == Firmware::PX4) {
+        // Parameter defaults of PX4 1.14 to 1.16 and main (rtl_params, navigator_params, geofence_params)
+        defaults = { { QStringLiteral("RTL_TYPE"), 0 }, { QStringLiteral("RTL_RETURN_ALT"), 60 }, { QStringLiteral("RTL_DESCEND_ALT"), 30 },
+                     { QStringLiteral("RTL_LAND_DELAY"), 0 }, { QStringLiteral("RTL_CONE_ANG"), 45 }, { QStringLiteral("RTL_MIN_DIST"), 10 },
+                     { QStringLiteral("NAV_ACC_RAD"), 10 }, { QStringLiteral("NAV_LOITER_RAD"), 80 }, { QStringLiteral("GF_ACTION"), 2 } };
+        // Changed by the airframe defaults of the vehicle class, rc.mc_defaults, rc.fw_defaults and rc.vtol_defaults
+        switch (vehicleClass) {
+        case VehicleClass::Multirotor:
+            defaults.insert(QStringLiteral("RTL_RETURN_ALT"), 30);
+            defaults.insert(QStringLiteral("RTL_DESCEND_ALT"), 10);
+            defaults.insert(QStringLiteral("NAV_ACC_RAD"), 2);
+            break;
+        case VehicleClass::FixedWing:
+            defaults.insert(QStringLiteral("RTL_TYPE"), 1);
+            defaults.insert(QStringLiteral("RTL_RETURN_ALT"), 100);
+            defaults.insert(QStringLiteral("RTL_DESCEND_ALT"), 100);
+            defaults.insert(QStringLiteral("RTL_LAND_DELAY"), -1);
+            break;
+        case VehicleClass::Vtol:
+            defaults.insert(QStringLiteral("RTL_TYPE"), 1);
+            break;
+        case VehicleClass::Other:
+            break;
+        }
+    } else if ((firmware == Firmware::ArduPilot) && (vehicleClass == VehicleClass::Multirotor)) {
+        // ArduCopter 4.6, in centimeters, with the fence disabled
+        defaults = { { QStringLiteral("RTL_ALT"), 1500 }, { QStringLiteral("RTL_CLIMB_MIN"), 0 }, { QStringLiteral("RTL_ALT_FINAL"), 0 },
+                     { QStringLiteral("RTL_CONE_SLOPE"), 3 }, { QStringLiteral("RALLY_INCL_HOME"), 1 }, { QStringLiteral("RALLY_LIMIT_KM"), 0.3 },
+                     { QStringLiteral("FENCE_ENABLE"), 0 }, { QStringLiteral("FENCE_AUTOENABLE"), 0 }, { QStringLiteral("FENCE_ACTION"), 1 } };
+    } else if ((firmware == Firmware::ArduPilot) && ((vehicleClass == VehicleClass::FixedWing) || (vehicleClass == VehicleClass::Vtol))) {
+        // ArduPlane 4.5 and later, with the fence disabled
+        defaults = { { QStringLiteral("RTL_ALTITUDE"), 100 }, { QStringLiteral("RTL_CLIMB_MIN"), 0 }, { QStringLiteral("RTL_AUTOLAND"), 0 },
+                     { QStringLiteral("RTL_RADIUS"), 0 }, { QStringLiteral("WP_LOITER_RAD"), 60 }, { QStringLiteral("RALLY_INCL_HOME"), 0 },
+                     { QStringLiteral("RALLY_LIMIT_KM"), 5 }, { QStringLiteral("FENCE_ENABLE"), 0 }, { QStringLiteral("FENCE_AUTOENABLE"), 0 },
+                     { QStringLiteral("FENCE_ACTION"), 1 } };
+    } else {
+        return Parameters();
+    }
+    Parameters parameters = parametersFrom(firmware, vehicleClass, [&defaults](const QString &name) -> std::optional<double> {
+        const auto it = defaults.constFind(name);
+        return (it != defaults.cend()) ? std::optional<double>(*it) : std::nullopt;
+    });
+    parameters.assumed = true;
+    return parameters;
+}
+
+QString GeoZoneReturnModel::autopilotName(Autopilot autopilot)
+{
+    switch (autopilot) {
+    case Autopilot::PX4:
+        return QStringLiteral("PX4");
+    case Autopilot::ArduCopter:
+        return QStringLiteral("ArduCopter");
+    case Autopilot::ArduPlane:
+        return QStringLiteral("ArduPlane");
+    case Autopilot::Unknown:
+        break;
+    }
+    return QString();
 }
 
 GeoZoneReturnModel::BreachAction GeoZoneReturnModel::breachAction(Autopilot autopilot, int action, bool legacyPlaneFence)

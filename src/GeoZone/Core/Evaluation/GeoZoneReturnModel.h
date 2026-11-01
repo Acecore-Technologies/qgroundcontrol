@@ -60,6 +60,7 @@ public:
     /// Parameters of the vehicle in meters and degrees. Altitudes "above home" are relative to the home altitude.
     struct Parameters {
         Autopilot autopilot = Autopilot::Unknown;
+        bool assumed = false;                   ///< The firmware's defaults for the vehicle class, the vehicle's own being unknown
         bool multicopter = false;               ///< PX4 only lowers the return altitude in its cone for multicopters
         bool vtol = false;                      ///< PX4 VTOLs land at home or rally points like multicopters
         /// PX4 RTL_RETURN_ALT above the destination. ArduCopter RTL_ALT above home, 0 to return at the current altitude.
@@ -160,6 +161,12 @@ public:
     static Parameters parametersFrom(Firmware firmware, VehicleClass vehicleClass, const ParameterLookup &lookup);
     /// @return Names of the parameters parametersFrom may read
     static const QStringList &parameterNames();
+    /// @return The parameters a vehicle of the firmware and class has by default, marked assumed. PX4 multicopters,
+    ///         fixed wings and VTOLs have the defaults of their airframes, which differ from those of the parameters.
+    ///         Autopilot::Unknown for other firmware and for ArduPilot vehicles which aren't copters or planes.
+    static Parameters defaultParameters(Firmware firmware, VehicleClass vehicleClass);
+    /// @return Name of the autopilot, like "ArduCopter", empty when unknown
+    static QString autopilotName(Autopilot autopilot);
 
     /// @return The fence breach action for the autopilot's FENCE_ACTION or GF_ACTION. Plane firmware before 4.1, with
     ///         FENCE_RETALT, numbers its actions differently.

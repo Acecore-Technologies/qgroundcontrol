@@ -135,7 +135,13 @@ void GeoZoneMissionCheck::_connectVehicle()
         (void) disconnect(_vehicle->parameterManager(), nullptr, this, nullptr);
     }
     _vehicle = vehicle;
-    if (!_vehicle || _vehicle->isOfflineEditingVehicle() || !_vehicle->parameterManager()) {
+    if (!_vehicle) {
+        return;
+    }
+    // The defaults of the firmware and vehicle class apply until the parameters are known
+    (void) connect(_vehicle, &Vehicle::firmwareTypeChanged, _vehicleConnections, [this]() { _scheduleUpdate(); });
+    (void) connect(_vehicle, &Vehicle::vehicleTypeChanged, _vehicleConnections, [this]() { _scheduleUpdate(); });
+    if (_vehicle->isOfflineEditingVehicle() || !_vehicle->parameterManager()) {
         return;
     }
     // The parameters arrive after the vehicle, each change of those the returns depend on is checked
