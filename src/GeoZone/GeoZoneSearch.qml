@@ -88,16 +88,24 @@ ColumnLayout {
                     color:                  GeoZoneStyle.restrictionColor(resultRow.modelData.restriction)
                 }
 
-                QGCLabel {
+                ColumnLayout {
                     Layout.fillWidth:   true
-                    text:               resultRow.modelData.displayName
-                    textFormat:         Text.PlainText
-                    elide:              Text.ElideRight
-                }
+                    spacing:            0
 
-                QGCLabel {
-                    text:           resultRow.modelData.restrictionText
-                    font.pointSize: ScreenTools.smallFontPointSize
+                    QGCLabel {
+                        Layout.fillWidth:   true
+                        text:               resultRow.modelData.displayName
+                        textFormat:         Text.PlainText
+                        elide:              Text.ElideRight
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth:   true
+                        text:               resultRow.modelData.identifier + " - " + resultRow.modelData.restrictionText
+                        textFormat:         Text.PlainText
+                        elide:              Text.ElideRight
+                        font.pointSize:     ScreenTools.smallFontPointSize
+                    }
                 }
             }
 
