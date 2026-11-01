@@ -58,6 +58,10 @@ public:
 
     explicit GeoZoneSourceIndex(const GeoZoneStore &store);
 
+    /// @return The entry of a source in the index, also the fields restoring a source in a pack, see GeoZonePack
+    static Entry entryFromJson(const QJsonObject &object);
+    static QJsonObject entryToJson(const Entry &entry);
+
     /// @return Index entries in source order. Without an index, the single file kept by earlier versions is
     ///         returned and its name setting is removed.
     Contents read() const;

@@ -52,7 +52,7 @@ GeoZoneLoader::Job GeoZoneLoader::fileJob(const QString &fileName)
     Job job;
     job.key = fileKey(localFileName);
     job.sourcePath = localFileName;
-    job.storedFileName = GeoZoneStore::newFileName();
+    job.storedFileName = GeoZoneStore::newFileName(localFileName);
     job.loadedAt = GeoZoneEnvironment::currentDateTimeUtc();
     job.fileDate = info.lastModified().toUTC();
     return job;
@@ -63,7 +63,6 @@ GeoZoneLoader::Job GeoZoneLoader::feedJob(const QString &url)
     Job job;
     job.key = url;
     job.url = url;
-    job.storedFileName = GeoZoneStore::newFileName();
     job.loadedAt = GeoZoneEnvironment::currentDateTimeUtc();
     job.fileDate = job.loadedAt;
     job.formatHint = GeoZoneProviders::formatHint(url);
@@ -75,7 +74,102 @@ GeoZoneLoader::Job GeoZoneLoader::feedJob(const QString &url)
         job.sourcePath = info.filePath();
         job.fileDate = info.lastModified().toUTC();
     }
+    job.storedFileName = GeoZoneStore::newFileName(job.sourcePath);
     return job;
+}
+
+GeoZoneLoader::Job GeoZoneLoader::downloadJob(const GeoZoneFeedFetch::Request &request, const GeoZoneFeedFetch::Result &result)
+{
+    Job job = feedJob(request.url);
+    job.sourcePath = result.filePath;
+    job.pagePaths = result.pagePaths;
+    job.downloaded = true;
+    job.storedFileName = GeoZoneStore::newFileName(result.filePath);
+    job.responseMember = request.service.effectiveResponseMember();
+    job.formatHint = request.formatHint;
+    job.etag = result.etag;
+    job.lastModified = result.lastModified;
+    job.datasetUrl = result.datasetUrl;
+    job.maxAgeSecs = result.maxAgeSecs;
+    job.area = request.area;
+
+    GeoZoneProvenance &provenance = job.provenance;
+    provenance.providerId = request.service.id.isEmpty() ? GeoZoneProviders::serviceId(request.url) : request.service.id;
+    provenance.requestUrl = result.requestUrl;
+    provenance.finalUrl = result.finalUrl;
+    provenance.redirects = result.redirects;
+    provenance.etag = result.etag;
+    provenance.lastModified = result.lastModified;
+    provenance.fetchedAt = job.loadedAt;
+    provenance.sha256 = result.sha256;
+    provenance.area = job.area;
+    provenance.integrity = result.integrity;
+    provenance.integrityText = result.integrityText;
+    return job;
+}
+
+void GeoZoneLoader::_setEntry(Job &job, const GeoZoneSourceIndex::Entry &entry)
+{
+    job.key = entry.key;
+    job.url = entry.url;
+    job.loadedAt = entry.loadedAt;
+    job.fileDate = entry.fileDate;
+    job.checkedAt = entry.checkedAt;
+    job.formatHint = GeoZoneProviders::formatHint(entry.url);
+    job.etag = entry.etag;
+    job.lastModified = entry.lastModified;
+    job.datasetUrl = entry.datasetUrl;
+    job.maxAgeSecs = entry.maxAgeSecs;
+    job.area = entry.area;
+    job.provenance = GeoZoneProvenance::fromJson(entry.provenance);
+}
+
+GeoZoneLoader::Job GeoZoneLoader::storedJob(const GeoZoneSourceIndex::Entry &entry, const QString &sourcePath)
+{
+    Job job;
+    _setEntry(job, entry);
+    job.sourcePath = sourcePath;
+    job.fromStore = true;
+    return job;
+}
+
+GeoZoneLoader::Job GeoZoneLoader::importedJob(const GeoZoneSourceIndex::Entry &entry, const QString &filePath, const QString &packName, const QDateTime &importedAt)
+{
+    Job job;
+    _setEntry(job, entry);
+    job.sourcePath = filePath;
+    // Adopted as the stored copy like a download
+    job.downloaded = true;
+    job.storedFileName = GeoZoneStore::newFileName(filePath);
+    if (!job.loadedAt.isValid()) {
+        job.loadedAt = importedAt;
+    }
+    if (!job.fileDate.isValid()) {
+        job.fileDate = job.loadedAt;
+    }
+    job.provenance.imported = true;
+    job.provenance.packName = packName;
+    job.provenance.importedAt = importedAt;
+    return job;
+}
+
+GeoZoneSourceIndex::Entry GeoZoneLoader::indexEntry(const Job &job, const GeoZoneSourceIndex::Entry &previous)
+{
+    GeoZoneSourceIndex::Entry entry = previous;
+    entry.key = job.key;
+    entry.url = job.url;
+    entry.fileName = job.storedFileName;
+    entry.loadedAt = job.loadedAt;
+    entry.fileDate = job.fileDate;
+    entry.checkedAt = (job.checkedAt > job.loadedAt) ? job.checkedAt : job.loadedAt;
+    if (job.downloaded) {
+        entry.etag = job.etag;
+        entry.lastModified = job.lastModified;
+        entry.datasetUrl = job.datasetUrl;
+        entry.maxAgeSecs = job.maxAgeSecs;
+        entry.area = job.area;
+    }
+    return entry;
 }
 
 QByteArray GeoZoneLoader::extractZip(const QByteArray &data, QString &errorString)

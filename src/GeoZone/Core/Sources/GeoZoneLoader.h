@@ -17,8 +17,10 @@
 
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
+#include "GeoZoneFeedFetch.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneProvenance.h"
+#include "GeoZoneSourceIndex.h"
 
 class GeoZoneStore;
 
@@ -77,6 +79,14 @@ public:
     static QString fileKey(const QString &fileName);
     /// @return Job loading a feed, from downloaded data or, for file: URLs, from the file in place
     static Job feedJob(const QString &url);
+    /// @return Job loading a feed downloaded by a fetch, with its validators, area and provenance
+    static Job downloadJob(const GeoZoneFeedFetch::Request &request, const GeoZoneFeedFetch::Result &result);
+    /// @return Job restoring the stored copy of a source of the index at sourcePath
+    static Job storedJob(const GeoZoneSourceIndex::Entry &entry, const QString &sourcePath);
+    /// @return Job loading a source of an offline pack, its copy extracted at filePath becoming the stored copy
+    static Job importedJob(const GeoZoneSourceIndex::Entry &entry, const QString &filePath, const QString &packName, const QDateTime &importedAt);
+    /// @return Index entry of the stored copy a job writes, updating the previous entry of the source
+    static GeoZoneSourceIndex::Entry indexEntry(const Job &job, const GeoZoneSourceIndex::Entry &previous);
 
 
     /// @return The largest XML file of a zip archive, or the data itself when it isn't a zip archive. Empty when the
@@ -95,4 +105,8 @@ public:
                       qint64 maxBytes = GeoZoneDownloader::defaultMaxBytes);
 
     static Result run(const Job &job, const GeoZoneStore &store);
+
+private:
+    /// Sets the dates, validators, area and provenance of a source of the index or a pack
+    static void _setEntry(Job &job, const GeoZoneSourceIndex::Entry &entry);
 };

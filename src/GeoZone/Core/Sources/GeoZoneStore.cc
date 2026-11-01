@@ -44,9 +44,27 @@ QString GeoZoneStore::path(const QString &fileName) const
     return QDir(_dir).filePath(fileName);
 }
 
-QString GeoZoneStore::newFileName()
+QString GeoZoneStore::newFileName(const QString &sourcePath)
 {
-    return QStringLiteral("%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    return QStringLiteral("%1.%2").arg(QUuid::createUuid().toString(QUuid::WithoutBraces), fileSuffix(sourcePath));
+}
+
+QString GeoZoneStore::fileSuffix(const QString &filePath)
+{
+    QFile file(filePath);
+    QByteArray head = file.open(QIODevice::ReadOnly) ? file.read(1024) : QByteArray();
+    if (head.startsWith("PK\x03\x04")) {
+        return QStringLiteral("zip");
+    }
+    if (head.startsWith("\xEF\xBB\xBF")) {
+        head.remove(0, 3);
+    }
+    return head.trimmed().startsWith('<') ? QStringLiteral("xml") : QStringLiteral("json");
+}
+
+QStringList GeoZoneStore::fileNameFilters()
+{
+    return { QStringLiteral("*.json"), QStringLiteral("*.xml"), QStringLiteral("*.zip") };
 }
 
 QString GeoZoneStore::moveToBackup() const
@@ -58,7 +76,7 @@ QString GeoZoneStore::moveToBackup() const
     }
 
     bool moved = false;
-    for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
+    for (const QString &fileName : dir.entryList(fileNameFilters(), QDir::Files)) {
         if (fileName != QLatin1String(GeoZoneAuthorisations::fileName)) {
             moved = dir.rename(fileName, QStringLiteral("%1/%2").arg(backupName, fileName)) || moved;
             GeoZoneParseCache::remove(dir.filePath(fileName));
@@ -137,7 +155,7 @@ void GeoZoneStore::removeFile(const QString &fileName) const
 void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) const
 {
     const QDir dir(_dir);
-    for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
+    for (const QString &fileName : dir.entryList(fileNameFilters(), QDir::Files)) {
         if ((fileName != QLatin1String(GeoZoneAuthorisations::fileName)) && !referencedFileNames.contains(fileName)) {
             qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
             (void) QFile::remove(dir.filePath(fileName));

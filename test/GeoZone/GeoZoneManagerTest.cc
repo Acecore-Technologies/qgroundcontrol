@@ -2081,6 +2081,89 @@ void GeoZoneManagerTest::_testPackServiceTrust()
     manager.clear();
 }
 
+void GeoZoneManagerTest::_testStoredFileNames()
+{
+    const ScopedEnvironment environment;
+    const QTemporaryDir storageDir;
+    const QTemporaryDir importDir;
+    const QTemporaryDir fileDir;
+    QVERIFY(storageDir.isValid() && importDir.isValid() && fileDir.isValid());
+    QFile aixm(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(aixm.open(QIODevice::ReadOnly));
+    const QByteArray xml = aixm.readAll();
+    const QString xmlPath = fileDir.filePath(QStringLiteral("zones.xml"));
+    const QString zipPath = fileDir.filePath(QStringLiteral("zones.zip"));
+    {
+        QFile xmlFile(xmlPath);
+        QVERIFY(xmlFile.open(QIODevice::WriteOnly) && (xmlFile.write(xml) == xml.size()));
+        QFile zipFile(zipPath);
+        QVERIFY(zipFile.open(QIODevice::WriteOnly));
+        GeoZonePack::ZipWriter writer(&zipFile);
+        QVERIFY(writer.add(QStringLiteral("zones.xml"), xml) && writer.finish());
+    }
+
+    // The stored copies are named after their content
+    GeoZoneManager manager(storageDir.path());
+    QString errorString;
+    QVERIFY2(manager.loadFile(xmlPath, errorString), qPrintable(errorString));
+    QVERIFY2(manager.loadFile(zipPath, errorString), qPrintable(errorString));
+    const QString xmlKey = GeoZoneLoader::fileKey(xmlPath);
+    const QString zipKey = GeoZoneLoader::fileKey(zipPath);
+    const QString xmlFileName = manager.storedFileName(xmlKey);
+    QVERIFY2(xmlFileName.endsWith(QStringLiteral(".xml")), qPrintable(xmlFileName));
+    QVERIFY2(manager.storedFileName(zipKey).endsWith(QStringLiteral(".zip")), qPrintable(manager.storedFileName(zipKey)));
+    const int zoneCount = manager.source(xmlKey)->zoneCount();
+    QVERIFY(zoneCount > 0);
+    QCOMPARE(manager.source(zipKey)->zoneCount(), zoneCount);
+
+    // and kept at the next start
+    {
+        GeoZoneManager restarted(storageDir.path());
+        restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+        QCOMPARE(restarted.source(xmlKey)->zoneCount(), zoneCount);
+        QCOMPARE(restarted.source(zipKey)->zoneCount(), zoneCount);
+        QVERIFY(QFile::exists(QDir(storageDir.path()).filePath(xmlFileName)));
+    }
+
+    // Packs hold them with their names
+    const QString packPath = fileDir.filePath(QStringLiteral("pack.zip"));
+    QVERIFY(manager.exportPack(packPath));
+    QHash<QString, QByteArray> files = _packFiles(packPath);
+    QCOMPARE(files.value(QStringLiteral("sources/") + xmlFileName), xml);
+
+    // Earlier versions named all copies .json, whatever their content
+    const QString oldPackPath = fileDir.filePath(QStringLiteral("old.zip"));
+    {
+        QJsonObject manifest = QJsonDocument::fromJson(files.value(QStringLiteral("manifest.json"))).object();
+        QJsonArray sources;
+        for (const QJsonValue &value : manifest.value(QStringLiteral("sources")).toArray()) {
+            QJsonObject source = value.toObject();
+            if (source.value(QStringLiteral("key")).toString() == xmlKey) {
+                source.insert(QStringLiteral("file"), QStringLiteral("sources/old.json"));
+                sources.append(source);
+            }
+        }
+        manifest.insert(QStringLiteral("sources"), sources);
+        QFile oldPack(oldPackPath);
+        QVERIFY(oldPack.open(QIODevice::WriteOnly));
+        GeoZonePack::ZipWriter writer(&oldPack);
+        QVERIFY(writer.add(QStringLiteral("sources/old.json"), xml));
+        QVERIFY(writer.add(QStringLiteral("manifest.json"), QJsonDocument(manifest).toJson()));
+        QVERIFY(writer.finish());
+    }
+    GeoZoneManager imported(importDir.path());
+    QSignalSpy importSpy(&imported, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(imported.importPack(oldPackPath));
+    QVERIFY2(importSpy.last()[0].toBool(), qPrintable(importSpy.last()[1].toString()));
+    QTRY_VERIFY(!imported.busy());
+    QVERIFY(imported.source(xmlKey));
+    QCOMPARE(imported.source(xmlKey)->zoneCount(), zoneCount);
+    QVERIFY2(imported.storedFileName(xmlKey).endsWith(QStringLiteral(".xml")), qPrintable(imported.storedFileName(xmlKey)));
+    QVERIFY(imported.importPack(packPath));
+    QTRY_VERIFY(!imported.busy());
+    QCOMPARE(imported.source(zipKey)->zoneCount(), zoneCount);
+}
+
 void GeoZoneManagerTest::_testManagerStartup()
 {
     const ScopedEnvironment environment;

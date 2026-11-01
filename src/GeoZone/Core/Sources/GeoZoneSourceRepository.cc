@@ -9,17 +9,15 @@
 
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneEnvironment.h"
-#include "GeoZonePack.h"
+#include "GeoZonePackExchange.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneSource.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFile>
-#include <QtCore/QCoreApplication>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
-#include <QtCore/QSaveFile>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QJsonArray>
 #include <QtCore/QLocale>
@@ -144,17 +142,16 @@ void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneServic
     }
     _setService(trimmedUrl, feedService);
     if (!secret.isEmpty()) {
-        _credentials.setSecret(trimmedUrl, secret);
+        _services.setSecret(trimmedUrl, secret);
         _updateCredentialsMissing(trimmedUrl);
     }
-    _tokens.remove(trimmedUrl);
+    _services.forgetToken(trimmedUrl);
     _download(trimmedUrl, GeoZoneLoader::Request::Add);
 }
 
 void GeoZoneSourceRepository::setSecret(const QString &key, const QString &secret)
 {
-    _credentials.setSecret(key, secret);
-    _tokens.remove(key);
+    _services.setSecret(key, secret);
     if (GeoZoneSource *const existing = source(key)) {
         existing->setCredentialsMissing(secret.isEmpty());
         if (existing->isFeed() && !secret.isEmpty()) {
@@ -165,16 +162,7 @@ void GeoZoneSourceRepository::setSecret(const QString &key, const QString &secre
 
 void GeoZoneSourceRepository::_setService(const QString &key, const GeoZoneService &service)
 {
-    // A secret only goes where it was entered for
-    if (const auto previous = _services.constFind(key); (previous == _services.cend()) || !previous->sameAuthTarget(service)) {
-        _credentials.remove(key);
-        (void) _tokens.remove(key);
-    }
-    if (service.isEmpty()) {
-        (void) _services.remove(key);
-    } else {
-        _services.insert(key, service);
-    }
+    _services.setService(key, service);
     if (GeoZoneSource *const existing = source(key)) {
         existing->setService(service);
     }
@@ -187,7 +175,7 @@ void GeoZoneSourceRepository::_setService(const QString &key, const GeoZoneServi
 void GeoZoneSourceRepository::_updateCredentialsMissing(const QString &key)
 {
     if (GeoZoneSource *const existing = source(key)) {
-        existing->setCredentialsMissing(existing->service().needsSecret() && _credentials.secret(key).isEmpty());
+        existing->setCredentialsMissing(_services.credentialsMissing(key));
     }
 }
 
@@ -272,7 +260,7 @@ QGeoRectangle GeoZoneSourceRepository::_requestArea(const QString &key) const
         return downloaded;
     }
     // Services answering areas up to a size get a smaller margin, a little under their limit
-    const GeoZoneService service = _services.value(key);
+    const GeoZoneService service = _services.service(key);
     const QGeoRectangle area = expanded(interest, _areaMargin);
     if ((service.maxAreaKm2 <= 0) || (GeoZoneService::areaKm2(area) <= (0.95 * service.maxAreaKm2))) {
         return area;
@@ -311,14 +299,6 @@ void GeoZoneSourceRepository::_checkAreas()
     }
 }
 
-void GeoZoneSourceRepository::_forgetService(const QString &key)
-{
-    if (_services.remove(key) > 0) {
-        _credentials.remove(key);
-    }
-    (void) _tokens.remove(key);
-}
-
 void GeoZoneSourceRepository::refreshFeeds()
 {
     for (int i = 0; i < _sources.count(); i++) {
@@ -349,14 +329,12 @@ void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Reque
     fetchRequest.url = url;
     fetchRequest.formatHint = GeoZoneProviders::formatHint(url);
     fetchRequest.companions = _companions.value(url);
-    fetchRequest.service = _services.value(url);
+    fetchRequest.service = _services.service(url);
     fetchRequest.time = GeoZoneEnvironment::currentDateTimeUtc();
     if (fetchRequest.service.needsSecret()) {
-        fetchRequest.secret = _credentials.secret(url);
+        fetchRequest.secret = _services.secret(url);
     }
-    if (const auto token = _tokens.constFind(url); (token != _tokens.cend()) && (token->expiresAt > fetchRequest.time)) {
-        fetchRequest.accessToken = token->value;
-    }
+    fetchRequest.accessToken = _services.token(url, fetchRequest.time);
     if (fetchRequest.service.areaOfInterest) {
         fetchRequest.area = _requestArea(url);
     }
@@ -403,32 +381,10 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
 
     GeoZoneSource *const existing = source(url);
     if (!result.accessToken.isEmpty()) {
-        _tokens.insert(url, Token{ result.accessToken, result.tokenExpiresAt });
+        _services.setToken(url, result.accessToken, result.tokenExpiresAt);
     }
     if (result.status == GeoZoneFeedFetch::Result::Status::Ready) {
-        GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
-        job.responseMember = fetch->request().service.effectiveResponseMember();
-        job.area = fetch->request().area;
-        GeoZoneProvenance &provenance = job.provenance;
-        provenance.providerId = fetch->request().service.id.isEmpty() ? GeoZoneProviders::serviceId(url) : fetch->request().service.id;
-        provenance.requestUrl = result.requestUrl;
-        provenance.finalUrl = result.finalUrl;
-        provenance.redirects = result.redirects;
-        provenance.etag = result.etag;
-        provenance.lastModified = result.lastModified;
-        provenance.fetchedAt = job.loadedAt;
-        provenance.sha256 = result.sha256;
-        provenance.area = job.area;
-        provenance.integrity = result.integrity;
-        provenance.integrityText = result.integrityText;
-        job.sourcePath = result.filePath;
-        job.pagePaths = result.pagePaths;
-        job.downloaded = true;
-        job.formatHint = fetch->request().formatHint;
-        job.etag = result.etag;
-        job.lastModified = result.lastModified;
-        job.datasetUrl = result.datasetUrl;
-        job.maxAgeSecs = result.maxAgeSecs;
+        GeoZoneLoader::Job job = GeoZoneLoader::downloadJob(fetch->request(), result);
         job.request = request;
         job.cancelToken = fetch->cancelToken();
         _startLoad(job, LoadMode::Background);
@@ -460,7 +416,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     }
     if (!existing) {
         // The service of a feed which couldn't be added is forgotten with its secret
-        _forgetService(url);
+        _services.forget(url);
     }
     if (request != GeoZoneLoader::Request::Automatic) {
         emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
@@ -549,7 +505,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
             source->setErrorString(loadResult.errorString);
             _scheduler->refreshFailed(*source);
         } else {
-            _forgetService(job.key);
+            _services.forget(job.key);
         }
         if (job.request != GeoZoneLoader::Request::Automatic) {
             emit loadFailed(job.key, tr("Geozone file load failed. %1").arg(loadResult.errorString));
@@ -568,9 +524,9 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
             source = _newSource(job.key, job.url);
             _removeLegacyFileSource(job);
         }
-        if (const auto service = _services.constFind(job.key); service != _services.cend()) {
-            source->setService(service.value());
-            source->setCredentialsMissing(service->needsSecret() && _credentials.secret(job.key).isEmpty());
+        if (_services.contains(job.key)) {
+            source->setService(_services.service(job.key));
+            source->setCredentialsMissing(_services.credentialsMissing(job.key));
         }
         emit sourceAboutToChange(source);
         source->setResult(loadResult.result, job.loadedAt, job.fileDate);
@@ -640,25 +596,12 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
         return;
     }
 
-    GeoZoneSourceIndex::Entry entry = _index.entry(job.key);
-    entry.key = job.key;
-    entry.url = job.url;
-    entry.fileName = job.storedFileName;
-    entry.loadedAt = job.loadedAt;
-    entry.fileDate = job.fileDate;
-    entry.checkedAt = (job.checkedAt > job.loadedAt) ? job.checkedAt : job.loadedAt;
+    GeoZoneSourceIndex::Entry entry = GeoZoneLoader::indexEntry(job, _index.entry(job.key));
     if (const GeoZoneSource *const source = this->source(job.key)) {
         entry.enabled = source->enabled();
         entry.provenance = source->provenance().toJson();
     }
-    entry.service = _services.contains(job.key) ? _services.value(job.key).toJson() : QJsonObject();
-    if (job.downloaded) {
-        entry.etag = job.etag;
-        entry.lastModified = job.lastModified;
-        entry.datasetUrl = job.datasetUrl;
-        entry.maxAgeSecs = job.maxAgeSecs;
-        entry.area = job.area;
-    }
+    entry.service = _services.contains(job.key) ? _services.service(job.key).toJson() : QJsonObject();
     _index.replace(entry);
     _saveIndex();
 }
@@ -733,7 +676,7 @@ void GeoZoneSourceRepository::removeSource(int index)
         source->setBusy(false);
     }
     _companions.remove(source->key());
-    _forgetService(source->key());
+    _services.forget(source->key());
     _scheduler->remove(source->key());
     emit sourceAboutToChange(source);
     _sources.removeAt(index);
@@ -782,19 +725,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
 
     QList<GeoZoneLoader::Job> jobs;
     for (const GeoZoneSourceIndex::Entry &entry : index.entries) {
-        GeoZoneLoader::Job job;
-        job.key = entry.key;
-        job.url = entry.url;
-        job.sourcePath = _store.path(entry.fileName);
-        job.fromStore = true;
-        job.loadedAt = entry.loadedAt;
-        job.fileDate = entry.fileDate;
-        job.checkedAt = entry.checkedAt;
-        job.formatHint = GeoZoneProviders::formatHint(job.url);
-        job.etag = entry.etag;
-        job.lastModified = entry.lastModified;
-        job.datasetUrl = entry.datasetUrl;
-        job.maxAgeSecs = entry.maxAgeSecs;
+        GeoZoneLoader::Job job = GeoZoneLoader::storedJob(entry, _store.path(entry.fileName));
         if (job.key.isEmpty() || entry.fileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
             qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source" << job.key << entry.fileName;
             continue;
@@ -809,10 +740,9 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         placeholder->setArea(entry.area);
         placeholder->setProvenance(GeoZoneProvenance::fromJson(entry.provenance));
         if (!entry.service.isEmpty()) {
-            const GeoZoneService service = GeoZoneService::fromJson(entry.service);
-            _services.insert(entry.key, service);
-            placeholder->setService(service);
-            placeholder->setCredentialsMissing(service.needsSecret() && _credentials.secret(entry.key).isEmpty());
+            _services.restoreService(entry.key, GeoZoneService::fromJson(entry.service));
+            placeholder->setService(_services.service(entry.key));
+            placeholder->setCredentialsMissing(_services.credentialsMissing(entry.key));
         }
         _index.insert(entry);
         jobs.append(job);
@@ -913,141 +843,41 @@ QJsonObject GeoZoneSourceRepository::provenanceReport() const
 
 bool GeoZoneSourceRepository::exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const
 {
-    QSaveFile file(packPath);
-    if (!file.open(QIODevice::WriteOnly)) {
-        errorString = file.errorString();
-        return false;
-    }
-    GeoZonePack::ZipWriter writer(&file);
-    QJsonArray sources;
+    QList<GeoZonePackExchange::ExportSource> sources;
     for (const QString &key : keys) {
         const GeoZoneSource *const source = this->source(key);
         const GeoZoneSourceIndex::Entry entry = _index.entry(key);
-        if (!source || !source->loaded() || entry.fileName.isEmpty()) {
-            continue;
+        if (source && source->loaded() && !entry.fileName.isEmpty()) {
+            sources.append(GeoZonePackExchange::ExportSource{ sourceReport(*source), entry, source->service(), _store.path(entry.fileName) });
         }
-        QFile stored(_store.path(entry.fileName));
-        if (!stored.open(QIODevice::ReadOnly)) {
-            errorString = tr("The stored copy of %1 could not be read: %2").arg(source->name(), stored.errorString());
-            return false;
-        }
-        const QString name = QLatin1String(GeoZonePack::sourcesDir) + entry.fileName;
-        if (!writer.add(name, stored.readAll())) {
-            errorString = writer.errorString();
-            return false;
-        }
-
-        QJsonObject object = sourceReport(*source);
-        object.insert(QStringLiteral("file"), name);
-        if (!source->service().isEmpty()) {
-            // The service with its user, which identifies but doesn't authenticate, without its headers, which may hold keys
-            object.insert(QStringLiteral("service"), source->service().shareableJson());
-        }
-        if (entry.fileDate.isValid()) {
-            object.insert(QStringLiteral("fileDate"), entry.fileDate.toUTC().toString(Qt::ISODate));
-        }
-        const std::pair<const char*, QString> validators[] = { { "etag", source->etag() }, { "lastModified", source->lastModified() }, { "datasetUrl", source->datasetUrl() } };
-        for (const auto &[validatorName, value] : validators) {
-            if (!value.isEmpty()) {
-                object.insert(QLatin1String(validatorName), value);
-            }
-        }
-        if (entry.maxAgeSecs > 0) {
-            object.insert(QStringLiteral("maxAge"), entry.maxAgeSecs);
-        }
-        if (source->area().isValid()) {
-            const QGeoRectangle area = source->area();
-            object.insert(QStringLiteral("area"), QJsonArray{ area.topLeft().longitude(), area.bottomRight().latitude(), area.bottomRight().longitude(), area.topLeft().latitude() });
-        }
-        sources.append(object);
     }
-    if (sources.isEmpty()) {
-        errorString = tr("None of the sources has stored data to export.");
-        return false;
-    }
-
-    const QJsonObject manifest{
-        { QStringLiteral("format"), QLatin1String(GeoZonePack::formatName) },
-        { QStringLiteral("version"), GeoZonePack::version },
-        { QStringLiteral("createdAt"), GeoZoneEnvironment::currentDateTimeUtc().toString(Qt::ISODate) },
-        { QStringLiteral("generator"), QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion()).trimmed() },
-        { QStringLiteral("sources"), sources },
-    };
-    if (!writer.add(QLatin1String(GeoZonePack::manifestName), QJsonDocument(manifest).toJson()) || !writer.finish()) {
-        errorString = writer.errorString();
-        return false;
-    }
-    if (!file.commit()) {
-        errorString = file.errorString();
-        return false;
-    }
-    qCDebug(GeoZoneSourceLog) << "Exported" << sources.count() << "sources to" << packPath;
-    return true;
+    return GeoZonePackExchange::write(sources, packPath, errorString);
 }
 
 int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorString)
 {
-    errorString.clear();
-    const GeoZonePack::Contents contents = GeoZonePack::read(packPath, _store.downloadDir());
-    if (!contents.errorString.isEmpty()) {
-        errorString = tr("The geozone pack could not be read. %1").arg(contents.errorString);
+    // Sources already here, or being added, keep their service
+    const GeoZonePackExchange::Import import = GeoZonePackExchange::read(packPath, _store.downloadDir(), [this](const QString &key) {
+        return source(key) || _services.contains(key);
+    }, GeoZoneEnvironment::currentDateTimeUtc());
+    if (!import.errorString.isEmpty()) {
+        errorString = import.errorString;
         return -1;
     }
 
-    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
-    const QString packName = QFileInfo(packPath).fileName();
-    QStringList errors = contents.errors;
-    int count = 0;
-    for (const GeoZonePack::Source &packSource : contents.sources) {
-        const QJsonObject &manifest = packSource.manifest;
-        const auto date = [&manifest](const char *name) { return QDateTime::fromString(manifest.value(QLatin1String(name)).toString(), Qt::ISODate); };
-        GeoZoneLoader::Job job;
-        job.key = manifest.value(QStringLiteral("key")).toString();
-        job.url = manifest.value(QStringLiteral("url")).toString();
-
-        // Sources already here keep their service, so that a pack can't send their secret elsewhere. The service of
-        // a new source is the pack's without its custom headers, its secret is entered again.
-        if (!source(job.key) && !_services.contains(job.key)) {
-            const QJsonValue serviceValue = manifest.value(QStringLiteral("service"));
-            GeoZoneService service = (job.url.isEmpty() || !serviceValue.isObject()) ? GeoZoneService() : GeoZoneService::fromJson(serviceValue.toObject());
-            service.headers.clear();
-            if (const QStringList otherOrigins = service.otherOrigins(job.url); !otherOrigins.isEmpty()) {
-                (void) QFile::remove(packSource.filePath);
-                errors.append(tr("%1: its service sends requests to %2, another server than the feed's. Add the service again to trust it.")
-                                  .arg(manifest.value(QStringLiteral("name")).toString(), otherOrigins.join(QStringLiteral(", "))));
-                continue;
-            }
-            _setService(job.key, service);
+    for (const GeoZonePackExchange::ImportSource &imported : import.sources) {
+        if (!imported.known) {
+            // The secret of a new source isn't in the pack, the source shows that it is missing
+            _setService(imported.job.key, imported.service);
         }
-
-        job.sourcePath = packSource.filePath;
-        // Adopted as the stored copy like a download
-        job.downloaded = true;
-        job.storedFileName = GeoZoneStore::newFileName();
-        job.loadedAt = date("loadedAt").isValid() ? date("loadedAt") : now;
-        job.fileDate = date("fileDate").isValid() ? date("fileDate") : job.loadedAt;
-        job.checkedAt = date("checkedAt");
-        job.formatHint = GeoZoneProviders::formatHint(job.url);
-        job.etag = manifest.value(QStringLiteral("etag")).toString();
-        job.lastModified = manifest.value(QStringLiteral("lastModified")).toString();
-        job.datasetUrl = manifest.value(QStringLiteral("datasetUrl")).toString();
-        job.maxAgeSecs = manifest.value(QStringLiteral("maxAge")).toInteger(-1);
-        const QJsonArray area = manifest.value(QStringLiteral("area")).toArray();
-        if (area.count() == 4) {
-            job.area = QGeoRectangle(QGeoCoordinate(area[3].toDouble(), area[0].toDouble()), QGeoCoordinate(area[1].toDouble(), area[2].toDouble()));
-        }
-        job.provenance = GeoZoneProvenance::fromJson(manifest.value(QStringLiteral("provenance")).toObject());
-        job.provenance.imported = true;
-        job.provenance.packName = packName;
-        job.provenance.importedAt = now;
+        GeoZoneLoader::Job job = imported.job;
         job.request = GeoZoneLoader::Request::User;
         job.cancelToken = _beginOperation(job.key);
         _startLoad(job, LoadMode::Background);
-        count++;
     }
-    qCDebug(GeoZoneSourceLog) << "Importing" << count << "sources from" << packPath;
-    errorString = errors.join(QLatin1Char('\n'));
-    return count;
+    qCDebug(GeoZoneSourceLog) << "Importing" << import.sources.count() << "sources from" << packPath;
+    errorString = import.errors.join(QLatin1Char('\n'));
+    return static_cast<int>(import.sources.count());
 }
 
 void GeoZoneSourceRepository::updateValidity()

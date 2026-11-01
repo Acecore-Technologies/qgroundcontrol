@@ -12,7 +12,7 @@ The module has two layers:
 | `src/GeoZone/Core` | `GeoZoneCore`, a static library which only depends on Qt (Core and Positioning, privately Concurrent, Network and zlib), so it can be tested and fuzzed without _QGroundControl_. |
 | `src/GeoZone/Core/Model` | The zones (`GeoZone`, its `Data`, `Volume` and schedule in `GeoZoneSchedule`), the vertical datums of their limits (`GeoZoneVertical`), their translated display texts in the units of the application (`GeoZoneText`, so that the model has no translations or units), their geometry (`GeoZoneGeometry`, see [Geometry](#geometry), `GeoZoneBox`, `GeoZoneShape` for the maps), the spatial index (`GeoZoneIndex`), the `GeoZoneCatalog` of all zones, `GeoZonePolicy` (which zones a check applies to) and `GeoZoneInfo`, the value QML gets. |
 | `src/GeoZone/Core/Formats` | `GeoZoneParser`, the `GeoZoneFormat` interface with one class per format, the helpers shared by the formats (`GeoZoneParserUtils`) and the zip reader (`GeoZoneZip`). |
-| `src/GeoZone/Core/Sources` | The sources and how they are obtained: `GeoZoneSourceRepository`, `GeoZoneSource`, `GeoZoneFeedFetch`, `GeoZoneDownloader`, `GeoZoneRefreshScheduler`, `GeoZoneLoader`, `GeoZoneStore`, `GeoZoneSourceIndex`, `GeoZoneParseCache`, the known services (`GeoZoneProviders`, `GeoZoneService`), `GeoZoneCredentials`, `GeoZoneProvenance` and offline packs (`GeoZonePack`). |
+| `src/GeoZone/Core/Sources` | The sources and how they are obtained: `GeoZoneSourceRepository`, `GeoZoneSource`, `GeoZoneFeedFetch`, `GeoZoneDownloader`, `GeoZoneRefreshScheduler`, `GeoZoneLoader`, `GeoZoneStore`, `GeoZoneSourceIndex`, `GeoZoneParseCache`, the known services (`GeoZoneProviders`, `GeoZoneService`), `GeoZoneServiceRegistry` (the services of the sources with their secrets in `GeoZoneCredentials` and their OAuth2 tokens), `GeoZoneProvenance` and offline packs (`GeoZonePack`, `GeoZonePackExchange`). |
 | `src/GeoZone/Core/Evaluation` | Checks of positions and paths: `GeoZonePathEvaluator`, the autopilot return paths (`GeoZoneReturnModel`) and the return destinations of missions (`GeoZoneReturnDestinations` on `GeoZoneMissionItem`), `GeoZoneRouteSearch`, `GeoZoneAlertTracker`, `GeoZoneBriefing`, `GeoZonePlanAudit`, `GeoZoneFences` (fence storage and priorities), `GeoZoneAuthorisations`, `GeoZoneSourceVersion` and `GeoZoneTerrain`. |
 | `src/GeoZone/Core/Geoid` | The EGM96 geoid grid converting heights above the WGS84 ellipsoid, see its `README.md`. |
 | `src/GeoZone` | The application layer: `GeoZoneModule` (the entry points), `GeoZoneManager` (the singleton publishing the zones and their queries to C++ and QML), `GeoZoneSettings` with `GeoZone.SettingsGroup.json`. |
@@ -157,6 +157,19 @@ The services _QGroundControl_ knows are listed in `GeoZoneProviders` (`src/GeoZo
 - A service needing credentials, an ED-318 POST or the area of interest is a `ServiceTemplate` of `serviceTemplates()`, offered by **Add Service...**: the URL template (with the placeholders of `GeoZoneService`), and a `GeoZoneService` with the `method`, `auth` (and `tokenUrl`, `authParameter`, `scope`), `headers`, `responseMember`, `areaOfInterest`, `timeWindowHours`, `maxAreaKm2` and `sha256Url`, a note telling how to get access, and `supported = false` for services whose data can't be read yet. Secrets are never part of `GeoZoneService`, `GeoZoneCredentials` keeps them.
 
 `GeoZoneParserTest::_testProviders()` tests the providers, `GeoZoneManagerTest` the services with `TestFeedServer` (`_testServiceApiKeys`, `_testServiceOAuth2`, `_testEd318Service`, `_testServiceAreaOfInterest`), and `GeoZoneParserTest::_testLiveNationalFeeds()` downloads the real services when `QGC_GEOZONE_LIVE_TEST` is set. Add the provider to the national feeds or services listed in the [user guide](../qgc-user-guide/geozones/geozones.md#loading-data).
+
+## Stored Copies and Offline Packs {#stored-copies-and-packs}
+
+`GeoZoneStore` keeps a copy of each source, named with a UUID and the suffix of its content (`GeoZoneStore::fileSuffix()`: `.zip`, `.xml` or `.json`; earlier versions named all copies `.json`), with its parse cache (`.gzc`) next to it. `sources.json`, written by `GeoZoneSourceIndex`, lists them with their origin, dates, validators, service and provenance. The jobs loading the sources are built by `GeoZoneLoader` (`fileJob()`, `feedJob()`, `downloadJob()`, `storedJob()`, `importedJob()`), so that downloads, stored copies and imported packs carry their dates, validators, area and provenance alike, and `GeoZoneLoader::indexEntry()` turns a job back into its index entry.
+
+`GeoZonePackExchange` writes and reads offline packs, zip archives with:
+
+| File | Contents |
+| ---- | -------- |
+| `manifest.json` | `format` (`qgc-geozone-pack`), `version` (1), `createdAt`, `generator` and `sources`: per source the fields of its index entry (`GeoZoneSourceIndex::entryToJson()`) and of `GeoZoneSourceRepository::sourceReport()`, `file` naming its copy in the pack, and its `service` without custom headers (`GeoZoneService::shareableJson()`). |
+| `sources/<name>` | The stored copy of each source, under its name in the store. Packs of earlier versions name all copies `.json`; the content decides how they are read. |
+
+Imported copies are checked against the BLAKE2b-256 hash of their provenance, and their services follow the rules of [Origins and Credentials](#origins-and-credentials). `GeoZoneManagerTest::_testOfflinePack()` and `_testStoredFileNames()` test them.
 
 ## Origins and Credentials {#origins-and-credentials}
 

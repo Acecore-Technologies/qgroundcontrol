@@ -72,30 +72,7 @@ GeoZoneSourceIndex::Contents GeoZoneSourceIndex::read() const
         }
 
         for (const QJsonValue &value : root.value(sourcesKey).toArray()) {
-            const QJsonObject object = value.toObject();
-            Entry entry;
-            entry.key = object.value(keyKey).toString();
-            entry.url = object.value(urlKey).toString();
-            entry.fileName = object.value(fileKey).toString();
-            entry.loadedAt = QDateTime::fromString(object.value(loadedAtKey).toString(), Qt::ISODate);
-            entry.fileDate = QDateTime::fromString(object.value(fileDateKey).toString(), Qt::ISODate);
-            entry.etag = object.value(etagKey).toString();
-            entry.lastModified = object.value(lastModifiedKey).toString();
-            entry.enabled = object.value(enabledKey).toBool(true);
-            entry.datasetUrl = object.value(datasetUrlKey).toString();
-            entry.maxAgeSecs = object.value(maxAgeKey).toInteger(-1);
-            // Only written once the server confirmed the copy after downloading it
-            entry.checkedAt = QDateTime::fromString(object.value(checkedAtKey).toString(), Qt::ISODate);
-            if (!entry.checkedAt.isValid() || (entry.checkedAt < entry.loadedAt)) {
-                entry.checkedAt = entry.loadedAt;
-            }
-            entry.service = object.value(serviceKey).toObject();
-            entry.provenance = object.value(provenanceKey).toObject();
-            const QJsonArray area = object.value(areaKey).toArray();
-            if (area.count() == 4) {
-                entry.area = QGeoRectangle(QGeoCoordinate(area[3].toDouble(), area[0].toDouble()), QGeoCoordinate(area[1].toDouble(), area[2].toDouble()));
-            }
-            contents.entries.append(entry);
+            contents.entries.append(entryFromJson(value.toObject()));
         }
         contents.status = Status::Ok;
         return contents;
@@ -137,48 +114,76 @@ bool GeoZoneSourceIndex::write(const QList<Entry> &entries, QString &errorString
 
     QJsonArray values;
     for (const Entry &entry : entries) {
-        QJsonObject object{
-            { keyKey, entry.key },
-            { fileKey, entry.fileName },
-            { loadedAtKey, entry.loadedAt.toString(Qt::ISODate) },
-            { fileDateKey, entry.fileDate.toString(Qt::ISODate) },
-        };
-        if (!entry.url.isEmpty()) {
-            object.insert(urlKey, entry.url);
-        }
-        if (!entry.etag.isEmpty()) {
-            object.insert(etagKey, entry.etag);
-        }
-        if (!entry.lastModified.isEmpty()) {
-            object.insert(lastModifiedKey, entry.lastModified);
-        }
-        if (!entry.enabled) {
-            object.insert(enabledKey, false);
-        }
-        if (!entry.datasetUrl.isEmpty()) {
-            object.insert(datasetUrlKey, entry.datasetUrl);
-        }
-        if (entry.maxAgeSecs > 0) {
-            object.insert(maxAgeKey, entry.maxAgeSecs);
-        }
-        if (entry.checkedAt.isValid() && (entry.checkedAt > entry.loadedAt)) {
-            object.insert(checkedAtKey, entry.checkedAt.toString(Qt::ISODate));
-        }
-        if (!entry.service.isEmpty()) {
-            object.insert(serviceKey, entry.service);
-        }
-        if (!entry.provenance.isEmpty()) {
-            object.insert(provenanceKey, entry.provenance);
-        }
-        if (entry.area.isValid()) {
-            object.insert(areaKey, QJsonArray{ entry.area.topLeft().longitude(), entry.area.bottomRight().latitude(),
-                                               entry.area.bottomRight().longitude(), entry.area.topLeft().latitude() });
-        }
-        values.append(object);
+        values.append(entryToJson(entry));
     }
 
     const QByteArray bytes = QJsonDocument(QJsonObject{ { versionKey, version }, { sourcesKey, values } }).toJson();
     return _store.writeFile(indexFileName, bytes, errorString);
+}
+
+GeoZoneSourceIndex::Entry GeoZoneSourceIndex::entryFromJson(const QJsonObject &object)
+{
+    Entry entry;
+    entry.key = object.value(keyKey).toString();
+    entry.url = object.value(urlKey).toString();
+    entry.fileName = object.value(fileKey).toString();
+    entry.loadedAt = QDateTime::fromString(object.value(loadedAtKey).toString(), Qt::ISODate);
+    entry.fileDate = QDateTime::fromString(object.value(fileDateKey).toString(), Qt::ISODate);
+    entry.etag = object.value(etagKey).toString();
+    entry.lastModified = object.value(lastModifiedKey).toString();
+    entry.enabled = object.value(enabledKey).toBool(true);
+    entry.datasetUrl = object.value(datasetUrlKey).toString();
+    entry.maxAgeSecs = object.value(maxAgeKey).toInteger(-1);
+    // Only written once the server confirmed the copy after downloading it
+    entry.checkedAt = QDateTime::fromString(object.value(checkedAtKey).toString(), Qt::ISODate);
+    if (!entry.checkedAt.isValid() || (entry.checkedAt < entry.loadedAt)) {
+        entry.checkedAt = entry.loadedAt;
+    }
+    entry.service = object.value(serviceKey).toObject();
+    entry.provenance = object.value(provenanceKey).toObject();
+    const QJsonArray area = object.value(areaKey).toArray();
+    if (area.count() == 4) {
+        entry.area = QGeoRectangle(QGeoCoordinate(area[3].toDouble(), area[0].toDouble()), QGeoCoordinate(area[1].toDouble(), area[2].toDouble()));
+    }
+    return entry;
+}
+
+QJsonObject GeoZoneSourceIndex::entryToJson(const Entry &entry)
+{
+    QJsonObject object{
+        { keyKey, entry.key },
+        { fileKey, entry.fileName },
+        { loadedAtKey, entry.loadedAt.toString(Qt::ISODate) },
+        { fileDateKey, entry.fileDate.toString(Qt::ISODate) },
+    };
+    const std::pair<const char*, QString> texts[] = {
+        { urlKey, entry.url }, { etagKey, entry.etag }, { lastModifiedKey, entry.lastModified }, { datasetUrlKey, entry.datasetUrl },
+    };
+    for (const auto &[name, text] : texts) {
+        if (!text.isEmpty()) {
+            object.insert(QLatin1String(name), text);
+        }
+    }
+    if (!entry.enabled) {
+        object.insert(enabledKey, false);
+    }
+    if (entry.maxAgeSecs > 0) {
+        object.insert(maxAgeKey, entry.maxAgeSecs);
+    }
+    if (entry.checkedAt.isValid() && (entry.checkedAt > entry.loadedAt)) {
+        object.insert(checkedAtKey, entry.checkedAt.toString(Qt::ISODate));
+    }
+    if (!entry.service.isEmpty()) {
+        object.insert(serviceKey, entry.service);
+    }
+    if (!entry.provenance.isEmpty()) {
+        object.insert(provenanceKey, entry.provenance);
+    }
+    if (entry.area.isValid()) {
+        object.insert(areaKey, QJsonArray{ entry.area.topLeft().longitude(), entry.area.bottomRight().latitude(),
+                                           entry.area.bottomRight().longitude(), entry.area.topLeft().latitude() });
+    }
+    return object;
 }
 
 void GeoZoneSourceIndex::replace(const Entry &entry)

@@ -189,7 +189,9 @@ Contents read(const QString &packPath, const QString &directory)
     });
     (void) QDir().mkpath(directory);
     QString zipError;
-    const bool readOk = GeoZoneZip::forEachFile(archive, { QStringLiteral(".json") }, maxBytes, zipError, [&](const GeoZoneZip::File &file) {
+    // Packs of earlier versions name all copies .json, whatever their content
+    const QStringList suffixes = { QStringLiteral(".json"), QStringLiteral(".xml"), QStringLiteral(".zip") };
+    const bool readOk = GeoZoneZip::forEachFile(archive, suffixes, maxBytes, zipError, [&](const GeoZoneZip::File &file) {
         if (file.name == QLatin1String(manifestName)) {
             manifestData = file.data;
         } else if (file.name.startsWith(QLatin1String(sourcesDir)) && !file.name.contains(QStringLiteral(".."))) {

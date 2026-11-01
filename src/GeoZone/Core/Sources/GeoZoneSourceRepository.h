@@ -22,6 +22,7 @@
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneLoader.h"
 #include "GeoZoneService.h"
+#include "GeoZoneServiceRegistry.h"
 #include "GeoZoneSourceIndex.h"
 #include "GeoZoneStore.h"
 
@@ -63,7 +64,7 @@ public:
     /// Replaces the secret of the service of a source and downloads it again
     void setSecret(const QString &key, const QString &secret);
     /// Keeps the secrets of the services, in the application settings by default
-    GeoZoneCredentials &credentials() { return _credentials; }
+    GeoZoneCredentials &credentials() { return _services.credentials(); }
 
     /// Sets the area of a planned mission, part of the area of interest of the services taking it, see
     /// GeoZoneService::areaOfInterest. Feeds whose downloaded area doesn't cover the area of interest are downloaded
@@ -169,8 +170,6 @@ private:
     void _removeLegacyFileSource(const GeoZoneLoader::Job &job);
     void _sourceEnabledChanged(GeoZoneSource *source);
     void _reportStorageError(const QString &message);
-    /// Forgets the service of a source with its secret and token
-    void _forgetService(const QString &key);
     /// Sets the service of a source, forgetting its secret and token when the service sends them elsewhere
     void _setService(const QString &key, const GeoZoneService &service);
     void _updateCredentialsMissing(const QString &key);
@@ -179,11 +178,6 @@ private:
     QGeoRectangle _requestArea(const QString &key) const;
     /// Downloads the feeds taking the area of interest again whose area doesn't cover it
     void _checkAreas();
-
-    struct Token {
-        QString value;
-        QDateTime expiresAt;
-    };
 
     GeoZoneStore _store;
     GeoZoneSourceIndex _index;
@@ -194,9 +188,7 @@ private:
     QHash<QString, GeoZoneCancelToken> _operations; ///< Fetch or load in progress per source key, earlier ones were canceled
     QHash<QString, GeoZoneFeedFetch*> _fetches;     ///< Feeds being downloaded, by URL
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
-    GeoZoneCredentials _credentials;
-    QHash<QString, GeoZoneService> _services;   ///< Of the feeds requested from a service, by source key
-    QHash<QString, Token> _tokens;              ///< OAuth2 tokens of the services by source key, kept for the session
+    GeoZoneServiceRegistry _services;   ///< Of the feeds requested from a service, with their secrets and tokens
     QHash<quintptr, QGeoRectangle> _missionAreas;
     QGeoCoordinate _vehiclePosition;
     double _areaMargin = defaultAreaMargin;

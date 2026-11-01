@@ -12,6 +12,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QSet>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 
 /// Keeps copies of the geozone sources in a directory, see GeoZoneSourceIndex for the index of their origin, dates
 /// and HTTP validators, and GeoZoneParseCache for the parse caches next to them. Methods only access the files, so a
@@ -23,7 +24,13 @@ public:
 
     QString dir() const { return _dir; }
     QString path(const QString &fileName) const;
-    static QString newFileName();
+    /// @return A new unique name for the stored copy of a file, with the suffix of its content, see fileSuffix
+    static QString newFileName(const QString &sourcePath);
+    /// @return "zip" for zip archives, "xml" for XML documents, otherwise "json". Copies stored by earlier versions
+    ///         are all named .json whatever their content.
+    static QString fileSuffix(const QString &filePath);
+    /// Name filters of the stored copies
+    static QStringList fileNameFilters();
 
     /// Moves the index and the stored copies to a new subdirectory, keeping them for the user when the index is unreadable
     /// @return Path of the subdirectory, empty if nothing could be moved

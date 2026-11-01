@@ -63,6 +63,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneOrigin.h
     Sources/GeoZonePack.cc
     Sources/GeoZonePack.h
+    Sources/GeoZonePackExchange.cc
+    Sources/GeoZonePackExchange.h
     Sources/GeoZoneParseCache.cc
     Sources/GeoZoneParseCache.h
     Sources/GeoZoneProvenance.cc
@@ -73,6 +75,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneRefreshScheduler.h
     Sources/GeoZoneService.cc
     Sources/GeoZoneService.h
+    Sources/GeoZoneServiceRegistry.cc
+    Sources/GeoZoneServiceRegistry.h
     Sources/GeoZoneSource.cc
     Sources/GeoZoneSource.h
     Sources/GeoZoneSourceIndex.cc
