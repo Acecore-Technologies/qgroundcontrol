@@ -21,6 +21,7 @@ private slots:
     void _testManagerBackgroundLoad();
     void _testFeedNotModified();
     void _testFeedCompanions();
+    void _testReloadChanges();
     void _testSourceValidity();
     void _testDownloadSizeLimit();
     void _testDownloadFailures();

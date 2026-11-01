@@ -100,6 +100,13 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     return update;
 }
 
+void GeoZoneAlertTracker::forget(const QSet<QString> &zoneKeys)
+{
+    for (const QString &zoneKey : zoneKeys) {
+        (void) _states.remove(zoneKey);
+    }
+}
+
 QList<GeoZone::Position> GeoZoneAlertTracker::predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds)
 {
     GeoZone::Position predicted;

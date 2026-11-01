@@ -66,6 +66,14 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     // Zones of a source are about to be deleted. Their alert states are kept so reloading the source doesn't repeat alerts.
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::monitoringChanged);
+    // Zones whose data changed alert again, their limits or schedule may differ
+    (void) connect(_manager, &GeoZoneManager::zonesChanged, this, [this](GeoZoneSource *source) {
+        if (source && !source->changedZoneKeys().isEmpty()) {
+            for (Tracker &tracker : _trackers) {
+                tracker.alerts.forget(source->changedZoneKeys());
+            }
+        }
+    });
 }
 
 GeoZoneMonitor *GeoZoneMonitor::instance()

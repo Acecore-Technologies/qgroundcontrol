@@ -13,6 +13,7 @@
 #include "GeoZoneShape.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -193,6 +194,16 @@ void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &f
 
 void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate)
 {
+    const bool reload = loaded();
+    QList<GeoZone::Data> previous;
+    previous.reserve(_zones.count());
+    for (const GeoZone *zone : std::as_const(_zones)) {
+        GeoZone::Data summary;
+        summary.identifier = zone->identifier();
+        summary.name = zone->name();
+        summary.contentHash = zone->data().contentHash;
+        previous.append(summary);
+    }
     _clearZones();
     _setMetadata(result, loadedAt, fileDate);
 
@@ -225,8 +236,83 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
         }
     }
 
+    _changedZoneKeys.clear();
+    if (reload) {
+        _summarizeChanges(previous, _zones);
+    }
     updateValidity(QDateTime::currentDateTimeUtc());
     emit changed();
+}
+
+void GeoZoneSource::_summarizeChanges(const QList<GeoZone::Data> &previous, const QList<GeoZone*> &zones)
+{
+    // Zones are recognized by identifier, or name without, several shapes of a TFR share one
+    const auto identity = [](const QString &identifier, const QString &name) { return identifier.isEmpty() ? name : identifier; };
+    QHash<QString, QList<QByteArray>> before;
+    QHash<QString, QString> names;
+    for (const GeoZone::Data &zone : previous) {
+        const QString id = identity(zone.identifier, zone.name);
+        before[id].append(zone.contentHash);
+        names.insert(id, zone.name.isEmpty() ? zone.identifier : zone.name);
+    }
+    QHash<QString, QList<QByteArray>> after;
+    QHash<QString, QStringList> keys;
+    for (const GeoZone *zone : zones) {
+        const QString id = identity(zone->identifier(), zone->name());
+        after[id].append(zone->data().contentHash);
+        keys[id].append(zone->key());
+        names.insert(id, zone->displayName());
+    }
+
+    QStringList added;
+    QStringList removed;
+    QStringList changedNames;
+    for (auto it = after.begin(); it != after.end(); ++it) {
+        const auto old = before.constFind(it.key());
+        if (old == before.cend()) {
+            added.append(names.value(it.key()));
+            continue;
+        }
+        QList<QByteArray> oldHashes = old.value();
+        QList<QByteArray> newHashes = it.value();
+        std::sort(oldHashes.begin(), oldHashes.end());
+        std::sort(newHashes.begin(), newHashes.end());
+        if (oldHashes != newHashes) {
+            changedNames.append(names.value(it.key()));
+            for (const QString &zoneKey : keys.value(it.key())) {
+                _changedZoneKeys.insert(zoneKey);
+            }
+        }
+    }
+    for (auto it = before.cbegin(); it != before.cend(); ++it) {
+        if (!after.contains(it.key())) {
+            removed.append(names.value(it.key()));
+        }
+    }
+    if (added.isEmpty() && removed.isEmpty() && changedNames.isEmpty()) {
+        return;
+    }
+
+    const auto list = [](QStringList namesList) {
+        constexpr qsizetype maxNames = 3;
+        namesList.sort(Qt::CaseInsensitive);
+        QString text = namesList.mid(0, maxNames).join(QStringLiteral(", "));
+        if (namesList.count() > maxNames) {
+            text += tr(" and %1 more").arg(namesList.count() - maxNames);
+        }
+        return text;
+    };
+    QStringList parts;
+    if (!added.isEmpty()) {
+        parts.append(tr("added %1").arg(list(added)));
+    }
+    if (!removed.isEmpty()) {
+        parts.append(tr("removed %1").arg(list(removed)));
+    }
+    if (!changedNames.isEmpty()) {
+        parts.append(tr("changed %1").arg(list(changedNames)));
+    }
+    _changesText = tr("Update of %1: %2").arg(QLocale().toString(QDateTime::currentDateTime(), QLocale::ShortFormat), parts.join(QStringLiteral("; ")));
 }
 
 void GeoZoneSource::setBusy(bool busy)

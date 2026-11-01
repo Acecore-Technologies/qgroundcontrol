@@ -101,6 +101,15 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
+                text:               object.changesText
+                textFormat:         Text.PlainText
+                visible:            text !== ""
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
                 text:               object.warningText
                 visible:            text !== ""

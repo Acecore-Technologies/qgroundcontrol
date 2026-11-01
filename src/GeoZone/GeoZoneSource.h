@@ -12,6 +12,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QSet>
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZoneParser.h"
@@ -41,6 +42,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
     Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
+    Q_PROPERTY(QString      changesText     READ changesText    NOTIFY changed FINAL)               ///< Zones added, removed and changed by the last reload which changed them, empty without
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
@@ -67,6 +69,9 @@ public:
     bool busy() const { return _busy; }
     QString errorString() const { return _errorString; }
     bool enabled() const { return _enabled; }
+    QString changesText() const { return _changesText; }
+    /// @return GeoZone::key of the zones whose published data changed in the last reload
+    const QSet<QString> &changedZoneKeys() const { return _changedZoneKeys; }
     void setEnabled(bool enabled);
 
     const QList<GeoZone*> &zones() const { return _zones; }
@@ -120,6 +125,8 @@ signals:
 
 private:
     void _clearZones();
+    /// Compares the zones with those of the previous load
+    void _summarizeChanges(const QList<GeoZone::Data> &previous, const QList<GeoZone*> &zones);
     void _setMetadata(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate);
     QString _dateText() const;
     QString _sourceText() const;
@@ -139,6 +146,8 @@ private:
     QDateTime _validTo;
     QString _validityText;
     bool _busy = false;
+    QString _changesText;
+    QSet<QString> _changedZoneKeys;
     int _failureCount = 0;      ///< Refreshes failed in a row
     QDateTime _retryAt;         ///< Earliest automatic refresh after a failure
     bool _enabled = true;

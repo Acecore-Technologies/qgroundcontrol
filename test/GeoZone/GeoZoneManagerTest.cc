@@ -339,6 +339,48 @@ void GeoZoneManagerTest::_testFeedCompanions()
     QCOMPARE(scheduled(restarted), 1);
 }
 
+void GeoZoneManagerTest::_testReloadChanges()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 300),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(5000, 90), 300),
+    }), errorString), qPrintable(errorString));
+    const GeoZoneSource *const source = manager.sources()->value<GeoZoneSource*>(0);
+    QVERIFY(source->changesText().isEmpty());
+
+    GeoZoneMonitor monitor(&manager);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 1);
+
+    // Reloading lists the zones added, removed and changed, and changed zones alert again
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 300),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center, 400),
+        _circleFeature(QStringLiteral("D"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(5000, 180), 300),
+    }), errorString), qPrintable(errorString));
+    QVERIFY2(source->changesText().contains(QStringLiteral("added D; removed C; changed B")), qPrintable(source->changesText()));
+    QCOMPARE(source->changedZoneKeys().count(), 1);
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 2);
+
+    // Unchanged zones keep their alert state
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 300),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center, 400),
+    }), errorString), qPrintable(errorString));
+    QVERIFY(source->changedZoneKeys().isEmpty());
+    QVERIFY(source->changesText().contains(QStringLiteral("removed D")));
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 2);
+}
+
 void GeoZoneManagerTest::_testFeedNotModified()
 {
     QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));

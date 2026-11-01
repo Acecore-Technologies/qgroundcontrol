@@ -88,8 +88,12 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
 
     // Hashed one feature at a time, serializing all of them at once would take as much memory as the file
     QCryptographicHash contentHash(QCryptographicHash::Sha1);
+    QList<QByteArray> featureHashes;
+    featureHashes.reserve(features.count());
     for (const QJsonValue &feature : features) {
-        contentHash.addData(QJsonDocument(feature.toObject()).toJson(QJsonDocument::Compact));
+        const QByteArray featureJson = QJsonDocument(feature.toObject()).toJson(QJsonDocument::Compact);
+        contentHash.addData(featureJson);
+        featureHashes.append(QCryptographicHash::hash(featureJson, QCryptographicHash::Sha1));
     }
     for (auto it = result.companions.cbegin(); it != result.companions.cend(); ++it) {
         contentHash.addData(it.key().toUtf8());
@@ -130,8 +134,10 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         result.validTo = _dateTime(metadata.value(QStringLiteral("validTo")));
     }
 
-    for (const QJsonValue &featureValue : features) {
+    for (qsizetype i = 0; i < features.count(); i++) {
+        const QJsonValue featureValue = features[i];
         GeoZone::Data zone;
+        zone.contentHash = featureHashes[i];
         if (format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone)) {
             zone.issues.removeDuplicates();
             for (const QString &issue : std::as_const(zone.issues)) {

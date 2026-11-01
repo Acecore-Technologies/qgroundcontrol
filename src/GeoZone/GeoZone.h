@@ -105,6 +105,7 @@ public:
         QString regulationExemption;    ///< ED-269/ED-318 YES or NO, as published
         QStringList extendedProperties; ///< Publisher specific properties, one "name: value" line each
         QStringList issues;             ///< Problems found while reading the zone, translated, like an unknown unit
+        QByteArray contentHash;         ///< Of the published feature, to recognize changed zones when a source reloads
     };
 
     explicit GeoZone(const Data &data);

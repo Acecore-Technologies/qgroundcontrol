@@ -11,6 +11,7 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QList>
+#include <QtCore/QSet>
 #include <QtCore/QString>
 
 #include "GeoZone.h"
@@ -78,6 +79,8 @@ public:
 
     /// Forgets the states, so that the alerts repeat
     void reset() { _states.clear(); }
+    /// Forgets the states of zones by GeoZone::key, like zones whose data changed, so that they alert again
+    void forget(const QSet<QString> &zoneKeys);
 
     /// @return Straight path from the position at the velocity for the seconds, with the terrain along it from
     ///         GeoZoneTerrain where it is loaded and the terrain below the vehicle elsewhere
