@@ -376,6 +376,10 @@ void GeoZoneFeedFetch::_fetchCompanions()
                 _companionsReceived();
             }
         }, _optionsFor(companion.url));
+        // A download which can't start finishes the fetch at once
+        if (_stage == Stage::Finished) {
+            return;
+        }
     }
 }
 
