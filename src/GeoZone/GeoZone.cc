@@ -24,6 +24,45 @@ namespace {
 constexpr double kUnlimitedSentinel = 99999.0; // Published as upper limit when a zone has no ceiling
 constexpr double kMetersPerFoot = 0.3048;
 
+/// @return Heights of the positions in the datum of a limit, nothing when they can't be compared
+std::optional<std::pair<double, double>> referenceHeights(GeoZone::VerticalReference reference, const GeoZone::Position &from, const GeoZone::Position &to)
+{
+    double height1 = from.altitudeAMSL;
+    double height2 = to.altitudeAMSL;
+    switch (reference) {
+    case GeoZone::VerticalReference::Ground:
+        height1 -= from.terrainAMSL;
+        height2 -= to.terrainAMSL;
+        break;
+    case GeoZone::VerticalReference::Ellipsoid:
+        // Heights above the ellipsoid differ from mean sea level by the geoid height of up to about 100 m
+        height1 += GeoZoneGeometry::geoidHeight(from.coordinate);
+        height2 += GeoZoneGeometry::geoidHeight(to.coordinate);
+        break;
+    case GeoZone::VerticalReference::MeanSeaLevel:
+        break;
+    case GeoZone::VerticalReference::FlightLevel:
+    case GeoZone::VerticalReference::Unknown:
+        // Flight levels depend on the air pressure and unknown references can't be compared
+        return std::nullopt;
+    }
+    if (qIsNaN(height1) || qIsNaN(height2)) {
+        return std::nullopt;
+    }
+    return std::make_pair(height1, height2);
+}
+
+/// Zones from the ground have no floor, vehicles on the ground or terrain data errors can be slightly below it
+bool hasFloor(const GeoZone::Volume &volume)
+{
+    return !qIsNaN(volume.lowerLimit) && !((volume.lowerReference == GeoZone::VerticalReference::Ground) && (volume.lowerLimit <= 0));
+}
+
+bool hasCeiling(const GeoZone::Volume &volume)
+{
+    return !qIsNaN(volume.upperLimit) && (volume.upperLimit < kUnlimitedSentinel);
+}
+
 } // namespace
 
 QGeoRectangle GeoZone::Volume::boundingBox() const
@@ -172,48 +211,57 @@ bool GeoZone::volumeContains(const Volume &volume, const QGeoCoordinate &coordin
 bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin)
 {
     const double scale = volume.feet ? kMetersPerFoot : 1.0;
-    // The altitude range of the positions in the reference of a limit, empty when unknown
-    const auto altitudeRange = [&from, &to](VerticalReference reference) -> std::optional<std::pair<double, double>> {
-        double altitude1 = from.altitudeAMSL;
-        double altitude2 = to.altitudeAMSL;
-        switch (reference) {
-        case VerticalReference::Ground:
-            altitude1 -= from.terrainAMSL;
-            altitude2 -= to.terrainAMSL;
-            break;
-        case VerticalReference::Ellipsoid:
-            // Heights above the ellipsoid differ from mean sea level by the geoid height of up to about 100 m
-            altitude1 += GeoZoneGeometry::geoidHeight(from.coordinate);
-            altitude2 += GeoZoneGeometry::geoidHeight(to.coordinate);
-            break;
-        case VerticalReference::MeanSeaLevel:
-            break;
-        case VerticalReference::FlightLevel:
-        case VerticalReference::Unknown:
-            // Flight levels depend on the air pressure and unknown references can't be compared
-            return std::nullopt;
-        }
-        if (qIsNaN(altitude1) || qIsNaN(altitude2)) {
-            return std::nullopt;
-        }
-        return std::make_pair(std::min(altitude1, altitude2), std::max(altitude1, altitude2));
-    };
-
-    // Zones from the ground have no floor, vehicles on the ground or terrain data errors can be slightly below it
-    const bool fromGround = (volume.lowerReference == VerticalReference::Ground) && (volume.lowerLimit <= 0);
-    if (!qIsNaN(volume.lowerLimit) && !fromGround) {
-        const auto range = altitudeRange(volume.lowerReference);
-        if (range && (range->second < ((volume.lowerLimit * scale) - margin))) {
+    if (hasFloor(volume)) {
+        const auto heights = referenceHeights(volume.lowerReference, from, to);
+        if (heights && ((std::max)(heights->first, heights->second) < ((volume.lowerLimit * scale) - margin))) {
             return false;
         }
     }
-    if (!qIsNaN(volume.upperLimit) && (volume.upperLimit < kUnlimitedSentinel)) {
-        const auto range = altitudeRange(volume.upperReference);
-        if (range && (range->first > ((volume.upperLimit * scale) + margin))) {
+    if (hasCeiling(volume)) {
+        const auto heights = referenceHeights(volume.upperReference, from, to);
+        if (heights && ((std::min)(heights->first, heights->second) > ((volume.upperLimit * scale) + margin))) {
             return false;
         }
     }
     return true;
+}
+
+std::optional<std::pair<double, double>> GeoZone::verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin)
+{
+    const double scale = volume.feet ? kMetersPerFoot : 1.0;
+    double first = 0;
+    double last = 1;
+    // Keeps the fractions at which the height in the datum of the limit is on the inner side of it
+    const auto constrain = [&first, &last, &from, &to](VerticalReference reference, double limit, bool upper) {
+        const auto heights = referenceHeights(reference, from, to);
+        if (!heights) {
+            return;
+        }
+        const double slope = heights->second - heights->first;
+        if (std::abs(slope) < 1e-9) {
+            if (upper ? (heights->first > limit) : (heights->first < limit)) {
+                first = 1;
+                last = 0;
+            }
+            return;
+        }
+        const double crossing = (limit - heights->first) / slope;
+        if (upper == (slope > 0)) {
+            last = (std::min)(last, crossing);
+        } else {
+            first = (std::max)(first, crossing);
+        }
+    };
+    if (hasFloor(volume)) {
+        constrain(volume.lowerReference, (volume.lowerLimit * scale) - margin, false);
+    }
+    if (hasCeiling(volume)) {
+        constrain(volume.upperReference, (volume.upperLimit * scale) + margin, true);
+    }
+    if (first > last) {
+        return std::nullopt;
+    }
+    return std::make_pair(first, last);
 }
 
 double GeoZone::limitAMSL(const Volume &volume, bool upper, const Position &position)
@@ -357,13 +405,13 @@ bool GeoZone::intersectsPath(const QList<QGeoCoordinate> &path) const
     return intersectsPath(positions);
 }
 
-bool GeoZone::intersectsPath(const QList<Position> &path) const
+std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path) const
 {
     if (path.isEmpty() || !_boundingBox.isValid()) {
-        return false;
+        return std::nullopt;
     }
     if (path.count() == 1) {
-        return contains(path.first());
+        return contains(path.first()) ? std::make_optional(PathEntry{ 0, 0, path.first() }) : std::nullopt;
     }
 
     // QGeoRectangle can't represent a single point or a meridian segment, so compare the ranges directly
@@ -398,40 +446,52 @@ bool GeoZone::intersectsPath(const QList<Position> &path) const
             }
         }
 
+        // The earliest fraction of the segment inside a volume horizontally and vertically
         const QPointF a = projection->toLocal(from.coordinate);
         const QPointF b = projection->toLocal(to.coordinate);
+        double entry = qInf();
         for (qsizetype v = 0; v < _data.volumes.count(); v++) {
             const Volume &volume = _data.volumes[v];
-            if (!verticalOverlap(volume, from, to)) {
+            const auto vertical = verticalInterval(volume, from, to);
+            if (!vertical || (vertical->first >= entry)) {
                 continue;
             }
 
+            QList<GeoZoneGeometry::Interval> horizontal;
             if (volume.isCircle) {
-                if (volume.center.isValid()) {
-                    const GeoZoneGeometry::LocalProjection centerProjection(volume.center);
-                    if (GeoZoneGeometry::distanceToSegment(QPointF(0, 0), centerProjection.toLocal(from.coordinate), centerProjection.toLocal(to.coordinate)) <= volume.radius) {
-                        return true;
-                    }
+                if (!volume.center.isValid()) {
+                    continue;
                 }
-                continue;
+                const GeoZoneGeometry::LocalProjection centerProjection(volume.center);
+                if (const auto interval = GeoZoneGeometry::segmentCircleInterval(centerProjection.toLocal(from.coordinate), centerProjection.toLocal(to.coordinate), volume.radius)) {
+                    horizontal.append(*interval);
+                }
+            } else {
+                horizontal = GeoZoneGeometry::segmentPolygonIntervals(a, b, projectedRings[v]);
             }
-
-            const QList<QList<QPointF>> &rings = projectedRings[v];
-            if (rings.isEmpty()) {
-                continue;
-            }
-            if (GeoZoneGeometry::polygonContains(rings, a) || GeoZoneGeometry::polygonContains(rings, b)) {
-                return true;
-            }
-            // Neither end is inside, so the segment enters the volume only by crossing a ring edge
-            for (const QList<QPointF> &ring : rings) {
-                if (GeoZoneGeometry::segmentIntersectsRing(a, b, ring)) {
-                    return true;
+            for (const GeoZoneGeometry::Interval &interval : std::as_const(horizontal)) {
+                if ((interval.second >= vertical->first) && (interval.first <= vertical->second)) {
+                    entry = (std::min)(entry, (std::max)(interval.first, vertical->first));
+                    break;
                 }
             }
         }
+        if (std::isinf(entry)) {
+            continue;
+        }
+
+        const auto interpolate = [entry](double value1, double value2) {
+            return (entry <= 0) ? value1 : ((entry >= 1) ? value2 : (value1 + ((value2 - value1) * entry)));
+        };
+        PathEntry result;
+        result.segment = i - 1;
+        result.fraction = entry;
+        result.position.coordinate = (entry <= 0) ? from.coordinate : ((entry >= 1) ? to.coordinate : projection->toGeo(a + ((b - a) * entry)));
+        result.position.altitudeAMSL = interpolate(from.altitudeAMSL, to.altitudeAMSL);
+        result.position.terrainAMSL = interpolate(from.terrainAMSL, to.terrainAMSL);
+        return result;
     }
-    return false;
+    return std::nullopt;
 }
 
 QString GeoZone::reasonText() const

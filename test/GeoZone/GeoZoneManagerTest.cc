@@ -57,9 +57,9 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         QCOMPARE(manager.zoneCount(), 3);
         QCOMPARE(manager.sources()->count(), 1);
 
-        QCOMPARE(manager.zonesInArea({ GeoZone::Prohibited }, QGeoRectangle()).count(), 1);
+        QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), GeoZonePolicy({ GeoZone::Prohibited })).count(), 1);
         const QGeoRectangle ireland(QGeoCoordinate(52.0, -9.0), QGeoCoordinate(51.0, -8.0));
-        const QList<GeoZone*> zonesInArea = manager.zonesInArea({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::USpace }, ireland);
+        const QList<GeoZone*> zonesInArea = manager.catalog().zonesInArea(ireland, GeoZonePolicy({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::USpace }));
         QCOMPARE(zonesInArea.count(), 1);
         QCOMPARE(zonesInArea[0]->name(), QStringLiteral("Control zone"));
 

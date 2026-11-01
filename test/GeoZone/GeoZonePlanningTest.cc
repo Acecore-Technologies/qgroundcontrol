@@ -12,6 +12,54 @@
 
 using namespace GeoZoneTestHelpers;
 
+void GeoZonePlanningTest::_testPathHits()
+{
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate square = center.atDistanceAndAzimuth(3000, 90);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _polygonFeature(QStringLiteral("B"), QStringLiteral("CONDITIONAL"), { square.atDistanceAndAzimuth(282.8, 45), square.atDistanceAndAzimuth(282.8, 135),
+                                                                              square.atDistanceAndAzimuth(282.8, 225), square.atDistanceAndAzimuth(282.8, 315) }),
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1000, 90), 200),
+        // Unpublished restriction types can't be assumed harmless
+        _circleFeature(QStringLiteral("X"), QStringLiteral("MYSTERY"), center.atDistanceAndAzimuth(2000, 90), 100),
+        _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(500, 90), 100),
+    }), errorString), qPrintable(errorString));
+
+    // Each zone once, in the order the path enters them, with the distance to the entry
+    const QList<GeoZone::Position> east = { GeoZone::Position{ center }, GeoZone::Position{ center.atDistanceAndAzimuth(2000, 90) },
+                                            GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90) }, GeoZone::Position{ center } };
+    const QList<GeoZoneCatalog::PathHit> hits = manager.catalog().pathHits(east, GeoZonePolicy::alerts());
+    QCOMPARE(hits.count(), 3);
+    QCOMPARE(hits[0].zone->identifier(), QStringLiteral("A"));
+    QCOMPARE(hits[1].zone->identifier(), QStringLiteral("X"));
+    QCOMPARE(hits[2].zone->identifier(), QStringLiteral("B"));
+    QVERIFY(qAbs(hits[0].distance - 800) < 1);
+    QVERIFY(qAbs(hits[1].distance - 1900) < 1);
+    QCOMPARE(hits[1].entry.segment, 0);
+    QVERIFY(qAbs(hits[2].distance - 2800) < 1);
+    QCOMPARE(hits[2].entry.segment, 1);
+    QVERIFY(qAbs(center.distanceTo(hits[2].entry.position.coordinate) - 2800) < 1);
+
+    // The first path entering a zone reports it
+    const QList<GeoZoneCatalog::PathHit> pathHits = manager.catalog().pathHits({ { GeoZone::Position{ center.atDistanceAndAzimuth(1000, 0) }, GeoZone::Position{ center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(4000, 90) } }, east },
+                                                                               GeoZonePolicy({ GeoZone::Prohibited }));
+    QCOMPARE(pathHits.count(), 1);
+    QCOMPARE(pathHits[0].path, 1);
+
+    // Restricted zones and unknown restrictions are warned about, others are information
+    GeoZoneMonitor monitor(&manager);
+    const QString warning = monitor.pathWarning(east);
+    QVERIFY(warning.contains(QStringLiteral("A (Prohibited)")));
+    QVERIFY(warning.contains(QStringLiteral("X (Unknown)")));
+    QVERIFY(!warning.contains(QStringLiteral("N (")));
+    QVERIFY(GeoZonePolicy::isRestricted(GeoZone::Unknown));
+    QVERIFY(!GeoZonePolicy::isRestricted(GeoZone::USpace));
+}
+
 void GeoZonePlanningTest::_testMissionCheck()
 {
     const QGeoCoordinate center(47, 8);

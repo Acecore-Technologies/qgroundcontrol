@@ -13,6 +13,9 @@
 #include <QtCore/QPointF>
 #include <QtPositioning/QGeoCoordinate>
 
+#include <optional>
+#include <utility>
+
 /// Planar geometry helpers for geozone and fence polygons
 namespace GeoZoneGeometry {
 
@@ -55,6 +58,16 @@ double distanceToRing(const QPointF &point, const QList<QPointF> &ring);
 
 /// @return true if a segment intersects an edge of the unclosed ring
 bool segmentIntersectsRing(const QPointF &a, const QPointF &b, const QList<QPointF> &ring);
+
+/// Range of fractions along a segment, 0 at its start and 1 at its end
+using Interval = std::pair<double, double>;
+
+/// @return Fractions of the segment from a to b inside the polygon, rings[0] less the holes, ordered by their start.
+///         The boundary is inside, so a segment touching it has an empty interval there.
+QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, const QList<QList<QPointF>> &rings);
+
+/// @return Fractions of the segment from a to b within the radius of the origin, nothing when it stays outside
+std::optional<Interval> segmentCircleInterval(const QPointF &a, const QPointF &b, double radius);
 
 /// @return true if no two edges of the unclosed ring intersect other than adjacent edges at their shared vertex
 bool isSimple(const QList<QPointF> &ring);

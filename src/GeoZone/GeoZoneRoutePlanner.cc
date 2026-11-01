@@ -282,11 +282,10 @@ std::optional<QList<QGeoCoordinate>> GeoZoneRoutePlanner::detourAround(const QGe
 
 QList<GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path) const
 {
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional };
-    QList<GeoZone*> zones = _manager->zonesCrossingPaths(restrictions, { path });
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    if (start.isValid()) {
-        zones.removeIf([&start, &end](const GeoZone *zone) { return !zone->isActiveDuring(start, end); });
+    QList<GeoZone*> zones;
+    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end))) {
+        zones.append(hit.zone);
     }
     return zones;
 }

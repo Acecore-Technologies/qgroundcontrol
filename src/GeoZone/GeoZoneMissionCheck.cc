@@ -254,10 +254,24 @@ void GeoZoneMissionCheck::update()
 {
     _updateTimer.stop();
 
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace, GeoZone::NoRestriction };
-    QList<GeoZone*> zones = _manager->zonesCrossingPaths(restrictions, pathsFromSegments(_missionSegments()));
+    // Zones which aren't active at any time during the planned flight don't apply
+    auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
+    if (_flightNow) {
+        plannedStart = QDateTime::currentDateTimeUtc();
+        plannedEnd = plannedStart.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0)));
+    }
+    const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd);
+    const GeoZonePolicy anyTime = policy.anyTime();
+
+    const GeoZoneCatalog &catalog = _manager->catalog();
+    QList<GeoZone*> zones;
+    for (const GeoZoneCatalog::PathHit &hit : catalog.pathHits(pathsFromSegments(_missionSegments()), anyTime)) {
+        if (!zones.contains(hit.zone)) {
+            zones.append(hit.zone);
+        }
+    }
     // Camera footprints and turns extend past the flight lines, so whole areas count
-    for (GeoZone *zone : _manager->zonesIntersectingAreas(restrictions, _missionAreas())) {
+    for (GeoZone *zone : catalog.zonesIntersectingAreas(_missionAreas(), anyTime)) {
         if (!zones.contains(zone)) {
             zones.append(zone);
         }
@@ -265,35 +279,18 @@ void GeoZoneMissionCheck::update()
     std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
         return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
     });
-
-    // Zones which aren't active at any time during the planned flight don't apply
-    int inactiveZoneCount = 0;
-    auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
-    if (_flightNow) {
-        plannedStart = QDateTime::currentDateTimeUtc();
-        plannedEnd = plannedStart.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0)));
-    }
-    if (plannedStart.isValid()) {
-        inactiveZoneCount = static_cast<int>(zones.removeIf([&plannedStart, &plannedEnd](const GeoZone *zone) { return !zone->isActiveDuring(plannedStart, plannedEnd); }));
-    }
+    const int inactiveZoneCount = static_cast<int>(zones.removeIf([&policy](const GeoZone *zone) { return !policy.acceptsSchedule(zone); }));
 
     QList<GeoZone*> crossed;
     QList<GeoZone*> uSpace;
     QList<GeoZone*> permitted;
     for (GeoZone *zone : std::as_const(zones)) {
-        switch (zone->restriction()) {
-        case GeoZone::USpace:
-            uSpace.append(zone);
-            break;
-        case GeoZone::NoRestriction:
-            permitted.append(zone);
-            break;
-        case GeoZone::Prohibited:
-        case GeoZone::ReqAuthorisation:
-        case GeoZone::Conditional:
-        case GeoZone::Unknown:
+        if (GeoZonePolicy::isRestricted(zone->restriction())) {
             crossed.append(zone);
-            break;
+        } else if (zone->restriction() == GeoZone::USpace) {
+            uSpace.append(zone);
+        } else {
+            permitted.append(zone);
         }
     }
 

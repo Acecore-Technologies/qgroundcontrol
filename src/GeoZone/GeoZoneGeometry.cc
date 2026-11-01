@@ -488,6 +488,89 @@ bool segmentIntersectsRing(const QPointF &a, const QPointF &b, const QList<QPoin
     return false;
 }
 
+QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, const QList<QList<QPointF>> &rings)
+{
+    if (rings.isEmpty()) {
+        return {};
+    }
+    const QPointF direction = b - a;
+    const double lengthSquared = QPointF::dotProduct(direction, direction);
+    if (lengthSquared < 1e-12) {
+        return polygonContains(rings, a) ? QList<Interval>{ { 0, 1 } } : QList<Interval>{};
+    }
+    const double length = std::sqrt(lengthSquared);
+
+    // Fractions where the segment meets the boundary, which is inside, and the segment ends
+    QList<std::pair<double, bool>> cuts = { { 0, false }, { 1, false } };
+    constexpr double tolerance = 1e-9;
+    for (const QList<QPointF> &ring : rings) {
+        for (qsizetype i = 0; i < ring.count(); i++) {
+            const QPointF &edgeStart = ring[i];
+            const QPointF edge = ring[(i + 1) % ring.count()] - edgeStart;
+            const QPointF offset = edgeStart - a;
+            const double denominator = _cross(direction, edge);
+            if (std::abs(denominator) <= (tolerance * length * _length(edge))) {
+                // Parallel, a collinear edge overlaps the segment on the boundary
+                if (std::abs(_cross(offset, direction)) > (1e-6 * length)) {
+                    continue;
+                }
+                const double t1 = QPointF::dotProduct(offset, direction) / lengthSquared;
+                const double t2 = QPointF::dotProduct(offset + edge, direction) / lengthSquared;
+                const double first = (std::max)((std::min)(t1, t2), 0.0);
+                const double last = (std::min)((std::max)(t1, t2), 1.0);
+                if (first <= last) {
+                    cuts.append({ first, true });
+                    cuts.append({ last, true });
+                }
+                continue;
+            }
+            const double t = _cross(offset, edge) / denominator;
+            const double s = _cross(offset, direction) / denominator;
+            if ((t >= -tolerance) && (t <= (1 + tolerance)) && (s >= -tolerance) && (s <= (1 + tolerance))) {
+                cuts.append({ std::clamp(t, 0.0, 1.0), true });
+            }
+        }
+    }
+    std::sort(cuts.begin(), cuts.end());
+
+    // Between consecutive cuts the segment is either inside or outside
+    QList<Interval> intervals;
+    const auto pointAt = [&a, &direction](double t) { return a + (direction * t); };
+    for (qsizetype i = 0; i < cuts.count(); i++) {
+        const double t = cuts[i].first;
+        const bool boundary = cuts[i].second || ((i + 1 < cuts.count()) && (cuts[i + 1].first == t) && cuts[i + 1].second);
+        if (boundary || polygonContains(rings, pointAt(t))) {
+            intervals.append({ t, t });
+        }
+        if ((i + 1 < cuts.count()) && (cuts[i + 1].first > t) && polygonContains(rings, pointAt((t + cuts[i + 1].first) / 2))) {
+            intervals.append({ t, cuts[i + 1].first });
+        }
+    }
+    return intervals;
+}
+
+std::optional<Interval> segmentCircleInterval(const QPointF &a, const QPointF &b, double radius)
+{
+    const QPointF direction = b - a;
+    const double quadratic = QPointF::dotProduct(direction, direction);
+    const double linear = 2 * QPointF::dotProduct(a, direction);
+    const double constant = QPointF::dotProduct(a, a) - (radius * radius);
+    if (quadratic < 1e-12) {
+        return (constant <= 0) ? std::make_optional(Interval{ 0, 1 }) : std::nullopt;
+    }
+    const double discriminant = (linear * linear) - (4 * quadratic * constant);
+    if (discriminant < 0) {
+        return std::nullopt;
+    }
+    const double root = std::sqrt(discriminant);
+    const double first = (-linear - root) / (2 * quadratic);
+    const double last = (-linear + root) / (2 * quadratic);
+    if ((last < 0) || (first > 1)) {
+        return std::nullopt;
+    }
+    return Interval{ (std::max)(first, 0.0), (std::min)(last, 1.0) };
+}
+
 bool isSimple(const QList<QPointF> &ring)
 {
     const qsizetype count = ring.count();

@@ -9,7 +9,6 @@
 
 #pragma once
 
-#include <QtCore/QDateTime>
 #include <QtCore/QList>
 #include <QtCore/QString>
 #include <QtPositioning/QGeoCoordinate>
@@ -17,6 +16,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneIndex.h"
+#include "GeoZonePolicy.h"
 
 class GeoZoneShape;
 class GeoZoneSource;
@@ -46,15 +46,24 @@ public:
     ///         then the most restrictive, limited to maxResults
     QList<GeoZone*> search(const QString &text, int maxResults) const;
 
-    /// See GeoZoneManager::zonesInArea
-    QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
-                                const QDateTime &activeFrom, const QDateTime &activeTo) const;
+    /// @return Zones accepted by the policy which intersect the area. An invalid area matches all zones.
+    QList<GeoZone*> zonesInArea(const QGeoRectangle &area, const GeoZonePolicy &policy) const;
 
-    /// See GeoZoneManager::zonesCrossingPaths
-    QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const;
+    /// First entry of a path into a zone
+    struct PathHit {
+        GeoZone *zone = nullptr;
+        int path = 0;               ///< Index of the path entering the zone
+        GeoZone::PathEntry entry;
+        double distance = 0;        ///< Meters along the path to the entry
+    };
 
-    /// See GeoZoneManager::zonesIntersectingAreas
-    QList<GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const;
+    /// @return First entry into each zone accepted by the policy which one of the paths enters, see
+    ///         GeoZone::pathEntry, ordered by path and distance along it
+    QList<PathHit> pathHits(const QList<QList<GeoZone::Position>> &paths, const GeoZonePolicy &policy) const;
+    QList<PathHit> pathHits(const QList<GeoZone::Position> &path, const GeoZonePolicy &policy) const { return pathHits(QList<QList<GeoZone::Position>>{ path }, policy); }
+
+    /// @return Zones accepted by the policy which overlap one of the areas, see GeoZone::intersectsArea
+    QList<GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Area> &areas, const GeoZonePolicy &policy) const;
 
 private:
     QList<GeoZone*> _zones;

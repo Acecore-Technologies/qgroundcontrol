@@ -21,6 +21,9 @@
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
+#include <optional>
+#include <utility>
+
 #include "GeoZoneSchedule.h"
 
 namespace GeoZoneGeometry {
@@ -157,9 +160,20 @@ public:
     double distanceTo(const Position &position, double verticalMargin = 0, double maxDistance = qInf()) const;
     double distanceTo(const QGeoCoordinate &coordinate) const { return distanceTo(Position{ coordinate }); }
 
-    /// @return true if the path enters a volume. Altitudes are interpolated between the positions, so paths
-    ///         following terrain need a position at each terrain sample.
-    bool intersectsPath(const QList<Position> &path) const;
+    /// Where a path enters a zone
+    struct PathEntry {
+        qsizetype segment = 0;  ///< From path[segment] towards path[segment + 1]
+        double fraction = 0;    ///< Along the segment, 0 at its start. 0 at the first position when it is inside.
+        Position position;      ///< Interpolated entry position
+    };
+
+    /// @return First position of the path inside a volume, horizontally and between its vertical limits, nothing
+    ///         when the path doesn't enter the zone. Coordinates, altitudes and terrain elevations are interpolated
+    ///         linearly between the positions, so paths following terrain need a position at each terrain sample.
+    std::optional<PathEntry> pathEntry(const QList<Position> &path) const;
+
+    /// @return true if the path enters a volume, see pathEntry
+    bool intersectsPath(const QList<Position> &path) const { return pathEntry(path).has_value(); }
     bool intersectsPath(const QList<QGeoCoordinate> &path) const;
 
     /// Area flown over by a mission item, like a survey polygon, with the range of its altitudes
@@ -175,6 +189,11 @@ public:
     /// @return true if the vertical limits of the volume overlap the altitudes between the positions, extended by
     ///         the margin. Unknown altitudes, limits and references overlap.
     static bool verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin = 0);
+
+    /// @return Fractions of the straight path between the positions, with altitudes and terrain interpolated linearly,
+    ///         which are within the vertical limits of the volume extended by the margin, nothing when none is.
+    ///         Unknown altitudes, limits and references don't limit it.
+    static std::optional<std::pair<double, double>> verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin = 0);
 
     /// @return true if the coordinate is inside the horizontal projection of the volume
     static bool volumeContains(const Volume &volume, const QGeoCoordinate &coordinate);

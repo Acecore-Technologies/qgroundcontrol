@@ -198,7 +198,7 @@ QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
 QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &segments, const GeoZoneManager *manager,
                                                          const QDateTime &activeFrom, const QDateTime &activeTo)
 {
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
+    const GeoZonePolicy policy = GeoZonePolicy::profile(activeFrom, activeTo);
 
     struct Run {
         const GeoZone *zone = nullptr;
@@ -256,7 +256,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         const double segmentMaxLongitude = (std::max)(segment.from.longitude(), segment.to.longitude());
 
         QList<Candidate> candidates;
-        for (const GeoZone *zone : manager->zonesInArea(restrictions, QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), activeFrom, activeTo)) {
+        for (const GeoZone *zone : manager->catalog().zonesInArea(QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), policy)) {
             const QList<GeoZone::Volume> &volumes = zone->data().volumes;
             for (int v = 0; v < volumes.count(); v++) {
                 const QGeoRectangle box = volumes[v].boundingBox();

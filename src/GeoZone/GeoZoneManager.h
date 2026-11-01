@@ -109,26 +109,6 @@ public:
     /// Asks the visible map to show the zone and its details
     Q_INVOKABLE void showZone(const QVariant &zone);
 
-    /// @return Zones matching one of the restrictions which intersect the area. An invalid area matches all zones.
-    /// @param activeFrom When valid, only zones active at this time or, with a valid activeTo, at any time until activeTo
-    QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
-                                const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime()) const
-    {
-        return _catalog.zonesInArea(restrictions, area, activeFrom, activeTo);
-    }
-
-    /// @return Zones matching one of the restrictions which one of the paths enters, see GeoZone::intersectsPath
-    QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const
-    {
-        return _catalog.zonesCrossingPaths(restrictions, paths);
-    }
-
-    /// @return Zones matching one of the restrictions which overlap one of the areas, see GeoZone::intersectsArea
-    QList<GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const
-    {
-        return _catalog.zonesIntersectingAreas(restrictions, areas);
-    }
-
     int zoneCount() const { return static_cast<int>(_catalog.zones().count()); }
     /// Zones of all sources, in the order of the sources
     const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }

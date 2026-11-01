@@ -48,7 +48,7 @@ QList<GeoZone*> GeoZoneFenceImporter::_zonesToImport(const QVariantList &restric
         }
     }
 
-    return GeoZoneManager::instance()->zonesInArea(restrictionList, area, activeFrom, activeTo);
+    return GeoZoneManager::instance()->catalog().zonesInArea(area, GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo));
 }
 
 GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_fencesFor(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double simplifyTolerance) const

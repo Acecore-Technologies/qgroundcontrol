@@ -32,6 +32,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneParser.h
         GeoZoneParserUtils.cc
         GeoZoneParserUtils.h
+        GeoZonePolicy.cc
+        GeoZonePolicy.h
         GeoZoneProfile.cc
         GeoZoneProfile.h
         GeoZoneProviders.cc

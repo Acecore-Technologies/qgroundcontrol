@@ -16,6 +16,7 @@ class GeoZonePlanningTest : public UnitTest
     Q_OBJECT
 
 private slots:
+    void _testPathHits();
     void _testMissionCheck();
     void _testRoutePlanner();
     void _testProfileBands();

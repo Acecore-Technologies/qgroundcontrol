@@ -316,10 +316,10 @@ double GeoZoneMonitor::terrainAMSL() const
 
 QList<GeoZoneMonitor::VerticalBand> GeoZoneMonitor::_verticalBands(const GeoZone::Position &position) const
 {
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
+    const GeoZonePolicy policy = GeoZonePolicy::alerts();
     QList<VerticalBand> bands;
     for (GeoZone *zone : _manager->catalog().zonesAt(position.coordinate)) {
-        if (!zone->active() || !restrictions.contains(zone->restriction())) {
+        if (!policy.accepts(zone)) {
             continue;
         }
         for (const GeoZone::Volume &volume : zone->data().volumes) {
@@ -333,10 +333,13 @@ QList<GeoZoneMonitor::VerticalBand> GeoZoneMonitor::_verticalBands(const GeoZone
 
 QString GeoZoneMonitor::pathWarning(const QList<GeoZone::Position> &path) const
 {
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
-    QList<GeoZone*> zones = _manager->zonesCrossingPaths(restrictions, { path });
-    // Zones the vehicle is already in were alerted when it entered them
-    zones.removeIf([&path](const GeoZone *zone) { return !zone->active() || zone->contains(path.constFirst()); });
+    QList<GeoZone*> zones;
+    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::alerts())) {
+        // Zones the vehicle is already in were alerted when it entered them
+        if ((hit.entry.segment > 0) || (hit.entry.fraction > 0)) {
+            zones.append(hit.zone);
+        }
+    }
     if (zones.isEmpty()) {
         return QString();
     }
@@ -457,21 +460,9 @@ GeoZone::Position GeoZoneMonitor::_predictedPosition(const GeoZone::Position &po
 
 double GeoZoneMonitor::_timeToEntry(const GeoZone *zone, const GeoZone::Position &position, const Velocity &velocity, double horizon)
 {
-    if (!zone->intersectsPath(QList<GeoZone::Position>{ position, _predictedPosition(position, velocity, horizon) })) {
-        return qQNaN();
-    }
-    // The path up to a time enters the zone from the entry on, so the entry is found by bisection
-    double before = 0;
-    double after = horizon;
-    while ((after - before) > 0.25) {
-        const double middle = (before + after) / 2;
-        if (zone->intersectsPath(QList<GeoZone::Position>{ position, _predictedPosition(position, velocity, middle) })) {
-            after = middle;
-        } else {
-            before = middle;
-        }
-    }
-    return after;
+    // The vehicle moves along the path at a constant velocity, so the time is proportional to the fraction
+    const auto entry = zone->pathEntry(QList<GeoZone::Position>{ position, _predictedPosition(position, velocity, horizon) });
+    return entry ? (entry->fraction * horizon) : qQNaN();
 }
 
 GeoZoneMonitor::Velocity GeoZoneMonitor::_estimateVelocity(QList<Sample> &samples, qint64 msecs, const GeoZone::Position &position)
@@ -502,8 +493,6 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         return;
     }
 
-    // U-space airspace requires a U-space flight authorisation, no restriction zones are only shown on the map
-    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
     const double approachDistance = settings->approachDistance()->rawValue().toDouble();
     const double approachVerticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
@@ -525,11 +514,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
     QSet<QString> nearbyZones;
     QList<Nearby> nearby;
     QList<AlertEvent> alerts;
-    for (GeoZone *zone : _manager->zonesInArea(restrictions, area)) {
-        if (!zone->active()) {
-            continue;
-        }
-
+    for (GeoZone *zone : _manager->catalog().zonesInArea(area, GeoZonePolicy::alerts())) {
         const QString &key = zone->key();
         const State previous = tracker.states.value(key, State::Away);
         const double nearLimit = approachDistance + ((previous != State::Away) ? hysteresisDistance : 0);

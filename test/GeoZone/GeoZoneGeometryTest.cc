@@ -177,10 +177,10 @@ void GeoZoneGeometryTest::_testIsActiveDuring()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QVERIFY2(manager.loadFile(QStringLiteral(":/unittest/ed269_test.json"), errorString), qPrintable(errorString));
-    const QList<GeoZone::Restriction> all = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown };
-    QCOMPARE(manager.zonesInArea(all, QGeoRectangle()).count(), 3);
-    QCOMPARE(manager.zonesInArea(all, QGeoRectangle(), _utc(monday.addDays(2), QTime(10, 0))).count(), 2);
-    QCOMPARE(manager.zonesInArea(all, QGeoRectangle(), _utc(monday.addDays(2), QTime(10, 0)), _utc(monday.addDays(7), QTime(10, 0))).count(), 3);
+    const GeoZonePolicy all({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown });
+    QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), all).count(), 3);
+    QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), all.activeDuring(_utc(monday.addDays(2), QTime(10, 0)))).count(), 2);
+    QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), all.activeDuring(_utc(monday.addDays(2), QTime(10, 0)), _utc(monday.addDays(7), QTime(10, 0)))).count(), 3);
 }
 
 void GeoZoneGeometryTest::_testOutwardSimplification()
@@ -347,6 +347,20 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(50, 270), center.atDistanceAndAzimuth(50, 90) }));
     QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 90) }));
 
+    // Entries at the outer boundary, at the hole's boundary when starting in the hole, and at the start when inside
+    const auto entryDistance = [](const GeoZone &zone, const QList<QGeoCoordinate> &path) {
+        QList<GeoZone::Position> positions;
+        for (const QGeoCoordinate &coordinate : path) {
+            positions.append(GeoZone::Position{ coordinate });
+        }
+        const std::optional<GeoZone::PathEntry> entry = zone.pathEntry(positions);
+        return entry ? path[entry->segment].distanceTo(entry->position.coordinate) : qQNaN();
+    };
+    QVERIFY(qAbs(entryDistance(polygon, { center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }) - 1500) < 1);
+    QVERIFY(qAbs(entryDistance(polygon, { center.atDistanceAndAzimuth(3000, 270), center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }) - 1500) < 1);
+    QVERIFY(qAbs(entryDistance(polygon, { center, center.atDistanceAndAzimuth(2000, 90) }) - 100) < 1);
+    QCOMPARE(entryDistance(polygon, { center.atDistanceAndAzimuth(300, 0), center.atDistanceAndAzimuth(2000, 90) }), 0.0);
+
     GeoZone::Volume circleVolume;
     circleVolume.isCircle = true;
     circleVolume.center = center;
@@ -357,6 +371,7 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     QVERIFY(qAbs(circle.distanceTo(center.atDistanceAndAzimuth(600, 30)) - 100) < 1);
     QVERIFY(circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(400, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(400, 0) }));
     QVERIFY(!circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(600, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(600, 0) }));
+    QVERIFY(qAbs(entryDistance(circle, { center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }) - 500) < 1);
 
     // Connected segments form one path, long legs get points along the great circle
     const QGeoCoordinate a(47, 8);
@@ -485,6 +500,20 @@ void GeoZoneGeometryTest::_testAltitudeLimits()
     QVERIFY(!zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(east, 600, 400) }));
     QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(east, 450, 400) }));
     QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, qQNaN()), position(east, 600, qQNaN()) }));
+    // Altitudes are interpolated: descending through the ceiling over the zone enters it there, descending below the
+    // ceiling only past the zone doesn't
+    const std::optional<GeoZone::PathEntry> entry = zone.pathEntry({ position(west, 600, 400), position(east, 450, 400) });
+    QVERIFY(entry.has_value());
+    QVERIFY(qAbs(entry->position.altitudeAMSL - 520) < 0.01);
+    QCOMPARE(entry->position.terrainAMSL, 400.0);
+    QVERIFY(qAbs(west.distanceTo(entry->position.coordinate) - (2000 * 80.0 / 150)) < 1);
+    QVERIFY(!zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(center.atDistanceAndAzimuth(3000, 90), 400, 400) }));
+    // Climbing in place enters at the floor
+    GeoZone::Data highData;
+    highData.volumes.append(high);
+    const std::optional<GeoZone::PathEntry> climb = GeoZone(highData).pathEntry({ position(center, 200, 150), position(center, 400, 150) });
+    QVERIFY(climb.has_value());
+    QVERIFY(qAbs(climb->position.altitudeAMSL - 304.8) < 0.01);
 }
 
 void GeoZoneGeometryTest::_testAreaIntersection()
