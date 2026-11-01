@@ -72,7 +72,7 @@ Item {
 
                     SettingsGroupLayout {
                         heading:            qsTr("Nearby Geozones")
-                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1 of the active vehicle, or which it would enter within %2 s at its current velocity, considering altitude limits.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
+                        headingDescription: qsTr("Active restricted and U-space zones within %1 of the active vehicle, or reached within %2 s at its velocity.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
 
                         QGCLabel {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
