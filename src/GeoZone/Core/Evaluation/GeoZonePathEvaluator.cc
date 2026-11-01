@@ -9,6 +9,7 @@
 
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneBox.h"
+#include "GeoZoneGeometry.h"
 #include "GeoZoneVertical.h"
 
 #include <QtCore/QHash>
@@ -22,6 +23,8 @@
 
 namespace {
 
+using Approximations = GeoZonePathEvaluator::Approximations;
+
 /// Spans along a path touching within this fraction of a segment are continuous
 constexpr double kContinuity = 1e-6;
 
@@ -30,8 +33,9 @@ struct RawVertex {
     QGeoCoordinate coordinate;
     double altitude = qQNaN();
     double terrain = qQNaN();
-    double msecs = qQNaN();     ///< Since the epoch, NaN when unknown
-    double source = 0;          ///< Vertex index plus fraction along the input path
+    double msecs = qQNaN();         ///< Since the epoch, NaN when unknown
+    double source = 0;              ///< Vertex index plus fraction along the input path
+    Approximations approximations;  ///< Of the segment from the previous vertex, like a great circle not followed closely
 };
 
 double interpolate(double value1, double value2, double fraction)
@@ -71,8 +75,13 @@ QDateTime fromMSecs(double msecs)
 
 /// Fills the terrain of the vertices from the lookup and adds vertices every spacing meters between them. Where the
 /// lookup has no elevation the terrain stays NaN, so that unknown stretches aren't bridged by interpolation.
-QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathEvaluator::TerrainLookup &lookup, double spacing, int maxPositions)
+/// @param coarse Set when the path is too long for maxPositions at the spacing, which is then widened
+QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathEvaluator::TerrainLookup &lookup, double spacing, int maxPositions,
+                            bool *coarse = nullptr)
 {
+    if (coarse) {
+        *coarse = false;
+    }
     if (!lookup) {
         return vertices;
     }
@@ -86,7 +95,13 @@ QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathE
             totalLength += vertices[i - 1].coordinate.distanceTo(vertices[i].coordinate);
         }
     }
-    spacing = (std::max)(spacing, totalLength / (std::max)(maxPositions, 1));
+    const double minSpacing = totalLength / (std::max)(maxPositions, 1);
+    if (minSpacing > spacing) {
+        spacing = minSpacing;
+        if (coarse) {
+            *coarse = true;
+        }
+    }
 
     QList<RawVertex> result;
     result.reserve(vertices.count());
@@ -118,14 +133,41 @@ QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathE
     return result;
 }
 
+/// Adds vertices on the great circles between the vertices, which vehicles fly along, where the edges straight in
+/// latitude and longitude, which the zone checks use, would be farther from them than kPathGreatCircleToleranceMeters.
+/// Altitudes, terrain and times are interpolated in proportion to the distance.
+QList<RawVertex> followGreatCircles(const QList<RawVertex> &vertices)
+{
+    QList<RawVertex> result;
+    result.reserve(vertices.count());
+    for (qsizetype i = 0; i < vertices.count(); i++) {
+        RawVertex vertex = vertices[i];
+        if ((i > 0) && vertices[i - 1].coordinate.isValid() && vertex.coordinate.isValid()) {
+            const RawVertex &from = vertices[i - 1];
+            const QPointF a(from.coordinate.longitude(), from.coordinate.latitude());
+            const QPointF b(vertex.coordinate.longitude(), vertex.coordinate.latitude());
+            bool exceeded = false;
+            const QList<double> fractions = GeoZoneGeometry::greatCircleFractions(a, b, GeoZoneGeometry::kPathGreatCircleToleranceMeters, &exceeded);
+            const Approximations approximations = exceeded ? Approximations(GeoZonePathEvaluator::GreatCircleDeviation) : Approximations();
+            for (qsizetype k = 1; k < (fractions.count() - 1); k++) {
+                const double fraction = fractions[k];
+                result.append(RawVertex{ GeoZone::toCoordinate(GeoZoneGeometry::greatCircleInterpolate(a, b, fraction)), interpolate(from.altitude, vertex.altitude, fraction),
+                                         interpolate(from.terrain, vertex.terrain, fraction), interpolate(from.msecs, vertex.msecs, fraction),
+                                         interpolate(from.source, vertex.source, fraction), approximations | from.approximations });
+            }
+            vertex.approximations |= approximations;
+        }
+        result.append(vertex);
+    }
+    return result;
+}
+
 const GeoZonePolicy &anyZonePolicy()
 {
     static const GeoZonePolicy policy({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace,
                                         GeoZone::Unknown });
     return policy;
 }
-
-using Approximations = GeoZonePathEvaluator::Approximations;
 
 /// Span of the parameter along a prepared path, the segment index plus the fraction along it
 struct Span {
@@ -174,8 +216,11 @@ struct GeoZonePathEvaluator::Prepared {
     QList<double> distances;
     QList<double> msecs;
     QList<double> sources;
+    QList<Approximations> approximations;   ///< Of the segment ending at each position
     qsizetype inputCount = 0;
     QString label;
+    bool followsTerrain = false;            ///< Altitudes above the terrain
+    bool coarseTerrain = false;             ///< Terrain sampled farther apart than the spacing, see TerrainCoarse
 
     qsizetype segmentCount() const { return (std::max)(positions.count() - 1, qsizetype{ 0 }); }
 
@@ -288,7 +333,7 @@ QList<const GeoZone*> GeoZonePathEvaluator::Result::activeEnteredZones() const
 
 GeoZonePathEvaluator::Approximations GeoZonePathEvaluator::Result::approximations() const
 {
-    Approximations result;
+    Approximations result = pathApproximations;
     for (const ZoneResult &zoneResult : zones) {
         result |= zoneResult.approximations();
     }
@@ -331,6 +376,7 @@ QList<GeoZonePathEvaluator::Prepared> GeoZonePathEvaluator::_prepare(const QList
         Prepared prepared;
         prepared.label = path.label;
         prepared.inputCount = path.vertices.count();
+        prepared.followsTerrain = path.altitudeReference == AltitudeReference::Terrain;
 
         QList<RawVertex> vertices;
         vertices.reserve(path.vertices.count());
@@ -338,7 +384,7 @@ QList<GeoZonePathEvaluator::Prepared> GeoZonePathEvaluator::_prepare(const QList
             const Vertex &vertex = path.vertices[i];
             vertices.append(RawVertex{ vertex.coordinate, vertex.altitude, vertex.terrainAMSL, toMSecs(vertex.time), static_cast<double>(i) });
         }
-        vertices = addTerrain(vertices, _terrainLookup, _terrainSpacing, _maxTerrainPositions);
+        vertices = followGreatCircles(addTerrain(vertices, _terrainLookup, _terrainSpacing, _maxTerrainPositions, &prepared.coarseTerrain));
         // A single position is evaluated as a segment without length
         if (vertices.count() == 1) {
             vertices.append(vertices.constFirst());
@@ -365,6 +411,7 @@ QList<GeoZonePathEvaluator::Prepared> GeoZonePathEvaluator::_prepare(const QList
             prepared.distances.append(distance);
             prepared.msecs.append(vertex.msecs);
             prepared.sources.append(vertex.source);
+            prepared.approximations.append(vertex.approximations);
         }
         preparedPaths.append(prepared);
     }
@@ -419,7 +466,10 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
             }
             const GeoZone::Volume &volume = volumes[v];
             const auto vertical = GeoZoneVertical::interval(volume, from, to);
-            const Approximations approximations = verticalApproximations(volume, from, to);
+            Approximations approximations = verticalApproximations(volume, from, to) | path.approximations[segment + 1];
+            if (path.coarseTerrain && (path.followsTerrain || GeoZoneVertical::aboveGround(volume))) {
+                approximations |= TerrainCoarse;
+            }
             const auto outsidePart = [&volume, &positionAt, segment](double first, double last) {
                 return PartSpan{ segment + first, segment + last, GeoZoneVertical::position(volume, positionAt((first + last) / 2)) };
             };
@@ -586,6 +636,11 @@ GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &p
     }
 
     Result result;
+    for (const Prepared &path : prepared) {
+        for (const Approximations approximations : path.approximations) {
+            result.pathApproximations |= approximations;
+        }
+    }
     QHash<const GeoZone*, qsizetype> resultIndexes;
     for (qsizetype c = 0; c < candidates.count(); c++) {
         ZoneResult zoneResult = _evaluateZone(candidates[c], prepared, candidateSegments[c]);

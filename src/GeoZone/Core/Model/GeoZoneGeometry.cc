@@ -388,6 +388,26 @@ void _densifyEdge(const QPointF &from, const QPointF &to, double tolerance, int 
     _densifyEdge(middle, to, tolerance, depth - 1, maxVertices, ring);
 }
 
+/// Adds the fractions between first and last, exclusive, of the great circle from one point to another, halving it
+/// until the straight edges are within the tolerance
+void _greatCircleFractions(const QPointF &from, const QPointF &to, double first, double last, double tolerance, int depth, QList<double> &fractions,
+                           bool &exceeded)
+{
+    const QPointF firstPoint = (first <= 0) ? from : greatCircleInterpolate(from, to, first);
+    const QPointF lastPoint = (last >= 1) ? to : greatCircleInterpolate(from, to, last);
+    if ((_greatCircleDeviationBound(firstPoint, lastPoint) <= tolerance) || (greatCircleDeviation(firstPoint, lastPoint) <= tolerance)) {
+        return;
+    }
+    if (depth <= 0) {
+        exceeded = true;
+        return;
+    }
+    const double middle = (first + last) / 2;
+    _greatCircleFractions(from, to, first, middle, tolerance, depth - 1, fractions, exceeded);
+    fractions.append(middle);
+    _greatCircleFractions(from, to, middle, last, tolerance, depth - 1, fractions, exceeded);
+}
+
 } // namespace
 
 LocalProjection::LocalProjection(const QGeoCoordinate &origin)
@@ -861,6 +881,18 @@ double greatCircleDeviation(const QPointF &from, const QPointF &to)
         deviation = (std::max)(deviation, distanceToSegment(QPointF(), projection.lonLatToLocal(from), projection.lonLatToLocal(to)));
     }
     return deviation;
+}
+
+QList<double> greatCircleFractions(const QPointF &from, const QPointF &to, double toleranceMeters, bool *exceeded)
+{
+    QList<double> fractions = { 0 };
+    bool farther = false;
+    _greatCircleFractions(from, to, 0, 1, toleranceMeters, kMaxGreatCircleSubdivisions, fractions, farther);
+    fractions.append(1);
+    if (exceeded) {
+        *exceeded = farther;
+    }
+    return fractions;
 }
 
 QList<QPointF> densifyGreatCircles(const QList<QPointF> &ring, qsizetype maxVertices, const QList<bool> &greatCircleEdges, double toleranceMeters)

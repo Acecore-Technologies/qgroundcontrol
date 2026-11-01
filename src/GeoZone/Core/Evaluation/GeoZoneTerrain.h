@@ -20,7 +20,7 @@
 namespace GeoZoneTerrain {
 
 constexpr double defaultSpacing = 100;  ///< Meters between the positions added along paths
-constexpr int maxPositions = 100;       ///< Positions of a path after adding the terrain, the spacing grows for long paths
+constexpr int maxPositions = 1000;      ///< Positions of a path after adding the terrain, the spacing grows for longer paths
 
 /// @return Ground elevation in meters AMSL at the coordinate, NaN when its terrain tile isn't loaded
 double elevationAt(const QGeoCoordinate &coordinate);

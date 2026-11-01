@@ -38,7 +38,9 @@ public:
     using TerrainLookup = std::function<double(const QGeoCoordinate &coordinate)>;
 
     static constexpr double defaultTerrainSpacing = 100;    ///< Meters between the positions added along paths with a terrain lookup
-    static constexpr int defaultMaxTerrainPositions = 100;  ///< Positions of a path after adding the terrain, the spacing grows for long paths
+    /// Positions of a path after adding the terrain, 100 km at the default spacing. The spacing grows for longer paths,
+    /// see TerrainCoarse.
+    static constexpr int defaultMaxTerrainPositions = 1000;
     /// Seconds the estimated times of crossings are widened by on both sides for zone schedules, since the take-off may
     /// be early or late and the vehicle may fly at another pace than estimated
     static constexpr int defaultScheduleToleranceSecs = 15 * 60;
@@ -48,6 +50,10 @@ public:
     enum Approximation {
         TerrainUnknown = 0x01,      ///< Limits above ground were compared where the terrain elevation is unknown, so they
                                     ///< were taken as reached
+        TerrainCoarse = 0x02,       ///< The terrain was sampled farther apart than the spacing, since the path is longer
+                                    ///< than the positions allowed, see setTerrainLookup
+        GreatCircleDeviation = 0x04,///< A leg is longer than its great circle can be followed within
+                                    ///< GeoZoneGeometry::kPathGreatCircleToleranceMeters, like across half the world
     };
     Q_DECLARE_FLAGS(Approximations, Approximation)
 
@@ -65,8 +71,9 @@ public:
         QDateTime time;                 ///< Estimated time the vehicle is at the vertex, invalid when unknown
     };
 
-    /// Positions flown in order, along straight lines in latitude and longitude, with the altitudes, terrain and times
-    /// interpolated linearly between them
+    /// Positions flown in order along the great circles between them, with the altitudes, terrain and times
+    /// interpolated linearly in proportion to the distance. Long legs are checked along their great circle, which
+    /// can be hundreds of meters from the line straight in latitude and longitude at high latitudes.
     struct Path {
         QList<Vertex> vertices;
         AltitudeReference altitudeReference = AltitudeReference::MeanSeaLevel;
@@ -151,7 +158,9 @@ public:
         const ZoneResult *find(const GeoZone *zone) const;
         /// @return The zones entered while they apply, in the order of zones
         QList<const GeoZone*> activeEnteredZones() const;
-        /// @return Why the results of the zones are approximate
+        Approximations pathApproximations;  ///< Of the paths, whether or not they meet zones, like GreatCircleDeviation
+
+        /// @return Why the results of the zones or the paths are approximate
         Approximations approximations() const;
     };
 

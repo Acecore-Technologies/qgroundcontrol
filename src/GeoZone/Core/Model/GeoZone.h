@@ -207,8 +207,9 @@ public:
     };
 
     /// @return First position of the path inside a volume, horizontally and between its vertical limits, nothing
-    ///         when the path doesn't enter the zone. Coordinates, altitudes and terrain elevations are interpolated
-    ///         linearly between the positions, so paths following terrain need a position at each terrain sample.
+    ///         when the path doesn't enter the zone. The path follows the great circles between the positions, see
+    ///         horizontalIntervals, and altitudes and terrain elevations are interpolated linearly between them, so
+    ///         paths following terrain need a position at each terrain sample.
     std::optional<PathEntry> pathEntry(const QList<Position> &path) const;
 
     /// @return true if the path enters a volume, see pathEntry
@@ -234,10 +235,12 @@ public:
     /// @return true if the coordinate is inside the horizontal projection of the volume at the index
     bool volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordinate) const;
 
-    /// @return Fractions of the straight segment between the coordinates, in latitude and longitude, which are inside
-    ///         the horizontal projection of the volume at the index, ordered and with touching intervals merged. The
-    ///         boundary is inside, so a segment touching it has an empty interval there. The segment takes the shorter
-    ///         way, which may cross the antimeridian.
+    /// @return Fractions of the great circle between the coordinates, which vehicles fly along, inside the horizontal
+    ///         projection of the volume at the index, ordered and with touching intervals merged. The boundary is
+    ///         inside, so a segment touching it has an empty interval there. Long segments are checked in pieces
+    ///         straight in latitude and longitude within GeoZoneGeometry::kPathGreatCircleToleranceMeters of the great
+    ///         circle, see GeoZoneGeometry::greatCircleFractions. The segment takes the shorter way, which may cross the
+    ///         antimeridian.
     QList<GeoZoneGeometry::Interval> horizontalIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const;
 
     /// @return Lower or upper limit of the volume in meters above mean sea level at the position, see
@@ -262,6 +265,8 @@ private:
     };
     /// Made on first use, from any thread, since most zones are never queried
     const Projected &_projected() const;
+    /// @return Fractions of the straight segment between the coordinates inside the volume, see horizontalIntervals
+    QList<GeoZoneGeometry::Interval> _straightIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const;
 
     const Data _data;
     QList<GeoZoneBox> _volumeBoxes; ///< Outer ring extents of the polygon volumes, invalid for circles

@@ -36,6 +36,12 @@ bool hasCeiling(const GeoZone::Volume &volume)
     return !qIsNaN(volume.upperLimit) && (volume.upperLimit < unlimitedSentinel);
 }
 
+bool aboveGround(const GeoZone::Volume &volume)
+{
+    return (hasFloor(volume) && (volume.lowerReference == GeoZone::VerticalReference::Ground)) ||
+           (hasCeiling(volume) && (volume.upperReference == GeoZone::VerticalReference::Ground));
+}
+
 double comparableLimit(const GeoZone::Volume &volume, bool upper)
 {
     const double meters = (upper ? volume.upperLimit : volume.lowerLimit) * (volume.feet ? metersPerFoot : 1.0);

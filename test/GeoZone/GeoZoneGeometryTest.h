@@ -41,6 +41,7 @@ private slots:
     void _testBoxAcrossAntimeridian();
     void _testGreatCircleEdges_data();
     void _testGreatCircleEdges();
+    void _testGreatCirclePaths();
     void _testMercatorEdges();
     void _testProjectionContinuity();
     void _testConcurrentQueries();

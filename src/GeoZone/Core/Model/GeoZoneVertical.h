@@ -54,6 +54,9 @@ bool hasFloor(const GeoZone::Volume &volume);
 /// @return true if the volume has a ceiling below the published unlimited one
 bool hasCeiling(const GeoZone::Volume &volume);
 
+/// @return true if the volume has a floor or ceiling above the ground, see hasFloor and hasCeiling
+bool aboveGround(const GeoZone::Volume &volume);
+
 /// @return The limit of the volume in meters in its datum: as published, except for flight levels which are
 ///         converted to heights above mean sea level with the current QNH, then widened by flightLevelMargin
 double comparableLimit(const GeoZone::Volume &volume, bool upper);

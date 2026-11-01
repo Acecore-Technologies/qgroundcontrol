@@ -113,6 +113,18 @@ QPointF greatCircleInterpolate(const QPointF &from, const QPointF &to, double fr
 ///         and longitude the shorter way around, sampled at a quarter, half and three quarters of the great circle
 double greatCircleDeviation(const QPointF &from, const QPointF &to);
 
+/// Largest distance in meters between the great circle a vehicle flies between two positions of a path and the pieces
+/// straight in latitude and longitude which the checks use for it, see greatCircleFractions
+inline constexpr double kPathGreatCircleToleranceMeters = 1.0;
+
+/// @return Fractions of the great circle from one point to another, x longitude and y latitude in degrees, from 0 to 1
+///         ascending, such that the edges straight in latitude and longitude between the points of the great circle
+///         at consecutive fractions are within the tolerance of it. Just 0 and 1 when the straight edge already is.
+///         The great circle is halved up to kMaxGreatCircleSubdivisions times.
+/// @param exceeded Set when a piece is still farther than the tolerance from the great circle
+QList<double> greatCircleFractions(const QPointF &from, const QPointF &to, double toleranceMeters = kPathGreatCircleToleranceMeters,
+                                   bool *exceeded = nullptr);
+
 /// Adds points on the great circles between the vertices of the unclosed ring, x longitude and y latitude in degrees,
 /// for formats whose edges are geodesics rather than straight in latitude and longitude, where an edge deviates from
 /// its great circle by more than the tolerance. Such edges are halved until each part is within the tolerance or up to

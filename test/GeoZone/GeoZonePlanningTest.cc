@@ -350,6 +350,62 @@ void GeoZonePlanningTest::_testEvaluatorUnknownTerrain()
     QCOMPARE(known.approximations(), GeoZonePathEvaluator::Approximations());
 }
 
+void GeoZonePlanningTest::_testEvaluatorGreatCircles()
+{
+    // A leg along the 60th parallel over one degree of longitude, whose great circle passes about 105 m north of the
+    // parallel halfway, with a small zone on each, and a zone 50 to 150 m above the ground near its start
+    const QPointF west(0, 60);
+    const QPointF east(1, 60);
+    const QGeoCoordinate start = GeoZone::toCoordinate(west);
+    const QGeoCoordinate end = GeoZone::toCoordinate(east);
+    const QGeoCoordinate onGreatCircle = GeoZone::toCoordinate(GeoZoneGeometry::greatCircleInterpolate(west, east, 0.5));
+    const QGeoCoordinate onParallel(60, 0.5);
+    const QGeoCoordinate groundCenter = start.atDistanceAndAzimuth(2000, 90);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("CIRCLE"), QStringLiteral("PROHIBITED"), onGreatCircle, 30),
+        _circleFeature(QStringLiteral("PARALLEL"), QStringLiteral("PROHIBITED"), onParallel, 30),
+        _withLimits(_circleFeature(QStringLiteral("AGL"), QStringLiteral("PROHIBITED"), groundCenter, 300), 50, QStringLiteral("AGL"), 150, QStringLiteral("AGL")),
+    }), errorString), qPrintable(errorString));
+    GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }));
+
+    // The vehicle flies the great circle, entering the zone on it about halfway and passing the one on the parallel.
+    // Without terrain the zone above ground counts as entered.
+    const GeoZonePathEvaluator::Result result = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
+    QStringList entered;
+    for (const GeoZone *zone : result.activeEnteredZones()) {
+        entered.append(zone->identifier());
+    }
+    QCOMPARE(entered, QStringList({ QStringLiteral("AGL"), QStringLiteral("CIRCLE") }));
+    const GeoZonePathEvaluator::Crossing &crossing = result.zones[1].crossings[0];
+    QCOMPARE(crossing.entry.segment, 0);
+    QVERIFY(_near(crossing.entry.fraction, 0.4995, 0.0005));
+    QVERIFY(_near((crossing.entry.distance + crossing.exit.distance) / 2, start.distanceTo(end) / 2, 2));
+    QVERIFY(onGreatCircle.distanceTo(crossing.entry.position.coordinate) < 35);
+    QCOMPARE(crossing.approximations, GeoZonePathEvaluator::Approximations());
+    QCOMPARE(result.pathApproximations, GeoZonePathEvaluator::Approximations());
+
+    // The terrain is sampled at the spacing up to the maximum positions, farther apart beyond, which is approximate
+    // for limits above ground
+    const auto groundZone = std::find_if(manager.zoneList().cbegin(), manager.zoneList().cend(), [](const GeoZone *zone) { return zone->identifier() == QStringLiteral("AGL"); });
+    QVERIFY(groundZone != manager.zoneList().cend());
+    evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; }, 100, 1000);
+    const GeoZonePathEvaluator::Result sampled = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
+    const GeoZonePathEvaluator::ZoneResult *const ground = sampled.find(*groundZone);
+    QVERIFY(ground);
+    QVERIFY(!ground->entered());
+    QCOMPARE(sampled.approximations(), GeoZonePathEvaluator::Approximations());
+    evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; }, 100, 100);
+    const GeoZonePathEvaluator::Result coarse = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
+    QVERIFY(coarse.find(*groundZone)->approximations().testFlag(GeoZonePathEvaluator::TerrainCoarse));
+    QVERIFY(coarse.approximations().testFlag(GeoZonePathEvaluator::TerrainCoarse));
+    // Only zones with limits above ground are affected
+    QCOMPARE(coarse.find(result.zones[1].zone)->approximations(), GeoZonePathEvaluator::Approximations());
+}
+
 void GeoZonePlanningTest::_testEvaluatorSchedules()
 {
     // Active on 1 January 2027 from 10:00 to 12:00 UTC, 1900 to 2100 m along a path of 4000 m
