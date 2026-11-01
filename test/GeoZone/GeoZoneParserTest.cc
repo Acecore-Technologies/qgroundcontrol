@@ -9,6 +9,9 @@
 
 #include "GeoZoneParserTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneZip.h"
+
+#include <zlib.h>
 
 using namespace GeoZoneTestHelpers;
 
@@ -346,6 +349,57 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QCOMPARE(GeoZoneLoader::extractZip(zipFile.readAll(), errorString), aixmBytes);
     QCOMPARE(GeoZoneLoader::extractZip(QByteArray("PK\x03\x04" "broken"), errorString), QByteArray());
     QVERIFY(!errorString.isEmpty());
+
+    // Archives expanding beyond the limit are stopped while inflating, whatever their headers declare
+    const auto deflatedZeros = [](qint64 size) {
+        z_stream stream{};
+        (void) deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+        const QByteArray zeros(1 << 20, '\0');
+        QByteArray output;
+        for (qint64 written = 0; written < size; written += zeros.size()) {
+            stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(zeros.constData()));
+            stream.avail_in = zeros.size();
+            const int flush = ((written + zeros.size()) >= size) ? Z_FINISH : Z_NO_FLUSH;
+            do {
+                char buffer[65536];
+                stream.next_out = reinterpret_cast<Bytef*>(buffer);
+                stream.avail_out = sizeof(buffer);
+                (void) deflate(&stream, flush);
+                output.append(buffer, sizeof(buffer) - stream.avail_out);
+            } while (stream.avail_out == 0);
+        }
+        deflateEnd(&stream);
+        return output;
+    };
+    const auto zipArchive = [](const QByteArray &name, const QByteArray &compressed, quint32 declaredSize, quint16 entryCount = 1) {
+        const auto u16 = [](QByteArray &bytes, quint16 value) { bytes.append(reinterpret_cast<const char*>(&value), 2); };
+        const auto u32 = [](QByteArray &bytes, quint32 value) { bytes.append(reinterpret_cast<const char*>(&value), 4); };
+        QByteArray archive;
+        u32(archive, 0x04034b50); u16(archive, 20); u16(archive, 0); u16(archive, 8); u16(archive, 0); u16(archive, 0);
+        u32(archive, 0); u32(archive, compressed.size()); u32(archive, declaredSize); u16(archive, name.size()); u16(archive, 0);
+        archive.append(name);
+        archive.append(compressed);
+        const quint32 directoryOffset = archive.size();
+        u32(archive, 0x02014b50); u16(archive, 20); u16(archive, 20); u16(archive, 0); u16(archive, 8); u16(archive, 0); u16(archive, 0);
+        u32(archive, 0); u32(archive, compressed.size()); u32(archive, declaredSize); u16(archive, name.size()); u16(archive, 0); u16(archive, 0);
+        u16(archive, 0); u16(archive, 0); u32(archive, 0); u32(archive, 0);
+        archive.append(name);
+        const quint32 directorySize = archive.size() - directoryOffset;
+        u32(archive, 0x06054b50); u16(archive, 0); u16(archive, 0); u16(archive, entryCount); u16(archive, entryCount);
+        u32(archive, directorySize); u32(archive, directoryOffset); u16(archive, 0);
+        return archive;
+    };
+    constexpr qint64 limit = 1 << 20;
+    const QByteArray bomb = deflatedZeros(8 * limit);
+    QVERIFY(bomb.size() < (limit / 10));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 1000), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The file in the zip archive is too large."));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 8 * limit), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The file in the zip archive is too large."));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 1000, GeoZoneZip::maxEntries + 1), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The zip archive has too many files."));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("readme.txt", bomb, 1000), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The zip archive has no geozone file."));
 
     // The NATS page links the datasets of the current and the next AIRAC cycle
     const QByteArray page = "<!DOCTYPE html><html><body>"

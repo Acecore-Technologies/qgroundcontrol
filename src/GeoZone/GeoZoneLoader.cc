@@ -11,12 +11,10 @@
 #include "GeoZoneDownloader.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneStore.h"
-#include "QGCZip.h"
+#include "GeoZoneZip.h"
 
-#include <QtCore/QDirIterator>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
-#include <QtCore/QTemporaryDir>
 #include <QtCore/QLocale>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QUrl>
@@ -61,42 +59,21 @@ QByteArray GeoZoneLoader::extractZip(const QByteArray &data, QString &errorStrin
         return data;
     }
 
-    const QTemporaryDir dir;
-    QFile archive(dir.filePath(QStringLiteral("archive.zip")));
-    if (!dir.isValid() || !archive.open(QIODevice::WriteOnly) || (archive.write(data) != data.size())) {
-        errorString = tr("Unable to extract the zip archive: %1").arg(archive.errorString());
-        return QByteArray();
-    }
-    archive.close();
-    return extractZipFile(archive.fileName(), errorString);
+    return GeoZoneZip::largestFile(data, { QStringLiteral(".xml"), QStringLiteral(".json"), QStringLiteral(".geojson") }, GeoZoneDownloader::defaultMaxBytes, errorString);
 }
 
 QByteArray GeoZoneLoader::extractZipFile(const QString &archivePath, QString &errorString)
 {
-    const QTemporaryDir dir;
-    const QString extracted = dir.filePath(QStringLiteral("extracted"));
-    if (!dir.isValid() || !QGCZip::unzipFile(archivePath, extracted)) {
-        errorString = tr("Unable to extract the zip archive.");
+    QFile archive(archivePath);
+    if (archive.size() > GeoZoneDownloader::defaultMaxBytes) {
+        errorString = tr("The zip archive is too large.");
         return QByteArray();
     }
-
-    QDirIterator files(extracted, { QStringLiteral("*.xml"), QStringLiteral("*.json"), QStringLiteral("*.geojson") }, QDir::Files, QDirIterator::Subdirectories);
-    QString largest;
-    qint64 largestSize = -1;
-    while (files.hasNext()) {
-        const QFileInfo info(files.next());
-        // Metadata files of the archive are small, the data is the largest file
-        if (info.size() > largestSize) {
-            largest = info.filePath();
-            largestSize = info.size();
-        }
-    }
-    QFile file(largest);
-    if (largest.isEmpty() || (largestSize > GeoZoneDownloader::defaultMaxBytes) || !file.open(QIODevice::ReadOnly)) {
-        errorString = tr("The zip archive has no geozone file.");
+    if (!archive.open(QIODevice::ReadOnly)) {
+        errorString = tr("Unable to extract the zip archive: %1").arg(archive.errorString());
         return QByteArray();
     }
-    return file.readAll();
+    return extractZip(archive.readAll(), errorString);
 }
 
 GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &store)
