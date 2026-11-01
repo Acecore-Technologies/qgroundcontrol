@@ -187,6 +187,20 @@ The secrets of the services, their custom headers and the area of interest only 
 - Imported packs never replace the service of a source already known. A new source takes the service of the pack without its `headers`, forgets any secret kept for its URL, and is left out when `otherOrigins()` isn't empty.
 - Packs and provenance reports write `GeoZoneService::shareableJson()`, without the headers; the index of the sources keeps them locally.
 
+### Credentials Backend {#credentials-backend}
+
+`GeoZoneCredentials` keeps the secret of each source under the SHA-256 of its key in the `GeoZoneCredentialStore` the application installs with `GeoZoneCredentials::setStore()`, for all instances. Without one, `GeoZoneSettingsCredentialStore` keeps them unencrypted in the `GeoZoneCredentials` group of the application settings. Installing a store moves the secrets kept in the settings into it. A secret the store fails to keep is kept in the settings, which are read first since they then hold the latest secret, and is moved into the store when it is set again. `GeoZoneManager::credentialStoreName` tells the **Add Service...** form where the secrets are.
+
+_QGroundControl_ doesn't install a secure store yet. [QtKeychain](https://github.com/frankosterfeld/qtkeychain) would be one: with `BUILD_WITH_QT6` it uses the Keychain on macOS and iOS, the Credential Manager on Windows, the Keystore on Android and, on Linux, the Secret Service through libsecret (or KWallet over D-Bus). On Linux its default configuration needs the libsecret development files (`libsecret-1-dev`, `pkg-config --exists libsecret-1`); without them (`LIBSECRET_SUPPORT=OFF`) it builds with Qt D-Bus, but only reaches KWallet and the deprecated GNOME Keyring library, so GNOME desktops would fall back to the settings. To add it:
+
+1. Add QtKeychain with `CPMAddPackage` in `src/GeoZone/CMakeLists.txt` (`BUILD_WITH_QT6 ON`, `BUILD_TRANSLATIONS OFF`, `BUILD_TEST_APPLICATION OFF`), link `qt6keychain` to the application, and install `libsecret-1-dev` on the Linux build machines.
+1. Implement `GeoZoneCredentialStore` in the application layer with `QKeychain::ReadPasswordJob`, `WritePasswordJob` and `DeletePasswordJob` under a service name like `QGroundControl GeoZones` and the id as key. The jobs are asynchronous while the store is called synchronously, so read the secrets of the sources of the index once at startup and keep them in memory, and write through. `ids()` returns the ids it knows, since keychains can't list them.
+1. Install it in `GeoZoneModule` before `GeoZoneManager::init()`, falling back to the settings when the keychain doesn't answer.
+
+`GeoZoneManagerTest::_testCredentialStores()` tests the migration and the fallback with a store in memory.
+
+### Tests {#origins-tests}
+
 `GeoZoneManagerTest::_testPackServiceTrust()` and `_testDownloadRedirects()` test these rules with two `TestFeedServer`s, whose different ports make different origins.
 
 ## Testing {#testing}

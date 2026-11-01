@@ -10,7 +10,10 @@
 #include "GeoZoneManagerTest.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneAirac.h"
+#include "GeoZoneCredentials.h"
 #include "GeoZoneSourceVersion.h"
+
+#include <QtCore/QCryptographicHash>
 
 using namespace GeoZoneTestHelpers;
 
@@ -93,6 +96,38 @@ QByteArray _directoryContent(const QString &path)
     }
     return content;
 }
+
+/// Keeps secrets in memory like a system keychain, or fails to keep them
+class MemoryCredentialStore : public GeoZoneCredentialStore
+{
+public:
+    MemoryCredentialStore(QHash<QString, QString> *secrets, const bool *failing)
+        : _secrets(secrets)
+        , _failing(failing)
+    {
+    }
+
+    QString name() const override { return QStringLiteral("the memory"); }
+    bool isSecure() const override { return true; }
+    QString secret(const QString &id) const override { return _secrets->value(id); }
+    bool setSecret(const QString &id, const QString &secret) override
+    {
+        if (*_failing) {
+            return false;
+        }
+        if (secret.isEmpty()) {
+            (void) _secrets->remove(id);
+        } else {
+            _secrets->insert(id, secret);
+        }
+        return true;
+    }
+    QStringList ids() const override { return _secrets->keys(); }
+
+private:
+    QHash<QString, QString> *_secrets = nullptr;
+    const bool *_failing = nullptr;
+};
 
 /// @return The files of a pack by name
 QHash<QString, QByteArray> _packFiles(const QString &packPath)
@@ -2170,6 +2205,57 @@ void GeoZoneManagerTest::_testPackServiceTrust()
     QVERIFY(hostile.requests.isEmpty());
     other.clear();
     manager.clear();
+}
+
+void GeoZoneManagerTest::_testCredentialStores()
+{
+    const QString key = QStringLiteral("https://example.org/zones");
+    const QString id = QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex());
+    GeoZoneSettingsCredentialStore settings;
+    QHash<QString, QString> kept;
+    bool failing = false;
+    const auto restore = qScopeGuard([&settings, &kept]() {
+        (void) GeoZoneCredentials::setStore(nullptr);
+        // The secrets of other sources go back to the settings
+        for (auto it = kept.cbegin(); it != kept.cend(); ++it) {
+            (void) settings.setSecret(it.key(), it.value());
+        }
+    });
+
+    // Without a store, the secrets are in the settings, by the hash of the source key
+    GeoZoneCredentials credentials;
+    QVERIFY(!GeoZoneCredentials::storeIsSecure());
+    QCOMPARE(GeoZoneCredentials::storeName(), QStringLiteral("the application settings, unencrypted"));
+    credentials.setSecret(key, QStringLiteral("s3cret"));
+    QCOMPARE(settings.secret(id), QStringLiteral("s3cret"));
+
+    // A secure store takes them over
+    QVERIFY(GeoZoneCredentials::setStore(std::make_unique<MemoryCredentialStore>(&kept, &failing)) >= 1);
+    QVERIFY(GeoZoneCredentials::storeIsSecure());
+    QCOMPARE(GeoZoneCredentials::storeName(), QStringLiteral("the memory"));
+    QCOMPARE(kept.value(id), QStringLiteral("s3cret"));
+    QVERIFY(settings.secret(id).isEmpty());
+    QCOMPARE(credentials.secret(key), QStringLiteral("s3cret"));
+    credentials.setSecret(key, QStringLiteral("new-s3cret"));
+    QCOMPARE(kept.value(id), QStringLiteral("new-s3cret"));
+    QVERIFY(settings.secret(id).isEmpty());
+    QCOMPARE(GeoZoneCredentials().secret(key), QStringLiteral("new-s3cret"));
+
+    // A secret the store fails to keep stays in the settings, until the store keeps it
+    failing = true;
+    credentials.setSecret(key, QStringLiteral("fallback-s3cret"));
+    QCOMPARE(settings.secret(id), QStringLiteral("fallback-s3cret"));
+    QCOMPARE(credentials.secret(key), QStringLiteral("fallback-s3cret"));
+    failing = false;
+    credentials.setSecret(key, QStringLiteral("kept-s3cret"));
+    QVERIFY(settings.secret(id).isEmpty());
+    QCOMPARE(credentials.secret(key), QStringLiteral("kept-s3cret"));
+
+    // Removing a secret removes it from both
+    credentials.remove(key);
+    QVERIFY(!kept.contains(id));
+    QVERIFY(settings.secret(id).isEmpty());
+    QVERIFY(credentials.secret(key).isEmpty());
 }
 
 void GeoZoneManagerTest::_testStoredFileNames()

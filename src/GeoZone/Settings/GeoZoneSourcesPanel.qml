@@ -472,7 +472,7 @@ ColumnLayout {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
-            text:               qsTr("Secrets are kept unencrypted in the QGroundControl settings, never in the list of sources, logs or exported packs.")
+            text:               qsTr("Secrets are kept in %1, never in the list of sources, logs or exported packs.").arg(_geoZoneManager.credentialStoreName)
             visible:            serviceEntry._auth > 0
         }
 

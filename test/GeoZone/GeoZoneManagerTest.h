@@ -43,6 +43,7 @@ private slots:
     void _testOfflinePack();
     void _testPackServiceTrust();
     void _testStoredFileNames();
+    void _testCredentialStores();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();

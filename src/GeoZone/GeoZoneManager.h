@@ -59,6 +59,7 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
     Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< See GeoZoneProviders::serviceTemplateList
+    Q_PROPERTY(QString              credentialStoreName READ credentialStoreName CONSTANT FINAL)    ///< Where the secrets of the services are kept, see GeoZoneCredentials
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
@@ -174,6 +175,7 @@ public:
     /// See GeoZoneProviders::areaProviders
     static QVariantList areaProviders() { return GeoZoneProviders::areaProviders(); }
     static QVariantList serviceTemplates() { return GeoZoneProviders::serviceTemplateList(); }
+    static QString credentialStoreName() { return GeoZoneCredentials::storeName(); }
     /// See GeoZoneProviders::areaFeedUrl
     Q_INVOKABLE QString areaFeedUrl(const QString &provider, const QGeoRectangle &area) const { return GeoZoneProviders::areaFeedUrl(provider, area); }
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for
