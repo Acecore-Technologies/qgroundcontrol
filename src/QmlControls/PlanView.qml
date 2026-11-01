@@ -575,6 +575,7 @@ Item {
             anchors.top:        parent.top
             anchors.topMargin:  _toolsMargin
             missionController:  _missionController
+            geoFenceController: _geoFenceController
             map:                editorMap
             leftLimit:          toolStrip.x + toolStrip.width + _toolsMargin
             rightLimit:         rightPanel.x - _toolsMargin

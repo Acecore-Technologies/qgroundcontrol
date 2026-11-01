@@ -20,16 +20,17 @@ import QGroundControl.ScreenTools
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
     border.color:   (missionCheck.warningText !== "" || _outdatedText !== "") ? qgcPal.warningText : qgcPal.text
     z:              QGroundControl.zOrderWidgets
-    visible:        missionCheck.warningText !== "" || missionCheck.infoText !== "" || _outdatedText !== ""
+    visible:        missionCheck.warningText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== ""
 
     required property var   missionController
     required property var   map                 ///< Fitted to the crossed zones when the banner is clicked
+    property var            geoFenceController: null    ///< Fence expected to exclude the prohibited zones, which can be added to it
     property real           leftLimit:  0
     property real           rightLimit: parent ? parent.width : 0
 
@@ -57,8 +58,11 @@ Rectangle {
         if (prohibitedZones.length > 5) {
             names += qsTr(" and %1 more").arg(prohibitedZones.length - 5)
         }
+        // Fences are only checked with the current plan, so recheck the zones the fence leaves out
+        const unfenced = check.unfencedZones.filter(zone => zone.restriction === GeoZone.Prohibited)
+        const fenceNote = unfenced.length > 0 ? qsTr("\n\nThe GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.", "", unfenced.length) : ""
         mainWindow.showMessageDialog(qsTr("Plan Upload"),
-                                     qsTr("The mission path enters prohibited geozones: %1\n\nClick 'Ok' to upload the Plan anyway.").arg(names),
+                                     qsTr("The mission path enters prohibited geozones: %1%2\n\nClick 'Ok' to upload the Plan anyway.").arg(names).arg(fenceNote),
                                      Dialog.Ok | Dialog.Cancel,
                                      uploadFunction)
     }
@@ -68,6 +72,12 @@ Rectangle {
     GeoZoneMissionCheck {
         id:                 check
         missionController:  control.missionController
+        geoFenceController: control.geoFenceController
+    }
+
+    GeoZoneFenceImporter {
+        id:                 fenceImporter
+        geoFenceController: control.geoFenceController
     }
 
     Column {
@@ -118,6 +128,24 @@ Rectangle {
         }
 
         QGCLabel {
+            id:                     fenceLabel
+            width:                  parent.width
+            wrapMode:               Text.WordWrap
+            horizontalAlignment:    Text.AlignHCenter
+            textFormat:             Text.PlainText
+            color:                  qgcPal.warningText
+            text:                   check.fenceText
+            visible:                text !== ""
+        }
+
+        QGCButton {
+            anchors.horizontalCenter:   parent.horizontalCenter
+            text:                       qsTr("Add Exclusion Fences")
+            visible:                    fenceLabel.visible
+            onClicked:                  fenceImporter.addZones(check.unfencedZones)
+        }
+
+        QGCLabel {
             id:                     hintLabel
             width:                  parent.width
             horizontalAlignment:    Text.AlignHCenter
@@ -127,8 +155,10 @@ Rectangle {
         }
     }
 
+    // Below the column, so its button gets its clicks
     QGCMouseArea {
         anchors.fill:   parent
+        z:              -1
         onClicked: {
             QGroundControl.geoZoneManager.visible = true
             if (check.crossedZonesBoundingBox.isValid) {

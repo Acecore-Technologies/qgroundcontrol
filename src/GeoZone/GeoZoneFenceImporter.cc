@@ -200,6 +200,17 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<GeoZon
     return fences;
 }
 
+int GeoZoneFenceImporter::addZones(const QList<QObject*> &zones, double simplifyTolerance)
+{
+    QList<GeoZone*> geoZones;
+    for (QObject *object : zones) {
+        if (GeoZone *const zone = qobject_cast<GeoZone*>(object)) {
+            geoZones.append(zone);
+        }
+    }
+    return addExclusions(geoZones, simplifyTolerance);
+}
+
 int GeoZoneFenceImporter::addExclusions(const QList<GeoZone*> &zones, double simplifyTolerance)
 {
     if (!_geoFenceController) {

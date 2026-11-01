@@ -10,10 +10,14 @@
 #include "GeoZoneMissionCheck.h"
 #include "ComplexMissionItem.h"
 #include "FlightPathSegment.h"
+#include "GeoFenceController.h"
 #include "GeoZone.h"
+#include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSource.h"
 #include "MissionController.h"
+#include "QGCFenceCircle.h"
+#include "QGCFencePolygon.h"
 #include "QGCMapPolygon.h"
 #include "QmlObjectListModel.h"
 #include "StructureScanComplexItem.h"
@@ -103,6 +107,97 @@ QString _zoneNames(const QList<GeoZone*> &zones, NameStyle style)
 
 } // namespace
 
+void GeoZoneMissionCheck::setGeoFenceController(GeoFenceController *geoFenceController)
+{
+    if (geoFenceController == _geoFenceController) {
+        return;
+    }
+    if (_geoFenceController) {
+        (void) disconnect(_geoFenceController, nullptr, this, nullptr);
+        (void) disconnect(_geoFenceController->polygons(), nullptr, this, nullptr);
+        (void) disconnect(_geoFenceController->circles(), nullptr, this, nullptr);
+    }
+    _geoFenceController = geoFenceController;
+    if (_geoFenceController) {
+        // Fence edits mark the lists dirty, additions and deletions change their counts
+        for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
+            (void) connect(fences, &QmlObjectListModel::countChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+            (void) connect(fences, &QmlObjectListModel::dirtyChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        }
+        (void) connect(_geoFenceController, &GeoFenceController::supportedChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    }
+    emit geoFenceControllerChanged();
+    _scheduleUpdate();
+}
+
+GeoFenceController *GeoZoneMissionCheck::geoFenceController() const
+{
+    return _geoFenceController;
+}
+
+QString GeoZoneMissionCheck::fenceText() const
+{
+    return _unfencedZones.isEmpty() ? QString() : tr("The GeoFence doesn't exclude prohibited zones on the path: %1").arg(_zoneNames(_unfencedZones, NameStyle::Name));
+}
+
+bool GeoZoneMissionCheck::fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone)
+{
+    // Tolerance for vertices on a fence boundary, like those of fences added from the zone
+    constexpr double toleranceMeters = 1;
+
+    QList<QList<QGeoCoordinate>> fencePolygons;
+    for (int i = 0; i < geoFenceController->polygons()->count(); i++) {
+        const QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(i);
+        if (!polygon->inclusion() && (polygon->count() >= 3)) {
+            fencePolygons.append(polygon->coordinateList());
+        }
+    }
+    QList<QGeoCircle> fenceCircles;
+    for (int i = 0; i < geoFenceController->circles()->count(); i++) {
+        QGCFenceCircle *const circle = geoFenceController->circles()->value<QGCFenceCircle*>(i);
+        if (!circle->inclusion()) {
+            fenceCircles.append(QGeoCircle(circle->center(), circle->radius()->rawValue().toDouble()));
+        }
+    }
+
+    const auto polygonCovers = [](const QList<QGeoCoordinate> &fence, const QList<QGeoCoordinate> &points) {
+        const GeoZoneGeometry::LocalProjection projection(fence.first());
+        const QList<QPointF> ring = projection.toLocal(fence);
+        return std::all_of(points.cbegin(), points.cend(), [&projection, &ring](const QGeoCoordinate &point) {
+            const QPointF local = projection.toLocal(point);
+            return GeoZoneGeometry::ringContains(ring, local) || (GeoZoneGeometry::distanceToRing(local, ring) <= toleranceMeters);
+        });
+    };
+    const auto circleCovers = [](const QGeoCircle &fence, const QList<QGeoCoordinate> &points) {
+        return std::all_of(points.cbegin(), points.cend(), [&fence](const QGeoCoordinate &point) {
+            return fence.center().distanceTo(point) <= (fence.radius() + toleranceMeters);
+        });
+    };
+
+    for (const QList<QGeoCoordinate> &zonePolygon : zone->exclusionPolygons()) {
+        const bool covered = std::any_of(fencePolygons.cbegin(), fencePolygons.cend(), [&](const QList<QGeoCoordinate> &fence) { return polygonCovers(fence, zonePolygon); }) ||
+                             std::any_of(fenceCircles.cbegin(), fenceCircles.cend(), [&](const QGeoCircle &fence) { return circleCovers(fence, zonePolygon); });
+        if (!covered) {
+            return false;
+        }
+    }
+    for (const QGeoCircle &zoneCircle : zone->exclusionCircles()) {
+        const bool covered =
+            std::any_of(fenceCircles.cbegin(), fenceCircles.cend(), [&zoneCircle](const QGeoCircle &fence) {
+                return (fence.center().distanceTo(zoneCircle.center()) + zoneCircle.radius()) <= (fence.radius() + toleranceMeters);
+            }) ||
+            std::any_of(fencePolygons.cbegin(), fencePolygons.cend(), [&zoneCircle](const QList<QGeoCoordinate> &fence) {
+                const GeoZoneGeometry::LocalProjection projection(zoneCircle.center());
+                const QList<QPointF> ring = projection.toLocal(fence);
+                return GeoZoneGeometry::ringContains(ring, QPointF(0, 0)) && (GeoZoneGeometry::distanceToRing(QPointF(0, 0), ring) >= (zoneCircle.radius() - toleranceMeters));
+            });
+        if (!covered) {
+            return false;
+        }
+    }
+    return true;
+}
+
 QString GeoZoneMissionCheck::warningText() const
 {
     return _crossedZones.isEmpty() ? QString() : tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, NameStyle::WithRestriction));
@@ -153,7 +248,8 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 {
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->parent() == source; };
-    const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource);
+    const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
+                              _unfencedZones.removeIf(fromSource);
     if (removed > 0) {
         emit crossedZonesChanged();
     }
@@ -206,7 +302,19 @@ void GeoZoneMissionCheck::update()
         }
     }
 
-    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (inactiveZoneCount != _inactiveZoneCount)) {
+    // Vehicles which support a fence can be stopped at prohibited zones by it
+    QList<GeoZone*> unfenced;
+    if (_geoFenceController && _geoFenceController->supported()) {
+        for (GeoZone *zone : std::as_const(crossed)) {
+            if ((zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(_geoFenceController, zone)) {
+                unfenced.append(zone);
+            }
+        }
+    }
+
+    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (inactiveZoneCount != _inactiveZoneCount) ||
+        (unfenced != _unfencedZones)) {
+        _unfencedZones = unfenced;
         _crossedZones = crossed;
         _uSpaceZones = uSpace;
         _permittedZones = permitted;

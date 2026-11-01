@@ -28,6 +28,7 @@ Item {
     id: _root
 
     property var missionController
+    property var geoFenceController: null   ///< Fence on the vehicle, checked for excluding prohibited zones of the mission
     property var confirmDialog
     property var guidedValueSlider
     property var fwdFlightGotoMapCircle
@@ -410,6 +411,7 @@ Item {
     GeoZoneMissionCheck {
         id:                 _vehicleMissionCheck
         missionController:  _root.missionController
+        geoFenceController: _root.geoFenceController
         flightNow:          true
     }
 
@@ -431,7 +433,7 @@ Item {
             return _activeVehicle.guidedTakeoffSupported ? monitor.altitudeWarning(_activeVehicle, sliderMeters) : ""
         case actionStartMission:
         case actionContinueMission:
-            return _vehicleMissionCheck.warningText
+            return [ _vehicleMissionCheck.warningText, _vehicleMissionCheck.fenceText ].filter(text => text !== "").join("\n")
         default:
             return ""
         }

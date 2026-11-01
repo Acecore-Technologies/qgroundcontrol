@@ -1477,6 +1477,37 @@ void GeoZoneTest::_testMissionCheck()
     QVERIFY(check.crossedZonesBoundingBox().contains(center));
     QVERIFY(check.crossedZonesBoundingBox().contains(center.atDistanceAndAzimuth(2000, 0)));
 
+    // The fence must exclude the prohibited zones, circles and polygons added from them do
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+    QVERIFY(geoFenceController->supported());
+    check.setGeoFenceController(geoFenceController);
+    QTRY_COMPARE(check.unfencedZones().count(), 1);
+    QVERIFY(check.fenceText().contains(QStringLiteral("P")));
+    geoFenceController->addInclusionCircle(center.atDistanceAndAzimuth(1000, 315), center.atDistanceAndAzimuth(1000, 135));
+    check.update();
+    QCOMPARE(check.unfencedZones().count(), 1);
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(geoFenceController);
+    QCOMPARE(importer.addZones(check.unfencedZones()), 1);
+    QTRY_VERIFY(check.unfencedZones().isEmpty());
+    QVERIFY(check.fenceText().isEmpty());
+    geoFenceController->deleteFences(false);
+    QTRY_COMPARE(check.unfencedZones().count(), 1);
+    // A polygon zone excluded by a simplified polygon fence
+    const QList<QGeoCoordinate> squareZone = { center.atDistanceAndAzimuth(300, 315), center.atDistanceAndAzimuth(300, 45),
+                                               center.atDistanceAndAzimuth(300, 135), center.atDistanceAndAzimuth(300, 225) };
+    GeoZone::Data squareData;
+    squareData.restriction = GeoZone::Prohibited;
+    GeoZone::Volume squareVolume;
+    squareVolume.rings = { squareZone };
+    squareData.volumes = { squareVolume };
+    GeoZone square(squareData);
+    QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, &square));
+    QCOMPARE(importer.addExclusions({ &square }, 25), 1);
+    QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, &square));
+    geoFenceController->deleteFences(false);
+    check.setGeoFenceController(nullptr);
+
     // A temporary restriction on the path counts at any time, or when it is active during the planned flight
     QJsonObject temporary = _circleFeature(QStringLiteral("T"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(700, 270), 100);
     temporary[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:00:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };

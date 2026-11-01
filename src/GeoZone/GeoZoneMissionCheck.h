@@ -18,6 +18,7 @@
 
 #include "GeoZone.h"
 
+class GeoFenceController;
 class GeoZoneManager;
 class GeoZoneSource;
 class MissionController;
@@ -30,6 +31,7 @@ class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
     Q_MOC_INCLUDE("MissionController.h")
+    Q_MOC_INCLUDE("GeoFenceController.h")
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
     Q_PROPERTY(QList<QObject*>      crossedZones        READ crossedZones                                   NOTIFY crossedZonesChanged FINAL)
@@ -40,6 +42,9 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(int                  inactiveZoneCount   READ inactiveZoneCount                              NOTIFY crossedZonesChanged FINAL)     ///< Zones entered which aren't active during the planned flight
     Q_PROPERTY(bool                 flightNow           READ flightNow          WRITE setFlightNow          NOTIFY flightNowChanged FINAL)        ///< Checks a flight starting now instead of at the planned start, like a mission on the vehicle
+    Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)   ///< Fence expected to exclude the prohibited zones
+    Q_PROPERTY(QList<QObject*>      unfencedZones       READ unfencedZones                                  NOTIFY crossedZonesChanged FINAL)     ///< Prohibited zones entered which the fence doesn't exclude
+    Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY crossedZonesChanged FINAL)
 
 public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
@@ -63,6 +68,13 @@ public:
     int inactiveZoneCount() const { return _inactiveZoneCount; }
     bool flightNow() const { return _flightNow; }
     void setFlightNow(bool flightNow);
+    GeoFenceController *geoFenceController() const;
+    void setGeoFenceController(GeoFenceController *geoFenceController);
+    QList<QObject*> unfencedZones() const { return QList<QObject*>(_unfencedZones.cbegin(), _unfencedZones.cend()); }
+    QString fenceText() const;
+
+    /// @return true if exclusion fences of the controller cover the whole zone, using the outer boundaries of its polygons
+    static bool fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone);
 
     /// @return Start and end of the planned flight from the planned start of the manager and the mission duration,
     ///         invalid without a planned start
@@ -89,6 +101,7 @@ signals:
     void missionControllerChanged();
     void crossedZonesChanged();
     void flightNowChanged();
+    void geoFenceControllerChanged();
 
 private:
     void _scheduleUpdate();
@@ -104,6 +117,8 @@ private:
     QList<GeoZone*> _permittedZones;
     int _inactiveZoneCount = 0;
     bool _flightNow = false;
+    QPointer<GeoFenceController> _geoFenceController;
+    QList<GeoZone*> _unfencedZones;
     QTimer _updateTimer;
 
     static constexpr int _updateDelayMSecs = 500;
