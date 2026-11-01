@@ -121,7 +121,7 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<GeoZon
 
     Fences fences;
     for (const GeoZone *zone : zones) {
-        const QString name = zone->name().isEmpty() ? zone->identifier() : zone->name();
+        const QString name = zone->displayName();
         for (const QList<QGeoCoordinate> &vertices : zone->exclusionPolygons(simplifyTolerance)) {
             if (!existingPolygons.contains(vertices) && !fences.polygons.contains(vertices)) {
                 fences.polygons.append(vertices);

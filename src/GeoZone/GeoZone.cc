@@ -369,7 +369,7 @@ bool GeoZone::intersectsPath(const QList<Position> &path) const
         }
 
         if (!projection) {
-            projection.emplace(path.first().coordinate);
+            projection.emplace(from.coordinate);
             for (const Volume &volume : _data.volumes) {
                 QList<QList<QPointF>> rings;
                 for (const QList<QGeoCoordinate> &ring : volume.rings) {
@@ -555,9 +555,9 @@ QString GeoZone::restrictionToString(Restriction restriction)
     case USpace:
         return tr("U-space airspace");
     case Unknown:
-    default:
-        return tr("Unknown");
+        break;
     }
+    return tr("Unknown");
 }
 
 int GeoZone::restrictionSeverity(Restriction restriction)
@@ -574,7 +574,7 @@ int GeoZone::restrictionSeverity(Restriction restriction)
     case NoRestriction:
         return 4;
     case Unknown:
-    default:
-        return 5;
+        break;
     }
+    return 5;
 }

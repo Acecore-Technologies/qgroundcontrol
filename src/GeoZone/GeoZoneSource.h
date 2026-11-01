@@ -24,21 +24,20 @@ class GeoZoneSource : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(QString      key             READ key            CONSTANT)                   ///< File name, or the URL of a feed
-    Q_PROPERTY(QString      url             READ url            CONSTANT)                   ///< Empty for files
-    Q_PROPERTY(QString      name            READ name           NOTIFY changed)
-    Q_PROPERTY(QString      formatName      READ formatName     NOTIFY changed)
-    Q_PROPERTY(QString      provider        READ provider       NOTIFY changed)
-    Q_PROPERTY(int          zoneCount       READ zoneCount      NOTIFY changed)
-    Q_PROPERTY(int          skippedCount    READ skippedCount   NOTIFY changed)
-    Q_PROPERTY(QDateTime    loadedAt        READ loadedAt       NOTIFY changed)             ///< When the file was loaded or the feed downloaded
-    Q_PROPERTY(QDateTime    dataDate        READ dataDate       NOTIFY changed)             ///< When the data was issued, or the file date
-    Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed)
-    Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged)     ///< Warning about outdated data, empty when current
-    Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged)
-    Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged)  ///< Why the last refresh failed
-    Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed)
-    Q_PROPERTY(int          refreshIntervalSecs READ refreshIntervalSecs NOTIFY changed)
+    Q_PROPERTY(QString      key             READ key            CONSTANT FINAL)                   ///< File name, or the URL of a feed
+    Q_PROPERTY(QString      url             READ url            CONSTANT FINAL)                   ///< Empty for files
+    Q_PROPERTY(QString      name            READ name           NOTIFY changed FINAL)
+    Q_PROPERTY(QString      formatName      READ formatName     NOTIFY changed FINAL)
+    Q_PROPERTY(QString      provider        READ provider       NOTIFY changed FINAL)
+    Q_PROPERTY(int          zoneCount       READ zoneCount      NOTIFY changed FINAL)
+    Q_PROPERTY(int          skippedCount    READ skippedCount   NOTIFY changed FINAL)
+    Q_PROPERTY(QDateTime    loadedAt        READ loadedAt       NOTIFY changed FINAL)             ///< When the file was loaded or the feed downloaded
+    Q_PROPERTY(QDateTime    dataDate        READ dataDate       NOTIFY changed FINAL)             ///< When the data was issued, or the file date
+    Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed FINAL)
+    Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged FINAL)     ///< Warning about outdated data, empty when current
+    Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
+    Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
+    Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);

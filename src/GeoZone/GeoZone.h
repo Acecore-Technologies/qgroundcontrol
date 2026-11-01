@@ -26,22 +26,22 @@ class GeoZone : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(QString          identifier              READ identifier             CONSTANT)
-    Q_PROPERTY(QString          name                    READ name                   CONSTANT)
-    Q_PROPERTY(QString          displayName             READ displayName            CONSTANT)   ///< Name, or the identifier of unnamed zones
-    Q_PROPERTY(QString          country                 READ country                CONSTANT)
-    Q_PROPERTY(Restriction      restriction             READ restriction            CONSTANT)
-    Q_PROPERTY(QString          restrictionText         READ restrictionText        CONSTANT)
-    Q_PROPERTY(QString          restrictionConditions   READ restrictionConditions  CONSTANT)
-    Q_PROPERTY(QString          reasonText              READ reasonText             CONSTANT)
-    Q_PROPERTY(QString          message                 READ message                CONSTANT)
-    Q_PROPERTY(QString          authorityText           READ authorityText          CONSTANT)
-    Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT)
-    Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT)
-    Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT)
-    Q_PROPERTY(bool             active                  READ active                 NOTIFY activeChanged)
-    Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT)   ///< Key of the GeoZoneSource
-    Q_PROPERTY(QString          sourceText              READ sourceText             NOTIFY sourceTextChanged)   ///< File or feed the zone was loaded from, with its date
+    Q_PROPERTY(QString          identifier              READ identifier             CONSTANT FINAL)
+    Q_PROPERTY(QString          name                    READ name                   CONSTANT FINAL)
+    Q_PROPERTY(QString          displayName             READ displayName            CONSTANT FINAL)   ///< Name, or the identifier of unnamed zones
+    Q_PROPERTY(QString          country                 READ country                CONSTANT FINAL)
+    Q_PROPERTY(Restriction      restriction             READ restriction            CONSTANT FINAL)
+    Q_PROPERTY(QString          restrictionText         READ restrictionText        CONSTANT FINAL)
+    Q_PROPERTY(QString          restrictionConditions   READ restrictionConditions  CONSTANT FINAL)
+    Q_PROPERTY(QString          reasonText              READ reasonText             CONSTANT FINAL)
+    Q_PROPERTY(QString          message                 READ message                CONSTANT FINAL)
+    Q_PROPERTY(QString          authorityText           READ authorityText          CONSTANT FINAL)
+    Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
+    Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT FINAL)
+    Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT FINAL)
+    Q_PROPERTY(bool             active                  READ active                 NOTIFY activeChanged FINAL)
+    Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT FINAL)   ///< Key of the GeoZoneSource
+    Q_PROPERTY(QString          sourceText              READ sourceText             NOTIFY sourceTextChanged FINAL)   ///< File or feed the zone was loaded from, with its date
 
 public:
     enum Restriction {
@@ -50,7 +50,7 @@ public:
         Conditional,
         NoRestriction,
         USpace,
-        Unknown
+        Unknown,
     };
     Q_ENUM(Restriction)
 

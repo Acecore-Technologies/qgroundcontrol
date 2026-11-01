@@ -29,17 +29,18 @@ class GeoZoneMissionCheck : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("MissionController.h")
 
-    Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged)
-    Q_PROPERTY(QList<QObject*>      crossedZones        READ crossedZones                                   NOTIFY crossedZonesChanged)
-    Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY crossedZonesChanged)
-    Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged)
-    Q_PROPERTY(QList<QObject*>      uSpaceZones         READ uSpaceZones                                    NOTIFY crossedZonesChanged)     ///< U-space airspaces the mission enters
-    Q_PROPERTY(QList<QObject*>      permittedZones      READ permittedZones                                 NOTIFY crossedZonesChanged)     ///< No restriction zones the mission enters
-    Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged)
+    Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
+    Q_PROPERTY(QList<QObject*>      crossedZones        READ crossedZones                                   NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QList<QObject*>      uSpaceZones         READ uSpaceZones                                    NOTIFY crossedZonesChanged FINAL)     ///< U-space airspaces the mission enters
+    Q_PROPERTY(QList<QObject*>      permittedZones      READ permittedZones                                 NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
+    Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
 
 public:
+    explicit GeoZoneMissionCheck(QObject *parent = nullptr);
     /// @param manager Zones to check, GeoZoneManager::instance() when null
-    explicit GeoZoneMissionCheck(QObject *parent = nullptr, GeoZoneManager *manager = nullptr);
+    explicit GeoZoneMissionCheck(GeoZoneManager *manager, QObject *parent = nullptr);
 
     static constexpr int maxListedZones = 5;
     static constexpr double maxStepDistance = 1000;     ///< Meters between points along long legs

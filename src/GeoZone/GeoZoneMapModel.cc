@@ -54,12 +54,11 @@ void GeoZoneMapItem::setZoomLevel(int zoomLevel)
 GeoZoneMapModel::GeoZoneMapModel(QObject *parent)
     : GeoZoneMapModel(GeoZoneManager::instance(), parent)
 {
-
 }
 
 GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
-    , _manager(manager)
+    , _manager(manager ? manager : GeoZoneManager::instance())
     , _polygons(new QmlObjectListModel(this))
     , _circles(new QmlObjectListModel(this))
     , _labelZones(new QmlObjectListModel(this))

@@ -594,7 +594,8 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         case Format::FaaTfr:
             valid = _faaTfrFeature(feature, zone);
             break;
-        default:
+        case Format::ED269:
+        case Format::Unknown:
             valid = _ed269Feature(feature, zone);
             break;
         }
@@ -626,7 +627,7 @@ QString GeoZoneParser::formatToString(Format format)
     case Format::FaaTfr:
         return QStringLiteral("FAA TFR");
     case Format::Unknown:
-    default:
-        return tr("Unknown");
+        break;
     }
+    return tr("Unknown");
 }

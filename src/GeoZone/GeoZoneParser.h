@@ -29,7 +29,7 @@ public:
         Unknown,
         ED269,
         ED318,
-        FaaTfr      ///< FAA temporary flight restrictions GeoJSON from tfr.faa.gov
+        FaaTfr,     ///< FAA temporary flight restrictions GeoJSON from tfr.faa.gov
     };
 
     struct Result {

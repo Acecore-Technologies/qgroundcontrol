@@ -470,7 +470,8 @@ void GeoZoneTest::_testIsActiveDuring()
     QVERIFY(scheduled.isActiveDuring(_utc(monday.addDays(2), QTime(0, 0)), _utc(monday.addDays(30), QTime(0, 0))));
     QVERIFY(!scheduled.isActiveDuring(_utc(monday, QTime(20, 0)), _utc(monday, QTime(10, 0))));
     // A window starting before the validity begins only overlaps the scheduled days inside it
-    QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 3, 25), QTime(0, 0)), _utc(QDate(2026, 3, 29), QTime(23, 0))));
+    QVERIFY(!scheduled.isActiveAt(_utc(QDate(2026, 3, 23), QTime(10, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 3, 23), QTime(0, 0)), _utc(QDate(2026, 3, 29), QTime(23, 0))));
     QVERIFY(scheduled.isActiveDuring(_utc(QDate(2026, 3, 25), QTime(0, 0)), _utc(QDate(2026, 3, 30), QTime(6, 0))));
     QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 10, 26), QTime(0, 0)), _utc(QDate(2026, 12, 1), QTime(0, 0))));
 
@@ -1219,6 +1220,8 @@ void GeoZoneTest::_testContainsAndPaths()
 
     // Paths through the zone, inside the hole only, and passing by
     QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }));
+    // Invalid positions are skipped
+    QVERIFY(polygon.intersectsPath({ QGeoCoordinate(), center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }));
     QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(300, 0) }));
     QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(50, 270), center.atDistanceAndAzimuth(50, 90) }));
     QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 90) }));
@@ -1434,7 +1437,7 @@ void GeoZoneTest::_testMissionCheck()
     masterController.start();
     MissionController *const missionController = masterController.missionController();
 
-    GeoZoneMissionCheck check(nullptr, &manager);
+    GeoZoneMissionCheck check(&manager);
     check.setMissionController(missionController);
 
     // Passes the no restriction zone only, which is reported without a warning
@@ -1893,10 +1896,16 @@ void GeoZoneTest::_testAlertLog()
     log.setDirectory(dir.filePath(QStringLiteral("logs")));
     (void) connect(&monitor, &GeoZoneMonitor::alertEvent, &log, &GeoZoneAlertLog::append);
 
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
     monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 520, 400 }, 3);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
+    QCOMPARE(eventSpy.count(), 2);
+    const QDate logDate = eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>().time.date();
+    if (eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().time.date() != logDate) {
+        QSKIP("The alerts were logged on both sides of midnight UTC");
+    }
 
-    QFile file(log.filePath(QDateTime::currentDateTimeUtc().date()));
+    QFile file(log.filePath(logDate));
     QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
     const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     file.close();
@@ -1923,6 +1932,13 @@ void GeoZoneTest::_testAlertLog()
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
     QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
     QCOMPARE(QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 3);
+
+    // Feed text starting like a spreadsheet formula stays text
+    GeoZoneMonitor::AlertEvent event;
+    event.time = QDateTime::currentDateTimeUtc();
+    event.zoneName = QStringLiteral("=1+1");
+    event.zoneIdentifier = QStringLiteral("@A1");
+    QVERIFY(GeoZoneAlertLog::line(event).contains(QStringLiteral(",'@A1,'=1+1,")));
 }
 
 void GeoZoneTest::_testProfileBands()
@@ -2146,6 +2162,7 @@ void GeoZoneTest::_testParserFuzz()
     // Mutated documents must load or fail cleanly, and loaded zones must be usable
     QRandomGenerator random(20261031);
     const QGeoCoordinate probe(47, 8);
+    const QDateTime reference = _utc(QDate(2026, 6, 1), QTime(12, 0));
     int loadedCount = 0;
     for (const QString &name : { QStringLiteral("ed269_test.json"), QStringLiteral("ed318_test.json"), QStringLiteral("faa_tfr_test.json"), QStringLiteral("ch_zurich_ed269.json") }) {
         QFile file(QStringLiteral(":/unittest/") + name);
@@ -2180,16 +2197,31 @@ void GeoZoneTest::_testParserFuzz()
             }
             loadedCount++;
             for (const GeoZone::Data &data : std::as_const(result.zones)) {
+                for (const GeoZone::Volume &volume : data.volumes) {
+                    if (volume.isCircle) {
+                        QVERIFY(volume.center.isValid() && std::isfinite(volume.radius) && (volume.radius > 0));
+                    } else {
+                        QVERIFY(!volume.rings.isEmpty() && (volume.rings.first().count() >= 3));
+                    }
+                    QVERIFY(!std::isinf(volume.lowerLimit) && !std::isinf(volume.upperLimit));
+                }
+
                 const GeoZone zone(data);
-                (void) zone.contains(GeoZone::Position{ probe, 500, 400 });
+                QVERIFY(zone.boundingBox().isValid());
+                for (const QGeoCoordinate &point : { probe, zone.center() }) {
+                    const double distance = zone.distanceTo(point);
+                    QVERIFY(distance >= 0);
+                    QVERIFY(!zone.contains(point) || (distance == 0));
+                }
                 (void) zone.distanceTo(GeoZone::Position{ probe, 500, 400 }, 30);
                 (void) zone.intersectsPath(QList<QGeoCoordinate>{ probe, probe.atDistanceAndAzimuth(5000, 45) });
-                (void) zone.exclusionPolygons(25);
+                for (const QList<QGeoCoordinate> &polygon : zone.exclusionPolygons(25)) {
+                    QVERIFY(polygon.count() >= 3);
+                }
                 (void) zone.exclusionCircles();
-                (void) zone.isActiveDuring(QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc().addDays(2));
+                (void) zone.isActiveDuring(reference, reference.addDays(2));
                 (void) zone.verticalLimitsText();
                 (void) zone.applicabilityText();
-                QVERIFY(!zone.boundingBox().isValid() || (qAbs(zone.boundingBox().center().latitude()) <= 90));
             }
         }
     }

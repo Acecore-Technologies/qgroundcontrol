@@ -56,7 +56,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
-    , _manager(manager)
+    , _manager(manager ? manager : GeoZoneManager::instance())
 {
     // Zones are about to be deleted. Their alert states are kept so reloading a source doesn't repeat alerts.
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
@@ -280,7 +280,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId)
             continue;
         }
 
-        const QString name = zone->name().isEmpty() ? zone->identifier() : zone->name();
+        const QString name = zone->displayName();
         QString message = (state == State::Inside) ?
             tr("Entered geozone %1 (%2)").arg(name, zone->restrictionText()) :
             tr("Approaching geozone %1 (%2)").arg(name, zone->restrictionText());

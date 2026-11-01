@@ -33,10 +33,10 @@ class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(bool         monitoring          READ monitoring         NOTIFY monitoringChanged)       ///< Alerts are enabled and vehicles are monitored against loaded zones
-    Q_PROPERTY(QVariantList nearbyZones         READ nearbyZones        NOTIFY nearbyZonesChanged)      ///< Maps with zone, inside and distance (meters), most restrictive first
-    Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyZonesChanged)      ///< Most restrictive GeoZone::Restriction nearby, -1 without
-    Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged)      ///< The vehicle is inside one of the nearby zones
+    Q_PROPERTY(bool         monitoring          READ monitoring         NOTIFY monitoringChanged FINAL)       ///< Alerts are enabled and vehicles are monitored against loaded zones
+    Q_PROPERTY(QVariantList nearbyZones         READ nearbyZones        NOTIFY nearbyZonesChanged FINAL)      ///< Maps with zone, inside and distance (meters), most restrictive first
+    Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyZonesChanged FINAL)      ///< Most restrictive GeoZone::Restriction nearby, -1 without
+    Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged FINAL)      ///< The vehicle is inside one of the nearby zones
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
@@ -109,7 +109,7 @@ private:
     enum class State {
         Away,
         Near,
-        Inside
+        Inside,
     };
 
     struct Nearby {
@@ -117,7 +117,7 @@ private:
         bool inside = false;
         int distance = 0;   ///< Rounded meters
 
-        bool operator==(const Nearby &other) const = default;
+        friend bool operator==(const Nearby &, const Nearby &) = default;
     };
 
     /// Alert state of one vehicle

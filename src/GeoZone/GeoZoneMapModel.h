@@ -26,10 +26,10 @@ class GeoZoneMapItem : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("GeoZone.h")
 
-    Q_PROPERTY(GeoZone*         zone        READ zone       CONSTANT)
-    Q_PROPERTY(QGeoShape        geoShape    READ geoShape   NOTIFY geoShapeChanged) ///< Polygon including holes
-    Q_PROPERTY(QGeoCoordinate   center      READ center     CONSTANT)               ///< Circle only
-    Q_PROPERTY(double           radius      READ radius     CONSTANT)               ///< Circle only, meters
+    Q_PROPERTY(GeoZone*         zone        READ zone       CONSTANT FINAL)
+    Q_PROPERTY(QGeoShape        geoShape    READ geoShape   NOTIFY geoShapeChanged FINAL) ///< Polygon including holes
+    Q_PROPERTY(QGeoCoordinate   center      READ center     CONSTANT FINAL)               ///< Circle only
+    Q_PROPERTY(double           radius      READ radius     CONSTANT FINAL)               ///< Circle only, meters
 
 public:
     GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent = nullptr);
@@ -59,10 +59,10 @@ class GeoZoneMapModel : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("QmlObjectListModel.h")
 
-    Q_PROPERTY(QmlObjectListModel*  polygons        READ polygons           CONSTANT)                       ///< GeoZoneMapItem polygons
-    Q_PROPERTY(QmlObjectListModel*  circles         READ circles            CONSTANT)                       ///< GeoZoneMapItem circles
-    Q_PROPERTY(QmlObjectListModel*  labelZones      READ labelZones         CONSTANT)                       ///< GeoZone objects to label
-    Q_PROPERTY(int                  hiddenZoneCount READ hiddenZoneCount    NOTIFY hiddenZoneCountChanged)  ///< Zones in view not shown because of the limit
+    Q_PROPERTY(QmlObjectListModel*  polygons        READ polygons           CONSTANT FINAL)                       ///< GeoZoneMapItem polygons
+    Q_PROPERTY(QmlObjectListModel*  circles         READ circles            CONSTANT FINAL)                       ///< GeoZoneMapItem circles
+    Q_PROPERTY(QmlObjectListModel*  labelZones      READ labelZones         CONSTANT FINAL)                       ///< GeoZone objects to label
+    Q_PROPERTY(int                  hiddenZoneCount READ hiddenZoneCount    NOTIFY hiddenZoneCountChanged FINAL)  ///< Zones in view not shown because of the limit
 
 public:
     static constexpr int maxShapeCount = 2000;

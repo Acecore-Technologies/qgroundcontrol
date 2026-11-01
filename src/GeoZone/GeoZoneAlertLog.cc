@@ -18,8 +18,11 @@
 
 namespace {
 
-QString csvField(const QString &value)
+QString csvField(const QString &text)
 {
+    // Text from feeds starting like a formula is run by spreadsheets, a leading quote keeps it text
+    static const QString formulaStarts = QStringLiteral("=+-@\t\r");
+    const QString value = (!text.isEmpty() && formulaStarts.contains(text.front())) ? (QLatin1Char('\'') + text) : text;
     if (!value.contains(QLatin1Char(',')) && !value.contains(QLatin1Char('"')) && !value.contains(QLatin1Char('\n')) && !value.contains(QLatin1Char('\r'))) {
         return value;
     }
@@ -95,5 +98,8 @@ void GeoZoneAlertLog::append(const GeoZoneMonitor::AlertEvent &event)
         text = header() + QLatin1Char('\n');
     }
     text += line(event) + QLatin1Char('\n');
-    (void) file.write(text.toUtf8());
+    const QByteArray bytes = text.toUtf8();
+    if ((file.write(bytes) != bytes.size()) || !file.flush()) {
+        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << path << file.errorString();
+    }
 }

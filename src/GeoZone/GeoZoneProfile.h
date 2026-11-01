@@ -27,17 +27,18 @@ class GeoZoneProfile : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("MissionController.h")
 
-    Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged)
+    Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
     /// One map per zone volume and stretch of the path inside its horizontal projection: restriction (GeoZone::Restriction),
     /// name, and points, a list of maps with distance (meters from the start), floor and ceiling (meters AMSL, NaN when
     /// the zone extends to the ground or has no ceiling, or the limit is unknown)
-    Q_PROPERTY(QVariantList         bands               READ bands                                          NOTIFY bandsChanged)
+    Q_PROPERTY(QVariantList         bands               READ bands                                          NOTIFY bandsChanged FINAL)
     /// The bands are only computed while active, like while the profile is shown
-    Q_PROPERTY(bool                 active              READ active             WRITE setActive             NOTIFY activeChanged)
+    Q_PROPERTY(bool                 active              READ active             WRITE setActive             NOTIFY activeChanged FINAL)
 
 public:
+    explicit GeoZoneProfile(QObject *parent = nullptr);
     /// @param manager Zones to show, GeoZoneManager::instance() when null
-    explicit GeoZoneProfile(QObject *parent = nullptr, GeoZoneManager *manager = nullptr);
+    explicit GeoZoneProfile(GeoZoneManager *manager, QObject *parent = nullptr);
 
     static constexpr double minSampleSpacing = 5;   ///< Meters between samples along short paths
     static constexpr int maxSamples = 20000;        ///< About the samples along the whole path, which sets the spacing of long paths
@@ -57,7 +58,6 @@ public:
         double distance = 0;        ///< Meters along the profile, which can differ slightly from the great circle
         QList<double> terrainAMSL;  ///< Ground elevation from the start to the end at even spacing, empty when unknown
         double terrainSpacing = 0;
-        double terrainFinalSpacing = 0; ///< Spacing of the last two samples
     };
 
     /// @return Bands of the zones along consecutive segments, see the bands property. Segments with a zero distance

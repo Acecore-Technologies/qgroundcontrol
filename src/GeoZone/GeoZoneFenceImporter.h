@@ -28,7 +28,7 @@ class GeoZoneFenceImporter : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(GeoFenceController* geoFenceController READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged)
+    Q_PROPERTY(GeoFenceController* geoFenceController READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)
 
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);

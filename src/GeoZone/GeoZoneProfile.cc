@@ -46,7 +46,12 @@ double terrainAt(const GeoZoneProfile::Segment &segment, double along, double le
 
 } // namespace
 
-GeoZoneProfile::GeoZoneProfile(QObject *parent, GeoZoneManager *manager)
+GeoZoneProfile::GeoZoneProfile(QObject *parent)
+    : GeoZoneProfile(GeoZoneManager::instance(), parent)
+{
+}
+
+GeoZoneProfile::GeoZoneProfile(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
 {
@@ -136,7 +141,6 @@ QList<GeoZoneProfile::Segment> GeoZoneProfile::_missionSegments() const
             segment.terrainAMSL.append(height.toDouble());
         }
         segment.terrainSpacing = flightPathSegment->distanceBetween();
-        segment.terrainFinalSpacing = flightPathSegment->finalDistanceBetween();
         segments.append(segment);
     };
 
@@ -174,7 +178,7 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
     const auto closeRun = [&bands](const Run &run) {
         bands.append(QVariantMap{
             { QStringLiteral("restriction"), static_cast<int>(run.zone->restriction()) },
-            { QStringLiteral("name"), run.zone->name().isEmpty() ? run.zone->identifier() : run.zone->name() },
+            { QStringLiteral("name"), run.zone->displayName() },
             { QStringLiteral("points"), run.points },
         });
     };

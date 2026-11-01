@@ -40,16 +40,16 @@ class GeoZoneManager : public QObject
     Q_MOC_INCLUDE("QmlObjectListModel.h")
     Q_MOC_INCLUDE("GeoZoneSource.h")
 
-    Q_PROPERTY(QmlObjectListModel*  zones               READ zones              CONSTANT)                           ///< GeoZone objects of all sources
-    Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT)                           ///< GeoZoneSource objects
-    Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY zonesChanged)                ///< Bounding box of all zones
-    Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged)
-    Q_PROPERTY(bool                 busy                READ busy               NOTIFY busyChanged)                 ///< Sources are being loaded or downloaded
-    Q_PROPERTY(double               progress            READ progress           NOTIFY progressChanged)             ///< Fraction of the downloads received, negative when unknown
-    Q_PROPERTY(QString              progressText        READ progressText       NOTIFY progressChanged)
-    Q_PROPERTY(QString              validityWarning     READ validityWarning    NOTIFY validityWarningChanged)      ///< Sources with outdated data
-    Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT)
-    Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT)                           ///< Maps with name and url of national feeds
+    Q_PROPERTY(QmlObjectListModel*  zones               READ zones              CONSTANT FINAL)                           ///< GeoZone objects of all sources
+    Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
+    Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY zonesChanged FINAL)                ///< Bounding box of all zones
+    Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged FINAL)
+    Q_PROPERTY(bool                 busy                READ busy               NOTIFY busyChanged FINAL)                 ///< Sources are being loaded or downloaded
+    Q_PROPERTY(double               progress            READ progress           NOTIFY progressChanged FINAL)             ///< Fraction of the downloads received, negative when unknown
+    Q_PROPERTY(QString              progressText        READ progressText       NOTIFY progressChanged FINAL)
+    Q_PROPERTY(QString              validityWarning     READ validityWarning    NOTIFY validityWarningChanged FINAL)      ///< Sources with outdated data
+    Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
+    Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)                           ///< Maps with name and url of national feeds
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map

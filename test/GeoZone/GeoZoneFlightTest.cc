@@ -192,7 +192,7 @@ void GeoZoneFlightTest::_testMissionCrossedZones()
     masterController.setFlyView(false);
     masterController.start();
     MissionController *const missionController = masterController.missionController();
-    GeoZoneMissionCheck check(nullptr, &manager);
+    GeoZoneMissionCheck check(&manager);
     check.setMissionController(missionController);
 
     // The simulated flight as a mission. Whether or not terrain heights are available, it enters the prison zone
@@ -232,6 +232,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     monitor.alertLog()->setDirectory(logDir.path());
     QVERIFY(!monitor.monitoring());
 
+    const QDate startDate = QDateTime::currentDateTimeUtc().date();
     _connectMockLink(MAV_AUTOPILOT_PX4);
     Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
     QVERIFY(vehicle);
@@ -249,11 +250,16 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     entered.sort();
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));
 
-    // The alerts are logged with the vehicle
-    QFile log(monitor.alertLog()->filePath(QDateTime::currentDateTimeUtc().date()));
-    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QStringList logLines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-    QCOMPARE(logLines.count(), alertSpy.count() + 1);
+    // The alerts are logged with the vehicle, in a file per day
+    QStringList logLines;
+    for (QDate date = startDate; date <= QDateTime::currentDateTimeUtc().date(); date = date.addDays(1)) {
+        QFile log(monitor.alertLog()->filePath(date));
+        if (log.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            logLines.append(QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts));
+        }
+    }
+    (void) logLines.removeAll(GeoZoneAlertLog::header());
+    QCOMPARE(logLines.count(), alertSpy.count());
     QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
     QVERIFY(logLines.last().section(QLatin1Char(','), 1, 1) == QString::number(vehicle->id()));
 
@@ -266,6 +272,13 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(alertSpy.count(), alertCount);
     QVERIFY(monitor.nearbyZones().isEmpty());
 
+    // Disconnecting the vehicle while monitoring clears its state
+    settings->alertsEnabled()->setRawValue(true);
+    QVERIFY(monitor.monitoring());
+    QTRY_COMPARE_WITH_TIMEOUT(nearbyIdentifiers(monitor), ctrs, 5000);
+    QVERIFY(monitor.inside());
     _disconnectMockLink();
     QTRY_VERIFY(!monitor.monitoring());
+    QVERIFY(monitor.nearbyZones().isEmpty());
+    QVERIFY(!monitor.inside());
 }

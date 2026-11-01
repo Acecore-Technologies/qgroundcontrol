@@ -21,7 +21,12 @@
 #include <algorithm>
 #include <cmath>
 
-GeoZoneMissionCheck::GeoZoneMissionCheck(QObject *parent, GeoZoneManager *manager)
+GeoZoneMissionCheck::GeoZoneMissionCheck(QObject *parent)
+    : GeoZoneMissionCheck(GeoZoneManager::instance(), parent)
+{
+}
+
+GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
 {
@@ -65,13 +70,17 @@ QList<QObject*> GeoZoneMissionCheck::crossedZones() const
 
 namespace {
 
-QString _zoneNames(const QList<GeoZone*> &zones, bool withRestriction)
+enum class NameStyle : quint8 {
+    Name,
+    WithRestriction,
+};
+
+QString _zoneNames(const QList<GeoZone*> &zones, NameStyle style)
 {
     QStringList names;
-    for (qsizetype i = 0; i < std::min<qsizetype>(zones.count(), GeoZoneMissionCheck::maxListedZones); i++) {
+    for (qsizetype i = 0; i < (std::min)(zones.count(), qsizetype{ GeoZoneMissionCheck::maxListedZones }); i++) {
         const GeoZone *const zone = zones[i];
-        const QString name = zone->name().isEmpty() ? zone->identifier() : zone->name();
-        names.append(withRestriction ? QStringLiteral("%1 (%2)").arg(name, zone->restrictionText()) : name);
+        names.append((style == NameStyle::WithRestriction) ? QStringLiteral("%1 (%2)").arg(zone->displayName(), zone->restrictionText()) : zone->displayName());
     }
     QString text = names.join(QStringLiteral(", "));
     if (zones.count() > GeoZoneMissionCheck::maxListedZones) {
@@ -84,17 +93,17 @@ QString _zoneNames(const QList<GeoZone*> &zones, bool withRestriction)
 
 QString GeoZoneMissionCheck::warningText() const
 {
-    return _crossedZones.isEmpty() ? QString() : tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, true));
+    return _crossedZones.isEmpty() ? QString() : tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, NameStyle::WithRestriction));
 }
 
 QString GeoZoneMissionCheck::infoText() const
 {
     QStringList lines;
     if (!_uSpaceZones.isEmpty()) {
-        lines.append(tr("U-space airspace: %1. A flight authorisation from a U-space service provider is required.").arg(_zoneNames(_uSpaceZones, false)));
+        lines.append(tr("U-space airspace: %1. A flight authorisation from a U-space service provider is required.").arg(_zoneNames(_uSpaceZones, NameStyle::Name)));
     }
     if (!_permittedZones.isEmpty()) {
-        lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(_zoneNames(_permittedZones, false)));
+        lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(_zoneNames(_permittedZones, NameStyle::Name)));
     }
     return lines.join(QStringLiteral("\n"));
 }
@@ -153,7 +162,10 @@ void GeoZoneMissionCheck::update()
         case GeoZone::NoRestriction:
             permitted.append(zone);
             break;
-        default:
+        case GeoZone::Prohibited:
+        case GeoZone::ReqAuthorisation:
+        case GeoZone::Conditional:
+        case GeoZone::Unknown:
             crossed.append(zone);
             break;
         }

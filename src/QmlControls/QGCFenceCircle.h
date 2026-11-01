@@ -24,8 +24,8 @@ public:
     const QGCFenceCircle& operator=(const QGCFenceCircle& other);
 
     Q_PROPERTY(bool inclusion READ inclusion WRITE setInclusion NOTIFY inclusionChanged)
-    Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)             ///< Optional label, like the zone of a fence added from a geozone
-    Q_PROPERTY(bool geoZone READ geoZone WRITE setGeoZone NOTIFY geoZoneChanged)    ///< Added from a geozone
+    Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged FINAL)           ///< Optional label, like the zone of a fence added from a geozone
+    Q_PROPERTY(bool geoZone READ geoZone WRITE setGeoZone NOTIFY geoZoneChanged FINAL)  ///< Added from a geozone
 
     /// Saves the QGCFenceCircle to the json object.
     ///     @param json Json object to save to
