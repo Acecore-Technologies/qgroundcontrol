@@ -33,8 +33,8 @@ public:
     struct Job {
         QString key;                ///< File name, or the URL of a feed
         QString url;                ///< Empty for files
-        QString sourcePath;         ///< File to parse when there is no data
-        QByteArray data;            ///< Downloaded content to parse
+        QString sourcePath;         ///< File to parse
+        bool downloaded = false;    ///< sourcePath is a download, which becomes the stored copy or is removed
         QString storedFileName;     ///< Name of the copy to write in the storage directory, empty to not copy
         QDateTime loadedAt;
         QDateTime fileDate;
@@ -62,6 +62,8 @@ public:
     /// @return The largest XML file of a zip archive, or the data itself when it isn't a zip archive. Empty when the
     ///         archive can't be extracted.
     static QByteArray extractZip(const QByteArray &data, QString &errorString);
+    /// @return The largest XML or JSON file of a zip archive, empty when it can't be extracted
+    static QByteArray extractZipFile(const QString &archivePath, QString &errorString);
 
     static Result run(const Job &job, const GeoZoneStore &store);
 };

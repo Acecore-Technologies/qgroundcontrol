@@ -182,6 +182,60 @@ bool GeoZoneStore::writeFile(const QString &fileName, const QByteArray &bytes, Q
     return saveFile(path(fileName), bytes, errorString);
 }
 
+bool GeoZoneStore::copyFile(const QString &sourcePath, const QString &fileName, QString &errorString) const
+{
+    if (!QDir().mkpath(_dir)) {
+        errorString = QStringLiteral("Unable to create %1").arg(_dir);
+        return false;
+    }
+    // Copied under a temporary name first, so an interrupted copy is never taken for a complete one
+    const QString target = path(fileName);
+    const QString partial = target + QStringLiteral(".part");
+    (void) QFile::remove(partial);
+    QFile source(sourcePath);
+    if (!source.copy(partial)) {
+        errorString = source.errorString();
+        (void) QFile::remove(partial);
+        return false;
+    }
+    if (!QFile::rename(partial, target)) {
+        errorString = QStringLiteral("Unable to rename %1").arg(partial);
+        (void) QFile::remove(partial);
+        return false;
+    }
+    return true;
+}
+
+bool GeoZoneStore::adoptFile(const QString &sourcePath, const QString &fileName, QString &errorString) const
+{
+    if (!QDir().mkpath(_dir)) {
+        errorString = QStringLiteral("Unable to create %1").arg(_dir);
+        return false;
+    }
+    if (QFile::rename(sourcePath, path(fileName))) {
+        return true;
+    }
+    // Other file systems can't rename across
+    if (!copyFile(sourcePath, fileName, errorString)) {
+        return false;
+    }
+    (void) QFile::remove(sourcePath);
+    return true;
+}
+
+QString GeoZoneStore::downloadDir() const
+{
+    return QDir(_dir).filePath(QStringLiteral("downloads"));
+}
+
+void GeoZoneStore::clearDownloads() const
+{
+    QDir dir(downloadDir());
+    if (dir.exists()) {
+        (void) dir.removeRecursively();
+    }
+}
+
 void GeoZoneStore::removeFile(const QString &fileName) const
 {
     if (!fileName.isEmpty()) {

@@ -18,6 +18,8 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 
 QGC_LOGGING_CATEGORY(GeoZoneParserLog, "qgc.geozone.geozoneparser")
@@ -41,12 +43,12 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
 
     const LanguageScope languageScope(language);
 
-    QByteArray json = bytes;
-    // Several national feeds are published with a UTF-8 byte order mark which QJsonDocument rejects
-    if (json.startsWith("\xEF\xBB\xBF")) {
-        json.remove(0, 3);
-    }
-    if (json.trimmed().startsWith('<')) {
+    // Several national feeds are published with a UTF-8 byte order mark which QJsonDocument rejects. The bytes of
+    // large files are used in place, without copies.
+    const qsizetype bomSize = bytes.startsWith("\xEF\xBB\xBF") ? 3 : 0;
+    const QByteArray json = QByteArray::fromRawData(bytes.constData() + bomSize, bytes.size() - bomSize);
+    const auto firstCharacter = std::find_if_not(json.cbegin(), json.cend(), [](char c) { return std::isspace(static_cast<unsigned char>(c)); });
+    if ((firstCharacter != json.cend()) && (*firstCharacter == '<')) {
         for (const GeoZoneFormat *format : GeoZoneFormat::formats()) {
             if (format->isXml()) {
                 return format->parseXml(json, result, errorString);
@@ -69,7 +71,12 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     }
     const QJsonArray features = featuresValue.toArray();
 
-    result.contentHash = QCryptographicHash::hash(QJsonDocument(features).toJson(QJsonDocument::Compact), QCryptographicHash::Sha1);
+    // Hashed one feature at a time, serializing all of them at once would take as much memory as the file
+    QCryptographicHash contentHash(QCryptographicHash::Sha1);
+    for (const QJsonValue &feature : features) {
+        contentHash.addData(QJsonDocument(feature.toObject()).toJson(QJsonDocument::Compact));
+    }
+    result.contentHash = contentHash.result();
 
     // A WFS response the server limited, which misses zones
     const double matched = _number(root.value(QStringLiteral("numberMatched")));

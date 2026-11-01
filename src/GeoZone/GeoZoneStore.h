@@ -59,6 +59,15 @@ public:
     QString moveToBackup() const;
 
     bool writeFile(const QString &fileName, const QByteArray &bytes, QString &errorString) const;
+    /// Copies a file into the directory as fileName
+    bool copyFile(const QString &sourcePath, const QString &fileName, QString &errorString) const;
+    /// Moves a file, like a finished download, into the directory as fileName
+    bool adoptFile(const QString &sourcePath, const QString &fileName, QString &errorString) const;
+
+    /// Directory in which downloads are written until they are adopted
+    QString downloadDir() const;
+    /// Removes downloads left by a previous session
+    void clearDownloads() const;
     void removeFile(const QString &fileName) const;
     /// Removes stored copies which aren't referenced
     void removeOrphanFiles(const QSet<QString> &referencedFileNames) const;

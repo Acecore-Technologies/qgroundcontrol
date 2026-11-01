@@ -18,6 +18,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QLocale>
+#include <QtCore/QScopeGuard>
 #include <QtCore/QUrl>
 
 GeoZoneLoader::Job GeoZoneLoader::fileJob(const QString &fileName)
@@ -67,8 +68,14 @@ QByteArray GeoZoneLoader::extractZip(const QByteArray &data, QString &errorStrin
         return QByteArray();
     }
     archive.close();
+    return extractZipFile(archive.fileName(), errorString);
+}
+
+QByteArray GeoZoneLoader::extractZipFile(const QString &archivePath, QString &errorString)
+{
+    const QTemporaryDir dir;
     const QString extracted = dir.filePath(QStringLiteral("extracted"));
-    if (!QGCZip::unzipFile(archive.fileName(), extracted)) {
+    if (!dir.isValid() || !QGCZip::unzipFile(archivePath, extracted)) {
         errorString = tr("Unable to extract the zip archive.");
         return QByteArray();
     }
@@ -95,36 +102,56 @@ QByteArray GeoZoneLoader::extractZip(const QByteArray &data, QString &errorStrin
 GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &store)
 {
     Result loadResult;
+    // Downloads which don't become the stored copy are removed
+    const auto removeDownload = qScopeGuard([&job, &loadResult]() {
+        if (job.downloaded && !loadResult.stored) {
+            (void) QFile::remove(job.sourcePath);
+        }
+    });
 
-    QByteArray bytes = job.data;
-    if (bytes.isEmpty()) {
-        QFile file(job.sourcePath);
-        if (!file.open(QIODevice::ReadOnly)) {
-            loadResult.errorString = tr("Unable to open file %1: %2").arg(job.sourcePath, file.errorString());
-            return loadResult;
-        }
-        if (file.size() > GeoZoneDownloader::defaultMaxBytes) {
-            loadResult.errorString = tr("The file %1 is larger than %2.").arg(job.sourcePath, QLocale::c().formattedDataSize(GeoZoneDownloader::defaultMaxBytes));
-            return loadResult;
-        }
-        bytes = file.readAll();
+    QFile file(job.sourcePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        loadResult.errorString = tr("Unable to open file %1: %2").arg(job.sourcePath, file.errorString());
+        return loadResult;
     }
-
-    QString extractError;
-    const QByteArray content = extractZip(bytes, extractError);
-    if (content.isEmpty()) {
-        loadResult.errorString = extractError;
+    if (file.size() > GeoZoneDownloader::defaultMaxBytes) {
+        loadResult.errorString = tr("The file %1 is larger than %2.").arg(job.sourcePath, QLocale::c().formattedDataSize(GeoZoneDownloader::defaultMaxBytes));
         return loadResult;
     }
 
+    // Large national files are parsed from the mapped file rather than a copy in memory
+    QByteArray content;
+    uchar *const mapped = (file.size() > 0) ? file.map(0, file.size()) : nullptr;
+    if (mapped) {
+        content = QByteArray::fromRawData(reinterpret_cast<const char*>(mapped), file.size());
+    } else {
+        content = file.readAll();
+    }
+
+    if (content.startsWith("PK\x03\x04")) {
+        QString extractError;
+        content = extractZipFile(job.sourcePath, extractError);
+        if (content.isEmpty()) {
+            loadResult.errorString = extractError;
+            return loadResult;
+        }
+    }
+
     QString parseError;
-    if (!GeoZoneParser::parse(content, loadResult.result, parseError, job.formatHint, job.language)) {
+    const bool parsed = GeoZoneParser::parse(content, loadResult.result, parseError, job.formatHint, job.language);
+    content.clear();
+    if (mapped) {
+        (void) file.unmap(mapped);
+    }
+    file.close();
+    if (!parsed) {
         loadResult.errorString = parseError;
         return loadResult;
     }
 
     if (!job.storedFileName.isEmpty()) {
-        loadResult.stored = store.writeFile(job.storedFileName, bytes, loadResult.storeError);
+        loadResult.stored = job.downloaded ? store.adoptFile(job.sourcePath, job.storedFileName, loadResult.storeError)
+                                           : store.copyFile(job.sourcePath, job.storedFileName, loadResult.storeError);
     }
 
     return loadResult;

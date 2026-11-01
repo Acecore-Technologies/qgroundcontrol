@@ -20,10 +20,8 @@
 
 #include "GeoZone.h"
 #include "GeoZoneCatalog.h"
-#include "GeoZoneDownloader.h"
-#include "GeoZoneLoader.h"
 #include "GeoZoneProviders.h"
-#include "GeoZoneStore.h"
+#include "GeoZoneSourceRepository.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 
@@ -32,9 +30,8 @@ class GeoZoneSource;
 class QmlObjectListModel;
 class QTimer;
 
-/// Loads UAS geographical zones from EUROCAE ED-269 / ED-318 files and national feeds for display on the
-/// maps, mission checks, flight alerts and conversion to GeoFence exclusion areas. A copy of each source is
-/// kept in the application data folder and reloaded on startup. Feeds are downloaded again periodically.
+/// UAS geographical zones of the sources of GeoZoneSourceRepository, for display on the maps, mission checks, flight
+/// alerts and conversion to GeoFence exclusion areas, with the queries they use.
 class GeoZoneManager : public QObject
 {
     Q_OBJECT
@@ -57,10 +54,7 @@ class GeoZoneManager : public QObject
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
 
-    enum class LoadMode : quint8 {
-        Synchronous,
-        Background,     ///< Parse files in a worker thread
-    };
+    using LoadMode = GeoZoneSourceRepository::LoadMode;
 
     /// @param storageDir Directory in which copies of the sources are kept. Empty for the default application data location.
     explicit GeoZoneManager(const QString &storageDir = QString(), QObject *parent = nullptr);
@@ -75,30 +69,30 @@ public:
 
     /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from a file with the same name.
     /// loadFailed is emitted on errors and sourceAdded on success.
-    Q_INVOKABLE void addFile(const QString &fileName);
+    Q_INVOKABLE void addFile(const QString &fileName) { _repository->addFile(fileName); }
 
     /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the
     /// source with the same URL. loadFailed is emitted on errors and sourceAdded on success.
-    Q_INVOKABLE void addUrl(const QString &url);
+    Q_INVOKABLE void addUrl(const QString &url) { _repository->addUrl(url); }
 
     /// Downloads all feeds again. Failures keep the previous data.
-    Q_INVOKABLE void refreshFeeds();
+    Q_INVOKABLE void refreshFeeds() { _repository->refreshFeeds(); }
 
     /// Removes a source, its zones and its stored copy
-    Q_INVOKABLE void removeSource(int index);
+    Q_INVOKABLE void removeSource(int index) { _repository->removeSource(index); }
 
     /// Removes all sources
-    Q_INVOKABLE void clear();
+    Q_INVOKABLE void clear() { _repository->clear(); }
 
     /// Synchronously loads a file, replacing the source loaded from a file with the same name
-    bool loadFile(const QString &fileName, QString &errorString);
+    bool loadFile(const QString &fileName, QString &errorString) { return _repository->loadFile(fileName, errorString); }
 
     /// Loads the sources stored by a previous session. An unreadable index is moved to a backup folder with the stored
     /// copies, a newer one leaves the store untouched for the session; storageFailed is emitted in both cases.
-    void loadStoredSources(LoadMode mode);
+    void loadStoredSources(LoadMode mode) { _repository->loadStoredSources(mode); }
 
     /// @return Name of the stored copy of a source in storageDir, empty when it has none
-    QString storedFileName(const QString &key) const { return _storedEntries.value(key).fileName; }
+    QString storedFileName(const QString &key) const { return _repository->storedFileName(key); }
 
     /// @return Zones to label in the map region: those centered in it, limited to maxLabelCount
     ///         preferring the most restrictive
@@ -136,8 +130,9 @@ public:
     }
 
     QmlObjectListModel *zones() const { return _zones; }
-    QmlObjectListModel *sources() const { return _sources; }
-    GeoZoneSource *source(const QString &key) const;
+    QmlObjectListModel *sources() const { return _repository->sources(); }
+    GeoZoneSource *source(const QString &key) const { return _repository->source(key); }
+    GeoZoneSourceRepository *repository() const { return _repository; }
     /// Polygons and circles of all zones for map display
     const QList<GeoZoneShape*> &shapes() const { return _catalog.shapes(); }
     /// @return Shapes of the zones whose bounding box intersects the bounds in degrees
@@ -145,10 +140,10 @@ public:
     QGeoRectangle boundingBox() const { return _catalog.boundingBox(); }
     bool visible() const;
     void setVisible(bool visible);
-    bool busy() const { return _pendingCount > 0; }
-    double progress() const;
-    QString progressText() const;
-    QString validityWarning() const { return _validityWarning; }
+    bool busy() const { return _repository->busy(); }
+    double progress() const { return _repository->progress(); }
+    QString progressText() const { return _repository->progressText(); }
+    QString validityWarning() const { return _repository->validityWarning(); }
     QStringList fileDialogFilters() const;
     static QVariantList feedPresets() { return GeoZoneProviders::feedPresets(); }
     /// See GeoZoneProviders::areaProviders
@@ -159,7 +154,7 @@ public:
     /// offline use and refreshed like other feeds. loadFailed is emitted when the area is too large.
     Q_INVOKABLE bool addArea(const QString &provider, const QGeoRectangle &area);
 
-    QString storageDir() const { return _store.dir(); }
+    QString storageDir() const { return _repository->storageDir(); }
 
     QDateTime plannedStart() const { return _plannedStart; }
     void setPlannedStart(const QDateTime &plannedStart);
@@ -185,40 +180,15 @@ signals:
 
 private slots:
     void _updateActive();
-    void _refreshDueFeeds();
 
 private:
-    void _prepareJob(GeoZoneLoader::Job &job) const;
-    void _startLoad(GeoZoneLoader::Job job, LoadMode mode);
-    void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
-    void _updateStoredEntry(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
-    void _download(const QString &url, GeoZoneLoader::Request request);
-    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
-    void _idle();
-    void _setPending(int delta);
-    void _beginZonesChange(GeoZoneSource *source);
     void _endZonesChange(GeoZoneSource *source);
-    void _saveIndex();
-    void _reportStorageError(const QString &message);
-    void _updateValidity();
 
-    GeoZoneStore _store;
-    GeoZoneDownloader *_downloader = nullptr;
+    GeoZoneSourceRepository *_repository = nullptr;
     QmlObjectListModel *_zones = nullptr;
-    QmlObjectListModel *_sources = nullptr;
     GeoZoneCatalog _catalog;            ///< Same zones as _zones, for queries
     QTimer *_activeTimer = nullptr;
-    QTimer *_refreshTimer = nullptr;
-    int _pendingCount = 0;
-    QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
-    QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
-    bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is
-    bool _storageErrorReported = false;
     QDateTime _plannedStart;
-    QString _validityWarning;
-    bool _startupRefreshPending = false;
-    bool _startupCheckPending = false;
 
     static constexpr int _activeUpdateIntervalMSecs = 60 * 1000;
-    static constexpr int _refreshCheckIntervalMSecs = 5 * 60 * 1000;
 };

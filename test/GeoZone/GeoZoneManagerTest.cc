@@ -456,14 +456,15 @@ void GeoZoneManagerTest::_testDownloadSizeLimit()
 
     GeoZoneDownloader::Result result = download(QStringLiteral("sized"));
     QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Ok);
-    QCOMPARE(result.data.size(), body.size());
+    QCOMPARE(QFileInfo(result.filePath).size(), body.size());
+    QCOMPARE(GeoZoneDownloader::readFile(result.filePath, body.size()), body);
 
     downloader.setMaxBytes(1000);
     for (const QString &path : { QStringLiteral("sized"), QStringLiteral("unsized") }) {
         result = download(path);
         QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
         QVERIFY2(result.errorString.startsWith(QStringLiteral("The download is larger than")), qPrintable(result.errorString));
-        QVERIFY(result.data.isEmpty());
+        QVERIFY(result.filePath.isEmpty());
     }
     QCOMPARE(downloader.count(), 0);
 }
@@ -529,6 +530,25 @@ void GeoZoneManagerTest::_testDownloadFailures()
     manager.refreshFeeds();
     QTRY_VERIFY(!manager.busy());
     QVERIFY(feed->errorString().isEmpty());
+
+    // Downloads become the stored copies, without being left in the download directory
+    const QString downloadDir = QDir(manager.storageDir()).filePath(QStringLiteral("downloads"));
+    QCOMPARE(QDir(downloadDir).entryList(QDir::Files).count(), 0);
+    QFile stored(QDir(manager.storageDir()).filePath(manager.storedFileName(feed->key())));
+    QVERIFY(stored.open(QIODevice::ReadOnly));
+    QCOMPARE(stored.readAll(), server.body);
+
+    // Removing a source cancels its download
+    const int requests = server.requestCount;
+    server.okPathStatus = "200 OK";
+    manager.addUrl(server.url(QStringLiteral("/hang")));
+    QTRY_COMPARE(server.requestCount, requests + 1);
+    QVERIFY(manager.busy());
+    manager.clear();
+    QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 1000);
+    QCOMPARE(manager.sources()->count(), 0);
+    QCOMPARE(failedSpy.count(), 3);
+    QCOMPARE(QDir(downloadDir).entryList(QDir::Files).count(), 0);
 }
 
 void GeoZoneManagerTest::_testManagerStartup()
