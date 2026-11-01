@@ -13,6 +13,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QRectF>
 #include <QtCore/QStringList>
 #include <QtCore/QTime>
 #include <QtPositioning/QGeoCircle>
@@ -20,6 +21,10 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZoneSchedule.h"
+
+namespace GeoZoneGeometry {
+class LocalProjection;
+}
 
 /// A UAS geographical zone loaded from an EUROCAE ED-269 or ED-318 data file.
 class GeoZone : public QObject
@@ -160,7 +165,8 @@ public:
 
     /// @return Horizontal distance in meters from the position to the closest volume whose vertical limits are
     ///         within verticalMargin meters of the position's altitude. 0 when inside, infinity without such a volume.
-    double distanceTo(const Position &position, double verticalMargin = 0) const;
+    /// @param maxDistance Polygons farther than this may be skipped, the result is then larger than maxDistance
+    double distanceTo(const Position &position, double verticalMargin = 0, double maxDistance = qInf()) const;
     double distanceTo(const QGeoCoordinate &coordinate) const { return distanceTo(Position{ coordinate }); }
 
     /// @return true if the path enters a volume. Altitudes are interpolated between the positions, so paths
@@ -203,8 +209,11 @@ signals:
 
 private:
     static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet);
+    /// @return Approximate distance in meters from the projection origin to the box, 0 inside
+    static double _boxDistance(const QRectF &box, const GeoZoneGeometry::LocalProjection &projection);
 
     const Data _data;
+    QList<QRectF> _volumeBoxes;     ///< Outer ring extents of the polygon volumes, x is longitude and y latitude
     QGeoRectangle _boundingBox;
     bool _active = true;
     QString _sourceKey;

@@ -287,10 +287,8 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
                 bool contained = false;
                 if (volume.isCircle) {
                     contained = volume.center.isValid() && (volume.center.distanceTo(position.coordinate) <= volume.radius);
-                } else if (!candidate.rings.isEmpty() && GeoZoneGeometry::ringContains(candidate.rings.first(), point)) {
-                    contained = std::none_of(candidate.rings.cbegin() + 1, candidate.rings.cend(), [&point](const QList<QPointF> &hole) {
-                        return GeoZoneGeometry::ringContains(hole, point);
-                    });
+                } else {
+                    contained = GeoZoneGeometry::polygonContains(candidate.rings, point);
                 }
                 if (!contained) {
                     continue;

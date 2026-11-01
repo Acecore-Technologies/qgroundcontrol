@@ -38,6 +38,14 @@ private:
 /// @param ring Unclosed polygon ring
 bool ringContains(const QList<QPointF> &ring, const QPointF &point);
 
+/// @return true if the point is inside the outer ring, rings[0], and outside the holes
+bool polygonContains(const QList<QList<QPointF>> &rings, const QPointF &point);
+
+/// @return Area of the unclosed ring, positive when counterclockwise
+double signedArea(const QList<QPointF> &ring);
+/// @return Signed area of the ring in square degrees, with longitude as x, positive when counterclockwise
+double signedArea(const QList<QGeoCoordinate> &ring);
+
 bool segmentsIntersect(const QPointF &a1, const QPointF &a2, const QPointF &b1, const QPointF &b2);
 
 double distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &b);

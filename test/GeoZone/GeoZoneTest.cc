@@ -1522,11 +1522,19 @@ void GeoZoneTest::_testMonitorAlerts()
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Entered geozone P")));
     QVERIFY(monitor.inside());
 
+    // The list model updates distances in place
+    QSignalSpy resetSpy(monitor.nearbyModel(), &QAbstractItemModel::modelReset);
+    QSignalSpy dataChangedSpy(monitor.nearbyModel(), &QAbstractItemModel::dataChanged);
+    QCOMPARE(monitor.nearbyModel()->count(), 1);
+
     // Jitter across the boundary and the approach distance does not alert again
     monitor.evaluate({ center.atDistanceAndAzimuth(310, 0) });
     monitor.evaluate({ center.atDistanceAndAzimuth(290, 0) });
     monitor.evaluate({ center.atDistanceAndAzimuth(410, 0) });
     monitor.evaluate({ center.atDistanceAndAzimuth(390, 0) });
+    QCOMPARE(resetSpy.count(), 0);
+    QVERIFY(dataChangedSpy.count() >= 3);
+    QCOMPARE(monitor.nearbyModel()->data(monitor.nearbyModel()->index(0), GeoZoneNearbyModel::DistanceRole).toInt(), 90);
     QCOMPARE(alertSpy.count(), 2);
 
     // Reloading changed zones doesn't repeat the approach alert of an unchanged zone
@@ -1830,6 +1838,31 @@ void GeoZoneTest::_testSettings()
     monitor.evaluate({ center.atDistanceAndAzimuth(500, 0) });
     QCOMPARE(alertSpy.count(), 1);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));
+}
+
+void GeoZoneTest::_testMonitorAlertOrder()
+{
+    // Simultaneous alerts are emitted most severe first, entries before approaches
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center, 500),
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(100, 0), 50),
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(100, 180), 50),
+    });
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 3);
+    QVERIFY(alertSpy[0][0].toString().startsWith(QStringLiteral("Approaching geozone P")));
+    QCOMPARE(alertSpy[0][1].toInt(), GeoZone::restrictionSeverity(GeoZone::Prohibited));
+    QVERIFY(alertSpy[1][0].toString().startsWith(QStringLiteral("Approaching geozone A")));
+    QVERIFY(alertSpy[2][0].toString().startsWith(QStringLiteral("Entered geozone C")));
 }
 
 void GeoZoneTest::_testMonitorMultipleVehicles()

@@ -24,17 +24,6 @@ namespace {
 constexpr double kUnlimitedSentinel = 99999.0; // Published as upper limit when a zone has no ceiling
 constexpr double kMetersPerFoot = 0.3048;
 
-bool _isClockwise(const QList<QGeoCoordinate> &ring)
-{
-    double sum = 0;
-    for (qsizetype i = 0; i < ring.count(); i++) {
-        const QGeoCoordinate &coord1 = ring[i];
-        const QGeoCoordinate &coord2 = ring[(i + 1) % ring.count()];
-        sum += (coord2.longitude() - coord1.longitude()) * (coord2.latitude() + coord1.latitude());
-    }
-    return sum >= 0;
-}
-
 } // namespace
 
 QGeoRectangle GeoZone::Volume::boundingBox() const
@@ -52,7 +41,21 @@ GeoZone::GeoZone(const Data &data, QObject *parent)
     : QObject(parent)
     , _data(data)
 {
+    _volumeBoxes.reserve(_data.volumes.count());
     for (const Volume &volume : _data.volumes) {
+        QRectF ringBox;
+        if (!volume.isCircle && !volume.rings.isEmpty() && !volume.rings.first().isEmpty()) {
+            double south = 90, north = -90, west = 180, east = -180;
+            for (const QGeoCoordinate &coordinate : volume.rings.first()) {
+                south = (std::min)(south, coordinate.latitude());
+                north = (std::max)(north, coordinate.latitude());
+                west = (std::min)(west, coordinate.longitude());
+                east = (std::max)(east, coordinate.longitude());
+            }
+            ringBox = QRectF(QPointF(west, south), QPointF(east, north));
+        }
+        _volumeBoxes.append(ringBox);
+
         const QGeoRectangle box = volume.boundingBox();
         if (!box.isValid()) {
             continue;
@@ -123,7 +126,7 @@ QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance
         }
 
         QList<QGeoCoordinate> outerRing = volume.rings.first();
-        if (!_isClockwise(outerRing)) {
+        if (GeoZoneGeometry::signedArea(outerRing) > 0) {
             std::reverse(outerRing.begin(), outerRing.end());
         }
         if (!polygons.contains(outerRing)) {
@@ -163,6 +166,7 @@ bool GeoZone::volumeContains(const Volume &volume, const QGeoCoordinate &coordin
     if (!GeoZoneGeometry::ringContains(projection.toLocal(volume.rings.first()), point)) {
         return false;
     }
+    // Holes are only projected when the outer ring contains the point
     return std::none_of(volume.rings.cbegin() + 1, volume.rings.cend(), [&projection, &point](const QList<QGeoCoordinate> &hole) {
         return GeoZoneGeometry::ringContains(projection.toLocal(hole), point);
     });
@@ -249,28 +253,49 @@ bool GeoZone::contains(const Position &position) const
     });
 }
 
-double GeoZone::distanceTo(const Position &position, double verticalMargin) const
+double GeoZone::distanceTo(const Position &position, double verticalMargin, double maxDistance) const
 {
     const GeoZoneGeometry::LocalProjection projection(position.coordinate);
+    const QPointF origin(0, 0);
     double minDistance = std::numeric_limits<double>::infinity();
-    for (const Volume &volume : _data.volumes) {
+    for (qsizetype i = 0; i < _data.volumes.count(); i++) {
+        const Volume &volume = _data.volumes[i];
         if (!verticalOverlap(volume, position, position, verticalMargin)) {
             continue;
         }
-        if (volumeContains(volume, position.coordinate)) {
-            return 0;
-        }
         if (volume.isCircle) {
             if (volume.center.isValid()) {
-                minDistance = std::min(minDistance, std::max(0.0, volume.center.distanceTo(position.coordinate) - volume.radius));
+                minDistance = (std::min)(minDistance, (std::max)(0.0, volume.center.distanceTo(position.coordinate) - volume.radius));
             }
             continue;
         }
+        if (volume.rings.isEmpty() || (_boxDistance(_volumeBoxes[i], projection) > (std::min)(minDistance, maxDistance))) {
+            continue;
+        }
+
+        QList<QList<QPointF>> rings;
+        rings.reserve(volume.rings.count());
         for (const QList<QGeoCoordinate> &ring : volume.rings) {
-            minDistance = std::min(minDistance, GeoZoneGeometry::distanceToRing(QPointF(0, 0), projection.toLocal(ring)));
+            rings.append(projection.toLocal(ring));
+        }
+        if (GeoZoneGeometry::polygonContains(rings, origin)) {
+            return 0;
+        }
+        for (const QList<QPointF> &ring : std::as_const(rings)) {
+            minDistance = (std::min)(minDistance, GeoZoneGeometry::distanceToRing(origin, ring));
         }
     }
     return minDistance;
+}
+
+double GeoZone::_boxDistance(const QRectF &box, const GeoZoneGeometry::LocalProjection &projection)
+{
+    // Distance from the projection origin to the box corners projected around it, close enough to skip far volumes
+    const QPointF southWest = projection.toLocal(QGeoCoordinate(box.top(), box.left()));
+    const QPointF northEast = projection.toLocal(QGeoCoordinate(box.bottom(), box.right()));
+    const double dx = (std::max)({ southWest.x(), -northEast.x(), 0.0 });
+    const double dy = (std::max)({ southWest.y(), -northEast.y(), 0.0 });
+    return std::hypot(dx, dy);
 }
 
 bool GeoZone::intersectsArea(const Area &area) const
@@ -318,10 +343,7 @@ bool GeoZone::intersectsArea(const Area &area) const
                 return true;
             }
         }
-        const QPointF &areaPoint = polygon.first();
-        const bool areaInVolume = GeoZoneGeometry::ringContains(rings.first(), areaPoint) &&
-                                  std::none_of(rings.cbegin() + 1, rings.cend(), [&areaPoint](const QList<QPointF> &hole) { return GeoZoneGeometry::ringContains(hole, areaPoint); });
-        if (areaInVolume || GeoZoneGeometry::ringContains(polygon, rings.first().first())) {
+        if (GeoZoneGeometry::polygonContains(rings, polygon.first()) || GeoZoneGeometry::ringContains(polygon, rings.first().first())) {
             return true;
         }
     }
@@ -401,11 +423,7 @@ bool GeoZone::intersectsPath(const QList<Position> &path) const
             if (rings.isEmpty()) {
                 continue;
             }
-            const auto insidePolygon = [&rings](const QPointF &point) {
-                return GeoZoneGeometry::ringContains(rings.first(), point) &&
-                       std::none_of(rings.cbegin() + 1, rings.cend(), [&point](const QList<QPointF> &hole) { return GeoZoneGeometry::ringContains(hole, point); });
-            };
-            if (insidePolygon(a) || insidePolygon(b)) {
+            if (GeoZoneGeometry::polygonContains(rings, a) || GeoZoneGeometry::polygonContains(rings, b)) {
                 return true;
             }
             // Neither end is inside, so the segment enters the volume only by crossing a ring edge

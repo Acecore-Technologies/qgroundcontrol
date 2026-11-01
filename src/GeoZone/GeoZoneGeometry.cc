@@ -57,15 +57,6 @@ bool _onSegment(const QPointF &a, const QPointF &b, const QPointF &point)
            (point.y() >= std::min(a.y(), b.y())) && (point.y() <= std::max(a.y(), b.y()));
 }
 
-double _signedArea(const QList<QPointF> &ring)
-{
-    double area = 0;
-    for (qsizetype i = 0; i < ring.count(); i++) {
-        area += _cross(ring[i], ring[(i + 1) % ring.count()]);
-    }
-    return area / 2;
-}
-
 /// Intersection of the lines through p with direction d and through q with direction e
 QPointF _lineIntersection(const QPointF &p, const QPointF &d, const QPointF &q, const QPointF &e)
 {
@@ -430,6 +421,32 @@ bool ringContains(const QList<QPointF> &ring, const QPointF &point)
     return inside;
 }
 
+bool polygonContains(const QList<QList<QPointF>> &rings, const QPointF &point)
+{
+    return !rings.isEmpty() && ringContains(rings.first(), point) &&
+           std::none_of(rings.cbegin() + 1, rings.cend(), [&point](const QList<QPointF> &hole) { return ringContains(hole, point); });
+}
+
+double signedArea(const QList<QPointF> &ring)
+{
+    double area = 0;
+    for (qsizetype i = 0; i < ring.count(); i++) {
+        area += _cross(ring[i], ring[(i + 1) % ring.count()]);
+    }
+    return area / 2;
+}
+
+double signedArea(const QList<QGeoCoordinate> &ring)
+{
+    double area = 0;
+    for (qsizetype i = 0; i < ring.count(); i++) {
+        const QGeoCoordinate &a = ring[i];
+        const QGeoCoordinate &b = ring[(i + 1) % ring.count()];
+        area += (a.longitude() * b.latitude()) - (b.longitude() * a.latitude());
+    }
+    return area / 2;
+}
+
 bool segmentsIntersect(const QPointF &a1, const QPointF &a2, const QPointF &b1, const QPointF &b2)
 {
     const int o1 = _orientation(a1, a2, b1);
@@ -535,7 +552,7 @@ QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double 
     QList<double> chainTolerances(count, toleranceMeters);  ///< Tolerance used for the chain starting at a kept vertex
 
     // The orientation of the simplified ring may flip when it degenerates, so the original defines outward
-    const bool counterClockwise = _signedArea(original) > 0;
+    const bool counterClockwise = signedArea(original) > 0;
 
     // Narrow features can make the expanded ring intersect itself or the original ring. Simplify the chains
     // around each problem with half the tolerance and try again, which keeps the rest of the ring unchanged.

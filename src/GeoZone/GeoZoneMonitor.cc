@@ -28,6 +28,63 @@
 
 QGC_LOGGING_CATEGORY(GeoZoneMonitorLog, "qgc.geozone.geozonemonitor")
 
+GeoZoneNearbyModel::GeoZoneNearbyModel(QObject *parent)
+    : QAbstractListModel(parent)
+{
+}
+
+void GeoZoneNearbyModel::setItems(const QList<Item> &items)
+{
+    const bool sameZones = (items.count() == _items.count()) &&
+                           std::equal(items.cbegin(), items.cend(), _items.cbegin(), [](const Item &a, const Item &b) { return a.zone == b.zone; });
+    if (!sameZones) {
+        const bool countChanged = (items.count() != _items.count());
+        beginResetModel();
+        _items = items;
+        endResetModel();
+        if (countChanged) {
+            emit this->countChanged();
+        }
+        return;
+    }
+
+    for (qsizetype row = 0; row < items.count(); row++) {
+        if (items[row] != _items[row]) {
+            _items[row] = items[row];
+            const QModelIndex changed = index(static_cast<int>(row));
+            emit dataChanged(changed, changed, { InsideRole, DistanceRole });
+        }
+    }
+}
+
+int GeoZoneNearbyModel::rowCount(const QModelIndex &parent) const
+{
+    return parent.isValid() ? 0 : count();
+}
+
+QVariant GeoZoneNearbyModel::data(const QModelIndex &index, int role) const
+{
+    if (!checkIndex(index, CheckIndexOption::IndexIsValid | CheckIndexOption::ParentIsInvalid)) {
+        return QVariant();
+    }
+    const Item &item = _items[index.row()];
+    switch (role) {
+    case ZoneRole:
+        return QVariant::fromValue(static_cast<QObject*>(item.zone));
+    case InsideRole:
+        return item.inside;
+    case DistanceRole:
+        return item.distance;
+    default:
+        return QVariant();
+    }
+}
+
+QHash<int, QByteArray> GeoZoneNearbyModel::roleNames() const
+{
+    return { { ZoneRole, "zone" }, { InsideRole, "inside" }, { DistanceRole, "distance" } };
+}
+
 Q_APPLICATION_STATIC(GeoZoneMonitor, _geoZoneMonitor);
 
 GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
@@ -57,6 +114,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _nearbyModel(new GeoZoneNearbyModel(this))
 {
     // Zones are about to be deleted. Their alert states are kept so reloading a source doesn't repeat alerts.
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
@@ -96,7 +154,7 @@ void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
 {
     if (vehicleId != _activeVehicleId) {
         _activeVehicleId = vehicleId;
-        emit nearbyZonesChanged();
+        _publishNearby();
     }
 }
 
@@ -109,7 +167,7 @@ void GeoZoneMonitor::removeVehicle(int vehicleId)
     const bool hadNearby = !it->nearby.isEmpty();
     _trackers.erase(it);
     if (hadNearby && (vehicleId == _activeVehicleId)) {
-        emit nearbyZonesChanged();
+        _publishNearby();
     }
 }
 
@@ -143,6 +201,12 @@ void GeoZoneMonitor::_alertsEnabledChanged()
 bool GeoZoneMonitor::monitoring() const
 {
     return !_vehicles.isEmpty() && (_manager->zones()->count() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
+}
+
+void GeoZoneMonitor::_publishNearby()
+{
+    _nearbyModel->setItems(_activeNearby());
+    emit nearbyZonesChanged();
 }
 
 const QList<GeoZoneMonitor::Nearby> &GeoZoneMonitor::_activeNearby() const
@@ -206,7 +270,7 @@ void GeoZoneMonitor::_resetTrackers()
         tracker = Tracker();
     }
     if (hadNearby) {
-        emit nearbyZonesChanged();
+        _publishNearby();
     }
 }
 
@@ -217,13 +281,8 @@ void GeoZoneMonitor::_forgetZones()
         tracker.nearby.clear();
     }
     if (hadNearby) {
-        emit nearbyZonesChanged();
+        _publishNearby();
     }
-}
-
-QString GeoZoneMonitor::_zoneKey(const GeoZone *zone)
-{
-    return QStringLiteral("%1\x1f%2\x1f%3\x1f%4").arg(zone->identifier(), zone->name(), zone->sourceText().section(QStringLiteral(" ("), 0, 0)).arg(static_cast<int>(zone->restriction()));
 }
 
 QString GeoZoneMonitor::_vehicleLabel(int vehicleId) const
@@ -253,25 +312,23 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId)
 
     QSet<QString> nearbyZones;
     QList<Nearby> nearby;
+    QList<AlertEvent> alerts;
     for (GeoZone *zone : _manager->zonesInArea(restrictions, area)) {
         if (!zone->active()) {
             continue;
         }
 
-        const QString key = _zoneKey(zone);
+        const QString &key = zone->key();
         const State previous = tracker.states.value(key, State::Away);
-        const double insideDistance = zone->distanceTo(position, (previous == State::Inside) ? hysteresisDistance : 0);
-        const double nearDistance = zone->distanceTo(position, approachVerticalDistance + ((previous != State::Away) ? hysteresisDistance : 0));
-        const double distance = std::min(insideDistance, nearDistance);
-        State state = State::Away;
-        if ((insideDistance <= 0) || ((previous == State::Inside) && (insideDistance <= hysteresisDistance))) {
-            state = State::Inside;
-        } else if ((nearDistance <= approachDistance) || ((previous != State::Away) && (nearDistance <= (approachDistance + hysteresisDistance)))) {
-            state = State::Near;
-        }
-        if (state == State::Away) {
+        const double nearLimit = approachDistance + ((previous != State::Away) ? hysteresisDistance : 0);
+        // The approach margin includes the inside margin, so a zone which isn't near isn't entered either
+        const double nearDistance = zone->distanceTo(position, approachVerticalDistance + ((previous != State::Away) ? hysteresisDistance : 0), nearLimit);
+        if (nearDistance > nearLimit) {
             continue;
         }
+        const double insideDistance = zone->distanceTo(position, (previous == State::Inside) ? hysteresisDistance : 0, hysteresisDistance);
+        const double distance = (std::min)(insideDistance, nearDistance);
+        const State state = ((insideDistance <= 0) || ((previous == State::Inside) && (insideDistance <= hysteresisDistance))) ? State::Inside : State::Near;
 
         nearbyZones.insert(key);
         tracker.states[key] = state;
@@ -300,9 +357,15 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId)
         event.restriction = zone->restriction();
         event.sourceText = zone->sourceText();
         event.message = message;
-        emit alertEvent(event);
-        emit alert(message);
+        alerts.append(event);
     }
+
+    // Simultaneous alerts most severe first, entries before approaches
+    std::stable_sort(alerts.begin(), alerts.end(), [](const AlertEvent &a, const AlertEvent &b) {
+        const int severityA = GeoZone::restrictionSeverity(a.restriction);
+        const int severityB = GeoZone::restrictionSeverity(b.restriction);
+        return (severityA != severityB) ? (severityA < severityB) : (a.inside && !b.inside);
+    });
 
     // Zones out of range or no longer active can alert again
     for (auto it = tracker.states.begin(); it != tracker.states.end();) {
@@ -326,8 +389,13 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId)
     if (nearby != tracker.nearby) {
         tracker.nearby = nearby;
         if (vehicleId == _activeVehicleId) {
-            emit nearbyZonesChanged();
+            _publishNearby();
         }
+    }
+
+    for (const AlertEvent &event : std::as_const(alerts)) {
+        emit alertEvent(event);
+        emit alert(event.message, GeoZone::restrictionSeverity(event.restriction));
     }
 }
 

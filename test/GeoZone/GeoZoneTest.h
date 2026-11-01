@@ -39,6 +39,7 @@ private slots:
     void _testAreaIntersection();
     void _testMissionCheck();
     void _testMonitorAlerts();
+    void _testMonitorAlertOrder();
     void _testMonitorMultipleVehicles();
     void _testAlertLog();
     void _testProfileBands();

@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QAbstractListModel>
 #include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QLoggingCategory>
@@ -21,6 +22,46 @@
 #include "GeoZone.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneMonitorLog)
+
+/// Zones near the active vehicle with roles zone, inside and distance (meters). Rows are updated in place
+/// while only the distances change, so views keep their delegates.
+class GeoZoneNearbyModel : public QAbstractListModel
+{
+    Q_OBJECT
+
+    Q_PROPERTY(int count READ count NOTIFY countChanged FINAL)
+
+public:
+    struct Item {
+        GeoZone *zone = nullptr;
+        bool inside = false;
+        int distance = 0;   ///< Rounded meters
+
+        friend bool operator==(const Item &, const Item &) = default;
+    };
+
+    enum Roles {
+        ZoneRole = Qt::UserRole + 1,
+        InsideRole,
+        DistanceRole,
+    };
+
+    explicit GeoZoneNearbyModel(QObject *parent = nullptr);
+
+    int count() const { return static_cast<int>(_items.count()); }
+    const QList<Item> &items() const { return _items; }
+    void setItems(const QList<Item> &items);
+
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QHash<int, QByteArray> roleNames() const override;
+
+signals:
+    void countChanged();
+
+private:
+    QList<Item> _items;
+};
 
 class GeoZoneAlertLog;
 class GeoZoneManager;
@@ -37,6 +78,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(QVariantList nearbyZones         READ nearbyZones        NOTIFY nearbyZonesChanged FINAL)      ///< Maps with zone, inside and distance (meters), most restrictive first
     Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyZonesChanged FINAL)      ///< Most restrictive GeoZone::Restriction nearby, -1 without
     Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged FINAL)      ///< The vehicle is inside one of the nearby zones
+    Q_PROPERTY(GeoZoneNearbyModel *nearbyModel  READ nearbyModel        CONSTANT FINAL)                       ///< nearbyZones as a list model
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
@@ -77,6 +119,7 @@ public:
     QVariantList nearbyZones() const;
     int alertRestriction() const;
     bool inside() const;
+    GeoZoneNearbyModel *nearbyModel() const { return _nearbyModel; }
 
     /// Vehicle whose nearby zones are published, noVehicle by default
     int activeVehicleId() const { return _activeVehicleId; }
@@ -90,8 +133,9 @@ public:
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
-    /// several vehicles are monitored.
-    void alert(const QString &message);
+    /// several vehicles are monitored. The alerts of an evaluation are emitted most severe first.
+    /// @param severity GeoZone::restrictionSeverity of the zone
+    void alert(const QString &message, int severity);
     void alertEvent(const GeoZoneMonitor::AlertEvent &event);
     void monitoringChanged();
     void nearbyZonesChanged();
@@ -112,23 +156,17 @@ private:
         Inside,
     };
 
-    struct Nearby {
-        GeoZone *zone = nullptr;
-        bool inside = false;
-        int distance = 0;   ///< Rounded meters
-
-        friend bool operator==(const Nearby &, const Nearby &) = default;
-    };
+    using Nearby = GeoZoneNearbyModel::Item;
 
     /// Alert state of one vehicle
     struct Tracker {
-        QHash<QString, State> states;   ///< Zones which are not Away by _zoneKey, which stays the same when a source reloads
+        QHash<QString, State> states;   ///< Zones which are not Away by GeoZone::key, which stays the same when a source reloads
         QList<Nearby> nearby;
     };
 
     static void _speak(const QString &message);
-    static QString _zoneKey(const GeoZone *zone);
     const QList<Nearby> &_activeNearby() const;
+    void _publishNearby();
     QString _vehicleLabel(int vehicleId) const;
     void _resetTrackers();
 
@@ -138,4 +176,5 @@ private:
     int _activeVehicleId = noVehicle;
     QTimer _evaluateTimer;
     GeoZoneAlertLog *_alertLog = nullptr;
+    GeoZoneNearbyModel *_nearbyModel = nullptr;
 };

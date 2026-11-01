@@ -15,7 +15,8 @@ import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Non-blocking popup for the flight alerts of GeoZoneMonitor, closed after a while or when clicked
+/// Non-blocking popup for the flight alerts of GeoZoneMonitor, closed after a while or when clicked. Alerts
+/// arriving while it is open are added, the most severe first.
 Popup {
     id:             control
     y:              (stackBelow && stackBelow.visible) ?
@@ -30,8 +31,19 @@ Popup {
 
     property var stackBelow: null   ///< Popup to show this one below while it is visible
 
-    function show(message) {
-        alertText.text = message
+    readonly property int _maxAlerts: 4
+
+    property var _alerts: []        ///< Shown alerts as { message, severity }
+
+    function show(message, severity) {
+        let alerts = visible ? _alerts.filter(alert => alert.message !== message) : []
+        alerts.push({ message: message, severity: severity === undefined ? Number.MAX_SAFE_INTEGER : severity })
+        // Stable sort, the latest of equally severe alerts last
+        alerts = alerts.map((alert, index) => ({ alert: alert, index: index }))
+                       .sort((a, b) => (a.alert.severity - b.alert.severity) || (a.index - b.index))
+                       .map(entry => entry.alert)
+        _alerts = alerts.slice(0, _maxAlerts)
+        alertText.text = _alerts.map(alert => alert.message).join("\n")
         open()
         closeTimer.restart()
     }
@@ -40,7 +52,7 @@ Popup {
 
     Connections {
         target:                     QGroundControl.geoZoneMonitor
-        function onAlert(message)   { control.show(message) }
+        function onAlert(message, severity) { control.show(message, severity) }
     }
 
     Timer {
@@ -85,6 +97,7 @@ Popup {
         anchors.centerIn:       parent
         wrapMode:               Text.WordWrap
         horizontalAlignment:    Text.AlignHCenter
+        textFormat:             Text.PlainText
         color:                  qgcPal.alertText
     }
 

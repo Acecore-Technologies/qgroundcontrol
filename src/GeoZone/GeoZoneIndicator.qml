@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 
@@ -49,8 +51,8 @@ Item {
         source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
-        color:              control._restrictionColor(_monitor.monitoring ? _monitor.alertRestriction : -1)
-        opacity:            _monitor.monitoring ? 1 : 0.5
+        color:              control._restrictionColor(control._monitor.monitoring ? control._monitor.alertRestriction : -1)
+        opacity:            control._monitor.monitoring ? 1 : 0.5
     }
 
     MouseArea {
@@ -70,39 +72,46 @@ Item {
 
                     SettingsGroupLayout {
                         heading:            qsTr("Nearby Geozones")
-                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1 of the active vehicle, considering altitude limits.").arg(control._distanceText(_geoZoneSettings.approachDistance.rawValue))
+                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1 of the active vehicle, considering altitude limits.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue))
 
                         QGCLabel {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
                                       (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
-                            visible: !_monitor.monitoring || _monitor.nearbyZones.length === 0
+                            visible: !control._monitor.monitoring || control._monitor.nearbyModel.count === 0
                         }
 
                         Repeater {
-                            model: _monitor.monitoring ? _monitor.nearbyZones : []
+                            model: control._monitor.monitoring ? control._monitor.nearbyModel : null
 
                             RowLayout {
-                                spacing: ScreenTools.defaultFontPixelWidth
+                                id:         nearbyRow
+                                spacing:    ScreenTools.defaultFontPixelWidth
+
+                                required property var   zone
+                                required property bool  inside
+                                required property int   distance
 
                                 Rectangle {
-                                    width:  ScreenTools.defaultFontPixelHeight * 0.75
-                                    height: width
-                                    radius: width / 2
-                                    color:  control._restrictionColor(modelData.zone.restriction)
+                                    Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
+                                    Layout.preferredHeight: Layout.preferredWidth
+                                    radius:                 width / 2
+                                    color:                  control._restrictionColor(nearbyRow.zone.restriction)
                                 }
 
                                 QGCLabel {
                                     Layout.fillWidth:   true
-                                    text:               modelData.zone.name !== "" ? modelData.zone.name : modelData.zone.identifier
+                                    text:               nearbyRow.zone.displayName
+                                    textFormat:         Text.PlainText
                                 }
 
                                 QGCLabel {
-                                    text: modelData.inside ? qsTr("Inside") : control._distanceText(modelData.distance)
+                                    text: nearbyRow.inside ? qsTr("Inside") : control._distanceText(nearbyRow.distance)
                                 }
 
                                 QGCLabel {
                                     font.pointSize: ScreenTools.smallFontPointSize
-                                    text:           modelData.zone.restrictionText + "\n" + modelData.zone.verticalLimitsText
+                                    text:           nearbyRow.zone.restrictionText + "\n" + nearbyRow.zone.verticalLimitsText
+                                    textFormat:     Text.PlainText
                                 }
                             }
                         }
@@ -130,21 +139,21 @@ Item {
                         FactCheckBoxSlider {
                             Layout.fillWidth:   true
                             text:               fact.shortDescription
-                            fact:               _geoZoneSettings.showZones
+                            fact:               control._geoZoneSettings.showZones
                             visible:            fact.visible
                         }
 
                         FactCheckBoxSlider {
                             Layout.fillWidth:   true
                             text:               fact.shortDescription
-                            fact:               _geoZoneSettings.alertsEnabled
+                            fact:               control._geoZoneSettings.alertsEnabled
                             visible:            fact.visible
                         }
 
                         FactCheckBoxSlider {
                             Layout.fillWidth:   true
                             text:               fact.shortDescription
-                            fact:               _geoZoneSettings.audioAlerts
+                            fact:               control._geoZoneSettings.audioAlerts
                             visible:            fact.visible
                             enabled:            control._alertsEnabled
                         }
@@ -152,15 +161,7 @@ Item {
                         FactCheckBoxSlider {
                             Layout.fillWidth:   true
                             text:               fact.shortDescription
-                            fact:               _geoZoneSettings.logAlerts
-                            visible:            fact.visible
-                            enabled:            control._alertsEnabled
-                        }
-
-                        LabelledFactTextField {
-                            Layout.fillWidth:   true
-                            label:              fact.shortDescription
-                            fact:               _geoZoneSettings.approachDistance
+                            fact:               control._geoZoneSettings.logAlerts
                             visible:            fact.visible
                             enabled:            control._alertsEnabled
                         }
@@ -168,7 +169,15 @@ Item {
                         LabelledFactTextField {
                             Layout.fillWidth:   true
                             label:              fact.shortDescription
-                            fact:               _geoZoneSettings.approachVerticalDistance
+                            fact:               control._geoZoneSettings.approachDistance
+                            visible:            fact.visible
+                            enabled:            control._alertsEnabled
+                        }
+
+                        LabelledFactTextField {
+                            Layout.fillWidth:   true
+                            label:              fact.shortDescription
+                            fact:               control._geoZoneSettings.approachVerticalDistance
                             visible:            fact.visible
                             enabled:            control._alertsEnabled
                         }
