@@ -346,7 +346,7 @@ void GeoZoneRoutePlanner::update()
             continue;
         }
 
-        const QString leg = tr("Leg %1 to %2").arg(fromItem->sequenceNumber()).arg(toItem->sequenceNumber());
+        const QString leg = tr("Leg to item %1").arg(toItem->sequenceNumber());
 
         // Zones which don't reach the ground can be flown under
         for (const GeoZone *zone : std::as_const(crossed)) {

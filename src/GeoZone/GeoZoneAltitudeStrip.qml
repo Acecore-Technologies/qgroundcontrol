@@ -108,11 +108,13 @@ Rectangle {
                 border.width:   1
             }
 
+            // Labels of bands sharing a floor are stacked above it
             QGCLabel {
                 x:              control._barX + control._barWidth + control._margin
-                y:              Math.min(Math.max(bandItem._floorY - height, control._plotTop), control._plotTop + control._plotHeight - height)
+                y:              Math.min(Math.max(bandItem._floorY - (height * (bandItem.index + 1)), control._plotTop), control._plotTop + control._plotHeight - height)
                 width:          control.width - x - control._margin
                 text:           bandItem.modelData.name + "\n" + bandItem.modelData.limitsText
+                wrapMode:       Text.NoWrap
                 textFormat:     Text.PlainText
                 elide:          Text.ElideRight
                 font.pointSize: ScreenTools.smallFontPointSize

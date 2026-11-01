@@ -2084,7 +2084,7 @@ void GeoZoneTest::_testMonitorTimeToEntry()
     // At 25 m/s the boundary 700 m ahead is reached in 28 s, within the approach time
     monitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
     QCOMPARE(alertSpy.count(), 1);
-    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Approaching geozone P (Prohibited), entry in about 28 seconds"));
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Approaching geozone P (Prohibited), entry in about 28 s"));
     QCOMPARE(monitor.nearbyZones().count(), 1);
     QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("timeToEntry")].toInt(), 28);
     QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("distance")].toInt(), 700);

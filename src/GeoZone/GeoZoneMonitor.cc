@@ -566,7 +566,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         if (state == State::Inside) {
             message = tr("Entered geozone %1 (%2)").arg(name, zone->restrictionText());
         } else if (!std::isnan(timeToEntry)) {
-            message = tr("Approaching geozone %1 (%2), entry in about %3 seconds").arg(name, zone->restrictionText()).arg(std::lround(timeToEntry));
+            message = tr("Approaching geozone %1 (%2), entry in about %3 s").arg(name, zone->restrictionText()).arg(std::lround(timeToEntry));
         } else {
             message = tr("Approaching geozone %1 (%2)").arg(name, zone->restrictionText());
         }
