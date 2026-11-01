@@ -160,6 +160,34 @@ QGCPopupDialog {
         }
 
         InfoRow {
+            label:      qsTr("Exemptions")
+            value:      root.geoZone ? root.geoZone.regulationExemptionText : ""
+            labelWidth: root._labelWidth
+            valueWidth: root._valueWidth
+        }
+
+        InfoRow {
+            label:      qsTr("U-space class")
+            value:      root.geoZone ? root.geoZone.uSpaceClass : ""
+            labelWidth: root._labelWidth
+            valueWidth: root._valueWidth
+        }
+
+        InfoRow {
+            label:      qsTr("Details")
+            value:      root.geoZone ? root.geoZone.extendedPropertiesText : ""
+            labelWidth: root._labelWidth
+            valueWidth: root._valueWidth
+        }
+
+        InfoRow {
+            label:      qsTr("Data issues")
+            value:      root.geoZone ? root.geoZone.issuesText : ""
+            labelWidth: root._labelWidth
+            valueWidth: root._valueWidth
+        }
+
+        InfoRow {
             label:      qsTr("Identifier")
             value:      !root.geoZone ? "" : (root.geoZone.country !== "" ? qsTr("%1 (%2)").arg(root.geoZone.identifier).arg(root.geoZone.country) : root.geoZone.identifier)
             labelWidth: root._labelWidth

@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QMap>
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
@@ -46,6 +47,7 @@ public:
         int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry
         QByteArray contentHash;     ///< Hash of the features, which stays the same when only metadata changes
         int missingFeatures = 0;    ///< Features of a WFS response the server left out because of its limit
+        QMap<QString, int> issues;  ///< Problems found in the zones, with the number of zones having each
     };
 
     static bool parseFile(const QString &fileName, Result &result, QString &errorString);

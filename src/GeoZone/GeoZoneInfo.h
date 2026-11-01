@@ -33,6 +33,10 @@ class GeoZoneInfo
     Q_PROPERTY(QString          reasonText              READ reasonText             CONSTANT FINAL)
     Q_PROPERTY(QString          message                 READ message                CONSTANT FINAL)
     Q_PROPERTY(QString          authorityText           READ authorityText          CONSTANT FINAL)
+    Q_PROPERTY(QString          uSpaceClass             READ uSpaceClass            CONSTANT FINAL)
+    Q_PROPERTY(QString          regulationExemptionText READ regulationExemptionText CONSTANT FINAL)
+    Q_PROPERTY(QString          extendedPropertiesText  READ extendedPropertiesText CONSTANT FINAL)  ///< Publisher specific properties, one per line
+    Q_PROPERTY(QString          issuesText              READ issuesText             CONSTANT FINAL)  ///< Problems reading the zone, one per line
     Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
     Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT FINAL)
     Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT FINAL)
@@ -59,6 +63,10 @@ public:
     QString reasonText() const { return _zone ? _zone->reasonText() : QString(); }
     QString message() const { return _zone ? _zone->message() : QString(); }
     QString authorityText() const { return _zone ? _zone->authorityText() : QString(); }
+    QString uSpaceClass() const { return _zone ? _zone->uSpaceClass() : QString(); }
+    QString regulationExemptionText() const { return _zone ? _zone->regulationExemptionText() : QString(); }
+    QString extendedPropertiesText() const { return _zone ? _zone->extendedPropertiesText() : QString(); }
+    QString issuesText() const { return _zone ? _zone->issuesText() : QString(); }
     QString applicabilityText() const { return _zone ? _zone->applicabilityText() : QString(); }
     QString verticalLimitsText() const { return _zone ? _zone->verticalLimitsText() : QString(); }
     QGeoCoordinate center() const { return _zone ? _zone->center() : QGeoCoordinate(); }

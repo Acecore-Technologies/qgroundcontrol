@@ -130,6 +130,34 @@ void GeoZoneParserTest::_testParseED269()
     QCOMPARE(period.schedule[0].days, QList<int>({ Qt::Monday, Qt::Tuesday }));
     QCOMPARE(period.schedule[0].startTime, QTime(5, 0));
     QCOMPARE(period.schedule[0].endTime, QTime(18, 0));
+
+    // Classification, exemptions and publisher properties are kept. Unknown units and days are reported, limits
+    // in an unknown unit are ignored so the zone applies at all altitudes.
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [
+        { "identifier": "A", "restriction": "REQ_AUTHORISATION", "uSpaceClass": "EUROCONTROL", "regulationExemption": "YES",
+          "extendedProperties": { "operator": "Airport", "phone": 123 },
+          "applicability": [ { "schedule": [ { "day": [ "MON", "HOLIDAY" ], "startTime": "08:00", "endTime": "10:00" } ] } ],
+          "geometry": [ { "uomDimensions": "NM", "lowerLimit": 0, "upperLimit": 5, "lowerVerticalReference": "AGL", "upperVerticalReference": "AGL",
+                          "horizontalProjection": { "type": "Circle", "center": [ 8, 47 ], "radius": 1 } } ] },
+        { "identifier": "B", "restriction": "PROHIBITED",
+          "geometry": [ { "uomDimensions": "NM", "lowerLimit": 0, "upperLimit": 5, "lowerVerticalReference": "AGL", "upperVerticalReference": "AGL",
+                          "horizontalProjection": { "type": "Circle", "center": [ 8.1, 47 ], "radius": 1 } } ] } ] })", result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 2);
+    const GeoZone::Data &classified = result.zones[0];
+    QCOMPARE(classified.uSpaceClass, QStringLiteral("EUROCONTROL"));
+    QCOMPARE(classified.regulationExemption, QStringLiteral("YES"));
+    QCOMPARE(classified.extendedProperties, QStringList({ QStringLiteral("operator: Airport"), QStringLiteral("phone: 123") }));
+    QVERIFY(std::isnan(classified.volumes[0].upperLimit));
+    QVERIFY(classified.applicability[0].schedule[0].days.isEmpty());
+    QCOMPARE(classified.issues.count(), 2);
+    const QString unitIssue = QStringLiteral("Unknown unit NM, the altitude limits are ignored");
+    QCOMPARE(result.issues.value(unitIssue), 2);
+    QCOMPARE(result.issues.value(QStringLiteral("Unknown day HOLIDAY in the schedule, taken as every day")), 1);
+    ZoneOwner owner;
+    QCOMPARE(owner.add(classified)->regulationExemptionText(), QStringLiteral("Exemptions possible"));
+    GeoZoneSource source(QStringLiteral("zones.json"), QString());
+    source.setResult(result, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    QVERIFY(source.warningText().contains(QStringLiteral("%1 (2 zone").arg(unitIssue)));
 }
 
 void GeoZoneParserTest::_testParseED318()

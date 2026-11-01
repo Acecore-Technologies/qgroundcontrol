@@ -521,6 +521,18 @@ QString GeoZone::reasonText() const
     return text;
 }
 
+QString GeoZone::regulationExemptionText() const
+{
+    const QString code = _data.regulationExemption.trimmed().toUpper();
+    if (code == QStringLiteral("YES")) {
+        return tr("Exemptions possible");
+    }
+    if (code == QStringLiteral("NO")) {
+        return tr("No exemptions");
+    }
+    return _data.regulationExemption;
+}
+
 QString GeoZone::applicabilityText() const
 {
     return GeoZoneSchedule::text(_data.applicability);

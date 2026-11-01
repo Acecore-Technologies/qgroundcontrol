@@ -48,7 +48,12 @@ QDateTime _dateTime(const QJsonValue &value);
 /// as published, utcOffsetSecs is set to its offset from UTC.
 QTime _time(const QJsonValue &value, int &utcOffsetSecs);
 
-QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value);
+/// @param issues Problems found, like unknown day codes, are added to it
+QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, QStringList &issues);
+
+/// Reads a unit of length
+/// @return false for an unknown unit, which is added to issues. An empty unit is meters.
+bool _lengthUnit(const QJsonValue &value, bool &feet, QStringList &issues);
 
 QStringList _authorities(const QJsonValue &value);
 

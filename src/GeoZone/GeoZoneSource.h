@@ -36,7 +36,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QDateTime    dataDate        READ dataDate       NOTIFY changed FINAL)             ///< When the data was issued, or the file date
     Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed FINAL)
     Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged FINAL)
-    Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete, empty when it is complete     ///< Warning about outdated data, empty when current
+    Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete or partly unreadable, empty when it is complete
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
@@ -131,6 +131,7 @@ private:
     QString _provider;
     int _skippedCount = 0;
     int _missingCount = 0;
+    QMap<QString, int> _issues;     ///< See GeoZoneParser::Result::issues
     QDateTime _loadedAt;
     QDateTime _fileDate;
     QDateTime _issued;

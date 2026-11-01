@@ -117,7 +117,14 @@ QString GeoZoneSource::detailsText() const
 
 QString GeoZoneSource::warningText() const
 {
-    return (_missingCount > 0) ? tr("The server left out %1 zones beyond its limit. Download a smaller area.").arg(_missingCount) : QString();
+    QStringList lines;
+    if (_missingCount > 0) {
+        lines.append(tr("The server left out %1 zones beyond its limit. Download a smaller area.").arg(_missingCount));
+    }
+    for (auto it = _issues.cbegin(); it != _issues.cend(); ++it) {
+        lines.append(tr("%1 (%n zone(s))", nullptr, it.value()).arg(it.key()));
+    }
+    return lines.join(QStringLiteral("\n"));
 }
 
 QString GeoZoneSource::_dateText() const
@@ -156,6 +163,7 @@ void GeoZoneSource::_setMetadata(const GeoZoneParser::Result &result, const QDat
     _provider = result.provider;
     _skippedCount = result.skippedFeatures;
     _missingCount = result.missingFeatures;
+    _issues = result.issues;
     _issued = result.issued;
     _validFrom = result.validFrom;
     _validTo = result.validTo;

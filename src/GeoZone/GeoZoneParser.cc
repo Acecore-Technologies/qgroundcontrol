@@ -114,6 +114,10 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     for (const QJsonValue &featureValue : features) {
         GeoZone::Data zone;
         if (format->parseFeature(featureValue.toObject(), zone)) {
+            zone.issues.removeDuplicates();
+            for (const QString &issue : std::as_const(zone.issues)) {
+                result.issues[issue]++;
+            }
             result.zones.append(zone);
         } else {
             qCDebug(GeoZoneParserLog) << "Skipping feature without usable geometry" << zone.identifier;

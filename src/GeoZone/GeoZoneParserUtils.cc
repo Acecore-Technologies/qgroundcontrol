@@ -10,6 +10,7 @@
 #include "GeoZoneParserUtils.h"
 #include "GeoZoneParser.h"
 
+#include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
@@ -182,7 +183,7 @@ QTime _time(const QJsonValue &value, int &utcOffsetSecs)
     return time;
 }
 
-QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value)
+QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, QStringList &issues)
 {
     static const QHash<QString, int> dayMap = {
         { QStringLiteral("MON"), Qt::Monday },
@@ -215,6 +216,9 @@ QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value)
                 } else {
                     // ANY, or an unknown code which is treated conservatively as any day
                     anyDay = true;
+                    if (dayCode != QStringLiteral("ANY")) {
+                        issues.append(GeoZoneParser::tr("Unknown day %1 in the schedule, taken as every day").arg(day));
+                    }
                 }
             }
             if (anyDay) {
@@ -395,8 +399,34 @@ void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volum
     }
 }
 
+bool _lengthUnit(const QJsonValue &value, bool &feet, QStringList &issues)
+{
+    const QString unit = value.toString().trimmed().toUpper();
+    static const QStringList meters = { QString(), QStringLiteral("M"), QStringLiteral("METER"), QStringLiteral("METERS"), QStringLiteral("METRE"), QStringLiteral("METRES") };
+    static const QStringList feetUnits = { QStringLiteral("FT"), QStringLiteral("FEET"), QStringLiteral("FOOT") };
+    feet = feetUnits.contains(unit);
+    if (feet || meters.contains(unit)) {
+        return true;
+    }
+    issues.append(GeoZoneParser::tr("Unknown unit %1, the altitude limits are ignored").arg(value.toString()));
+    return false;
+}
+
 void _commonProperties(const QJsonObject &object, const QString &restrictionKey, GeoZone::Data &zone)
 {
+    zone.uSpaceClass = _text(object.value(QStringLiteral("uSpaceClass")));
+    zone.regulationExemption = _text(object.value(QStringLiteral("regulationExemption")));
+    const QJsonObject extended = object.value(QStringLiteral("extendedProperties")).toObject();
+    for (auto it = extended.constBegin(); it != extended.constEnd(); ++it) {
+        const QJsonValue &value = it.value();
+        const QString text = (value.isObject() || value.isArray()) ?
+                                 QString::fromUtf8(value.isObject() ? QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact) : QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact)) :
+                                 value.toVariant().toString();
+        if (!text.isEmpty()) {
+            zone.extendedProperties.append(QStringLiteral("%1: %2").arg(it.key(), text));
+        }
+    }
+
     zone.identifier = _text(object.value(QStringLiteral("identifier")));
     zone.country = _text(object.value(QStringLiteral("country")));
     zone.name = _text(object.value(QStringLiteral("name")));

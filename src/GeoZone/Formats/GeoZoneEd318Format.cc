@@ -15,7 +15,7 @@ using namespace GeoZoneParserUtils;
 
 namespace {
 
-GeoZone::Volume _ed318Layer(const QJsonValue &value, const GeoZone::Volume &fallback)
+GeoZone::Volume _ed318Layer(const QJsonValue &value, const GeoZone::Volume &fallback, QStringList &issues)
 {
     if (!value.isObject()) {
         return fallback;
@@ -23,20 +23,21 @@ GeoZone::Volume _ed318Layer(const QJsonValue &value, const GeoZone::Volume &fall
 
     const QJsonObject layer = value.toObject();
     GeoZone::Volume volume;
-    volume.feet = layer.value(QStringLiteral("uom")).toString().compare(QStringLiteral("ft"), Qt::CaseInsensitive) == 0;
-    volume.lowerLimit = _number(layer.value(QStringLiteral("lower")));
-    volume.upperLimit = _number(layer.value(QStringLiteral("upper")));
+    // Limits in an unknown unit are unknown, which applies the zone at all altitudes
+    const bool knownUnit = _lengthUnit(layer.value(QStringLiteral("uom")), volume.feet, issues);
+    volume.lowerLimit = knownUnit ? _number(layer.value(QStringLiteral("lower"))) : qQNaN();
+    volume.upperLimit = knownUnit ? _number(layer.value(QStringLiteral("upper"))) : qQNaN();
     volume.setReferences(layer.value(QStringLiteral("lowerReference")).toString(), layer.value(QStringLiteral("upperReference")).toString());
     return volume;
 }
 
-void _ed318Geometry(const QJsonObject &geometry, const GeoZone::Volume &parentLayer, QList<GeoZone::Volume> &volumes)
+void _ed318Geometry(const QJsonObject &geometry, const GeoZone::Volume &parentLayer, QList<GeoZone::Volume> &volumes, QStringList &issues)
 {
-    const GeoZone::Volume layer = _ed318Layer(geometry.value(QStringLiteral("layer")), parentLayer);
+    const GeoZone::Volume layer = _ed318Layer(geometry.value(QStringLiteral("layer")), parentLayer, issues);
 
     if (geometry.value(QStringLiteral("type")).toString() == QStringLiteral("GeometryCollection")) {
         for (const QJsonValue &child : geometry.value(QStringLiteral("geometries")).toArray()) {
-            _ed318Geometry(child.toObject(), layer, volumes);
+            _ed318Geometry(child.toObject(), layer, volumes, issues);
         }
         return;
     }
@@ -53,9 +54,9 @@ bool _ed318Feature(const QJsonObject &feature, GeoZone::Data &zone)
     if (zone.identifier.isEmpty()) {
         zone.identifier = _text(feature.value(QStringLiteral("id")));
     }
-    zone.applicability = _applicability(properties.value(QStringLiteral("limitedApplicability")));
+    zone.applicability = _applicability(properties.value(QStringLiteral("limitedApplicability")), zone.issues);
 
-    _ed318Geometry(feature.value(QStringLiteral("geometry")).toObject(), GeoZone::Volume(), zone.volumes);
+    _ed318Geometry(feature.value(QStringLiteral("geometry")).toObject(), GeoZone::Volume(), zone.volumes, zone.issues);
 
     return !zone.volumes.isEmpty();
 }

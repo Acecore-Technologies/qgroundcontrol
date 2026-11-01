@@ -65,15 +65,25 @@ struct DipulLimit {
     QString reference;
 };
 
-DipulLimit _dipulLimit(const QJsonValue &value, const QString &unit, const QString &reference)
+DipulLimit _dipulLimit(const QJsonValue &value, const QString &unit, const QString &reference, QStringList &issues)
 {
     DipulLimit limit;
     const double number = _number(value);
     if (std::isnan(number)) {
         return limit;
     }
-    const QString upperUnit = unit.toUpper();
-    limit.meters = (upperUnit == QStringLiteral("FT")) ? (number * kMetersPerFoot) : ((upperUnit == QStringLiteral("FL")) ? (number * 100 * kMetersPerFoot) : number);
+    const QString upperUnit = unit.trimmed().toUpper();
+    if (upperUnit == QStringLiteral("FT")) {
+        limit.meters = number * kMetersPerFoot;
+    } else if (upperUnit == QStringLiteral("FL")) {
+        limit.meters = number * 100 * kMetersPerFoot;
+    } else if (upperUnit.isEmpty() || (upperUnit == QStringLiteral("M"))) {
+        limit.meters = number;
+    } else {
+        // An unknown limit applies the zone at all altitudes
+        issues.append(GeoZoneParser::tr("Unknown unit %1, the altitude limits are ignored").arg(unit));
+        return limit;
+    }
     limit.reference = reference.toUpper();
     return limit;
 }
@@ -114,17 +124,17 @@ bool _dipulFeature(const QJsonObject &feature, GeoZone::Data &zone)
     DipulLimit upper;
     if (properties.contains(QStringLiteral("lower_limit_altitude"))) {
         lower = _dipulLimit(properties.value(QStringLiteral("lower_limit_altitude")), _text(properties.value(QStringLiteral("lower_limit_unit"))),
-                            _text(properties.value(QStringLiteral("lower_limit_alt_ref"))));
+                            _text(properties.value(QStringLiteral("lower_limit_alt_ref"))), zone.issues);
         upper = _dipulLimit(properties.value(QStringLiteral("upper_limit_altitude")), _text(properties.value(QStringLiteral("upper_limit_unit"))),
-                            _text(properties.value(QStringLiteral("upper_limit_alt_ref"))));
+                            _text(properties.value(QStringLiteral("upper_limit_alt_ref"))), zone.issues);
     } else {
-        lower = _dipulLimit(properties.value(QStringLiteral("lower_limit_m_agl")), QStringLiteral("M"), QStringLiteral("AGL"));
+        lower = _dipulLimit(properties.value(QStringLiteral("lower_limit_m_agl")), QStringLiteral("M"), QStringLiteral("AGL"), zone.issues);
         if (std::isnan(lower.meters)) {
-            lower = _dipulLimit(properties.value(QStringLiteral("lower_limit_ft_msl")), QStringLiteral("FT"), QStringLiteral("MSL"));
+            lower = _dipulLimit(properties.value(QStringLiteral("lower_limit_ft_msl")), QStringLiteral("FT"), QStringLiteral("MSL"), zone.issues);
         }
-        upper = _dipulLimit(properties.value(QStringLiteral("upper_limit_ft_msl")), QStringLiteral("FT"), QStringLiteral("MSL"));
+        upper = _dipulLimit(properties.value(QStringLiteral("upper_limit_ft_msl")), QStringLiteral("FT"), QStringLiteral("MSL"), zone.issues);
         if (std::isnan(upper.meters)) {
-            upper = _dipulLimit(properties.value(QStringLiteral("upper_limit_fl_pa")), QStringLiteral("FL"), QStringLiteral("STD"));
+            upper = _dipulLimit(properties.value(QStringLiteral("upper_limit_fl_pa")), QStringLiteral("FL"), QStringLiteral("STD"), zone.issues);
         }
     }
     GeoZone::Volume layer;

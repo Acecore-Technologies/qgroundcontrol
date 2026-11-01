@@ -101,6 +101,10 @@ public:
         QStringList authorities;    ///< One human readable line per zone authority
         QList<TimePeriod> applicability;
         QList<Volume> volumes;
+        QString uSpaceClass;            ///< ED-269/ED-318 U-space classification, as published
+        QString regulationExemption;    ///< ED-269/ED-318 YES or NO, as published
+        QStringList extendedProperties; ///< Publisher specific properties, one "name: value" line each
+        QStringList issues;             ///< Problems found while reading the zone, translated, like an unknown unit
     };
 
     explicit GeoZone(const Data &data);
@@ -117,6 +121,11 @@ public:
     QString reasonText() const;
     QString message() const { return _data.message; }
     QString authorityText() const { return _data.authorities.join(QStringLiteral("\n")); }
+    QString uSpaceClass() const { return _data.uSpaceClass; }
+    /// @return Whether the regulation allows exemptions, empty when not published
+    QString regulationExemptionText() const;
+    QString extendedPropertiesText() const { return _data.extendedProperties.join(QStringLiteral("\n")); }
+    QString issuesText() const { return _data.issues.join(QStringLiteral("\n")); }
     QString applicabilityText() const;
     QString verticalLimitsText() const;
     QGeoCoordinate center() const { return _boundingBox.center(); }

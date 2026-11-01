@@ -20,15 +20,16 @@ namespace {
 bool _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     _commonProperties(feature, QStringLiteral("restriction"), zone);
-    zone.applicability = _applicability(feature.value(QStringLiteral("applicability")));
+    zone.applicability = _applicability(feature.value(QStringLiteral("applicability")), zone.issues);
 
     for (const QJsonValue &geometryValue : feature.value(QStringLiteral("geometry")).toArray()) {
         const QJsonObject geometry = geometryValue.toObject();
 
         GeoZone::Volume layer;
-        layer.feet = geometry.value(QStringLiteral("uomDimensions")).toString().compare(QStringLiteral("FT"), Qt::CaseInsensitive) == 0;
-        layer.lowerLimit = _number(geometry.value(QStringLiteral("lowerLimit")));
-        layer.upperLimit = _number(geometry.value(QStringLiteral("upperLimit")));
+        // Limits in an unknown unit are unknown, which applies the zone at all altitudes
+        const bool knownUnit = _lengthUnit(geometry.value(QStringLiteral("uomDimensions")), layer.feet, zone.issues);
+        layer.lowerLimit = knownUnit ? _number(geometry.value(QStringLiteral("lowerLimit"))) : qQNaN();
+        layer.upperLimit = knownUnit ? _number(geometry.value(QStringLiteral("upperLimit"))) : qQNaN();
         layer.setReferences(geometry.value(QStringLiteral("lowerVerticalReference")).toString(), geometry.value(QStringLiteral("upperVerticalReference")).toString());
 
         // ED-269 expresses all dimensions, including the circle radius, in uomDimensions
