@@ -30,6 +30,16 @@ bool GeoZoneFormat::parseFeature(const QJsonObject &, GeoZone::Data &) const
     return false;
 }
 
+bool GeoZoneFormat::parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &, GeoZone::Data &zone) const
+{
+    return parseFeature(feature, zone);
+}
+
+QList<GeoZoneFormat::CompanionRequest> GeoZoneFormat::companionRequests(const QUrl &, const QJsonObject &, const QJsonArray &) const
+{
+    return {};
+}
+
 QList<const GeoZoneFormat*> &GeoZoneFormat::_registered()
 {
     static QList<const GeoZoneFormat*> registered;

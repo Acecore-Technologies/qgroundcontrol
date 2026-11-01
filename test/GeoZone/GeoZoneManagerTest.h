@@ -20,6 +20,7 @@ private slots:
     void _testManagerStoreFailures();
     void _testManagerBackgroundLoad();
     void _testFeedNotModified();
+    void _testFeedCompanions();
     void _testSourceValidity();
     void _testDownloadSizeLimit();
     void _testDownloadFailures();

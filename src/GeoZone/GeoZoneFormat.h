@@ -13,6 +13,7 @@
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
+#include <QtCore/QUrl>
 
 /// A geozone data format, which recognizes its documents and converts their features into zones. Formats are stateless
 /// and used from worker threads. Adding a format takes a class in the Formats directory registered with
@@ -42,6 +43,18 @@ public:
     virtual void readMetadata(const QJsonObject &root, GeoZoneParser::Result &result) const;
     /// @return true if the feature has a usable geometry
     virtual bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const;
+    /// Like parseFeature, for formats whose features refer to companion documents
+    virtual bool parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone) const;
+
+    /// Companion document of a feed's document, downloaded with it and kept in the stored copy
+    struct CompanionRequest {
+        QString key;
+        QString version;    ///< A known companion with this version isn't downloaded again
+        QString url;
+    };
+    /// @return The companion documents the features refer to, none by default
+    /// @param documentUrl Where the document was downloaded from
+    virtual QList<CompanionRequest> companionRequests(const QUrl &documentUrl, const QJsonObject &root, const QJsonArray &features) const;
     /// Services answering with an empty list when no zones apply, unlike files which must have zones
     virtual bool acceptsEmpty() const { return false; }
 

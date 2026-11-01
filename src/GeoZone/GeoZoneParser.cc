@@ -24,6 +24,12 @@
 
 QGC_LOGGING_CATEGORY(GeoZoneParserLog, "qgc.geozone.geozoneparser")
 
+namespace {
+
+constexpr const char *kCompositeKey = "geozoneComposite";
+
+} // namespace
+
 using namespace GeoZoneParserUtils;
 
 bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &errorString)
@@ -63,7 +69,16 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         return false;
     }
 
-    const QJsonObject root = document.object();
+    QJsonObject root = document.object();
+    // Composite documents carry the companions of the feed's document
+    if (root.contains(QLatin1String(kCompositeKey))) {
+        const QJsonObject companions = root.value(QStringLiteral("companions")).toObject();
+        for (auto it = companions.constBegin(); it != companions.constEnd(); ++it) {
+            const QJsonObject companion = it.value().toObject();
+            result.companions.insert(it.key(), Companion{ companion.value(QStringLiteral("version")).toString(), companion.value(QStringLiteral("data")).toString().toUtf8() });
+        }
+        root = root.value(QStringLiteral("document")).toObject();
+    }
     const QJsonValue featuresValue = root.value(QStringLiteral("features"));
     if (!document.isObject() || !featuresValue.isArray()) {
         errorString = tr("Not a geozone file. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces and the FAA, DiPUL and IGN GeoJSON are supported.");
@@ -75,6 +90,10 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     QCryptographicHash contentHash(QCryptographicHash::Sha1);
     for (const QJsonValue &feature : features) {
         contentHash.addData(QJsonDocument(feature.toObject()).toJson(QJsonDocument::Compact));
+    }
+    for (auto it = result.companions.cbegin(); it != result.companions.cend(); ++it) {
+        contentHash.addData(it.key().toUtf8());
+        contentHash.addData(it.value().version.toUtf8());
     }
     result.contentHash = contentHash.result();
 
@@ -113,7 +132,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
 
     for (const QJsonValue &featureValue : features) {
         GeoZone::Data zone;
-        if (format->parseFeature(featureValue.toObject(), zone)) {
+        if (format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone)) {
             zone.issues.removeDuplicates();
             for (const QString &issue : std::as_const(zone.issues)) {
                 result.issues[issue]++;
@@ -134,6 +153,15 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     qCDebug(GeoZoneParserLog) << formatToString(result.format) << "zones:" << result.zones.count() << "skipped:" << result.skippedFeatures;
 
     return true;
+}
+
+QByteArray GeoZoneParser::composite(const QJsonObject &document, const Companions &companions)
+{
+    QJsonObject companionObjects;
+    for (auto it = companions.cbegin(); it != companions.cend(); ++it) {
+        companionObjects.insert(it.key(), QJsonObject{ { QStringLiteral("version"), it.value().version }, { QStringLiteral("data"), QString::fromUtf8(it.value().data) } });
+    }
+    return QJsonDocument(QJsonObject{ { QLatin1String(kCompositeKey), 1 }, { QStringLiteral("document"), document }, { QStringLiteral("companions"), companionObjects } }).toJson(QJsonDocument::Compact);
 }
 
 QString GeoZoneParser::formatToString(Format format)

@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <QtCore/QHash>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMap>
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
@@ -36,6 +38,13 @@ public:
         Aixm,       ///< AIXM 5.1 airspaces, like the UK flight restriction zones from NATS
     };
 
+    /// Document a feed's features refer to, like the details of an FAA NOTAM, with its version
+    struct Companion {
+        QString version;
+        QByteArray data;
+    };
+    using Companions = QHash<QString, Companion>;   ///< By key
+
     struct Result {
         Format format = Format::Unknown;
         QString title;
@@ -48,7 +57,11 @@ public:
         QByteArray contentHash;     ///< Hash of the features, which stays the same when only metadata changes
         int missingFeatures = 0;    ///< Features of a WFS response the server left out because of its limit
         QMap<QString, int> issues;  ///< Problems found in the zones, with the number of zones having each
+        Companions companions;      ///< Of a composite document, see composite()
     };
+
+    /// @return A document with its companion documents, which parse() reads like the document with the companions
+    static QByteArray composite(const QJsonObject &document, const Companions &companions);
 
     static bool parseFile(const QString &fileName, Result &result, QString &errorString);
     /// @param formatHint WFS formats like FaaTfr accept an empty feature list from their server as a valid list

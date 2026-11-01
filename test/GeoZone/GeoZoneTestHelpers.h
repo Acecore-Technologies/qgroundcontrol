@@ -191,13 +191,18 @@ public:
     QByteArray body;
     int requestCount = 0;
     QByteArray okPathStatus = "200 OK";     ///< Status of /ok, to make a feed fail later
+    QHash<QByteArray, QByteArray> files;    ///< Content served by path
+    QList<QByteArray> requestedPaths;
 
 private:
     void _respond(QTcpSocket *socket, const QByteArray &path)
     {
         QByteArray status = "200 OK";
         QByteArray content;
-        if (path == "/ok") {
+        requestedPaths.append(path);
+        if (files.contains(path)) {
+            content = files.value(path);
+        } else if (path == "/ok") {
             status = okPathStatus;
             content = status.startsWith("200") ? body : QByteArray();
         } else if (path == "/missing") {

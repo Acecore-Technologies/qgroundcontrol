@@ -9,6 +9,7 @@
 
 #include "GeoZoneParserTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneFormat.h"
 #include "GeoZoneZip.h"
 
 #include <zlib.h>
@@ -277,6 +278,40 @@ void GeoZoneParserTest::_testParseFaaTfr()
     QVERIFY(source.validityText().isEmpty());
     source.updateValidity(result.issued.addSecs(3 * 3600));
     QCOMPARE(source.validityText(), QStringLiteral("Data is 3 hours old"));
+
+    // The NOTAM details give the times and altitudes of their TFRs, which apply at all times and altitudes without
+    const QByteArray detail = R"(<XNOTAM-Update><Group><Add><Not>
+        <dateEffective>2026-03-06T14:00:00</dateEffective><dateExpire>2026-03-06T22:00:00</dateExpire>
+        <TfrNot><TFRAreaGroup><aseTFRArea><txtName>Area A</txtName>
+        <codeDistVerUpper>ALT</codeDistVerUpper><valDistVerUpper>3000</valDistVerUpper><uomDistVerUpper>FT</uomDistVerUpper>
+        <codeDistVerLower>HEI</codeDistVerLower><valDistVerLower>0</valDistVerLower><uomDistVerLower>FT</uomDistVerLower>
+        <ScheduleGroup><dateEffective>2026-03-06T14:00:00</dateEffective><dateExpire>2026-03-06T22:00:00</dateExpire></ScheduleGroup>
+        </aseTFRArea></TFRAreaGroup></TfrNot></Not></Add></Group></XNOTAM-Update>)";
+    QFile tfrFile(QStringLiteral(":/unittest/faa_tfr_test.json"));
+    QVERIFY(tfrFile.open(QIODevice::ReadOnly));
+    const QJsonObject tfrRoot = QJsonDocument::fromJson(tfrFile.readAll()).object();
+    const QList<GeoZoneFormat::CompanionRequest> requests = GeoZoneFormat::find(GeoZoneParser::Format::FaaTfr)->companionRequests(
+        QUrl(QStringLiteral("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS")), tfrRoot, tfrRoot.value(QStringLiteral("features")).toArray());
+    QCOMPARE(requests.count(), 2);
+    QCOMPARE(requests[0].key, QStringLiteral("6/4240"));
+    QCOMPARE(requests[0].version, QStringLiteral("202603052027"));
+    QCOMPARE(requests[0].url, QStringLiteral("https://tfr.faa.gov/download/detail_6_4240.xml"));
+    QVERIFY2(GeoZoneParser::parse(GeoZoneParser::composite(tfrRoot, { { QStringLiteral("6/4240"), { QStringLiteral("202603052027"), detail } } }), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.companions.count(), 1);
+    for (const GeoZone::Data &tfr : std::as_const(result.zones)) {
+        if (!tfr.identifier.startsWith(QStringLiteral("6/4240"))) {
+            QVERIFY(tfr.applicability.isEmpty());
+            QVERIFY(std::isnan(tfr.volumes[0].upperLimit));
+            continue;
+        }
+        QCOMPARE(tfr.applicability.count(), 1);
+        QCOMPARE(tfr.applicability[0].start, _utc(QDate(2026, 3, 6), QTime(14, 0)));
+        QCOMPARE(tfr.applicability[0].end, _utc(QDate(2026, 3, 6), QTime(22, 0)));
+        QCOMPARE(tfr.volumes[0].upperLimit, 3000.0);
+        QVERIFY(tfr.volumes[0].feet);
+        QCOMPARE(tfr.volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
+        QCOMPARE(tfr.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    }
 }
 
 void GeoZoneParserTest::_testParseNationalFormats()
@@ -468,7 +503,7 @@ void GeoZoneParserTest::_testLiveNationalFeeds()
     QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
     for (const QVariant &preset : GeoZoneManager::feedPresets()) {
         const QString url = preset.toMap().value(QStringLiteral("url")).toString();
-        if (url.contains(QStringLiteral("uas-betrieb.de")) || url.contains(QStringLiteral("ead-it.com"))) {
+        if (url.contains(QStringLiteral("uas-betrieb.de")) || url.contains(QStringLiteral("ead-it.com")) || url.contains(QStringLiteral("tfr.faa.gov"))) {
             manager.addUrl(url);
         }
     }
@@ -479,12 +514,21 @@ void GeoZoneParserTest::_testLiveNationalFeeds()
         qWarning() << failure;
     }
     QCOMPARE(failedSpy.count(), 0);
-    QCOMPARE(manager.sources()->count(), 4);
+    QCOMPARE(manager.sources()->count(), 5);
     for (int i = 0; i < manager.sources()->count(); i++) {
         const GeoZoneSource *const source = manager.sources()->value<GeoZoneSource*>(i);
         qDebug() << source->name() << source->detailsText() << source->warningText();
         QVERIFY2(source->zoneCount() > 0, qPrintable(source->key()));
     }
+
+    // The FAA TFRs get the times and altitudes of their NOTAMs
+    const QList<GeoZone*> &zones = manager.zoneList();
+    const qsizetype tfrs = std::count_if(zones.cbegin(), zones.cend(), [](const GeoZone *zone) { return zone->country() == QStringLiteral("USA"); });
+    const qsizetype detailed = std::count_if(zones.cbegin(), zones.cend(), [](const GeoZone *zone) {
+        return (zone->country() == QStringLiteral("USA")) && !zone->data().applicability.isEmpty();
+    });
+    qDebug() << "TFRs" << tfrs << "with NOTAM times" << detailed;
+    QVERIFY((tfrs == 0) || (detailed > (tfrs / 2)));
 }
 
 void GeoZoneParserTest::_testParseErrors()

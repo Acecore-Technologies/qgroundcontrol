@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneSourceRepository.h"
+#include "GeoZoneFormat.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneSettings.h"
@@ -17,6 +18,8 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFile>
 #include <QtCore/QFutureWatcher>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QLocale>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
@@ -238,6 +241,15 @@ void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result 
         return;
     }
 
+    if (_fetchCompanions(download, url, generation, request)) {
+        return;
+    }
+    _loadDownload(download, url, generation, request);
+}
+
+void GeoZoneSourceRepository::_loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request)
+{
+    const GeoZoneSource *const existing = source(url);
     GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
     job.sourcePath = download.filePath;
     job.downloaded = true;
@@ -249,6 +261,94 @@ void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result 
     job.request = request;
     job.generation = generation;
     _startLoad(job, LoadMode::Background);
+}
+
+bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request)
+{
+    // Feeds with companions, like the FAA TFR list, are small enough to read here
+    const QJsonDocument document = QJsonDocument::fromJson(GeoZoneDownloader::readFile(download.filePath, _maxPageBytes));
+    if (!document.isObject()) {
+        return false;
+    }
+    const QJsonObject root = document.object();
+    const QJsonArray features = root.value(QStringLiteral("features")).toArray();
+    const GeoZoneSource *const existing = source(url);
+    const GeoZoneParser::Format hint = (existing && existing->loaded()) ? existing->format() : GeoZoneProviders::formatHint(url);
+    const GeoZoneFormat *format = nullptr;
+    for (const GeoZoneFormat *candidate : GeoZoneFormat::formats()) {
+        if (!candidate->isXml() && candidate->detect(root, features, hint)) {
+            format = candidate;
+            break;
+        }
+    }
+    if (!format) {
+        return false;
+    }
+    const QList<GeoZoneFormat::CompanionRequest> requests = format->companionRequests(QUrl(url), root, features);
+    if (requests.isEmpty()) {
+        return false;
+    }
+
+    struct Fetch {
+        QJsonObject root;
+        GeoZoneParser::Companions companions;
+        int remaining = 0;
+    };
+    const auto fetch = QSharedPointer<Fetch>::create();
+    fetch->root = root;
+    const GeoZoneParser::Companions known = _companions.value(url);
+    QList<GeoZoneFormat::CompanionRequest> missing;
+    for (const GeoZoneFormat::CompanionRequest &companion : requests) {
+        const auto it = known.constFind(companion.key);
+        if ((it != known.cend()) && (it->version == companion.version)) {
+            fetch->companions.insert(companion.key, it.value());
+        } else {
+            missing.append(companion);
+        }
+    }
+
+    // The document is stored with its companions, so they are available offline
+    const auto finish = [this, fetch, download, url, generation, request]() {
+        if (_generations.value(url) != generation) {
+            (void) QFile::remove(download.filePath);
+            return;
+        }
+        QFile file(download.filePath);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            (void) file.write(GeoZoneParser::composite(fetch->root, fetch->companions));
+            file.close();
+        }
+        _loadDownload(download, url, generation, request);
+    };
+    if (missing.isEmpty()) {
+        finish();
+        return true;
+    }
+
+    qCDebug(GeoZoneManagerLog) << "Downloading" << missing.count() << "companion documents of" << url;
+    fetch->remaining = static_cast<int>(missing.count());
+    _setPending(1);
+    for (const GeoZoneFormat::CompanionRequest &companion : std::as_const(missing)) {
+        _downloader->get(companion.url, QString(), QString(), [this, fetch, companion, finish](const GeoZoneDownloader::Result &result) {
+            // A missing companion leaves its zones as conservative as without it
+            if (result.status == GeoZoneDownloader::Result::Status::Ok) {
+                const QByteArray data = GeoZoneDownloader::readFile(result.filePath, _maxCompanionBytes);
+                if (!data.isEmpty()) {
+                    fetch->companions.insert(companion.key, GeoZoneParser::Companion{ companion.version, data });
+                }
+            } else {
+                qCWarning(GeoZoneManagerLog) << "Companion download failed" << companion.url << result.errorString;
+            }
+            if (!result.filePath.isEmpty()) {
+                (void) QFile::remove(result.filePath);
+            }
+            if (--fetch->remaining == 0) {
+                finish();
+                _setPending(-1);
+            }
+        }, url);
+    }
+    return true;
 }
 
 void GeoZoneSourceRepository::_prepareJob(GeoZoneLoader::Job &job) const
@@ -325,6 +425,10 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         qCDebug(GeoZoneManagerLog) << "Loaded" << source->zoneCount() << source->formatName() << "zones from" << job.key;
     }
     source->setErrorString(QString());
+    // Companions of the stored copy are reused for the next download
+    if (!loadResult.result.companions.isEmpty()) {
+        _companions.insert(job.key, loadResult.result.companions);
+    }
     if (source->isFeed() && job.downloaded) {
         source->setValidators(job.etag, job.lastModified);
     }
@@ -436,6 +540,7 @@ void GeoZoneSourceRepository::removeSource(int index)
     }
 
     _downloader->abort(source->key());
+    _companions.remove(source->key());
     emit sourceAboutToChange(source);
     (void) _sources->removeAt(index);
     emit sourceChanged(source);

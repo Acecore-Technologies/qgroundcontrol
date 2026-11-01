@@ -291,6 +291,54 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     QVERIFY(restarted.source(feedUrl)->isFeed());
 }
 
+void GeoZoneManagerTest::_testFeedCompanions()
+{
+    // An FAA TFR list with the detail of one of its NOTAMs
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QFile fixture(QStringLiteral(":/unittest/faa_tfr_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    server.files.insert("/geoserver/tfr.json", fixture.readAll());
+    server.files.insert("/download/detail_6_4240.xml", R"(<XNOTAM-Update><Group><Add><Not>
+        <dateEffective>2026-03-06T14:00:00</dateEffective><dateExpire>2026-03-06T22:00:00</dateExpire>
+        <TfrNot><TFRAreaGroup><aseTFRArea><codeDistVerUpper>ALT</codeDistVerUpper><valDistVerUpper>3000</valDistVerUpper>
+        <uomDistVerUpper>FT</uomDistVerUpper><codeDistVerLower>HEI</codeDistVerLower><valDistVerLower>0</valDistVerLower>
+        <uomDistVerLower>FT</uomDistVerLower></aseTFRArea></TFRAreaGroup></TfrNot></Not></Add></Group></XNOTAM-Update>)");
+    const QString url = server.url(QStringLiteral("/geoserver/tfr.json"));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto detailRequests = [&server]() { return server.requestedPaths.count("/download/detail_6_4240.xml"); };
+    const auto scheduled = [](const GeoZoneManager &manager) {
+        const QList<GeoZone*> &zones = manager.zoneList();
+        return std::count_if(zones.cbegin(), zones.cend(), [](const GeoZone *zone) { return !zone->data().applicability.isEmpty(); });
+    };
+
+    {
+        // The details are downloaded with the list and kept in the stored copy
+        GeoZoneManager manager(dir.path());
+        manager.addUrl(url);
+        QTRY_VERIFY_WITH_TIMEOUT(manager.zoneCount() > 0 && !manager.busy(), 10000);
+        QCOMPARE(scheduled(manager), 1);
+        QCOMPARE(detailRequests(), 1);
+
+        // Unchanged NOTAMs aren't downloaded again
+        manager.refreshFeeds();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 10000);
+        QCOMPARE(server.requestedPaths.count("/geoserver/tfr.json"), 2);
+        QCOMPARE(detailRequests(), 1);
+        QCOMPARE(scheduled(manager), 1);
+    }
+
+    // After a restart the stored details apply and are reused
+    GeoZoneManager restarted(dir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QCOMPARE(scheduled(restarted), 1);
+    restarted.refreshFeeds();
+    QTRY_VERIFY_WITH_TIMEOUT(!restarted.busy(), 10000);
+    QCOMPARE(detailRequests(), 1);
+    QCOMPARE(scheduled(restarted), 1);
+}
+
 void GeoZoneManagerTest::_testFeedNotModified()
 {
     QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));

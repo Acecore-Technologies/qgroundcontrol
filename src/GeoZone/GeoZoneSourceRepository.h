@@ -94,6 +94,11 @@ private:
     void _updateStoredEntry(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _download(const QString &url, GeoZoneLoader::Request request);
     void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
+    /// Starts loading a downloaded feed
+    void _loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
+    /// Downloads the companion documents of a feed which has them, then loads it
+    /// @return false when the feed has no companions
+    bool _fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
     void _idle();
     void _setPending(int delta);
     void _saveIndex();
@@ -109,6 +114,7 @@ private:
     int _pendingCount = 0;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
     QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
+    QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
     bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is
     bool _storageErrorReported = false;
     QString _validityWarning;
@@ -117,4 +123,5 @@ private:
 
     static constexpr int _refreshCheckIntervalMSecs = 5 * 60 * 1000;
     static constexpr qint64 _maxPageBytes = 4 * 1024 * 1024;   ///< Downloads read to look for links to datasets
+    static constexpr qint64 _maxCompanionBytes = 1024 * 1024;
 };
