@@ -358,9 +358,10 @@ void GeoZoneParserTest::_testParseFaaTfr()
     QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/faa_tfr_test.json"), result, errorString), qPrintable(errorString));
     const QDateTime now = QDateTime::currentDateTimeUtc();
     source.setResult(result, now, now);
-    QCOMPARE(source.refreshIntervalSecs(), 15 * 60);
-    QVERIFY(!source.refreshDue(now.addSecs(10 * 60)));
-    QVERIFY(source.refreshDue(now.addSecs(16 * 60)));
+    const GeoZoneRefreshScheduler scheduler;
+    QCOMPARE(scheduler.refreshIntervalSecs(source), 15 * 60);
+    QVERIFY(!scheduler.isDue(source, now.addSecs(10 * 60)));
+    QVERIFY(scheduler.isDue(source, now.addSecs(16 * 60)));
 
     // Restrictions change during the day, so the list is outdated after hours rather than weeks
     source.updateValidity(result.issued.addSecs(3600));

@@ -25,6 +25,7 @@ private slots:
     void _testFeedCompanions();
     void _testFeedFetchFormatCompanions();
     void _testFeedCancellation();
+    void _testRefreshScheduler();
     void _testReloadChanges();
     void _testSourceValidity();
     void _testDownloadSizeLimit();

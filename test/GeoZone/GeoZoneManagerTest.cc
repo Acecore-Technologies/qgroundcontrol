@@ -333,8 +333,8 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     // The user's file is read in place, never removed
     QVERIFY(QFile::exists(ed318File));
     const QDateTime now = environment.now();
-    QVERIFY(!feed->refreshDue(now));
-    QVERIFY(feed->refreshDue(now.addSecs(25 * 3600)));
+    QVERIFY(!manager.repository()->scheduler()->isDue(*feed, now));
+    QVERIFY(manager.repository()->scheduler()->isDue(*feed, now.addSecs(25 * 3600)));
 
     // A failed refresh keeps the previous data
     QVERIFY(QFile::remove(ed318File));
@@ -530,6 +530,121 @@ void GeoZoneManagerTest::_testFeedCancellation()
     QVERIFY(!storage.exists(job.storedFileName));
 }
 
+void GeoZoneManagerTest::_testRefreshScheduler()
+{
+    ScopedEnvironment environment;
+
+    // How long a response stays current, from its headers
+    QCOMPARE(GeoZoneDownloader::maxAgeSecs("public, max-age=600", QByteArray(), QByteArray(), QByteArray()), 600);
+    QCOMPARE(GeoZoneDownloader::maxAgeSecs("max-age=600", "Sat, 31 Oct 2026 12:00:00 GMT", QByteArray(), "100"), 500);
+    QCOMPARE(GeoZoneDownloader::maxAgeSecs(QByteArray(), "Sat, 31 Oct 2026 12:00:00 GMT", "Sat, 31 Oct 2026 11:00:00 GMT", QByteArray()), 3600);
+    QCOMPARE(GeoZoneDownloader::maxAgeSecs("no-cache", QByteArray(), QByteArray(), QByteArray()), -1);
+    QCOMPARE(GeoZoneDownloader::maxAgeSecs("max-age=0", "Sat, 31 Oct 2026 12:00:00 GMT", "Sat, 31 Oct 2026 11:00:00 GMT", QByteArray()), -1);
+    QCOMPARE(GeoZoneDownloader::maxAgeSecs(QByteArray(), "0", QByteArray(), QByteArray()), -1);
+
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    server.etags.insert("/zones", "\"v1\"");
+    server.headers.insert("/zones", "Cache-Control: max-age=3600\r\n");
+    const QString url = server.url(QStringLiteral("/zones"));
+    const QTemporaryDir storageDir;
+    const QTemporaryDir sourceDir;
+    QVERIFY(storageDir.isValid() && sourceDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    const auto settle = [&manager]() { return QTest::qWaitFor([&manager]() { return !manager.busy(); }, 10000); };
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.addUrl(url);
+    QVERIFY(addedSpy.wait(10000));
+    QVERIFY(settle());
+    GeoZoneSource *const feed = manager.source(url);
+    QVERIFY(feed);
+    GeoZoneRefreshScheduler *const scheduler = manager.repository()->scheduler();
+    QSignalSpy dueSpy(scheduler, &GeoZoneRefreshScheduler::refreshDue);
+
+    // The server keeps its data current for an hour, sooner than the refresh interval of a day
+    QCOMPARE(scheduler->refreshIntervalSecs(*feed), 3600);
+    environment.addSecs(3599);
+    scheduler->check();
+    QCOMPARE(dueSpy.count(), 0);
+    environment.addSecs(1);
+    scheduler->check();
+    QCOMPARE(dueSpy.count(), 1);
+    QVERIFY(feed->busy());
+    QVERIFY(settle());
+    QCOMPARE(server.requestCount, 2);
+    QVERIFY(feed->errorString().isEmpty());
+    // Confirmed by the server, it is current for another hour
+    scheduler->check();
+    QCOMPARE(dueSpy.count(), 1);
+
+    // A server can't make the refreshes more frequent than every 5 minutes, without a lifetime the settings apply
+    server.headers.insert("/zones", "Cache-Control: max-age=10\r\n");
+    environment.addSecs(3600);
+    scheduler->check();
+    QVERIFY(settle());
+    QCOMPARE(scheduler->refreshIntervalSecs(*feed), GeoZoneRefreshScheduler::minRefreshSecs);
+    server.headers.remove("/zones");
+    environment.addSecs(GeoZoneRefreshScheduler::minRefreshSecs);
+    scheduler->check();
+    QVERIFY(settle());
+    QCOMPARE(dueSpy.count(), 3);
+    QCOMPARE(scheduler->refreshIntervalSecs(*feed), 24 * 3600);
+
+    // A failed refresh keeps the zones and is retried after 5 minutes, then twice as long, within 20 %
+    server.etags.remove("/zones");
+    server.files.remove("/zones");
+    environment.addSecs(24 * 3600);
+    scheduler->check();
+    QVERIFY(settle());
+    QCOMPARE(dueSpy.count(), 4);
+    QVERIFY(!feed->errorString().isEmpty());
+    QCOMPARE(manager.zoneCount(), 3);
+    QDateTime retryAt = scheduler->retryAt(feed->key());
+    QVERIFY(environment.now().secsTo(retryAt) >= GeoZoneRefreshScheduler::minRetrySecs * 0.8);
+    QVERIFY(environment.now().secsTo(retryAt) <= GeoZoneRefreshScheduler::minRetrySecs * 1.2);
+    environment.setNow(retryAt.addSecs(-1));
+    scheduler->check();
+    QCOMPARE(dueSpy.count(), 4);
+    environment.setNow(retryAt);
+    scheduler->check();
+    QVERIFY(settle());
+    QCOMPARE(dueSpy.count(), 5);
+    retryAt = scheduler->retryAt(feed->key());
+    QVERIFY(environment.now().secsTo(retryAt) >= GeoZoneRefreshScheduler::minRetrySecs * 2 * 0.8);
+    QVERIFY(environment.now().secsTo(retryAt) <= GeoZoneRefreshScheduler::minRetrySecs * 2 * 1.2);
+
+    // A successful retry ends the retries
+    server.files.insert("/zones", server.body);
+    server.headers.insert("/zones", "Cache-Control: max-age=7200\r\n");
+    environment.setNow(retryAt);
+    scheduler->check();
+    QVERIFY(settle());
+    QCOMPARE(dueSpy.count(), 6);
+    QVERIFY(feed->errorString().isEmpty());
+    QVERIFY(!scheduler->retryAt(feed->key()).isValid());
+    QCOMPARE(scheduler->nextRefresh(*feed), environment.now().addSecs(7200));
+
+    // Files are only reloaded by the user
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(sourceDir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 300) }), errorString), qPrintable(errorString));
+    const GeoZoneSource *const file = manager.sources()->value<GeoZoneSource*>(1);
+    QVERIFY(!scheduler->nextRefresh(*file).isValid());
+    environment.addSecs(365 * 24 * 3600);
+    dueSpy.clear();
+    scheduler->check();
+    QCOMPARE(dueSpy.count(), 1);
+    QCOMPARE(dueSpy.first()[0].value<GeoZoneSource*>(), feed);
+    QVERIFY(settle());
+
+    // The lifetime given by the server is kept across restarts
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QVERIFY(restarted.source(url));
+    QCOMPARE(restarted.repository()->scheduler()->refreshIntervalSecs(*restarted.source(url)), 7200);
+}
+
 void GeoZoneManagerTest::_testReloadChanges()
 {
     const QGeoCoordinate center(47, 8);
@@ -719,26 +834,27 @@ void GeoZoneManagerTest::_testSourceValidity()
     QVERIFY(manager.validityWarning().startsWith(QStringLiteral("Test GeoZones: Data is")));
 
     // Failed refreshes of a feed are retried after 5 minutes, then twice as long after each failure, within 20 %
+    GeoZoneRefreshScheduler scheduler;
     GeoZoneSource feed(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));
     feed.setStoredDates(now, now);
-    QVERIFY(!feed.refreshDue(now.addSecs(60)));
-    feed.setErrorString(QStringLiteral("Server unavailable"));
-    QVERIFY(!feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 0.79)));
-    QVERIFY(feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 1.21)));
+    QVERIFY(!scheduler.isDue(feed, now.addSecs(60)));
+    scheduler.refreshFailed(feed);
+    QVERIFY(!scheduler.isDue(feed, now.addSecs(GeoZoneRefreshScheduler::minRetrySecs * 0.79)));
+    QVERIFY(scheduler.isDue(feed, now.addSecs(GeoZoneRefreshScheduler::minRetrySecs * 1.21)));
     for (int failure = 2; failure <= 3; failure++) {
-        feed.setErrorString(QStringLiteral("Server unavailable"));
+        scheduler.refreshFailed(feed);
     }
-    QVERIFY(!feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 4 * 0.79)));
-    QVERIFY(feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 4 * 1.21)));
+    QVERIFY(!scheduler.isDue(feed, now.addSecs(GeoZoneRefreshScheduler::minRetrySecs * 4 * 0.79)));
+    QVERIFY(scheduler.isDue(feed, now.addSecs(GeoZoneRefreshScheduler::minRetrySecs * 4 * 1.21)));
     // Up to the maximum, or the refresh interval when shorter
     for (int failure = 4; failure <= 20; failure++) {
-        feed.setErrorString(QStringLiteral("Server unavailable"));
+        scheduler.refreshFailed(feed);
     }
-    QVERIFY(feed.refreshDue(now.addSecs(GeoZoneSource::maxRetrySecs * 1.21)));
+    QVERIFY(scheduler.isDue(feed, now.addSecs(GeoZoneRefreshScheduler::maxRetrySecs * 1.21)));
     // A successful refresh follows the refresh interval again
-    feed.setErrorString(QString());
-    QVERIFY(!feed.retryAt().isValid());
-    QVERIFY(!feed.refreshDue(now.addSecs(60)));
+    scheduler.refreshSucceeded(feed.key(), -1);
+    QVERIFY(!scheduler.retryAt(feed.key()).isValid());
+    QVERIFY(!scheduler.isDue(feed, now.addSecs(60)));
 }
 
 void GeoZoneManagerTest::_testDownloadSizeLimit()
@@ -971,12 +1087,13 @@ void GeoZoneManagerTest::_testSettings()
     GeoZoneParser::Result result;
     result.format = GeoZoneParser::Format::ED318;
     feed.setResult(result, environment.now(), environment.now());
+    const GeoZoneRefreshScheduler scheduler;
     settings->feedRefreshHours()->setRawValue(6);
-    QCOMPARE(feed.refreshIntervalSecs(), 6 * 3600);
+    QCOMPARE(scheduler.refreshIntervalSecs(feed), 6 * 3600);
     result.format = GeoZoneParser::Format::FaaTfr;
     feed.setResult(result, environment.now(), environment.now());
     settings->liveFeedRefreshMinutes()->setRawValue(30);
-    QCOMPARE(feed.refreshIntervalSecs(), 30 * 60);
+    QCOMPARE(scheduler.refreshIntervalSecs(feed), 30 * 60);
 
     // Approach alerts at the configured distance
     GeoZoneMonitor monitor(&manager);

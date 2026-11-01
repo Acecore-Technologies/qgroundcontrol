@@ -84,6 +84,7 @@ void GeoZoneFeedFetch::_get(const QString &url, const QString &etag, const QStri
 
 void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
 {
+    _addMaxAge(download.maxAgeSecs);
     if (download.status == GeoZoneDownloader::Result::Status::NotModified) {
         _finish(Result::Status::NotModified);
         return;
@@ -113,6 +114,7 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
 
 void GeoZoneFeedFetch::_datasetReceived(const GeoZoneDownloader::Result &download)
 {
+    _addMaxAge(download.maxAgeSecs);
     if (download.status == GeoZoneDownloader::Result::Status::NotModified) {
         _finish(Result::Status::NotModified);
     } else if (download.status != GeoZoneDownloader::Result::Status::Ok) {
@@ -236,6 +238,14 @@ void GeoZoneFeedFetch::_companionsReceived()
         file.close();
     }
     _finish(Result::Status::Ready);
+}
+
+void GeoZoneFeedFetch::_addMaxAge(qint64 maxAgeSecs)
+{
+    // A page linking to the dataset may change sooner than the dataset, and the other way around
+    if ((maxAgeSecs > 0) && ((_result.maxAgeSecs <= 0) || (maxAgeSecs < _result.maxAgeSecs))) {
+        _result.maxAgeSecs = maxAgeSecs;
+    }
 }
 
 void GeoZoneFeedFetch::_finish(Result::Status status, const QString &errorString)

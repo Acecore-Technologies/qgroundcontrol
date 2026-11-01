@@ -20,8 +20,8 @@
 #include "GeoZoneSourceIndex.h"
 #include "GeoZoneStore.h"
 
+class GeoZoneRefreshScheduler;
 class GeoZoneSource;
-class QTimer;
 
 /// The geozone sources: adds, downloads, loads and removes them, keeps a copy of each for the next start,
 /// refreshes the feeds and reports outdated data. GeoZoneManager publishes the zones of the loaded sources.
@@ -64,6 +64,8 @@ public:
     /// @return Name of the stored copy of a source in storageDir, empty when it has none
     QString storedFileName(const QString &key) const { return _index.fileName(key); }
     QString storageDir() const { return _store.dir(); }
+    /// Decides when the feeds are refreshed
+    GeoZoneRefreshScheduler *scheduler() const { return _scheduler; }
 
     bool busy() const { return _pendingCount > 0; }
     double progress() const;
@@ -91,7 +93,6 @@ signals:
     void validityWarningChanged();
 
 private:
-    void _refreshDueFeeds();
     void _prepareJob(GeoZoneLoader::Job &job) const;
     void _startLoad(GeoZoneLoader::Job job, LoadMode mode);
     void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
@@ -117,7 +118,7 @@ private:
     GeoZoneSourceIndex _index;
     GeoZoneDownloader *_downloader = nullptr;
     QList<GeoZoneSource*> _sources;
-    QTimer *_refreshTimer = nullptr;
+    GeoZoneRefreshScheduler *_scheduler = nullptr;
     int _pendingCount = 0;
     QHash<QString, GeoZoneCancelToken> _operations; ///< Fetch or load in progress per source key, earlier ones were canceled
     QHash<QString, GeoZoneFeedFetch*> _fetches;     ///< Feeds being downloaded, by URL
@@ -126,6 +127,4 @@ private:
     QString _validityWarning;
     bool _startupRefreshPending = false;
     bool _startupCheckPending = false;
-
-    static constexpr int _refreshCheckIntervalMSecs = 5 * 60 * 1000;
 };

@@ -33,6 +33,7 @@ public:
         QString lastModified;
         bool enabled = true;    ///< See GeoZoneSource::enabled
         QString datasetUrl;     ///< Dataset the feed's page linked to, whose download the validators belong to
+        qint64 maxAgeSecs = -1; ///< How long the server said the data stays current, negative when it didn't
     };
 
     enum class Status : quint8 {
@@ -74,7 +75,7 @@ public:
     bool setEnabled(const QString &key, bool enabled);
     /// Records that the server confirmed the stored copy current, when the validators are those of the copy
     /// @return true if the entry was changed
-    bool confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt);
+    bool confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt, qint64 maxAgeSecs);
     /// Removes the files of the store which no entry refers to
     void removeUnreferencedFiles() const;
     /// Writes the entries of the sources with the keys, in this order. Does nothing when read only.

@@ -10,6 +10,7 @@
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneProviders.h"
+#include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneSource.h"
 
 #include <QtConcurrent/QtConcurrentRun>
@@ -18,7 +19,6 @@
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QLocale>
 #include <QtCore/QScopeGuard>
-#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 
 GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObject *parent)
@@ -26,12 +26,13 @@ GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObj
     , _store(storageDir)
     , _index(_store)
     , _downloader(new GeoZoneDownloader(this))
-    , _refreshTimer(new QTimer(this))
+    , _scheduler(new GeoZoneRefreshScheduler([this]() { return _sources; }, this))
 {
     _downloader->setDirectory(_store.downloadDir());
 
-    _refreshTimer->setInterval(_refreshCheckIntervalMSecs);
-    (void) connect(_refreshTimer, &QTimer::timeout, this, &GeoZoneSourceRepository::_refreshDueFeeds);
+    (void) connect(_scheduler, &GeoZoneRefreshScheduler::refreshDue, this, [this](GeoZoneSource *source) {
+        _download(source->url(), GeoZoneLoader::Request::Automatic);
+    });
 
     (void) connect(_downloader, &GeoZoneDownloader::progressChanged, this, &GeoZoneSourceRepository::progressChanged);
 }
@@ -53,7 +54,7 @@ void GeoZoneSourceRepository::init()
     _startupRefreshPending = true;
     _startupCheckPending = true;
     loadStoredSources(LoadMode::Background);
-    _refreshTimer->start();
+    _scheduler->start();
     if (!busy()) {
         _idle();
     }
@@ -120,17 +121,6 @@ void GeoZoneSourceRepository::refreshFeeds()
         const GeoZoneSource *const source = _sources[i];
         if (source->isFeed()) {
             _download(source->url(), GeoZoneLoader::Request::User);
-        }
-    }
-}
-
-void GeoZoneSourceRepository::_refreshDueFeeds()
-{
-    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
-    for (int i = 0; i < _sources.count(); i++) {
-        const GeoZoneSource *const source = _sources[i];
-        if (!source->busy() && source->refreshDue(now)) {
-            _download(source->url(), GeoZoneLoader::Request::Automatic);
         }
     }
 }
@@ -203,6 +193,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         job.etag = result.etag;
         job.lastModified = result.lastModified;
         job.datasetUrl = result.datasetUrl;
+        job.maxAgeSecs = result.maxAgeSecs;
         job.request = request;
         job.cancelToken = fetch->cancelToken();
         _startLoad(job, LoadMode::Background);
@@ -216,7 +207,8 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         existing->setStoredDates(now, now);
         existing->setBusy(false);
         existing->setErrorString(QString());
-        if (_index.confirm(url, existing->etag(), existing->lastModified(), now)) {
+        _scheduler->refreshSucceeded(url, result.maxAgeSecs);
+        if (_index.confirm(url, existing->etag(), existing->lastModified(), now, result.maxAgeSecs)) {
             _saveIndex();
         }
         updateValidity();
@@ -228,6 +220,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     if (existing) {
         existing->setBusy(false);
         existing->setErrorString(error);
+        _scheduler->refreshFailed(*existing);
     }
     if (request != GeoZoneLoader::Request::Automatic) {
         emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
@@ -314,6 +307,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         qCWarning(GeoZoneSourceLog) << "Load failed" << job.key << loadResult.errorString;
         if (source) {
             source->setErrorString(loadResult.errorString);
+            _scheduler->refreshFailed(*source);
         }
         if (job.request != GeoZoneLoader::Request::Automatic) {
             emit loadFailed(job.key, tr("Geozone file load failed. %1").arg(loadResult.errorString));
@@ -338,6 +332,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         qCDebug(GeoZoneSourceLog) << "Loaded" << source->zoneCount() << source->formatName() << "zones from" << job.key;
     }
     source->setErrorString(QString());
+    _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
     // Companions of the stored copy are reused for the next download
     if (!loadResult.result.companions.isEmpty()) {
         _companions.insert(job.key, loadResult.result.companions);
@@ -392,6 +387,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
         entry.etag = job.etag;
         entry.lastModified = job.lastModified;
         entry.datasetUrl = job.datasetUrl;
+        entry.maxAgeSecs = job.maxAgeSecs;
     }
     _index.replace(entry);
     _saveIndex();
@@ -423,7 +419,7 @@ void GeoZoneSourceRepository::_idle()
 {
     if (_startupRefreshPending) {
         _startupRefreshPending = false;
-        _refreshDueFeeds();
+        _scheduler->check();
         if (busy()) {
             return;
         }
@@ -467,6 +463,7 @@ void GeoZoneSourceRepository::removeSource(int index)
         source->setBusy(false);
     }
     _companions.remove(source->key());
+    _scheduler->remove(source->key());
     emit sourceAboutToChange(source);
     _sources.removeAt(index);
     emit sourceRemoved(index);
@@ -524,6 +521,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         job.etag = entry.etag;
         job.lastModified = entry.lastModified;
         job.datasetUrl = entry.datasetUrl;
+        job.maxAgeSecs = entry.maxAgeSecs;
         if (job.key.isEmpty() || entry.fileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
             qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source" << job.key << entry.fileName;
             continue;

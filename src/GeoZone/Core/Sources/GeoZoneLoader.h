@@ -45,6 +45,7 @@ public:
         QString etag;               ///< HTTP validators of a downloaded feed
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
+        qint64 maxAgeSecs = -1;     ///< How long the server said a downloaded feed stays current, negative when it didn't
         QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
         Request request = Request::Automatic;
         GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops before parsing or storing

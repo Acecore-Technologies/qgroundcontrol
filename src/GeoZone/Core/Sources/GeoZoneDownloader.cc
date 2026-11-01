@@ -13,6 +13,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QLocale>
+#include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
 #include <QtCore/QUrl>
 #include <QtNetwork/QNetworkAccessManager>
@@ -141,6 +142,7 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
         download.file->close();
 
         Result result;
+        result.maxAgeSecs = maxAgeSecs(reply->rawHeader("Cache-Control"), reply->rawHeader("Expires"), reply->rawHeader("Date"), reply->rawHeader("Age"));
         if (download.aborted) {
             result.errorString = tr("The download was canceled.");
         } else if (!download.writeError.isEmpty()) {
@@ -173,6 +175,40 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
         }
         callback(result);
     });
+}
+
+qint64 GeoZoneDownloader::maxAgeSecs(const QByteArray &cacheControl, const QByteArray &expires, const QByteArray &date, const QByteArray &age)
+{
+    const auto httpDate = [](const QByteArray &value) {
+        const QDateTime parsed = QLocale::c().toDateTime(QString::fromLatin1(value.trimmed()), QStringLiteral("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
+        return parsed.isValid() ? QDateTime(parsed.date(), parsed.time(), QTimeZone::UTC) : QDateTime();
+    };
+
+    qint64 lifetime = -1;
+    bool hasMaxAge = false;
+    for (const QByteArray &directive : cacheControl.split(',')) {
+        const QByteArray trimmed = directive.trimmed().toLower();
+        if (trimmed.startsWith("max-age=")) {
+            bool ok = false;
+            const qint64 value = trimmed.mid(8).replace('"', QByteArray()).toLongLong(&ok);
+            if (ok) {
+                lifetime = value;
+                hasMaxAge = true;
+            }
+        }
+    }
+    if (!hasMaxAge && !expires.isEmpty()) {
+        // Relative to the server's Date, so that the clocks needn't agree
+        const QDateTime expiresAt = httpDate(expires);
+        const QDateTime sentAt = date.isEmpty() ? GeoZoneEnvironment::currentDateTimeUtc() : httpDate(date);
+        if (expiresAt.isValid() && sentAt.isValid()) {
+            lifetime = sentAt.secsTo(expiresAt);
+        }
+    }
+    if ((lifetime > 0) && !age.isEmpty()) {
+        lifetime -= age.trimmed().toLongLong();
+    }
+    return (lifetime > 0) ? lifetime : -1;
 }
 
 double GeoZoneDownloader::progress() const

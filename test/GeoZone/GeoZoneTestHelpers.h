@@ -24,6 +24,7 @@
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneProviders.h"
+#include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneStore.h"

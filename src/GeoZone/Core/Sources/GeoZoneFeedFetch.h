@@ -64,6 +64,7 @@ public:
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, empty when the feed URL is the dataset
         QString errorString;
+        qint64 maxAgeSecs = -1;     ///< Shortest time the server said the feed or its dataset stays current, negative without
     };
 
     /// @param downloader Shared with other fetches, each cancels its own downloads
@@ -103,6 +104,7 @@ private:
     void _fetchCompanions();
     void _companionsReceived();
     void _finish(Result::Status status, const QString &errorString = QString());
+    void _addMaxAge(qint64 maxAgeSecs);
 
     QPointer<GeoZoneDownloader> _downloader;
     Request _request;

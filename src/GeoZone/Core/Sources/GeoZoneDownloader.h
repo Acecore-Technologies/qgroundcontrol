@@ -40,6 +40,7 @@ public:
         QString etag;
         QString lastModified;
         QString errorString;
+        qint64 maxAgeSecs = -1; ///< How long the server said the data stays current, negative when it didn't
     };
     using Callback = std::function<void(const Result &result)>;
 
@@ -59,6 +60,10 @@ public:
     /// Directory in which downloads are written, the temporary directory by default
     QString directory() const { return _directory; }
     void setDirectory(const QString &directory) { _directory = directory; }
+
+    /// @return Seconds the response stays current from its headers: Cache-Control max-age, or Expires after Date,
+    ///         less its Age. Negative when the response doesn't tell, or tells to revalidate it at once.
+    static qint64 maxAgeSecs(const QByteArray &cacheControl, const QByteArray &expires, const QByteArray &date, const QByteArray &age);
 
     /// @return Content of a downloaded file, empty when it is larger than maxBytes or can't be read
     static QByteArray readFile(const QString &filePath, qint64 maxBytes);

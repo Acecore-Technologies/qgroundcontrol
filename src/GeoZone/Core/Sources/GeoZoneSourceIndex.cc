@@ -28,6 +28,7 @@ constexpr const char *etagKey = "etag";
 constexpr const char *lastModifiedKey = "lastModified";
 constexpr const char *datasetUrlKey = "datasetUrl";
 constexpr const char *enabledKey = "enabled";
+constexpr const char *maxAgeKey = "maxAge";
 constexpr const char *sourcesKey = "sources";
 constexpr const char *versionKey = "version";
 
@@ -78,6 +79,7 @@ GeoZoneSourceIndex::Contents GeoZoneSourceIndex::read() const
             entry.lastModified = object.value(lastModifiedKey).toString();
             entry.enabled = object.value(enabledKey).toBool(true);
             entry.datasetUrl = object.value(datasetUrlKey).toString();
+            entry.maxAgeSecs = object.value(maxAgeKey).toInteger(-1);
             contents.entries.append(entry);
         }
         contents.status = Status::Ok;
@@ -140,6 +142,9 @@ bool GeoZoneSourceIndex::write(const QList<Entry> &entries, QString &errorString
         if (!entry.datasetUrl.isEmpty()) {
             object.insert(datasetUrlKey, entry.datasetUrl);
         }
+        if (entry.maxAgeSecs > 0) {
+            object.insert(maxAgeKey, entry.maxAgeSecs);
+        }
         values.append(object);
     }
 
@@ -173,7 +178,7 @@ bool GeoZoneSourceIndex::setEnabled(const QString &key, bool enabled)
     return true;
 }
 
-bool GeoZoneSourceIndex::confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt)
+bool GeoZoneSourceIndex::confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt, qint64 maxAgeSecs)
 {
     // The stored copy is only confirmed current when it is the version the validators belong to
     const auto it = _entries.find(key);
@@ -182,6 +187,7 @@ bool GeoZoneSourceIndex::confirm(const QString &key, const QString &etag, const 
     }
     it->loadedAt = checkedAt;
     it->fileDate = checkedAt;
+    it->maxAgeSecs = maxAgeSecs;
     return true;
 }
 

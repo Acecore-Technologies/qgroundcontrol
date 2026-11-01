@@ -119,18 +119,6 @@ public:
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
     bool isLive() const { return GeoZoneProviders::isLive(_format); }
 
-    /// @return Seconds after which a feed is downloaded again, from the refresh intervals of
-    ///         GeoZoneEnvironment::sourceSettings
-    int refreshIntervalSecs() const;
-
-    /// @return true if a feed should be downloaded again: when it is older than the refresh interval, or after a
-    ///         failed refresh once its retry delay passed
-    bool refreshDue(const QDateTime &now) const;
-
-    static constexpr int minRetrySecs = 5 * 60;     ///< After the first failed refresh, doubling with each failure
-    static constexpr int maxRetrySecs = 6 * 3600;   ///< Or the refresh interval when shorter
-    QDateTime retryAt() const { return _retryAt; }
-
 signals:
     void changed();
     void validityChanged();
@@ -163,8 +151,6 @@ private:
     bool _busy = false;
     QString _changesText;
     QSet<QString> _changedZoneKeys;
-    int _failureCount = 0;      ///< Refreshes failed in a row
-    QDateTime _retryAt;         ///< Earliest automatic refresh after a failure
     bool _enabled = true;
     QString _errorString;
     QByteArray _contentHash;
