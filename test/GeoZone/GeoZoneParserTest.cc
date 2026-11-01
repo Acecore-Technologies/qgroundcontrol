@@ -636,6 +636,41 @@ void GeoZoneParserTest::_testParserFuzz()
     QVERIFY2(loadedCount > 400, qPrintable(QString::number(loadedCount)));
 }
 
+void GeoZoneParserTest::_testFuzzFindings()
+{
+    // Documents found by the fuzz targets, whose numbers were out of the range of int
+    GeoZoneParser::Result result;
+    QString errorString;
+
+    // A web feature service response limited to far fewer features than it matched
+    const QByteArray limited = R"({ "type": "FeatureCollection", "numberMatched": 1e300, "numberReturned": 1, "features": [ { "type": "Feature",
+        "properties": { "type": "PROHIBITED" }, "geometry": { "type": "Polygon", "coordinates": [ [ [8, 47], [8.01, 47], [8.01, 47.01], [8, 47] ] ] } } ] })";
+    QVERIFY2(GeoZoneParser::parse(limited, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.missingFeatures, std::numeric_limits<int>::max());
+
+    // AIXM arcs sweeping more than a turn end after one, those with angles which aren't numbers are left out
+    const QString aixm = QStringLiteral(R"(<message:AIXMBasicMessage xmlns:message="http://www.aixm.aero/schema/5.1/message"
+        xmlns:aixm="http://www.aixm.aero/schema/5.1" xmlns:gml="http://www.opengis.net/gml/3.2"><message:hasMember><aixm:Airspace>
+        <aixm:timeSlice><aixm:AirspaceTimeSlice><aixm:type>R</aixm:type><aixm:designator>ARC</aixm:designator>
+        <aixm:geometryComponent><aixm:AirspaceGeometryComponent><aixm:theAirspaceVolume><aixm:AirspaceVolume>
+        <aixm:horizontalProjection><aixm:Surface><gml:patches><gml:PolygonPatch><gml:exterior><gml:Ring><gml:curveMember><gml:Curve>
+        <gml:segments><gml:ArcByCenterPoint><gml:pointProperty><aixm:Point><gml:pos>51.3 -0.8</gml:pos></aixm:Point></gml:pointProperty>
+        <gml:radius uom="[nmi_i]">2</gml:radius><gml:startAngle uom="deg">0</gml:startAngle><gml:endAngle uom="deg">%1</gml:endAngle>
+        </gml:ArcByCenterPoint></gml:segments></gml:Curve></gml:curveMember></gml:Ring></gml:exterior></gml:PolygonPatch></gml:patches>
+        </aixm:Surface></aixm:horizontalProjection></aixm:AirspaceVolume></aixm:theAirspaceVolume></aixm:AirspaceGeometryComponent>
+        </aixm:geometryComponent></aixm:AirspaceTimeSlice></aixm:timeSlice></aixm:Airspace></message:hasMember></message:AIXMBasicMessage>)");
+    for (const QString &endAngle : { QStringLiteral("1e6"), QStringLiteral("1e12") }) {
+        QVERIFY2(GeoZoneParser::parse(aixm.arg(endAngle).toUtf8(), result, errorString), qPrintable(errorString));
+        QCOMPARE(result.zones.count(), 1);
+        QVERIFY(qAbs(result.zones[0].volumes[0].rings[0].count() - 120) <= 1);
+        QVERIFY(GeoZone(result.zones[0]).contains(QGeoCoordinate(51.3, -0.8)));
+    }
+    for (const QString &endAngle : { QStringLiteral("inf"), QStringLiteral("nan") }) {
+        QVERIFY(!GeoZoneParser::parse(aixm.arg(endAngle).toUtf8(), result, errorString));
+        QVERIFY(!errorString.isEmpty());
+    }
+}
+
 void GeoZoneParserTest::_testDisplayText()
 {
     const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));

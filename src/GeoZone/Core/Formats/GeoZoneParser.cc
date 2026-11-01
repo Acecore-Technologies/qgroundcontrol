@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 
 Q_LOGGING_CATEGORY(GeoZoneParserLog, "qgc.geozone.geozoneparser")
 
@@ -147,7 +148,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     const double matched = _number(root.value(QStringLiteral("numberMatched")));
     const double returned = _number(root.value(QStringLiteral("numberReturned")));
     if (!std::isnan(matched) && !std::isnan(returned) && (matched > returned)) {
-        result.missingFeatures = static_cast<int>(matched - returned);
+        result.missingFeatures = static_cast<int>((std::min)(matched - returned, static_cast<double>(std::numeric_limits<int>::max())));
     }
 
     const GeoZoneFormat *format = nullptr;

@@ -14,6 +14,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QXmlStreamReader>
 
+#include <algorithm>
 #include <cmath>
 
 using namespace GeoZoneParserUtils;
@@ -185,9 +186,10 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
             }
         } else if (reader.isEndElement() && inAirspace) {
             if (!segment.isEmpty() && (name == segment)) {
-                if ((segment == QLatin1String("ArcByCenterPoint")) && !points.isEmpty() && (radius > 0) && !std::isnan(startAngle) && !std::isnan(endAngle)) {
-                    // The sweep is signed, clockwise when the end bearing is larger
-                    const double sweep = endAngle - startAngle;
+                if ((segment == QLatin1String("ArcByCenterPoint")) && !points.isEmpty() && (radius > 0) && std::isfinite(startAngle) && std::isfinite(endAngle)) {
+                    // The sweep is signed, clockwise when the end bearing is larger. Arcs of more than a turn are
+                    // malformed, they end after one.
+                    const double sweep = std::clamp(endAngle - startAngle, -360.0, 360.0);
                     const int steps = (std::max)(1, static_cast<int>(std::ceil(std::abs(sweep) / 3)));
                     QList<QGeoCoordinate> arc;
                     for (int i = 0; i <= steps; i++) {

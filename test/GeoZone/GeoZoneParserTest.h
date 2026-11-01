@@ -26,6 +26,7 @@ private slots:
     void _testParseErrors();
     void _testXmlAndPackages();
     void _testParserFuzz();
+    void _testFuzzFindings();
     void _testDisplayText();
     void _testProviders();
 };
