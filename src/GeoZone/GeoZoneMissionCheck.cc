@@ -19,10 +19,13 @@
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QGCMapPolygon.h"
+#include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
+#include "SimpleMissionItem.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFutureWatcher>
+#include <QtCore/QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -66,10 +69,34 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionCheck::_scheduleUpdate);
         (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
         (void) connect(_missionController, &MissionController::missionTimeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_connectMissionItems);
+        // The return altitude is a vehicle parameter
+        if (PlanMasterController *const masterController = _missionController->masterController()) {
+            (void) connect(masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        }
+        _connectMissionItems();
     }
 
     emit missionControllerChanged();
     _scheduleUpdate();
+}
+
+void GeoZoneMissionCheck::_connectMissionItems()
+{
+    QmlObjectListModel *const visualItems = _missionController ? _missionController->visualItems() : nullptr;
+    if (!visualItems) {
+        return;
+    }
+    // Loiter radii, commands and transitions change the paths checked besides the flight path
+    (void) connect(visualItems, &QmlObjectListModel::countChanged, this, &GeoZoneMissionCheck::_connectMissionItems, Qt::UniqueConnection);
+    for (int i = 0; i < visualItems->count(); i++) {
+        if (SimpleMissionItem *const item = visualItems->value<SimpleMissionItem*>(i)) {
+            (void) connect(item, &SimpleMissionItem::loiterRadiusChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+            (void) connect(item, &SimpleMissionItem::commandChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+            (void) connect(item, &VisualMissionItem::currentVTOLModeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+        }
+    }
 }
 
 void GeoZoneMissionCheck::setFlightNow(bool flightNow)
@@ -197,7 +224,25 @@ bool GeoZoneMissionCheck::fenceExcludes(GeoFenceController *geoFenceController, 
 
 QString GeoZoneMissionCheck::warningText() const
 {
-    return _crossedZones.isEmpty() ? QString() : tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, NameStyle::WithRestriction));
+    if (_crossedZones.isEmpty()) {
+        return QString();
+    }
+    QStringList lines = { tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, NameStyle::WithRestriction)) };
+    // Zones entered besides the drawn flight path, like by a loiter circle or the return to launch
+    QStringList labels;
+    QHash<QString, QList<GeoZone*>> labelZones;
+    for (GeoZone *zone : _crossedZones) {
+        for (const QString &label : _pathLabels.value(zone)) {
+            if (!labels.contains(label)) {
+                labels.append(label);
+            }
+            labelZones[label].append(zone);
+        }
+    }
+    for (const QString &label : std::as_const(labels)) {
+        lines.append(tr("Only %1 enters %2.").arg(label, _zoneNames(labelZones.value(label), NameStyle::Name)));
+    }
+    return lines.join(QStringLiteral("\n"));
 }
 
 QString GeoZoneMissionCheck::infoText() const
@@ -249,6 +294,7 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
     _evaluation++;
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
+    (void) _pathLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
                               _authorisedZones.removeIf(fromSource) +
                               _unfencedZones.removeIf(fromSource);
@@ -261,7 +307,7 @@ void GeoZoneMissionCheck::update()
 {
     _updateTimer.stop();
     _evaluation++;
-    _apply(zonesOnPath(_manager->catalog(), GeoZoneMissionPath::fromMission(_missionController)));
+    _apply(evaluate(_manager->catalog(), GeoZoneMissionPath::fromMission(_missionController)));
 }
 
 void GeoZoneMissionCheck::_updateConcurrently()
@@ -269,7 +315,7 @@ void GeoZoneMissionCheck::_updateConcurrently()
     const quint64 evaluation = ++_evaluation;
     const GeoZoneCatalog catalog = _manager->catalog();
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController);
-    auto *const watcher = new QFutureWatcher<QList<GeoZone*>>(this);
+    auto *const watcher = new QFutureWatcher<Evaluation>(this);
     (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {
         watcher->deleteLater();
         // Zones of an outdated evaluation may be gone
@@ -277,32 +323,44 @@ void GeoZoneMissionCheck::_updateConcurrently()
             _apply(watcher->result());
         }
     });
-    watcher->setFuture(QtConcurrent::run([catalog, path]() { return zonesOnPath(catalog, path); }));
+    watcher->setFuture(QtConcurrent::run([catalog, path]() { return evaluate(catalog, path); }));
 }
 
-QList<GeoZone*> GeoZoneMissionCheck::zonesOnPath(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path)
+GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path)
 {
     const GeoZonePolicy anyTime = GeoZonePolicy::mission(QDateTime(), QDateTime());
-    QList<GeoZone*> zones;
+    Evaluation evaluation;
+    QSet<const GeoZone*> onFlightPath;
     for (const GeoZoneCatalog::PathHit &hit : catalog.pathHits(path.positionLists(), anyTime)) {
-        if (!zones.contains(hit.zone)) {
-            zones.append(hit.zone);
+        if (!evaluation.zones.contains(hit.zone)) {
+            evaluation.zones.append(hit.zone);
+        }
+        const QString &label = path.paths()[hit.path].label;
+        if (label.isEmpty()) {
+            onFlightPath.insert(hit.zone);
+        } else if (!evaluation.pathLabels[hit.zone].contains(label)) {
+            evaluation.pathLabels[hit.zone].append(label);
         }
     }
     // Camera footprints and turns extend past the flight lines, so whole areas count
     for (GeoZone *zone : catalog.zonesIntersectingAreas(path.areas(), anyTime)) {
-        if (!zones.contains(zone)) {
-            zones.append(zone);
+        onFlightPath.insert(zone);
+        if (!evaluation.zones.contains(zone)) {
+            evaluation.zones.append(zone);
         }
     }
-    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
+    for (const GeoZone *zone : std::as_const(onFlightPath)) {
+        (void) evaluation.pathLabels.remove(zone);
+    }
+    std::stable_sort(evaluation.zones.begin(), evaluation.zones.end(), [](const GeoZone *a, const GeoZone *b) {
         return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
     });
-    return zones;
+    return evaluation;
 }
 
-void GeoZoneMissionCheck::_apply(QList<GeoZone*> zones)
+void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
 {
+    QList<GeoZone*> zones = evaluation.zones;
     // Zones which aren't active at any time during the planned flight don't apply
     auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
     if (_flightNow) {
@@ -345,7 +403,8 @@ void GeoZoneMissionCheck::_apply(QList<GeoZone*> zones)
     }
 
     if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (authorised != _authorisedZones) || (inactiveZoneCount != _inactiveZoneCount) ||
-        (unfenced != _unfencedZones)) {
+        (unfenced != _unfencedZones) || (evaluation.pathLabels != _pathLabels)) {
+        _pathLabels = evaluation.pathLabels;
         _unfencedZones = unfenced;
         _crossedZones = crossed;
         _uSpaceZones = uSpace;

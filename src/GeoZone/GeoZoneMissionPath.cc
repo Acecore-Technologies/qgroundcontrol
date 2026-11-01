@@ -10,11 +10,19 @@
 #include "GeoZoneMissionPath.h"
 #include "ComplexMissionItem.h"
 #include "FlightPathSegment.h"
+#include "GeoZoneTerrain.h"
+#include "LandingComplexItem.h"
 #include "MissionController.h"
+#include "ParameterManager.h"
+#include "PlanMasterController.h"
+#include "PlanViewSettings.h"
 #include "QGCMapPolygon.h"
 #include "QmlObjectListModel.h"
+#include "SettingsManager.h"
+#include "SimpleMissionItem.h"
 #include "StructureScanComplexItem.h"
 #include "TransectStyleComplexItem.h"
+#include "Vehicle.h"
 #include "VisualMissionItem.h"
 
 #include <QtPositioning/QGeoRectangle>
@@ -171,7 +179,164 @@ GeoZoneMissionPath GeoZoneMissionPath::fromMission(MissionController *missionCon
     }
 
     path._paths = pathsFromSegments(path._segments);
+    path._appendCoverage(missionController, coordinateItems);
     return path;
+}
+
+void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, const QList<int> &coordinateItems)
+{
+    const QmlObjectListModel *const visualItems = missionController->visualItems();
+
+    // Terrain at a position of the flight path, from the segment ending or starting there
+    const auto terrainAtPathPosition = [this](const QGeoCoordinate &coordinate) {
+        for (const Segment &segment : std::as_const(_segments)) {
+            if (segment.terrainAMSL.isEmpty()) {
+                continue;
+            }
+            if (segment.to.isValid() && (segment.to.distanceTo(coordinate) < 1)) {
+                return segment.terrainAMSL.last();
+            }
+            if (segment.from.isValid() && (segment.from.distanceTo(coordinate) < 1)) {
+                return segment.terrainAMSL.first();
+            }
+        }
+        return qQNaN();
+    };
+    // The terrain tiles give the terrain along the path where they are loaded, the nearest flight path position's elsewhere
+    const auto appendPath = [this, &terrainAtPathPosition](QList<GeoZone::Position> positions, int itemIndex, const QString &label) {
+        if (positions.count() < 2) {
+            return;
+        }
+        if (qIsNaN(positions.first().terrainAMSL)) {
+            positions.first().terrainAMSL = terrainAtPathPosition(positions.first().coordinate);
+        }
+        _paths.append(Path{ GeoZoneTerrain::withTerrain(positions), itemIndex, label });
+    };
+    const auto previousCoordinateItems = [&coordinateItems](int index) {
+        QList<int> previous;
+        for (const int item : coordinateItems) {
+            if (item < index) {
+                previous.append(item);
+            }
+        }
+        return previous;
+    };
+
+    const double transitionDistance = SettingsManager::instance()->planViewSettings()->vtolTransitionDistance()->rawValue().toDouble();
+    int returnItem = -1;
+    for (int i = 0; i < visualItems->count(); i++) {
+        VisualMissionItem *const visualItem = visualItems->value<VisualMissionItem*>(i);
+        if (SimpleMissionItem *const simpleItem = qobject_cast<SimpleMissionItem*>(visualItem)) {
+            const int command = simpleItem->command();
+            if (simpleItem->isLoiterItem() && simpleItem->coordinate().isValid()) {
+                // Without a radius the vehicle's default applies, multicopters hover at the waypoint
+                const double radius = std::abs(simpleItem->loiterRadius());
+                if (radius > 0) {
+                    appendPath(circle(simpleItem->coordinate(), radius, simpleItem->amslEntryAlt(), qQNaN()), i,
+                               tr("the loiter at item %1").arg(simpleItem->sequenceNumber()));
+                }
+            } else if (command == MAV_CMD_DO_VTOL_TRANSITION) {
+                // Transitions take about the transition distance, flying on past the waypoints they follow or lead to
+                const QList<int> previous = previousCoordinateItems(i);
+                const auto next = std::find_if(coordinateItems.cbegin(), coordinateItems.cend(), [i](int item) { return item > i; });
+                if (previous.isEmpty() || (transitionDistance <= 0)) {
+                    continue;
+                }
+                const VisualMissionItem *const startItem = visualItems->value<const VisualMissionItem*>(previous.last());
+                const QGeoCoordinate start = startItem->exitCoordinate();
+                QGeoCoordinate overshootFrom;
+                double azimuth = qQNaN();
+                double overshoot = 0;
+                const int state = qRound(simpleItem->missionItem().param1());
+                if ((state == MAV_VTOL_STATE_MC) && (previous.count() >= 2)) {
+                    // Slowing down to hover after the waypoint, along the leg to it
+                    const QGeoCoordinate before = visualItems->value<const VisualMissionItem*>(previous[previous.count() - 2])->exitCoordinate();
+                    if (before.isValid() && (before.distanceTo(start) > 1)) {
+                        overshootFrom = start;
+                        azimuth = before.azimuthTo(start);
+                        overshoot = transitionDistance;
+                    }
+                } else if ((state == MAV_VTOL_STATE_FW) && (next != coordinateItems.cend())) {
+                    // Speeding up towards the next waypoint, past it when it is closer than the transition distance
+                    const QGeoCoordinate end = visualItems->value<const VisualMissionItem*>(*next)->coordinate();
+                    if (end.isValid() && (start.distanceTo(end) > 1)) {
+                        overshootFrom = end;
+                        azimuth = start.azimuthTo(end);
+                        overshoot = transitionDistance - start.distanceTo(end);
+                    }
+                }
+                if (overshootFrom.isValid() && (overshoot > 0)) {
+                    const double altitude = startItem->amslExitAlt();
+                    appendPath({ GeoZone::Position{ overshootFrom, altitude }, GeoZone::Position{ overshootFrom.atDistanceAndAzimuth(overshoot, azimuth), altitude } }, i,
+                               tr("the VTOL transition at item %1").arg(simpleItem->sequenceNumber()));
+                }
+            } else if (command == MAV_CMD_NAV_RETURN_TO_LAUNCH) {
+                returnItem = i;
+            }
+        } else if (LandingComplexItem *const landingItem = qobject_cast<LandingComplexItem*>(visualItem)) {
+            const double radius = landingItem->loiterRadius()->rawValue().toDouble();
+            if (landingItem->useLoiterToAlt()->rawValue().toBool() && landingItem->finalApproachCoordinate().isValid() && (radius > 0)) {
+                appendPath(circle(landingItem->finalApproachCoordinate(), radius, landingItem->amslEntryAlt(), qQNaN()), i,
+                           tr("the landing pattern loiter at item %1").arg(landingItem->sequenceNumber()));
+            }
+        }
+    }
+
+    // Straight home at the return altitude, climbing to it first
+    const QList<int> beforeReturn = previousCoordinateItems(returnItem);
+    const QGeoCoordinate home = missionController->plannedHomePosition();
+    if ((returnItem >= 0) && !beforeReturn.isEmpty() && home.isValid()) {
+        const VisualMissionItem *const lastItem = visualItems->value<const VisualMissionItem*>(beforeReturn.last());
+        const QGeoCoordinate from = lastItem->exitCoordinate();
+        const double fromAltitude = lastItem->amslExitAlt();
+        const double homeAltitude = home.altitude();
+        PlanMasterController *const masterController = missionController->masterController();
+        const double returnHeight = returnAltitude(masterController ? masterController->managerVehicle() : nullptr);
+        double cruise = qQNaN();
+        if (!qIsNaN(returnHeight) && !qIsNaN(fromAltitude) && !qIsNaN(homeAltitude)) {
+            cruise = (returnHeight > 0) ? (std::max)(fromAltitude, homeAltitude + returnHeight) : fromAltitude;
+        }
+        const QString label = qIsNaN(cruise) ? tr("the return to launch at an unknown altitude") : tr("the return to launch");
+        const QGeoCoordinate homePosition(home.latitude(), home.longitude());
+        if (from.isValid() && (from.distanceTo(homePosition) > 1)) {
+            for (const Path &returnPath : pathsFromSegments({ Segment{ from, from, fromAltitude, cruise }, Segment{ from, homePosition, cruise, cruise },
+                                                              Segment{ homePosition, homePosition, cruise, homeAltitude } })) {
+                appendPath(returnPath.positions, returnItem, label);
+            }
+        }
+    }
+}
+
+double GeoZoneMissionPath::returnAltitude(Vehicle *vehicle)
+{
+    if (!vehicle || vehicle->isOfflineEditingVehicle() || !vehicle->parameterManager() || !vehicle->parameterManager()->parametersReady()) {
+        return qQNaN();
+    }
+    // PX4 and ArduPlane in meters, ArduCopter and older ArduPlane in centimeters. Zero or less returns at the current altitude.
+    static const QList<std::pair<QString, double>> parameters = {
+        { QStringLiteral("RTL_RETURN_ALT"), 1.0 },
+        { QStringLiteral("RTL_ALTITUDE"), 1.0 },
+        { QStringLiteral("RTL_ALT"), 0.01 },
+        { QStringLiteral("ALT_HOLD_RTL"), 0.01 },
+    };
+    ParameterManager *const parameterManager = vehicle->parameterManager();
+    for (const auto &[name, scale] : parameters) {
+        if (parameterManager->parameterExists(ParameterManager::defaultComponentId, name)) {
+            const double value = parameterManager->getParameter(ParameterManager::defaultComponentId, name)->rawValue().toDouble() * scale;
+            return (value > 0) ? value : 0;
+        }
+    }
+    return qQNaN();
+}
+
+QList<GeoZone::Position> GeoZoneMissionPath::circle(const QGeoCoordinate &center, double radius, double altitudeAMSL, double terrainAMSL)
+{
+    QList<GeoZone::Position> positions;
+    positions.reserve(circleVertexCount + 1);
+    for (int i = 0; i <= circleVertexCount; i++) {
+        positions.append(GeoZone::Position{ center.atDistanceAndAzimuth(radius, (360.0 * (i % circleVertexCount)) / circleVertexCount), altitudeAMSL, terrainAMSL });
+    }
+    return positions;
 }
 
 GeoZoneMissionPath GeoZoneMissionPath::fromSegments(const QList<Segment> &segments, const QList<GeoZone::Area> &areas)

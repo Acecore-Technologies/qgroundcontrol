@@ -197,6 +197,67 @@ void GeoZonePlanningTest::_testMissionCheck()
     QVERIFY(check.crossedZones().isEmpty());
 }
 
+void GeoZonePlanningTest::_testMissionCoverage()
+{
+    // L under a loiter circle away from the legs, V past a back transition, and R on the way home above the mission
+    const QGeoCoordinate home(47, 8);
+    const QGeoCoordinate loiter = home.atDistanceAndAzimuth(2000, 90);
+    const QGeoCoordinate last = loiter.atDistanceAndAzimuth(2000, 0);
+    QJsonObject returnZone = _circleFeature(QStringLiteral("R"), QStringLiteral("PROHIBITED"), home.atDistanceAndAzimuth(home.distanceTo(last) / 2, home.azimuthTo(last)), 100);
+    QJsonArray geometry = returnZone[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = 1000;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
+    layer[QStringLiteral("upperLimit")] = 2000;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
+    geometry[0] = layer;
+    returnZone[QStringLiteral("geometry")] = geometry;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("L"), QStringLiteral("PROHIBITED"), loiter.atDistanceAndAzimuth(300, 180), 40),
+        _circleFeature(QStringLiteral("V"), QStringLiteral("PROHIBITED"), last.atDistanceAndAzimuth(150, 0), 30),
+        returnZone,
+    }), errorString), qPrintable(errorString));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    missionController->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(home.latitude(), home.longitude(), 400));
+    SimpleMissionItem *const loiterItem = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(loiter, 1));
+    QVERIFY(loiterItem);
+    loiterItem->setCommand(MAV_CMD_NAV_LOITER_UNLIM);
+    loiterItem->setRadius(300);
+    (void) missionController->insertSimpleMissionItem(last, 2);
+    SimpleMissionItem *const transitionItem = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(last, 3));
+    transitionItem->setCommand(MAV_CMD_DO_VTOL_TRANSITION);
+    transitionItem->missionItem().setParam1(MAV_VTOL_STATE_MC);
+    SimpleMissionItem *const returnItem = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(last, 4));
+    returnItem->setCommand(MAV_CMD_NAV_RETURN_TO_LAUNCH);
+
+    // The drawn flight path enters none of them, the vehicle's return altitude is unknown offline
+    GeoZoneMissionCheck check(&manager);
+    check.setMissionController(missionController);
+    QTRY_COMPARE(check.crossedZones().count(), 3);
+    const auto zone = [&check](const QString &identifier) {
+        const auto it = std::find_if(check.crossedZones().cbegin(), check.crossedZones().cend(), [&identifier](const GeoZone *crossed) { return crossed->identifier() == identifier; });
+        return (it != check.crossedZones().cend()) ? *it : nullptr;
+    };
+    QCOMPARE(check.pathLabels(zone(QStringLiteral("L"))), QStringList({ QStringLiteral("the loiter at item 1") }));
+    QCOMPARE(check.pathLabels(zone(QStringLiteral("V"))), QStringList({ QStringLiteral("the VTOL transition at item 3") }));
+    QCOMPARE(check.pathLabels(zone(QStringLiteral("R"))), QStringList({ QStringLiteral("the return to launch at an unknown altitude") }));
+    QVERIFY2(check.warningText().contains(QStringLiteral("Only the loiter at item 1 enters L.")), qPrintable(check.warningText()));
+
+    // A smaller loiter stays clear of L
+    loiterItem->setRadius(100);
+    QTRY_VERIFY(!zone(QStringLiteral("L")));
+    QCOMPARE(check.crossedZones().count(), 2);
+}
+
 void GeoZonePlanningTest::_testAuthorisations()
 {
     const QGeoCoordinate center(47, 8);

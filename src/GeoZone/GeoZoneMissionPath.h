@@ -9,18 +9,24 @@
 
 #pragma once
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QList>
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
 
 class MissionController;
+class Vehicle;
 
 /// Flight path of a planned mission as the geozone checks see it: the segments flown with their altitudes and
-/// terrain, the areas of patterns, and the legs between mission items. Built on the GUI thread from the
+/// terrain, the areas of patterns, and the legs between mission items. Besides the flight path the mission
+/// controller draws, it covers loiter circles, the loiter of landing patterns, the distance VTOL transitions
+/// overshoot and the return to launch at the vehicle's return altitude. Built on the GUI thread from the
 /// MissionController, then only read, so that zone checks can run on other threads.
 class GeoZoneMissionPath
 {
+    Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionPath)
+
 public:
     /// Straight flight path segment, in mission order
     struct Segment {
@@ -48,6 +54,7 @@ public:
     struct Path {
         QList<GeoZone::Position> positions;
         int itemIndex = -1;         ///< Item of the first segment
+        QString label;              ///< What the vehicle does on paths besides the drawn flight path, like "the loiter at item 3"
     };
 
     /// Straight leg between two mission items with a coordinate, which a route can go around
@@ -76,12 +83,23 @@ public:
 
     static constexpr double maxStepDistance = 1000;     ///< Meters between positions along long legs without terrain
     static constexpr int maxStepsPerSegment = 10000;
+    static constexpr int circleVertexCount = 36;        ///< Of loiter circles
+
+    /// @return Return altitude above home in meters from the vehicle's parameters, 0 to return at the current
+    ///         altitude, NaN when unknown like for the offline vehicle
+    static double returnAltitude(Vehicle *vehicle);
+
+    /// @return Closed path around the center at the radius, the altitude and terrain
+    static QList<GeoZone::Position> circle(const QGeoCoordinate &center, double radius, double altitudeAMSL, double terrainAMSL);
 
     /// Splits segments into connected paths with a position at each terrain sample, or along the great circle every
     /// maxStepDistance without terrain samples. Altitudes are interpolated.
     static QList<Path> pathsFromSegments(const QList<Segment> &segments);
 
 private:
+    /// Adds the paths the drawn flight path leaves out
+    void _appendCoverage(MissionController *missionController, const QList<int> &coordinateItems);
+
     QList<Segment> _segments;
     QList<GeoZone::Area> _areas;
     QList<Leg> _legs;

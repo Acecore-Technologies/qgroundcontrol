@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -93,9 +94,18 @@ public:
     /// Re-evaluates immediately on this thread instead of after changes settle on another one
     Q_INVOKABLE void update();
 
-    /// @return Zones the path or its areas enter whatever their schedule and authorisations, most restrictive first.
-    ///         Can run on any thread with a copy of the catalog.
-    static QList<GeoZone*> zonesOnPath(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path);
+    /// Zones a mission path enters
+    struct Evaluation {
+        QList<GeoZone*> zones;                          ///< Most restrictive first
+        QHash<const GeoZone*, QStringList> pathLabels;  ///< Labels of the paths entering zones the drawn flight path doesn't
+    };
+
+    /// @return Zones the path or its areas enter whatever their schedule and authorisations. Can run on any thread with
+    ///         a copy of the catalog.
+    static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path);
+
+    /// @return Labels of the paths besides the drawn flight path entering the zone, when only those do
+    QStringList pathLabels(const GeoZone *zone) const { return _pathLabels.value(zone); }
 
 signals:
     void missionControllerChanged();
@@ -106,10 +116,11 @@ signals:
 private:
     void _scheduleUpdate();
     void _clearZones(GeoZoneSource *source);
+    void _connectMissionItems();
     /// Evaluates the mission path on another thread, the result is dropped when the mission or zones change meanwhile
     void _updateConcurrently();
     /// Sorts the zones on the path by the policies of the planned flight
-    void _apply(QList<GeoZone*> zones);
+    void _apply(const Evaluation &evaluation);
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
@@ -121,6 +132,7 @@ private:
     bool _flightNow = false;
     QPointer<GeoFenceController> _geoFenceController;
     QList<GeoZone*> _unfencedZones;
+    QHash<const GeoZone*, QStringList> _pathLabels;
     QTimer _updateTimer;
     quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones
 

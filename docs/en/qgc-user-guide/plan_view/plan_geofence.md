@@ -98,6 +98,7 @@ When many small zones are in view, the smallest are left out until you zoom in, 
 ### Mission and Flight Checks
 
 When the planned mission path or the area of a survey, corridor scan or structure scan enters a prohibited, authorisation required or conditional zone, a warning listing the zones is shown at the top of the Plan View map and the zones are outlined in white. Click the warning to show the zones on the map.
+Besides the drawn flight path, the check follows loiter circles with a radius, the loiter of landing patterns, the distance VTOL transitions fly on past their waypoint (**VTOL TransitionDistance** in _Application Settings > Plan View_), and a **Return To Launch** item flying straight home at the vehicle's return altitude parameter. Without a connected vehicle the return altitude is unknown, so zones along the way home count at any altitude. The warning names what enters zones the drawn flight path doesn't, like "Only the loiter at item 3 enters ...".
 U-space airspaces the mission enters are listed too, since flying there requires a flight authorisation from a U-space service provider. Zones without restriction are listed for their conditions, they never hide restricted zones.
 Uploading a mission which enters a prohibited zone asks for confirmation.
 

@@ -42,6 +42,7 @@
 #include "QGCMapPolygon.h"
 #include "QGCZip.h"
 #include "SettingsManager.h"
+#include "MissionSettingsItem.h"
 #include "SimpleMissionItem.h"
 #include "SurveyComplexItem.h"
 #include "UnitsSettings.h"

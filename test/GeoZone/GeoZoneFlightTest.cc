@@ -17,6 +17,7 @@
 #include "GeoZoneSettings.h"
 #include "MissionController.h"
 #include "MultiVehicleManager.h"
+#include "ParameterManager.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
 #include "SimpleMissionItem.h"
@@ -236,6 +237,13 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
     QVERIFY(vehicle);
     QTRY_VERIFY(monitor.monitoring());
+
+    // Missions are checked returning to launch at the vehicle's return altitude
+    QTRY_VERIFY(vehicle->parameterManager()->parametersReady());
+    QVERIFY(vehicle->parameterManager()->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("RTL_RETURN_ALT")));
+    const double returnAltitude = vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, QStringLiteral("RTL_RETURN_ALT"))->rawValue().toDouble();
+    QVERIFY(returnAltitude > 0);
+    QCOMPARE(GeoZoneMissionPath::returnAltitude(vehicle), returnAltitude);
 
     // A parked vehicle is on the ground below the CTRs, even before terrain data is received
     QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
