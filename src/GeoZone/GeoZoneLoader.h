@@ -43,6 +43,7 @@ public:
         QString etag;               ///< HTTP validators of a downloaded feed
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
+        QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
         Request request = Request::Automatic;
         int generation = 0;
     };

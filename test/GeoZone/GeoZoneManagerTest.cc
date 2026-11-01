@@ -1026,3 +1026,87 @@ void GeoZoneManagerTest::_testFeedDatasetLink()
     QVERIFY(restarted.source(url)->datasetUrl().endsWith(QStringLiteral("EG_FULL_20210101_XML.zip")));
     QCOMPARE(restarted.source(url)->etag(), QStringLiteral("\"20210101_XML.zip\""));
 }
+
+void GeoZoneManagerTest::_testWfsPaging()
+{
+    // A WFS limiting its responses to 2 of the 5 features of the area, like the IGN and DiPUL servers
+    QFile fixture(QStringLiteral(":/unittest/france_uas_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QJsonObject template_ = QJsonDocument::fromJson(fixture.readAll()).object();
+    QJsonArray allFeatures;
+    for (int i = 0; i < 5; i++) {
+        QJsonObject feature = template_.value(QStringLiteral("features")).toArray().first().toObject();
+        feature.insert(QStringLiteral("id"), QStringLiteral("carte_restriction_drones_lf.%1").arg(i));
+        QJsonObject geometry = feature.value(QStringLiteral("geometry")).toObject();
+        geometry.insert(QStringLiteral("coordinates"), QJsonArray{ QJsonArray{ QJsonArray{
+            QJsonArray{ 2.0 + (i * 0.1), 48.0 }, QJsonArray{ 2.05 + (i * 0.1), 48.0 }, QJsonArray{ 2.05 + (i * 0.1), 48.05 }, QJsonArray{ 2.0 + (i * 0.1), 48.0 } } } });
+        feature.insert(QStringLiteral("geometry"), geometry);
+        allFeatures.append(feature);
+    }
+    constexpr int pageSize = 2;
+    bool failThirdPage = false;
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QList<QUrlQuery> queries;
+    (void) connect(&server, &QTcpServer::newConnection, &server, [&]() {
+        while (QTcpSocket *const socket = server.nextPendingConnection()) {
+            (void) connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
+                const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", request);
+                if (!request.contains("\r\n\r\n")) {
+                    return;
+                }
+                const QUrlQuery query(QUrl(QString::fromLatin1(request.split(' ').value(1))));
+                queries.append(query);
+                const int start = query.queryItemValue(QStringLiteral("STARTINDEX")).toInt();
+                QByteArray response;
+                if (failThirdPage && (start >= 2 * pageSize)) {
+                    response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                } else {
+                    QJsonObject page = template_;
+                    QJsonArray features;
+                    for (int i = start; (i < start + pageSize) && (i < allFeatures.count()); i++) {
+                        features.append(allFeatures[i]);
+                    }
+                    page.insert(QStringLiteral("features"), features);
+                    page.insert(QStringLiteral("numberMatched"), allFeatures.count());
+                    page.insert(QStringLiteral("totalFeatures"), allFeatures.count());
+                    page.insert(QStringLiteral("numberReturned"), features.count());
+                    const QByteArray body = QJsonDocument(page).toJson(QJsonDocument::Compact);
+                    response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
+                }
+                (void) socket->write(response);
+                socket->disconnectFromHost();
+            });
+            (void) connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+    const QString url = QStringLiteral("http://127.0.0.1:%1/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=restrictions&OUTPUTFORMAT=application/json")
+                            .arg(server.serverPort());
+
+    // All pages are downloaded and stored together
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.zoneCount(), 5);
+        QCOMPARE(queries.count(), 3);
+        QCOMPARE(queries[1].queryItemValue(QStringLiteral("STARTINDEX")), QStringLiteral("2"));
+        QCOMPARE(queries[2].queryItemValue(QStringLiteral("STARTINDEX")), QStringLiteral("4"));
+        QVERIFY(manager.source(url)->warningText().isEmpty());
+    }
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QCOMPARE(restarted.zoneCount(), 5);
+
+    // A page which fails leaves the zones of the others, and the source tells how many are missing
+    failThirdPage = true;
+    restarted.refreshFeeds();
+    QTRY_VERIFY(!restarted.busy());
+    QCOMPARE(restarted.zoneCount(), 4);
+    QVERIFY(restarted.source(url)->warningText().contains(QStringLiteral("left out 1 zones")));
+}

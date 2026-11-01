@@ -63,6 +63,18 @@ public:
     /// @return true for formats of short-lived restrictions, refreshed and outdated after hours rather than days
     static bool isLive(GeoZoneParser::Format format);
 
+    /// Feature counts of a WFS GeoJSON response, -1 when not given
+    struct WfsCounts {
+        qint64 matched = -1;    ///< numberMatched or totalFeatures
+        qint64 returned = -1;   ///< numberReturned
+    };
+    /// @return The counts of a response from its first and last bytes, where servers write them, without parsing it
+    static WfsCounts wfsCounts(const QByteArray &head, const QByteArray &tail);
+    /// @return URL of the WFS GetFeature request returning the features from startIndex on, empty when the URL isn't
+    ///         a GetFeature request
+    static QString wfsPageUrl(const QString &url, qint64 startIndex);
+    static constexpr int maxWfsPages = 50;     ///< Pages downloaded after the first of a response the server limited
+
 private:
     static QString _bboxQuery(const QGeoRectangle &area, const QString &suffix = QString());
     static QString _dipulUrl(const QStringList &layers, const QGeoRectangle &area);

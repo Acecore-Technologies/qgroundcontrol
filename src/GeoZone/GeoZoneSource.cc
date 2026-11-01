@@ -121,7 +121,7 @@ QString GeoZoneSource::warningText() const
 {
     QStringList lines;
     if (_missingCount > 0) {
-        lines.append(tr("The server left out %1 zones beyond its limit. Download a smaller area.").arg(_missingCount));
+        lines.append(tr("The server left out %1 zones beyond its limit, which could not be downloaded. Download a smaller area.").arg(_missingCount));
     }
     for (auto it = _issues.cbegin(); it != _issues.cend(); ++it) {
         lines.append(tr("%1 (%n zone(s))", nullptr, it.value()).arg(it.key()));

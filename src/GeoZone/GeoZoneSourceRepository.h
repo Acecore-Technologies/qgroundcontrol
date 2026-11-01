@@ -11,6 +11,7 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QObject>
+#include <QtCore/QSharedPointer>
 #include <QtCore/QString>
 
 #include "GeoZoneDownloader.h"
@@ -97,6 +98,11 @@ private:
     void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl = QString());
     /// Starts loading a downloaded feed
     void _loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
+    /// Downloads the further pages of a WFS response the server limited, then continues with the companions
+    /// @return false when the response is complete
+    bool _fetchPages(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
+    struct PageFetch;
+    void _fetchPage(const QSharedPointer<PageFetch> &fetch);
     /// Downloads the companion documents of a feed which has them, then loads it
     /// @return false when the feed has no companions
     bool _fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
@@ -117,6 +123,7 @@ private:
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
     QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
+    QHash<QString, QStringList> _pagePaths; ///< Further pages downloaded for the feed being loaded, by URL
     bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is
     bool _storageErrorReported = false;
     QString _validityWarning;

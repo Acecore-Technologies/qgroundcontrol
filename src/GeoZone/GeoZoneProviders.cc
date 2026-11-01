@@ -11,6 +11,7 @@
 #include "GeoZoneFormat.h"
 
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 
 namespace {
 
@@ -201,4 +202,48 @@ QString GeoZoneProviders::_dipulUrl(const QStringList &layers, const QGeoRectang
         url += QStringLiteral("&BBOX=") + _bboxQuery(area);
     }
     return url;
+}
+
+GeoZoneProviders::WfsCounts GeoZoneProviders::wfsCounts(const QByteArray &head, const QByteArray &tail)
+{
+    const auto count = [&head, &tail](const char *name) -> qint64 {
+        const QRegularExpression pattern(QStringLiteral("\"%1\"\\s*:\\s*(\\d+)").arg(QLatin1String(name)));
+        for (const QByteArray *bytes : { &head, &tail }) {
+            const QRegularExpressionMatch match = pattern.match(QString::fromLatin1(*bytes));
+            if (match.hasMatch()) {
+                return match.captured(1).toLongLong();
+            }
+        }
+        return -1;
+    };
+    WfsCounts counts;
+    counts.matched = count("numberMatched");
+    if (counts.matched < 0) {
+        counts.matched = count("totalFeatures");
+    }
+    counts.returned = count("numberReturned");
+    return counts;
+}
+
+QString GeoZoneProviders::wfsPageUrl(const QString &url, qint64 startIndex)
+{
+    QUrl pageUrl(url);
+    QUrlQuery query(pageUrl);
+    bool getFeature = false;
+    QList<std::pair<QString, QString>> items;
+    for (const auto &[key, value] : query.queryItems(QUrl::FullyDecoded)) {
+        if (key.compare(QStringLiteral("request"), Qt::CaseInsensitive) == 0) {
+            getFeature = (value.compare(QStringLiteral("GetFeature"), Qt::CaseInsensitive) == 0);
+        }
+        if (key.compare(QStringLiteral("startIndex"), Qt::CaseInsensitive) != 0) {
+            items.append({ key, value });
+        }
+    }
+    if (!getFeature) {
+        return QString();
+    }
+    items.append({ QStringLiteral("STARTINDEX"), QString::number(startIndex) });
+    query.setQueryItems(items);
+    pageUrl.setQuery(query);
+    return pageUrl.toString();
 }
