@@ -16,6 +16,7 @@
 #include "GeoZonePlanning.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
+#include "GeoZoneText.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
@@ -225,9 +226,9 @@ QString zoneHtml(const Briefing::Zone &zone, const Briefing &briefing)
     }
     html += QStringLiteral("<table class=\"zone\" width=\"100%\" cellspacing=\"0\" cellpadding=\"4\">\n");
     html += QStringLiteral("<tr><td colspan=\"2\" class=\"zonetitle\" bgcolor=\"%1\"><font color=\"#ffffff\"><b>%2</b> \u2014 %3</font></td></tr>\n")
-                .arg(color, title, GeoZone::restrictionToString(zone.restriction).toHtmlEscaped());
+                .arg(color, title, GeoZoneText::restriction(zone.restriction).toHtmlEscaped());
 
-    QString restriction = GeoZone::restrictionToString(zone.restriction);
+    QString restriction = GeoZoneText::restriction(zone.restriction);
     if (!zone.restrictionCode.isEmpty()) {
         restriction = Text::tr("%1 (published as %2)").arg(restriction, zone.restrictionCode);
     }
@@ -561,7 +562,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
         json.insert(QStringLiteral("name"), zone.name);
         json.insert(QStringLiteral("restriction"), GeoZoneBriefing::restrictionCode(zone.restriction));
         json.insert(QStringLiteral("restrictionCode"), zone.restrictionCode);
-        json.insert(QStringLiteral("restrictionText"), GeoZone::restrictionToString(zone.restriction));
+        json.insert(QStringLiteral("restrictionText"), GeoZoneText::restriction(zone.restriction));
         json.insert(QStringLiteral("reasons"), zone.reasons);
         json.insert(QStringLiteral("verticalLimits"), zone.verticalLimits);
         json.insert(QStringLiteral("schedule"), zone.schedule);

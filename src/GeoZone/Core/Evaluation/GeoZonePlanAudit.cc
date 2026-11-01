@@ -9,6 +9,7 @@
 
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneCatalog.h"
+#include "GeoZoneText.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QJsonArray>
@@ -254,7 +255,7 @@ QString GeoZonePlanAudit::Changes::summary() const
 
 QStringList GeoZonePlanAudit::Changes::details() const
 {
-    const auto describe = [](const Zone &zone) { return tr("%1 (%2)").arg(zone.displayName(), GeoZone::restrictionToString(zone.restriction)); };
+    const auto describe = [](const Zone &zone) { return tr("%1 (%2)").arg(zone.displayName(), GeoZoneText::restriction(zone.restriction)); };
     QStringList lines;
     for (const ZoneChange &change : modified) {
         QStringList was;
@@ -262,7 +263,7 @@ QStringList GeoZonePlanAudit::Changes::details() const
             was.append(change.saved.displayName());
         }
         if (change.saved.restriction != change.current.restriction) {
-            was.append(GeoZone::restrictionToString(change.saved.restriction));
+            was.append(GeoZoneText::restriction(change.saved.restriction));
         }
         lines.append(was.isEmpty() ? tr("Modified: %1").arg(describe(change.current)) :
                                      tr("Modified: %1, was %2").arg(describe(change.current), was.join(QStringLiteral(", "))));

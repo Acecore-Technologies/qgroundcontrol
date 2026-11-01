@@ -24,6 +24,8 @@ qt_add_library(GeoZoneCore STATIC
     Model/GeoZoneSchedule.h
     Model/GeoZoneShape.cc
     Model/GeoZoneShape.h
+    Model/GeoZoneText.cc
+    Model/GeoZoneText.h
     Model/GeoZoneVector.h
     Model/GeoZoneVertical.cc
     Model/GeoZoneVertical.h

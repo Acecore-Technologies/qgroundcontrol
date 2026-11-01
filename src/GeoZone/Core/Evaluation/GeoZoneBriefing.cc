@@ -13,6 +13,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneText.h"
 
 #include <algorithm>
 #include <cmath>
@@ -173,8 +174,8 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         result.name = zone->name();
         result.restriction = zone->restriction();
         result.restrictionCode = zone->data().restrictionCode;
-        result.reasons = zone->reasonText();
-        result.verticalLimits = zone->verticalLimitsText();
+        result.reasons = GeoZoneText::reasons(zone->data());
+        result.verticalLimits = GeoZoneText::verticalLimits(zone->data());
         result.schedule = zone->data().applicability.isEmpty() ? QString() : zone->applicabilityText();
         result.activePeriods = activePeriods(zone, windowStart, windowEnd);
         result.activeDuringFlight = start.isValid() ? !result.activePeriods.isEmpty() : zone->active();
@@ -183,7 +184,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         result.conditions = zone->restrictionConditions();
         result.otherReasonInfo = zone->data().otherReasonInfo;
         result.uSpaceClass = zone->uSpaceClass();
-        result.regulationExemption = zone->regulationExemptionText();
+        result.regulationExemption = GeoZoneText::regulationExemption(zone->data());
         result.sourceKey = zone->sourceKey();
         result.contentHash = zone->data().contentHash;
         if (input.authorisations) {

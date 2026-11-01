@@ -10,6 +10,7 @@
 #pragma once
 
 #include "GeoZone.h"
+#include "GeoZoneText.h"
 
 #include <QtCore/QMetaType>
 #include <QtCore/QSharedPointer>
@@ -59,17 +60,17 @@ public:
     QString displayName() const { return _zone ? _zone->displayName() : QString(); }
     QString country() const { return _zone ? _zone->country() : QString(); }
     int restriction() const { return _zone ? static_cast<int>(_zone->restriction()) : static_cast<int>(GeoZone::Unknown); }
-    QString restrictionText() const { return _zone ? _zone->restrictionText() : QString(); }
+    QString restrictionText() const { return _zone ? GeoZoneText::restriction(_zone->restriction()) : QString(); }
     QString restrictionConditions() const { return _zone ? _zone->restrictionConditions() : QString(); }
-    QString reasonText() const { return _zone ? _zone->reasonText() : QString(); }
+    QString reasonText() const { return _zone ? GeoZoneText::reasons(_zone->data()) : QString(); }
     QString message() const { return _zone ? _zone->message() : QString(); }
     QString authorityText() const { return _zone ? _zone->authorityText() : QString(); }
     QString uSpaceClass() const { return _zone ? _zone->uSpaceClass() : QString(); }
-    QString regulationExemptionText() const { return _zone ? _zone->regulationExemptionText() : QString(); }
+    QString regulationExemptionText() const { return _zone ? GeoZoneText::regulationExemption(_zone->data()) : QString(); }
     QString extendedPropertiesText() const { return _zone ? _zone->extendedPropertiesText() : QString(); }
     QString issuesText() const { return _zone ? _zone->issuesText() : QString(); }
     QString applicabilityText() const { return _zone ? _zone->applicabilityText() : QString(); }
-    QString verticalLimitsText() const { return _zone ? _zone->verticalLimitsText() : QString(); }
+    QString verticalLimitsText() const { return _zone ? GeoZoneText::verticalLimits(_zone->data()) : QString(); }
     bool approximateLimits() const { return _zone && _zone->approximateLimits(); }
     QGeoCoordinate center() const { return _zone ? _zone->center() : QGeoCoordinate(); }
     QGeoRectangle boundingBox() const { return _zone ? _zone->boundingBox() : QGeoRectangle(); }

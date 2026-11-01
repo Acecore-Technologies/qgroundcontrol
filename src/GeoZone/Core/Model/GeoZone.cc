@@ -509,109 +509,14 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
     return std::nullopt;
 }
 
-QString GeoZone::reasonText() const
-{
-    static const QHash<QString, const char*> reasonNames = {
-        { QStringLiteral("AIR_TRAFFIC"),        QT_TR_NOOP("Air traffic") },
-        { QStringLiteral("SENSITIVE"),          QT_TR_NOOP("Sensitive area") },
-        { QStringLiteral("PRIVACY"),            QT_TR_NOOP("Privacy") },
-        { QStringLiteral("POPULATION"),         QT_TR_NOOP("Population") },
-        { QStringLiteral("NATURE"),             QT_TR_NOOP("Nature") },
-        { QStringLiteral("NOISE"),              QT_TR_NOOP("Noise") },
-        { QStringLiteral("FOREIGN_TERRITORY"),  QT_TR_NOOP("Foreign territory") },
-        { QStringLiteral("EMERGENCY"),          QT_TR_NOOP("Emergency") },
-        { QStringLiteral("OTHER"),              QT_TR_NOOP("Other") },
-    };
-
-    QStringList reasons;
-    for (const QString &reason : _data.reasons) {
-        const auto it = reasonNames.constFind(reason.toUpper());
-        reasons.append((it != reasonNames.constEnd()) ? tr(it.value()) : reason);
-    }
-
-    QString text = reasons.join(QStringLiteral(", "));
-    if (!_data.otherReasonInfo.isEmpty()) {
-        text = text.isEmpty() ? _data.otherReasonInfo : QStringLiteral("%1 (%2)").arg(text, _data.otherReasonInfo);
-    }
-    return text;
-}
-
-QString GeoZone::regulationExemptionText() const
-{
-    const QString code = _data.regulationExemption.trimmed().toUpper();
-    if (code == QStringLiteral("YES")) {
-        return tr("Exemptions possible");
-    }
-    if (code == QStringLiteral("NO")) {
-        return tr("No exemptions");
-    }
-    return _data.regulationExemption;
-}
-
 QString GeoZone::applicabilityText() const
 {
     return GeoZoneSchedule::text(_data.applicability);
 }
 
-QString GeoZone::verticalLimitsText() const
-{
-    const double qnh = GeoZoneEnvironment::qnhHPa();
-    const auto convertedFlightLevel = [](double limit, VerticalReference reference) {
-        return (reference == VerticalReference::FlightLevel) && !qIsNaN(limit) && (limit < GeoZoneVertical::unlimitedSentinel);
-    };
-    QStringList lines;
-    for (const Volume &volume : _data.volumes) {
-        QString line;
-        if (qIsNaN(volume.lowerLimit) && qIsNaN(volume.upperLimit)) {
-            line = tr("Not specified");
-        } else {
-            line = QStringLiteral("%1 - %2").arg(_limitToString(volume.lowerLimit, volume.lowerReference, volume.lowerReferenceCode, volume.feet, qnh),
-                                                 _limitToString(volume.upperLimit, volume.upperReference, volume.upperReferenceCode, volume.feet, qnh));
-            if (convertedFlightLevel(volume.lowerLimit, volume.lowerReference) || convertedFlightLevel(volume.upperLimit, volume.upperReference)) {
-                line += QStringLiteral(" ") + tr("(QNH %1 hPa)").arg(QString::number(qnh, 'g', 6));
-            }
-        }
-        if (!lines.contains(line)) {
-            lines.append(line);
-        }
-    }
-    return lines.join(QStringLiteral("\n"));
-}
-
 bool GeoZone::approximateLimits() const
 {
     return std::any_of(_data.volumes.cbegin(), _data.volumes.cend(), [](const Volume &volume) { return volume.approximateLimits(); });
-}
-
-QString GeoZone::_limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet, double qnhHPa)
-{
-    if (qIsNaN(limit)) {
-        return tr("not specified");
-    }
-    if (limit >= GeoZoneVertical::unlimitedSentinel) {
-        return tr("Unlimited");
-    }
-    if ((limit == 0) && (reference == VerticalReference::Ground)) {
-        return tr("GND");
-    }
-    if (reference == VerticalReference::FlightLevel) {
-        // In hundreds of feet of pressure altitude, with the height it is at with the QNH in the standard atmosphere
-        const double pressureAltitude = feet ? (limit * GeoZoneVertical::metersPerFoot) : limit;
-        const double flightLevel = std::round(pressureAltitude / GeoZoneVertical::metersPerFoot / 10) / 10;
-        const double amsl = GeoZoneEnvironment::metersToVerticalDistanceUnits(GeoZoneVertical::pressureAltitudeToAMSL(pressureAltitude, qnhHPa));
-        return tr("FL %1 ≈ %2 %3 AMSL").arg(flightLevel).arg(qRound(amsl)).arg(GeoZoneEnvironment::verticalDistanceUnits());
-    }
-
-    const QString publishedUnits = feet ? QStringLiteral("ft") : QStringLiteral("m");
-    const QString userUnits = GeoZoneEnvironment::verticalDistanceUnits();
-    if (userUnits == publishedUnits) {
-        return QStringLiteral("%1 %2 %3").arg(limit).arg(publishedUnits, referenceCode);
-    }
-
-    // Show the published value too since the converted value is rounded
-    const double meters = feet ? (limit * GeoZoneVertical::metersPerFoot) : limit;
-    const double converted = GeoZoneEnvironment::metersToVerticalDistanceUnits(meters);
-    return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, referenceCode).arg(limit).arg(publishedUnits);
 }
 
 void GeoZone::Volume::setReferences(const QString &lowerCode, const QString &upperCode)
@@ -660,25 +565,6 @@ GeoZone::Restriction GeoZone::restrictionFromString(const QString &restriction)
         return USpace;
     }
     return Unknown;
-}
-
-QString GeoZone::restrictionToString(Restriction restriction)
-{
-    switch (restriction) {
-    case Prohibited:
-        return tr("Prohibited");
-    case ReqAuthorisation:
-        return tr("Authorisation required");
-    case Conditional:
-        return tr("Conditional");
-    case NoRestriction:
-        return tr("No restriction");
-    case USpace:
-        return tr("U-space airspace");
-    case Unknown:
-        break;
-    }
-    return tr("Unknown");
 }
 
 int GeoZone::restrictionSeverity(Restriction restriction)

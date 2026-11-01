@@ -10,6 +10,7 @@
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneBox.h"
 #include "GeoZoneGeometry.h"
+#include "GeoZoneText.h"
 #include "GeoZoneVertical.h"
 
 #include <QtCore/QHash>
@@ -762,7 +763,7 @@ QString GeoZonePathEvaluator::zoneNames(const QList<const GeoZone*> &zones, int 
     QStringList names;
     for (qsizetype i = 0; i < (std::min)(zones.count(), qsizetype{ maxListed }); i++) {
         const GeoZone *const zone = zones[i];
-        names.append(withRestriction ? QStringLiteral("%1 (%2)").arg(zone->displayName(), zone->restrictionText()) : zone->displayName());
+        names.append(withRestriction ? QStringLiteral("%1 (%2)").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())) : zone->displayName());
     }
     QString text = names.join(QStringLiteral(", "));
     if (zones.count() > maxListed) {

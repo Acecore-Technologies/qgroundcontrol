@@ -38,7 +38,6 @@
 class GeoZone : public QEnableSharedFromThis<GeoZone>
 {
     Q_GADGET
-    Q_DECLARE_TR_FUNCTIONS(GeoZone)
     Q_DISABLE_COPY_MOVE(GeoZone)
 
 public:
@@ -140,19 +139,21 @@ public:
     QString displayName() const { return _data.name.isEmpty() ? _data.identifier : _data.name; }
     QString country() const { return _data.country; }
     Restriction restriction() const { return _data.restriction; }
-    QString restrictionText() const { return restrictionToString(_data.restriction); }
     QString restrictionConditions() const { return _data.restrictionConditions; }
-    QString reasonText() const;
     QString message() const { return _data.message; }
     QString authorityText() const { return _data.authorities.join(QStringLiteral("\n")); }
     QString uSpaceClass() const { return _data.uSpaceClass; }
-    /// @return Whether the regulation allows exemptions, empty when not published
-    QString regulationExemptionText() const;
     QString extendedPropertiesText() const { return _data.extendedProperties.join(QStringLiteral("\n")); }
     QString issuesText() const { return _data.issues.join(QStringLiteral("\n")); }
     QString applicabilityText() const;
-    /// Limits of each volume on a line. Flight levels show their approximate height above mean sea level with the QNH.
+
+    /// Translated texts in the units of the application, made by GeoZoneText
+    QString restrictionText() const { return restrictionToString(_data.restriction); }
+    QString reasonText() const;
+    QString regulationExemptionText() const;
     QString verticalLimitsText() const;
+    static QString restrictionToString(Restriction restriction);
+
     /// @return true if the heights of some limits are approximate, see Volume::approximateLimits
     bool approximateLimits() const;
     QGeoCoordinate center() const { return _box.center(); }
@@ -253,14 +254,11 @@ public:
 
     static VerticalReference verticalReferenceFromString(const QString &reference);
     static Restriction restrictionFromString(const QString &restriction);
-    static QString restrictionToString(Restriction restriction);
 
     /// @return 0 for the most restrictive zones, increasing for less restrictive ones
     static int restrictionSeverity(Restriction restriction);
 
 private:
-    static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet, double qnhHPa);
-
     /// Polygon volumes projected around the zone center, so that queries don't project them again
     struct Projected {
         explicit Projected(const QGeoCoordinate &origin) : projection(origin) {}
