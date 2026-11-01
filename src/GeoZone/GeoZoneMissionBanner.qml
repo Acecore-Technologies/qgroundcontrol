@@ -20,7 +20,7 @@ import QGroundControl.ScreenTools
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
@@ -105,6 +105,16 @@ Rectangle {
             text:                   check.infoText
             textFormat:             Text.PlainText
             visible:                text !== ""
+        }
+
+        QGCLabel {
+            id:                     plannedLabel
+            width:                  parent.width
+            wrapMode:               Text.WordWrap
+            horizontalAlignment:    Text.AlignHCenter
+            font.pointSize:         ScreenTools.smallFontPointSize
+            text:                   qsTr("Checked for a flight starting %1 (local time)").arg(Qt.formatDateTime(QGroundControl.geoZoneManager.plannedStart, "yyyy-MM-dd HH:mm"))
+            visible:                !isNaN(QGroundControl.geoZoneManager.plannedStart.getTime())
         }
 
         QGCLabel {

@@ -85,7 +85,9 @@ public:
 
     /// @return Bands of the zones along consecutive segments, see the bands property. Segments with a zero distance
     ///         and invalid coordinates only advance the distance.
-    static QList<Band> computeBands(const QList<Segment> &segments, const GeoZoneManager *manager);
+    /// @param activeFrom, activeTo When valid, only zones active at some time between them
+    static QList<Band> computeBands(const QList<Segment> &segments, const GeoZoneManager *manager,
+                                    const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime());
     /// @return The bands in the form of the bands property
     static QVariantList toVariantList(const QList<Band> &bands);
     static QVariantList bandsForSegments(const QList<Segment> &segments, const GeoZoneManager *manager) { return toVariantList(computeBands(segments, manager)); }

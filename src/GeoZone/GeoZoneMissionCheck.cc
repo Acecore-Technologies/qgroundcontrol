@@ -37,6 +37,7 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMissionCheck::_clearZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    (void) connect(_manager, &GeoZoneManager::plannedStartChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
 }
 
 MissionController *GeoZoneMissionCheck::missionController() const
@@ -58,6 +59,7 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
         // Emitted after the flight path or any item coordinate changes
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionCheck::_scheduleUpdate);
         (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        (void) connect(_missionController, &MissionController::missionTimeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
     }
 
     emit missionControllerChanged();
@@ -106,7 +108,20 @@ QString GeoZoneMissionCheck::infoText() const
     if (!_permittedZones.isEmpty()) {
         lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(_zoneNames(_permittedZones, NameStyle::Name)));
     }
+    if (_inactiveZoneCount > 0) {
+        lines.append(tr("%n zone(s) on the path are not active at the planned flight time.", nullptr, _inactiveZoneCount));
+    }
     return lines.join(QStringLiteral("\n"));
+}
+
+std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::plannedFlightTimes(const GeoZoneManager *manager, const MissionController *missionController)
+{
+    const QDateTime start = manager->plannedStart();
+    if (!start.isValid()) {
+        return {};
+    }
+    const double missionSeconds = missionController ? missionController->missionTime() : 0;
+    return { start, start.addSecs(std::llround((std::max)(missionSeconds, 0.0))) };
 }
 
 QGeoRectangle GeoZoneMissionCheck::crossedZonesBoundingBox() const
@@ -151,6 +166,13 @@ void GeoZoneMissionCheck::update()
         return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
     });
 
+    // Zones which aren't active at any time during the planned flight don't apply
+    int inactiveZoneCount = 0;
+    const auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
+    if (plannedStart.isValid()) {
+        inactiveZoneCount = static_cast<int>(zones.removeIf([&plannedStart, &plannedEnd](const GeoZone *zone) { return !zone->isActiveDuring(plannedStart, plannedEnd); }));
+    }
+
     QList<GeoZone*> crossed;
     QList<GeoZone*> uSpace;
     QList<GeoZone*> permitted;
@@ -171,10 +193,11 @@ void GeoZoneMissionCheck::update()
         }
     }
 
-    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones)) {
+    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (inactiveZoneCount != _inactiveZoneCount)) {
         _crossedZones = crossed;
         _uSpaceZones = uSpace;
         _permittedZones = permitted;
+        _inactiveZoneCount = inactiveZoneCount;
         emit crossedZonesChanged();
     }
 }

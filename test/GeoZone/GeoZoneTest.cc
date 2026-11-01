@@ -1463,6 +1463,25 @@ void GeoZoneTest::_testMissionCheck()
     QVERIFY(check.crossedZonesBoundingBox().contains(center));
     QVERIFY(check.crossedZonesBoundingBox().contains(center.atDistanceAndAzimuth(2000, 0)));
 
+    // A temporary restriction on the path counts at any time, or when it is active during the planned flight
+    QJsonObject temporary = _circleFeature(QStringLiteral("T"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(700, 270), 100);
+    temporary[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:00:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("temporary.json"), QJsonArray{ temporary }), errorString), qPrintable(errorString));
+    QTRY_COMPARE(check.crossedZones().count(), 3);
+    QCOMPARE(check.inactiveZoneCount(), 0);
+    manager.setPlannedStart(_utc(QDate(2027, 1, 1), QTime(8, 0)));
+    QTRY_COMPARE(check.crossedZones().count(), 2);
+    QCOMPARE(check.inactiveZoneCount(), 1);
+    QVERIFY(check.infoText().contains(QStringLiteral("1 zone(s) on the path are not active at the planned flight time.")));
+    // The mission takes a few minutes, so a start just before the restriction overlaps it
+    const QDateTime overlappingStart = _utc(QDate(2027, 1, 1), QTime(10, 0)).addSecs(-std::llround(missionController->missionTime() / 2));
+    QVERIFY(missionController->missionTime() > 10);
+    manager.setPlannedStart(overlappingStart);
+    QTRY_COMPARE(check.crossedZones().count(), 3);
+    manager.clearPlannedStart();
+    QTRY_COMPARE(check.inactiveZoneCount(), 0);
+    QCOMPARE(check.crossedZones().count(), 3);
+
     // A survey whose area covers a zone its flight lines miss
     const QGeoCoordinate surveyCenter = center.atDistanceAndAzimuth(5000, 180);
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("survey.json"),

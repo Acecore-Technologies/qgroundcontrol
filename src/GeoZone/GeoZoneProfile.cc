@@ -12,6 +12,7 @@
 #include "FlightPathSegment.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionCheck.h"
 #include "MissionController.h"
 #include "QmlObjectListModel.h"
 #include "VisualMissionItem.h"
@@ -62,6 +63,7 @@ GeoZoneProfile::GeoZoneProfile(GeoZoneManager *manager, QObject *parent)
     // The bands reference no zones, but they are outdated
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneProfile::_clear);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, &_updateTimer, qOverload<>(&QTimer::start));
+    (void) connect(_manager, &GeoZoneManager::plannedStartChanged, &_updateTimer, qOverload<>(&QTimer::start));
 }
 
 MissionController *GeoZoneProfile::missionController() const
@@ -77,11 +79,13 @@ void GeoZoneProfile::setMissionController(MissionController *missionController)
 
     if (_missionController) {
         (void) disconnect(_missionController, nullptr, this, nullptr);
+        (void) disconnect(_missionController, nullptr, &_updateTimer, nullptr);
     }
     _missionController = missionController;
     if (_missionController) {
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, &_updateTimer, qOverload<>(&QTimer::start));
         (void) connect(_missionController, &MissionController::visualItemsChanged, &_updateTimer, qOverload<>(&QTimer::start));
+        (void) connect(_missionController, &MissionController::missionTimeChanged, &_updateTimer, qOverload<>(&QTimer::start));
     }
 
     emit missionControllerChanged();
@@ -118,7 +122,8 @@ void GeoZoneProfile::update()
     if (!_active) {
         return;
     }
-    const QList<Band> bands = computeBands(_missionSegments(), _manager);
+    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
+    const QList<Band> bands = computeBands(_missionSegments(), _manager, plannedStart, plannedEnd);
     if (bands != _bandList) {
         _bandList = bands;
         _bands = toVariantList(_bandList);
@@ -190,7 +195,8 @@ QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
     return list;
 }
 
-QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &segments, const GeoZoneManager *manager)
+QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &segments, const GeoZoneManager *manager,
+                                                         const QDateTime &activeFrom, const QDateTime &activeTo)
 {
     static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
 
@@ -250,7 +256,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         const double segmentMaxLongitude = (std::max)(segment.from.longitude(), segment.to.longitude());
 
         QList<Candidate> candidates;
-        for (const GeoZone *zone : manager->zonesInArea(restrictions, QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }))) {
+        for (const GeoZone *zone : manager->zonesInArea(restrictions, QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), activeFrom, activeTo)) {
             const QList<GeoZone::Volume> &volumes = zone->data().volumes;
             for (int v = 0; v < volumes.count(); v++) {
                 const QGeoRectangle box = volumes[v].boundingBox();

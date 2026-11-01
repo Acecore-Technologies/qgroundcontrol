@@ -49,7 +49,8 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QString              progressText        READ progressText       NOTIFY progressChanged FINAL)
     Q_PROPERTY(QString              validityWarning     READ validityWarning    NOTIFY validityWarningChanged FINAL)      ///< Sources with outdated data
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
-    Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)                           ///< Maps with name and url of national feeds
+    Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)
+    Q_PROPERTY(QDateTime            plannedStart        READ plannedStart       WRITE setPlannedStart NOTIFY plannedStartChanged FINAL)    ///< Planned flight start for mission checks, invalid to check zones whatever their schedule                           ///< Maps with name and url of national feeds
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
@@ -151,6 +152,11 @@ public:
 
     QString storageDir() const { return _store.dir(); }
 
+    QDateTime plannedStart() const { return _plannedStart; }
+    void setPlannedStart(const QDateTime &plannedStart);
+    /// Checks missions against zones whatever their schedule
+    Q_INVOKABLE void clearPlannedStart() { setPlannedStart(QDateTime()); }
+
 signals:
     /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
     void zonesAboutToChange(GeoZoneSource *source);
@@ -158,6 +164,7 @@ signals:
     void zonesChanged(GeoZoneSource *source);
     void boundingBoxChanged();
     void showZoneRequested(QObject *zone);
+    void plannedStartChanged();
     void visibleChanged(bool visible);
     void busyChanged(bool busy);
     void progressChanged();
@@ -198,6 +205,7 @@ private:
     QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
     bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is
     bool _storageErrorReported = false;
+    QDateTime _plannedStart;
     QString _validityWarning;
     bool _startupRefreshPending = false;
     bool _startupCheckPending = false;

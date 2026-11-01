@@ -24,7 +24,8 @@ class MissionController;
 
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
 /// altitudes. U-space airspaces and no restriction zones are reported separately, they never hide
-/// restricted zones. Zone schedules are not considered, since the mission may be flown at any time.
+/// restricted zones. With a planned start in GeoZoneManager, only zones active at some time during the mission
+/// are reported, otherwise zone schedules are not considered since the mission may be flown at any time.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -37,6 +38,7 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QList<QObject*>      uSpaceZones         READ uSpaceZones                                    NOTIFY crossedZonesChanged FINAL)     ///< U-space airspaces the mission enters
     Q_PROPERTY(QList<QObject*>      permittedZones      READ permittedZones                                 NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(int                  inactiveZoneCount   READ inactiveZoneCount                              NOTIFY crossedZonesChanged FINAL)     ///< Zones entered which aren't active during the planned flight
 
 public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
@@ -57,6 +59,11 @@ public:
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
+    int inactiveZoneCount() const { return _inactiveZoneCount; }
+
+    /// @return Start and end of the planned flight from the planned start of the manager and the mission duration,
+    ///         invalid without a planned start
+    static std::pair<QDateTime, QDateTime> plannedFlightTimes(const GeoZoneManager *manager, const MissionController *missionController);
 
     /// Re-evaluates immediately instead of after changes settle
     Q_INVOKABLE void update();
@@ -91,6 +98,7 @@ private:
     QList<GeoZone*> _crossedZones;
     QList<GeoZone*> _uSpaceZones;
     QList<GeoZone*> _permittedZones;
+    int _inactiveZoneCount = 0;
     QTimer _updateTimer;
 
     static constexpr int _updateDelayMSecs = 500;

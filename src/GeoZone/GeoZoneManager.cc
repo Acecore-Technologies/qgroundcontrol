@@ -125,6 +125,15 @@ bool GeoZoneManager::visible() const
     return SettingsManager::instance()->geoZoneSettings()->showZones()->rawValue().toBool();
 }
 
+void GeoZoneManager::setPlannedStart(const QDateTime &plannedStart)
+{
+    const QDateTime start = plannedStart.isValid() ? plannedStart.toUTC() : QDateTime();
+    if (start != _plannedStart) {
+        _plannedStart = start;
+        emit plannedStartChanged();
+    }
+}
+
 void GeoZoneManager::setVisible(bool visible)
 {
     SettingsManager::instance()->geoZoneSettings()->showZones()->setRawValue(visible);
