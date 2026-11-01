@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneSourceVersion.h"
+#include "GeoZoneAirac.h"
 #include "GeoZoneBox.h"
 #include "GeoZoneSource.h"
 
@@ -64,19 +65,7 @@ QList<GeoZoneSourceVersion> GeoZoneSourceVersion::covering(const QList<const Geo
 
 QString GeoZoneSourceVersion::airacCycleOf(const QDate &date)
 {
-    if (!date.isValid()) {
-        return QString();
-    }
-    // Cycles last 28 days from the effective date of cycle 2001
-    static const QDate epoch(2020, 1, 2);
-    constexpr qint64 cycleDays = 28;
-    const auto floorDiv = [](qint64 a, qint64 b) { return static_cast<qint64>(std::floor(static_cast<double>(a) / static_cast<double>(b))); };
-    const qint64 cycle = floorDiv(epoch.daysTo(date), cycleDays);
-    const QDate effective = epoch.addDays(cycle * cycleDays);
-    // The first cycle of a year is the first one effective in it
-    const qint64 firstOfYear = -floorDiv(-epoch.daysTo(QDate(effective.year(), 1, 1)), cycleDays);
-    const qint64 number = cycle - firstOfYear + 1;
-    return QStringLiteral("%1%2").arg(effective.year() % 100, 2, 10, QChar(u'0')).arg(number, 2, 10, QChar(u'0'));
+    return GeoZoneAirac::cycleName(date);
 }
 
 bool GeoZoneSourceVersion::sameData(const GeoZoneSourceVersion &other) const

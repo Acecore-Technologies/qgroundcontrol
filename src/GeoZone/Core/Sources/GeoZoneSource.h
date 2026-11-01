@@ -9,11 +9,14 @@
 
 #pragma once
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
+#include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QObject>
 #include <QtCore/QSet>
+#include <QtCore/QStringList>
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZoneBox.h"
@@ -27,6 +30,33 @@ Q_DECLARE_LOGGING_CATEGORY(GeoZoneSourceLog)
 
 class GeoZone;
 class GeoZoneShape;
+
+/// Zones added, removed and changed by a reload of a source: zones are told apart by their identifier, or their name
+/// without, and compared by their content hashes (GeoZone::Data::contentHash)
+struct GeoZoneSourceChanges
+{
+    Q_DECLARE_TR_FUNCTIONS(GeoZoneSourceChanges)
+
+public:
+    QDateTime at;           ///< When the reload happened
+    int addedCount = 0;
+    int removedCount = 0;
+    int changedCount = 0;
+    QStringList added;      ///< Names of the zones, sorted, at most maxNames
+    QStringList removed;
+    QStringList changed;
+
+    static constexpr qsizetype maxNames = 200;
+
+    bool isEmpty() const { return (addedCount + removedCount + changedCount) == 0; }
+    /// @return Like "Updated 12:03: 3 new, 1 changed, 2 removed", empty without changes
+    QString summary() const;
+    /// @return The names of the zones added, changed and removed, a line for each, empty without changes
+    QString details() const;
+    QJsonObject toJson() const;
+    static GeoZoneSourceChanges fromJson(const QJsonObject &object);
+    bool operator==(const GeoZoneSourceChanges &other) const = default;
+};
 
 /// Zones loaded from one geozone file or downloaded feed
 class GeoZoneSource : public QObject
@@ -50,7 +80,8 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
     Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
-    Q_PROPERTY(QString      changesText     READ changesText    NOTIFY changed FINAL)               ///< Zones added, removed and changed by the last reload which changed them, empty without
+    Q_PROPERTY(QString      changesText     READ changesText    NOTIFY changed FINAL)               ///< Counts of the zones added, changed and removed by the last reload which changed them, empty without
+    Q_PROPERTY(QString      changesDetails  READ changesDetails NOTIFY changed FINAL)               ///< Names of these zones, see GeoZoneSourceChanges::details
     Q_PROPERTY(bool         needsCredentials    READ needsCredentials   NOTIFY serviceChanged FINAL)    ///< The service of the feed requires a secret, see GeoZoneCredentials
     Q_PROPERTY(bool         credentialsMissing  READ credentialsMissing NOTIFY serviceChanged FINAL)    ///< The secret the service requires isn't known, like after importing a pack
     Q_PROPERTY(bool         followsArea     READ followsArea    NOTIFY serviceChanged FINAL)        ///< The service downloads the zones around the mission and the vehicle
@@ -89,7 +120,12 @@ public:
     bool busy() const { return _busy; }
     QString errorString() const { return _errorString; }
     bool enabled() const { return _enabled; }
-    QString changesText() const { return _changesText; }
+    QString changesText() const { return _changes.summary(); }
+    QString changesDetails() const { return _changes.details(); }
+    /// @return The changes of the last reload which changed zones, kept until the next one
+    const GeoZoneSourceChanges &changes() const { return _changes; }
+    /// Restores the changes recorded by a previous session
+    void setChanges(const GeoZoneSourceChanges &changes);
     /// @return GeoZone::key of the zones whose published data changed in the last reload
     const QSet<QString> &changedZoneKeys() const { return _changedZoneKeys; }
     void setEnabled(bool enabled);
@@ -122,7 +158,10 @@ public:
     /// Dataset a feed's page linked to, like the current AIRAC cycle, empty when the feed URL is the dataset. The
     /// validators are those of the dataset.
     QString datasetUrl() const { return _datasetUrl; }
-    void setDatasetUrl(const QString &datasetUrl) { _datasetUrl = datasetUrl; }
+    void setDatasetUrl(const QString &datasetUrl);
+    /// @return Effective date of the AIRAC cycle of the data, invalid unless the feed's dataset is published by AIRAC
+    ///         cycle, see GeoZoneProviders::airacDatasetDate. The data is outdated once the next cycle takes effect.
+    QDate airacDate() const { return GeoZoneProviders::airacDatasetDate(_datasetUrl); }
 
     /// Replaces the zones. The previous zones are deleted.
     /// @param fileDate Date of the data when the file has no issue date: file modification or download time
@@ -193,7 +232,7 @@ private:
     QDateTime _validTo;
     QString _validityText;
     bool _busy = false;
-    QString _changesText;
+    GeoZoneSourceChanges _changes;
     QSet<QString> _changedZoneKeys;
     bool _enabled = true;
     QString _errorString;

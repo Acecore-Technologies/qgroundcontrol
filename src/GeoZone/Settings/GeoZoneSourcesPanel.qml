@@ -152,13 +152,41 @@ ColumnLayout {
                 visible:            text !== ""
             }
 
+            // The zones the last reload added, changed and removed, their names on demand
+            RowLayout {
+                Layout.fillWidth:   true
+                spacing:            _margin
+                visible:            object.changesText !== ""
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    wrapMode:           Text.WordWrap
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    text:               object.changesText
+                    textFormat:         Text.PlainText
+                }
+
+                QGCLabel {
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    font.underline:     true
+                    color:              qgcPal.buttonHighlight
+                    text:               changesDetailsLabel.visible ? qsTr("Hide") : qsTr("Details")
+
+                    MouseArea {
+                        anchors.fill:   parent
+                        onClicked:      changesDetailsLabel.visible = !changesDetailsLabel.visible
+                    }
+                }
+            }
+
             QGCLabel {
+                id:                 changesDetailsLabel
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.changesText
+                text:               object.changesDetails
                 textFormat:         Text.PlainText
-                visible:            text !== ""
+                visible:            false
             }
 
             QGCLabel {

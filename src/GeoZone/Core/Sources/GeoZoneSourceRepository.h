@@ -87,8 +87,8 @@ public:
 
     static constexpr double defaultAreaMargin = 5000;
 
-    /// @return Description of a source for briefings and offline packs: its origin, dates, service and provenance.
-    ///         Holds no secrets.
+    /// @return Description of a source for briefings and offline packs: its origin, dates, service, provenance, the
+    ///         changes of its last reload (lastChanges, see GeoZoneSourceChanges) and its AIRAC cycle. Holds no secrets.
     static QJsonObject sourceReport(const GeoZoneSource &source);
     /// @return The reports of the sources, see sourceReport, and when it was made
     QJsonObject provenanceReport() const;

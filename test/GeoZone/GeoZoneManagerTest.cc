@@ -9,6 +9,8 @@
 
 #include "GeoZoneManagerTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneAirac.h"
+#include "GeoZoneSourceVersion.h"
 
 using namespace GeoZoneTestHelpers;
 
@@ -794,8 +796,15 @@ void GeoZoneManagerTest::_testReloadChanges()
         _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center, 400),
         _circleFeature(QStringLiteral("D"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(5000, 180), 300),
     }), errorString), qPrintable(errorString));
-    QVERIFY2(source->changesText().contains(QStringLiteral("added D; removed C; changed B")), qPrintable(source->changesText()));
+    QVERIFY2(source->changesText().startsWith(QStringLiteral("Updated ")) && source->changesText().endsWith(QStringLiteral(": 1 new, 1 changed, 1 removed")),
+             qPrintable(source->changesText()));
+    QCOMPARE(source->changesDetails(), QStringLiteral("New: D\nChanged: B\nRemoved: C"));
     QCOMPARE(source->changedZoneKeys().count(), 1);
+    QJsonObject lastChanges = GeoZoneSourceRepository::sourceReport(*source).value(QStringLiteral("lastChanges")).toObject();
+    QCOMPARE(lastChanges.value(QStringLiteral("addedCount")).toInt(), 1);
+    QCOMPARE(lastChanges.value(QStringLiteral("changedCount")).toInt(), 1);
+    QCOMPARE(lastChanges.value(QStringLiteral("removedCount")).toInt(), 1);
+    QCOMPARE(lastChanges.value(QStringLiteral("changed")).toArray(), QJsonArray{ QStringLiteral("B") });
     monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 2);
 
@@ -805,9 +814,91 @@ void GeoZoneManagerTest::_testReloadChanges()
         _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center, 400),
     }), errorString), qPrintable(errorString));
     QVERIFY(source->changedZoneKeys().isEmpty());
-    QVERIFY(source->changesText().contains(QStringLiteral("removed D")));
+    QVERIFY2(source->changesText().endsWith(QStringLiteral(": 1 removed")), qPrintable(source->changesText()));
+    QCOMPARE(source->changesDetails(), QStringLiteral("Removed: D"));
     monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 2);
+
+    // Reloading the same zones keeps the changes of the last reload which changed them
+    const GeoZoneSourceChanges changes = source->changes();
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 300),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center, 400),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(source->changes(), changes);
+
+    // and so does the next start
+    GeoZoneManager restarted(dir.filePath(QStringLiteral("storage")));
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    const GeoZoneSource *const restored = restarted.sources()->value<GeoZoneSource*>(0);
+    QCOMPARE(restored->changes().removed, QStringList{ QStringLiteral("D") });
+    QCOMPARE(restored->changes().at.toSecsSinceEpoch(), changes.at.toSecsSinceEpoch());
+    lastChanges = GeoZoneSourceRepository::sourceReport(*restored).value(QStringLiteral("lastChanges")).toObject();
+    QCOMPARE(lastChanges.value(QStringLiteral("removedCount")).toInt(), 1);
+}
+
+void GeoZoneManagerTest::_testAiracCycles_data()
+{
+    QTest::addColumn<QDate>("date");
+    QTest::addColumn<QDate>("start");
+    QTest::addColumn<QDate>("next");
+    QTest::addColumn<QString>("name");
+
+    QTest::newRow("epoch") << QDate(2020, 1, 2) << QDate(2020, 1, 2) << QDate(2020, 1, 30) << QStringLiteral("2001");
+    QTest::newRow("before the epoch") << QDate(2019, 12, 31) << QDate(2019, 12, 5) << QDate(2020, 1, 2) << QStringLiteral("1913");
+    QTest::newRow("long before") << QDate(2015, 1, 8) << QDate(2015, 1, 8) << QDate(2015, 2, 5) << QStringLiteral("1501");
+    QTest::newRow("14th cycle of 2020") << QDate(2020, 12, 31) << QDate(2020, 12, 31) << QDate(2021, 1, 28) << QStringLiteral("2014");
+    QTest::newRow("into the next year") << QDate(2021, 1, 27) << QDate(2020, 12, 31) << QDate(2021, 1, 28) << QStringLiteral("2014");
+    QTest::newRow("first of 2021") << QDate(2021, 1, 28) << QDate(2021, 1, 28) << QDate(2021, 2, 25) << QStringLiteral("2101");
+    QTest::newRow("first of 2024") << QDate(2024, 1, 25) << QDate(2024, 1, 25) << QDate(2024, 2, 22) << QStringLiteral("2401");
+    QTest::newRow("last day of 2513") << QDate(2026, 1, 21) << QDate(2025, 12, 25) << QDate(2026, 1, 22) << QStringLiteral("2513");
+    QTest::newRow("first of 2026") << QDate(2026, 1, 22) << QDate(2026, 1, 22) << QDate(2026, 2, 19) << QStringLiteral("2601");
+    QTest::newRow("within 2611") << QDate(2026, 11, 1) << QDate(2026, 10, 29) << QDate(2026, 11, 26) << QStringLiteral("2611");
+}
+
+void GeoZoneManagerTest::_testAiracCycles()
+{
+    QFETCH(QDate, date);
+    QFETCH(QDate, start);
+    QFETCH(QDate, next);
+    QFETCH(QString, name);
+
+    QCOMPARE(GeoZoneAirac::cycleStart(date), start);
+    QCOMPARE(GeoZoneAirac::nextCycleStart(date), next);
+    QCOMPARE(GeoZoneAirac::cycleName(date), name);
+    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(date), name);
+}
+
+void GeoZoneManagerTest::_testAiracExpiry()
+{
+    ScopedEnvironment environment;
+    environment.setNow(QDateTime(QDate(2026, 1, 21), QTime(23, 0), QTimeZone::UTC));
+    const QString datasetUrl = QStringLiteral("https://example.org/d/UAS_AREA_1/EG_FULL_20251225_XML.zip");
+    QCOMPARE(GeoZoneProviders::airacDatasetDate(datasetUrl), QDate(2025, 12, 25));
+    QVERIFY(!GeoZoneProviders::airacDatasetDate(QStringLiteral("https://example.org/zones_20251225.zip")).isValid());
+
+    // The data of a dataset published by AIRAC cycle is current during its cycle
+    const QString url = QStringLiteral("https://example.org/page");
+    GeoZoneSource source(url, url);
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::Aixm;
+    source.setResult(result, environment.now(), environment.now());
+    source.setDatasetUrl(datasetUrl);
+    QVERIFY2(source.validityText().isEmpty(), qPrintable(source.validityText()));
+    QVERIFY2(source.detailsText().contains(QStringLiteral("AIRAC 2513")), qPrintable(source.detailsText()));
+    const QJsonObject airac = GeoZoneSourceRepository::sourceReport(source).value(QStringLiteral("airac")).toObject();
+    QCOMPARE(airac.value(QStringLiteral("cycle")).toString(), QStringLiteral("2513"));
+    QCOMPARE(airac.value(QStringLiteral("effective")).toString(), QStringLiteral("2025-12-25"));
+    QCOMPARE(airac.value(QStringLiteral("ends")).toString(), QStringLiteral("2026-01-22"));
+
+    // and outdated once the next cycle takes effect, a day after the download
+    environment.setNow(QDateTime(QDate(2026, 1, 22), QTime(0, 0), QTimeZone::UTC));
+    source.updateValidity(environment.now());
+    QCOMPARE(source.validityText(), QStringLiteral("AIRAC cycle 2513 ended on 2026-01-22, a newer cycle is in effect"));
+
+    // Data of the next cycle, downloaded before it takes effect, isn't
+    source.setDatasetUrl(QStringLiteral("https://example.org/d/UAS_AREA_1/EG_FULL_20260219_XML.zip"));
+    QVERIFY2(source.validityText().isEmpty(), qPrintable(source.validityText()));
 }
 
 void GeoZoneManagerTest::_testFeedNotModified()

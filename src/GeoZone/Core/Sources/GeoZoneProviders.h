@@ -40,6 +40,7 @@ public:
         /// Links to the current dataset on a download page, with the dataset's effective date (yyyyMMdd) as the
         /// second capture. Empty when the feed URL is the dataset.
         QRegularExpression datasetLinkPattern;
+        bool airac = false;     ///< The datasets take effect by AIRAC cycle, see GeoZoneAirac
     };
 
     /// A service queried with credentials, an ED-318 POST or by the area of interest, which the user completes with its
@@ -75,6 +76,9 @@ public:
     /// @return URL of the current dataset linked from a download page, like the AIRAC datasets of NATS, or an empty
     ///         string when the data isn't such a page. The latest dataset effective today or earlier is chosen.
     static QString datasetLink(const QString &url, const QByteArray &data, const QDate &today);
+    /// @return Effective date of a dataset linked from a download page (see datasetLink) when its service publishes
+    ///         its datasets by AIRAC cycle, invalid otherwise
+    static QDate airacDatasetDate(const QString &datasetUrl);
 
     /// @return true for formats of short-lived restrictions, refreshed and outdated after hours rather than days
     static bool isLive(GeoZoneParser::Format format);

@@ -27,6 +27,9 @@ private slots:
     void _testFeedCancellation();
     void _testRefreshScheduler();
     void _testReloadChanges();
+    void _testAiracCycles_data();
+    void _testAiracCycles();
+    void _testAiracExpiry();
     void _testSourceValidity();
     void _testDownloadSizeLimit();
     void _testDownloadFailures();

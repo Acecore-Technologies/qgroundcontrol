@@ -9,11 +9,13 @@
 
 #include "GeoZoneSource.h"
 #include "GeoZone.h"
+#include "GeoZoneAirac.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneShape.h"
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
+#include <QtCore/QJsonArray>
 #include <QtCore/QLocale>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -91,6 +93,15 @@ void GeoZoneSource::setCredentialsMissing(bool missing)
     }
 }
 
+void GeoZoneSource::setDatasetUrl(const QString &datasetUrl)
+{
+    if (datasetUrl != _datasetUrl) {
+        _datasetUrl = datasetUrl;
+        updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
+        emit changed();
+    }
+}
+
 void GeoZoneSource::setArea(const QGeoRectangle &area)
 {
     if (area != _area) {
@@ -160,6 +171,9 @@ QString GeoZoneSource::detailsText() const
     QStringList parts = { formatName(), tr("zones: %1").arg(zoneCount()) };
     if (!_dateText().isEmpty()) {
         parts.append(_dateText());
+    }
+    if (const QDate airac = airacDate(); airac.isValid()) {
+        parts.append(tr("AIRAC %1").arg(GeoZoneAirac::cycleName(airac)));
     }
     if (!_provider.isEmpty()) {
         parts.append(_provider);
@@ -364,26 +378,107 @@ void GeoZoneSource::_summarizeChanges(const QList<GeoZone::Data> &previous, cons
         return;
     }
 
-    const auto list = [](QStringList namesList) {
-        constexpr qsizetype maxNames = 3;
+    const auto sorted = [](QStringList namesList) {
         namesList.sort(Qt::CaseInsensitive);
-        QString text = namesList.mid(0, maxNames).join(QStringLiteral(", "));
-        if (namesList.count() > maxNames) {
-            text += tr(" and %n more", nullptr, static_cast<int>(namesList.count() - maxNames));
-        }
-        return text;
+        return namesList.mid(0, GeoZoneSourceChanges::maxNames);
     };
-    QStringList parts;
-    if (!added.isEmpty()) {
-        parts.append(tr("added %1").arg(list(added)));
+    _changes = GeoZoneSourceChanges();
+    _changes.at = GeoZoneEnvironment::currentDateTimeUtc();
+    _changes.addedCount = static_cast<int>(added.count());
+    _changes.removedCount = static_cast<int>(removed.count());
+    _changes.changedCount = static_cast<int>(changedNames.count());
+    _changes.added = sorted(added);
+    _changes.removed = sorted(removed);
+    _changes.changed = sorted(changedNames);
+}
+
+void GeoZoneSource::setChanges(const GeoZoneSourceChanges &changes)
+{
+    if (!(changes == _changes)) {
+        _changes = changes;
+        emit changed();
     }
-    if (!removed.isEmpty()) {
-        parts.append(tr("removed %1").arg(list(removed)));
+}
+
+QString GeoZoneSourceChanges::summary() const
+{
+    if (isEmpty()) {
+        return QString();
     }
-    if (!changedNames.isEmpty()) {
-        parts.append(tr("changed %1").arg(list(changedNames)));
+    QStringList counts;
+    if (addedCount > 0) {
+        counts.append(tr("%n new", nullptr, addedCount));
     }
-    _changesText = tr("Update of %1: %2").arg(QLocale().toString(GeoZoneEnvironment::currentDateTimeUtc().toLocalTime(), QLocale::ShortFormat), parts.join(QStringLiteral("; ")));
+    if (changedCount > 0) {
+        counts.append(tr("%n changed", nullptr, changedCount));
+    }
+    if (removedCount > 0) {
+        counts.append(tr("%n removed", nullptr, removedCount));
+    }
+    // The time of a reload today, otherwise the date too
+    const QDateTime local = at.toLocalTime();
+    const QLocale locale;
+    const QString time = (local.date() == GeoZoneEnvironment::currentDateTimeUtc().toLocalTime().date()) ?
+        locale.toString(local.time(), QLocale::ShortFormat) : locale.toString(local, QLocale::ShortFormat);
+    return tr("Updated %1: %2").arg(time, counts.join(QStringLiteral(", ")));
+}
+
+QString GeoZoneSourceChanges::details() const
+{
+    const auto line = [](const QString &label, const QStringList &names, int count) {
+        QString text = names.join(QStringLiteral(", "));
+        if (count > names.count()) {
+            text += tr(" and %n more", nullptr, static_cast<int>(count - names.count()));
+        }
+        return label.arg(text);
+    };
+    QStringList lines;
+    if (addedCount > 0) {
+        lines.append(line(tr("New: %1"), added, addedCount));
+    }
+    if (changedCount > 0) {
+        lines.append(line(tr("Changed: %1"), changed, changedCount));
+    }
+    if (removedCount > 0) {
+        lines.append(line(tr("Removed: %1"), removed, removedCount));
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+QJsonObject GeoZoneSourceChanges::toJson() const
+{
+    if (isEmpty()) {
+        return QJsonObject();
+    }
+    return QJsonObject{
+        { QStringLiteral("at"), at.toUTC().toString(Qt::ISODate) },
+        { QStringLiteral("addedCount"), addedCount },
+        { QStringLiteral("changedCount"), changedCount },
+        { QStringLiteral("removedCount"), removedCount },
+        { QStringLiteral("added"), QJsonArray::fromStringList(added) },
+        { QStringLiteral("changed"), QJsonArray::fromStringList(changed) },
+        { QStringLiteral("removed"), QJsonArray::fromStringList(removed) },
+    };
+}
+
+GeoZoneSourceChanges GeoZoneSourceChanges::fromJson(const QJsonObject &object)
+{
+    const auto names = [&object](const char *key) {
+        QStringList list;
+        for (const QJsonValue &value : object.value(QLatin1String(key)).toArray()) {
+            list.append(value.toString());
+        }
+        return list.mid(0, maxNames);
+    };
+    GeoZoneSourceChanges changes;
+    changes.at = QDateTime::fromString(object.value(QStringLiteral("at")).toString(), Qt::ISODate);
+    changes.added = names("added");
+    changes.changed = names("changed");
+    changes.removed = names("removed");
+    changes.addedCount = (std::max)(static_cast<int>(changes.added.count()), object.value(QStringLiteral("addedCount")).toInt());
+    changes.changedCount = (std::max)(static_cast<int>(changes.changed.count()), object.value(QStringLiteral("changedCount")).toInt());
+    changes.removedCount = (std::max)(static_cast<int>(changes.removed.count()), object.value(QStringLiteral("removedCount")).toInt());
+    return changes;
 }
 
 void GeoZoneSource::setBusy(bool busy)
@@ -412,6 +507,9 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
             text = tr("Expired on %1").arg(_formatDate(_validTo));
         } else if (_validFrom.isValid() && (_validFrom > now)) {
             text = tr("Not valid until %1").arg(_formatDate(_validFrom));
+        } else if (const QDate airac = airacDate(); airac.isValid() && (GeoZoneAirac::nextCycleStart(airac) <= now.toUTC().date())) {
+            text = tr("AIRAC cycle %1 ended on %2, a newer cycle is in effect")
+                       .arg(GeoZoneAirac::cycleName(airac), GeoZoneAirac::nextCycleStart(airac).toString(Qt::ISODate));
         } else if (isLive() && date.isValid() && (date.secsTo(now) > (qint64{ settings.liveStaleHours } * 3600))) {
             text = tr("Data is %n hour(s) old", nullptr, static_cast<int>(date.secsTo(now) / 3600));
         } else if (!isLive() && date.isValid() && (date.daysTo(now) > settings.staleDays)) {

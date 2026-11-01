@@ -33,6 +33,7 @@ constexpr const char *checkedAtKey = "checkedAt";
 constexpr const char *serviceKey = "service";
 constexpr const char *areaKey = "area";
 constexpr const char *provenanceKey = "provenance";
+constexpr const char *changesKey = "changes";
 constexpr const char *sourcesKey = "sources";
 constexpr const char *versionKey = "version";
 
@@ -141,6 +142,7 @@ GeoZoneSourceIndex::Entry GeoZoneSourceIndex::entryFromJson(const QJsonObject &o
     }
     entry.service = object.value(serviceKey).toObject();
     entry.provenance = object.value(provenanceKey).toObject();
+    entry.changes = object.value(changesKey).toObject();
     const QJsonArray area = object.value(areaKey).toArray();
     if (area.count() == 4) {
         entry.area = QGeoRectangle(QGeoCoordinate(area[3].toDouble(), area[0].toDouble()), QGeoCoordinate(area[1].toDouble(), area[2].toDouble()));
@@ -178,6 +180,9 @@ QJsonObject GeoZoneSourceIndex::entryToJson(const Entry &entry)
     }
     if (!entry.provenance.isEmpty()) {
         object.insert(provenanceKey, entry.provenance);
+    }
+    if (!entry.changes.isEmpty()) {
+        object.insert(changesKey, entry.changes);
     }
     if (entry.area.isValid()) {
         object.insert(areaKey, QJsonArray{ entry.area.topLeft().longitude(), entry.area.bottomRight().latitude(),

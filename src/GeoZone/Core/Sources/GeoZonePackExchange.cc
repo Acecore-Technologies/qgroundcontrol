@@ -45,6 +45,8 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
             object.insert(it.key(), it.value());
         }
         object.insert(QStringLiteral("file"), name);
+        // The report has them as lastChanges
+        (void) object.remove(QStringLiteral("changes"));
         if (source.service.isEmpty()) {
             (void) object.remove(QStringLiteral("service"));
         } else {

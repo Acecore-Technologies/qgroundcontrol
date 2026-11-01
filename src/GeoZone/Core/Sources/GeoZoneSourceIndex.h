@@ -41,6 +41,7 @@ public:
         QJsonObject service;    ///< See GeoZoneService::toJson, empty for plain feeds and files. Holds no secrets.
         QGeoRectangle area;     ///< Area of interest the feed was downloaded for, invalid when its service takes none
         QJsonObject provenance; ///< See GeoZoneProvenance::toJson
+        QJsonObject changes;    ///< Of the last reload which changed zones, see GeoZoneSourceChanges::toJson
     };
 
     enum class Status : quint8 {

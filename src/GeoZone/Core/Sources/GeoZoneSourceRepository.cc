@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneSourceRepository.h"
+#include "GeoZoneAirac.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZonePackExchange.h"
 #include "GeoZoneProviders.h"
@@ -600,6 +601,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     if (const GeoZoneSource *const source = this->source(job.key)) {
         entry.enabled = source->enabled();
         entry.provenance = source->provenance().toJson();
+        entry.changes = source->changes().toJson();
     }
     entry.service = _services.contains(job.key) ? _services.service(job.key).toJson() : QJsonObject();
     _index.replace(entry);
@@ -739,6 +741,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         placeholder->setDatasetUrl(job.datasetUrl);
         placeholder->setArea(entry.area);
         placeholder->setProvenance(GeoZoneProvenance::fromJson(entry.provenance));
+        placeholder->setChanges(GeoZoneSourceChanges::fromJson(entry.changes));
         if (!entry.service.isEmpty()) {
             _services.restoreService(entry.key, GeoZoneService::fromJson(entry.service));
             placeholder->setService(_services.service(entry.key));
@@ -825,6 +828,16 @@ QJsonObject GeoZoneSourceRepository::sourceReport(const GeoZoneSource &source)
     }
     if (source.integrityFailed()) {
         report.insert(QStringLiteral("integrityFailed"), true);
+    }
+    if (!source.changes().isEmpty()) {
+        report.insert(QStringLiteral("lastChanges"), source.changes().toJson());
+    }
+    if (const QDate airac = source.airacDate(); airac.isValid()) {
+        report.insert(QStringLiteral("airac"), QJsonObject{
+            { QStringLiteral("cycle"), GeoZoneAirac::cycleName(airac) },
+            { QStringLiteral("effective"), GeoZoneAirac::cycleStart(airac).toString(Qt::ISODate) },
+            { QStringLiteral("ends"), GeoZoneAirac::nextCycleStart(airac).toString(Qt::ISODate) },
+        });
     }
     return report;
 }

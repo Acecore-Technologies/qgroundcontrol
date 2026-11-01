@@ -66,6 +66,7 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
                         QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/"));
     // NATS lists the full UAS flight restriction datasets of the current and next AIRAC cycles
     nats.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\""));
+    nats.airac = true;
 
     return {
         feed(QStringLiteral("traficom"), tr("Finland (Traficom)"), QStringLiteral("traficom.fi"), Format::Unknown,
@@ -264,6 +265,25 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
         }
     }
     return QString();
+}
+
+QDate GeoZoneProviders::airacDatasetDate(const QString &datasetUrl)
+{
+    if (datasetUrl.isEmpty()) {
+        return QDate();
+    }
+    // The patterns match the links of the download pages
+    const QString link = QStringLiteral("href=\"%1\"").arg(datasetUrl);
+    for (const Service &service : services()) {
+        if (!service.airac || !service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {
+            continue;
+        }
+        const QRegularExpressionMatch match = service.datasetLinkPattern.match(link);
+        if (match.hasMatch()) {
+            return QDate::fromString(match.captured(2), QStringLiteral("yyyyMMdd"));
+        }
+    }
+    return QDate();
 }
 
 bool GeoZoneProviders::isLive(GeoZoneParser::Format format)
