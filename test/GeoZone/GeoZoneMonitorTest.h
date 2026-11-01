@@ -29,4 +29,5 @@ private slots:
     void _testAlertArbiter();
     void _testSpokenAlerts();
     void _testPositionLoss();
+    void _testAlertActions();
 };

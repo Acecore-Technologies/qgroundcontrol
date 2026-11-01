@@ -38,7 +38,8 @@ void GeoZoneAlertArbiter::setClock(const Clock &clock)
 
 void GeoZoneAlertArbiter::submit(const Alert &alert)
 {
-    if (std::any_of(_pending.cbegin(), _pending.cend(), [&alert](const Alert &pending) { return pending.id == alert.id; })) {
+    if (zoneMuted(alert.vehicleKey, alert.zoneKey) ||
+        std::any_of(_pending.cbegin(), _pending.cend(), [&alert](const Alert &pending) { return pending.id == alert.id; })) {
         return;
     }
     _pending.append(alert);
@@ -55,6 +56,30 @@ void GeoZoneAlertArbiter::setInsideZones(int vehicleKey, const QSet<QString> &zo
     (void) _breaches.removeIf([vehicleKey, &zoneKeys](const Breach &breach) {
         return (breach.alert.vehicleKey == vehicleKey) && !zoneKeys.contains(breach.alert.zoneKey);
     });
+    const auto mutes = _zoneMutes.find(vehicleKey);
+    if (mutes != _zoneMutes.end()) {
+        mutes->intersect(zoneKeys);
+        if (mutes->isEmpty()) {
+            _zoneMutes.erase(mutes);
+        }
+    }
+}
+
+void GeoZoneAlertArbiter::muteZone(int vehicleKey, const QString &zoneKey)
+{
+    _zoneMutes[vehicleKey].insert(zoneKey);
+    const auto matches = [vehicleKey, &zoneKey](const Alert &alert) { return (alert.vehicleKey == vehicleKey) && (alert.zoneKey == zoneKey); };
+    (void) _pending.removeIf(matches);
+    (void) _breaches.removeIf([&matches](const Breach &breach) { return matches(breach.alert); });
+}
+
+int GeoZoneAlertArbiter::zoneMuteCount() const
+{
+    int count = 0;
+    for (const QSet<QString> &zoneKeys : _zoneMutes) {
+        count += static_cast<int>(zoneKeys.count());
+    }
+    return count;
 }
 
 void GeoZoneAlertArbiter::setSuspended(int vehicleKey, bool suspended)
@@ -69,6 +94,7 @@ void GeoZoneAlertArbiter::setSuspended(int vehicleKey, bool suspended)
 void GeoZoneAlertArbiter::removeVehicle(int vehicleKey)
 {
     (void) _suspended.remove(vehicleKey);
+    (void) _zoneMutes.remove(vehicleKey);
     (void) _pending.removeIf([vehicleKey](const Alert &alert) { return alert.vehicleKey == vehicleKey; });
     (void) _breaches.removeIf([vehicleKey](const Breach &breach) { return breach.alert.vehicleKey == vehicleKey; });
 }

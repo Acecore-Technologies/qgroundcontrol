@@ -11,12 +11,15 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtCore/QVariantList>
+#include <QtCore/QVariantMap>
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
@@ -59,6 +62,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(GeoZoneAlertHistory *alertHistory READ alertHistory      CONSTANT FINAL)                       ///< Alerts of the session and earlier today
     Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< Alerts are neither spoken nor repeated, see muteAlerts()
     Q_PROPERTY(int              defaultMuteSecs     READ defaultMuteSecs    CONSTANT FINAL)
+    Q_PROPERTY(QStringList      mutedZoneKeys       READ mutedZoneKeys      NOTIFY zoneMutesChanged FINAL)   ///< Zones muted for the active vehicle until it leaves them, see muteZone()
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
@@ -73,6 +77,8 @@ public:
 
     static constexpr int evaluateIntervalMSecs = 1000;
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
+    static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see alertActions()
+    static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
 
     /// An alert of a vehicle about a zone
     struct AlertEvent {
@@ -181,6 +187,17 @@ public:
     Q_INVOKABLE void muteAlerts(int seconds = 0);
     Q_INVOKABLE void unmuteAlerts();
 
+    /// @return What can be done about an alert of the alert and alertRepeated signals, while its vehicle is monitored, as
+    ///         a map: vehicleId, zoneKey (GeoZone::key), activeVehicle (the alert is about the active vehicle), inside
+    ///         (the vehicle is inside the zone, by its current position), zoneMuted (see muteZone()) and climbHeight
+    ///         (meters the vehicle climbs to be climbClearance above the ceiling of the zone where it is, NaN when the
+    ///         zone has no known ceiling there or the vehicle's position or altitude are unknown). Empty for unknown
+    ///         alerts.
+    Q_INVOKABLE QVariantMap alertActions(int alertId) const;
+    /// Mutes the zone of the alert for its vehicle until the vehicle leaves the zone: the zone is neither shown, spoken
+    /// nor repeated meanwhile, the alerts are still logged
+    Q_INVOKABLE void muteZone(int alertId);
+
     GeoZoneManager *manager() const { return _manager; }
     GeoZoneActiveVehicleView *activeView() const { return _activeView; }
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
@@ -191,6 +208,7 @@ public:
     bool monitoring() const;
     bool alertsMuted() const { return _arbiter.muted(); }
     static int defaultMuteSecs() { return GeoZoneAlertArbiter::defaultMuteMSecs / 1000; }
+    QStringList mutedZoneKeys() const;
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
@@ -206,6 +224,7 @@ signals:
     /// A vehicle started breaching its fence. The vehicle announces it, so it isn't spoken.
     void fenceBreach(const QString &message);
     void alertsMutedChanged();
+    void zoneMutesChanged();
 
 private slots:
     void _updateEvaluateTimer();
@@ -234,6 +253,11 @@ private:
     void _resetMonitors();
 
     AlertEvent _alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId);
+    /// @return Meters to climb above the zone by climbClearance, NaN when it has no known ceiling at the vehicle
+    static double _climbHeight(const GeoZoneVehicleMonitor *monitor, const GeoZone *zone);
+    GeoZoneVehicleMonitor *_monitorByKey(int key) const;
+    /// Notifies zoneMutesChanged when the count changed since it was taken
+    void _zoneMutesChanged(int previousCount);
     /// @return The message naming the vehicle while several are monitored
     QString _labelled(int vehicleId, const QString &message) const;
     qint64 _now() const { return _clock ? _clock() : _elapsed.elapsed(); }
@@ -244,6 +268,11 @@ private:
     int _activeVehicleId = noVehicle;
     int _nextVehicleKey = 1;
     int _nextAlertId = 1;
+    struct AlertSubject {
+        int vehicleKey = 0;
+        QString zoneKey;
+    };
+    QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
     QTimer _evaluateTimer;
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty

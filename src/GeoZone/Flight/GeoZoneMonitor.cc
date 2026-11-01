@@ -85,6 +85,9 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(_alertHistory, &GeoZoneAlertHistory::alertAcknowledged, this, [this](int alertId) { _arbiter.acknowledge(alertId); });
     (void) connect(_alertHistory, &GeoZoneAlertHistory::allAcknowledged, this, [this]() { _arbiter.acknowledgeAll(); });
 
+    // Zones are muted for the active vehicle
+    (void) connect(_activeView, &GeoZoneActiveVehicleView::activeMonitorChanged, this, &GeoZoneMonitor::zoneMutesChanged);
+
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
 
@@ -186,7 +189,9 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
         return;
     }
     (void) _monitors.removeOne(monitor);
+    const int muteCount = _arbiter.zoneMuteCount();
     _arbiter.removeVehicle(monitor->key());
+    _zoneMutesChanged(muteCount);
     (void) monitor->disconnect(this);
     // Removed while the vehicle emits a signal, or from a slot of the monitor
     monitor->deleteLater();
@@ -335,18 +340,25 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
         const AlertEvent::Kind kind = zoneAlert.inside ? AlertEvent::Entry : AlertEvent::Approach;
         _submit(monitor, _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId()), zoneAlert.zone);
     }
-    // Breaches end when the vehicle leaves the zone. Without a current position the zones it is in aren't known, the
-    // nearby zones are those of its last position.
+    // Breaches and zone mutes end when the vehicle leaves the zone. Without a current position the zones it is in
+    // aren't known, the nearby zones are those of its last position.
     if (!monitor->positionUnavailable()) {
+        const int muteCount = _arbiter.zoneMuteCount();
         _arbiter.setInsideZones(monitor->key(), monitor->insideZoneKeys());
+        _zoneMutesChanged(muteCount);
     }
 }
 
 void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone)
 {
     const int severity = GeoZone::restrictionSeverity(event.restriction);
+    _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event.zoneKey });
+    (void) _alertSubjects.remove(event.id - maxActionAlerts);
     emit alertEvent(event);
-    emit alert(event.message, severity, event.id);
+    // A zone muted until the vehicle leaves it is logged but not shown
+    if (!_arbiter.zoneMuted(monitor->key(), event.zoneKey)) {
+        emit alert(event.message, severity, event.id);
+    }
 
     GeoZoneAlertArbiter::Alert announced;
     announced.id = event.id;
@@ -411,6 +423,89 @@ void GeoZoneMonitor::unmuteAlerts()
     _arbiter.unmute();
     _muteTimer.stop();
     _updateMuted();
+}
+
+QVariantMap GeoZoneMonitor::alertActions(int alertId) const
+{
+    const auto subject = _alertSubjects.constFind(alertId);
+    const GeoZoneVehicleMonitor *const monitor = (subject != _alertSubjects.cend()) ? _monitorByKey(subject->vehicleKey) : nullptr;
+    if (!monitor) {
+        return {};
+    }
+    const QList<GeoZoneAlertTracker::Nearby> &nearby = monitor->nearby();
+    const auto zone = std::find_if(nearby.cbegin(), nearby.cend(), [&subject](const GeoZoneAlertTracker::Nearby &candidate) {
+        return candidate.zone->key() == subject->zoneKey;
+    });
+    const bool known = (zone != nearby.cend()) && !monitor->positionUnavailable();
+    return QVariantMap{
+        { QStringLiteral("vehicleId"), monitor->vehicleId() },
+        { QStringLiteral("zoneKey"), subject->zoneKey },
+        { QStringLiteral("activeVehicle"), monitor == _activeView->monitor() },
+        { QStringLiteral("inside"), known && zone->inside },
+        { QStringLiteral("zoneMuted"), _arbiter.zoneMuted(subject->vehicleKey, subject->zoneKey) },
+        { QStringLiteral("climbHeight"), known ? _climbHeight(monitor, zone->zone) : qQNaN() },
+    };
+}
+
+void GeoZoneMonitor::muteZone(int alertId)
+{
+    const auto subject = _alertSubjects.constFind(alertId);
+    if ((subject == _alertSubjects.cend()) || !_monitorByKey(subject->vehicleKey)) {
+        return;
+    }
+    const int muteCount = _arbiter.zoneMuteCount();
+    _arbiter.muteZone(subject->vehicleKey, subject->zoneKey);
+    _zoneMutesChanged(muteCount);
+}
+
+QStringList GeoZoneMonitor::mutedZoneKeys() const
+{
+    const GeoZoneVehicleMonitor *const monitor = _activeView->monitor();
+    return monitor ? QStringList(_arbiter.mutedZones(monitor->key()).values()) : QStringList();
+}
+
+void GeoZoneMonitor::_zoneMutesChanged(int previousCount)
+{
+    if (_arbiter.zoneMuteCount() != previousCount) {
+        emit zoneMutesChanged();
+    }
+}
+
+GeoZoneVehicleMonitor *GeoZoneMonitor::_monitorByKey(int key) const
+{
+    const auto it = std::find_if(_monitors.cbegin(), _monitors.cend(), [key](const GeoZoneVehicleMonitor *monitor) { return monitor->key() == key; });
+    return (it != _monitors.cend()) ? *it : nullptr;
+}
+
+double GeoZoneMonitor::_climbHeight(const GeoZoneVehicleMonitor *monitor, const GeoZone *zone)
+{
+    const GeoZone::Position &position = monitor->position();
+    if (std::isnan(position.altitudeAMSL)) {
+        return qQNaN();
+    }
+    // The volumes over the vehicle, or all of them when it is beside the zone
+    const QList<GeoZone::Volume> &volumes = zone->data().volumes;
+    QList<qsizetype> indexes;
+    for (qsizetype i = 0; i < volumes.count(); i++) {
+        if (zone->volumeContains(i, position.coordinate)) {
+            indexes.append(i);
+        }
+    }
+    if (indexes.isEmpty()) {
+        for (qsizetype i = 0; i < volumes.count(); i++) {
+            indexes.append(i);
+        }
+    }
+    double ceiling = qQNaN();
+    for (const qsizetype i : std::as_const(indexes)) {
+        const double upper = GeoZone::limitAMSL(volumes[i], true, position);
+        if (std::isnan(upper)) {
+            return qQNaN();
+        }
+        ceiling = std::isnan(ceiling) ? upper : (std::max)(ceiling, upper);
+    }
+    const double height = ceiling + climbClearance - position.altitudeAMSL;
+    return (height > 0) ? height : qQNaN();
 }
 
 void GeoZoneMonitor::_updateMuted()

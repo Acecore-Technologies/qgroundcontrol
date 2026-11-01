@@ -215,6 +215,13 @@ Item {
                                 }
 
                                 QGCLabel {
+                                    text:           qsTr("Muted")
+                                    color:          qgcPal.warningText
+                                    font.pointSize: ScreenTools.smallFontPointSize
+                                    visible:        control._monitor.mutedZoneKeys.indexOf(nearbyRow.zone.key) >= 0
+                                }
+
+                                QGCLabel {
                                     text: nearbyRow.inside ? qsTr("Inside") :
                                               (nearbyRow.timeToEntry >= 0 ? qsTr("%1, entry in %2 s").arg(control._distanceText(nearbyRow.distance)).arg(nearbyRow.timeToEntry) :
                                                                             control._distanceText(nearbyRow.distance))
