@@ -57,6 +57,8 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     // The age at which data is outdated may have changed
     (void) connect(settings->staleDays(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
     (void) connect(settings->liveStaleHours(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
+    // Limits published as flight levels are converted with the QNH, so checks and texts using them are updated
+    (void) connect(settings->qnhHPa(), &Fact::rawValueChanged, this, [this]() { emit zonesChanged(nullptr); });
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);

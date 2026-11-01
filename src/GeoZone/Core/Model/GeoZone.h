@@ -58,7 +58,7 @@ public:
         Ground,         ///< AGL or SFC
         MeanSeaLevel,   ///< AMSL or MSL
         Ellipsoid,      ///< WGS84
-        FlightLevel,    ///< STD, pressure altitude which depends on the weather
+        FlightLevel,    ///< STD, pressure altitude converted with the QNH, see pressureAltitudeToAMSL
     };
 
     /// Altitude of a position relative to the vertical limits of a volume
@@ -92,6 +92,10 @@ public:
 
         /// Sets the references from the published codes
         void setReferences(const QString &lowerCode, const QString &upperCode);
+
+        /// @return true if a limit is a flight level, whose height above mean sea level is approximated from the
+        ///         QNH of GeoZoneEnvironment when it is compared or shown
+        bool approximateLimits() const { return (lowerReference == VerticalReference::FlightLevel) || (upperReference == VerticalReference::FlightLevel); }
 
         /// Of the outer ring or the circle, invalid without them
         GeoZoneBox boundingBox() const;
@@ -147,7 +151,10 @@ public:
     QString extendedPropertiesText() const { return _data.extendedProperties.join(QStringLiteral("\n")); }
     QString issuesText() const { return _data.issues.join(QStringLiteral("\n")); }
     QString applicabilityText() const;
+    /// Limits of each volume on a line. Flight levels show their approximate height above mean sea level with the QNH.
     QString verticalLimitsText() const;
+    /// @return true if the heights of some limits are approximate, see Volume::approximateLimits
+    bool approximateLimits() const;
     QGeoCoordinate center() const { return _box.center(); }
     /// Bounds of all volumes, which may cross the antimeridian
     const GeoZoneBox &box() const { return _box; }
@@ -242,8 +249,21 @@ public:
 
     /// @return Lower or upper limit of the volume in meters above mean sea level at the position, using its terrain
     ///         elevation for limits above ground. NaN when the zone extends to the ground or has no ceiling, or the
-    ///         limit can't be converted, like flight levels or limits above unknown terrain.
+    ///         limit can't be converted, like limits above unknown terrain or in unknown references. Flight levels
+    ///         are converted with the QNH and widened by flightLevelMargin, like when they are compared.
     static double limitAMSL(const Volume &volume, bool upper, const Position &position);
+
+    /// Fraction of the height of a flight level above mean sea level by which floors are lowered and ceilings raised
+    /// when they are compared. The conversion assumes the temperatures of the standard atmosphere, in colder air flight
+    /// levels are lower by about 4 % of their height per 10 degrees Celsius.
+    static constexpr double flightLevelMargin = 0.04;
+
+    /// @return Height in meters above mean sea level of a pressure altitude, like a flight level, where the sea
+    ///         level pressure is qnhHPa. As read by an altimeter set to the QNH, which is the true altitude in the
+    ///         standard atmosphere: the pressure altitude less the pressure altitude of the QNH,
+    ///         44330.8 m * (1 - (QNH / 1013.25 hPa)^0.190263), about 8.3 m per hPa near the sea level.
+    /// @param pressureAltitude Meters in the ICAO standard atmosphere, 30.48 m per flight level
+    static double pressureAltitudeToAMSL(double pressureAltitude, double qnhHPa);
 
     static VerticalReference verticalReferenceFromString(const QString &reference);
     static Restriction restrictionFromString(const QString &restriction);
@@ -253,7 +273,7 @@ public:
     static int restrictionSeverity(Restriction restriction);
 
 private:
-    static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet);
+    static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet, double qnhHPa);
 
     /// Polygon volumes projected around the zone center, so that queries don't project them again
     struct Projected {

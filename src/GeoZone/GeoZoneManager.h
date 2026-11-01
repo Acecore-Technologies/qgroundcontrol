@@ -151,7 +151,8 @@ public:
 signals:
     /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
     void zonesAboutToChange(GeoZoneSource *source);
-    /// The zones of the source changed, zones() and the queries include them unless it was removed
+    /// The zones of the source changed, zones() and the queries include them unless it was removed. The source is
+    /// null when the vertical limits of all zones changed, after a new QNH converts their flight levels differently.
     void zonesChanged(GeoZoneSource *source);
     void boundingBoxChanged();
     void showZoneRequested(const QVariant &zone);   ///< GeoZoneInfo

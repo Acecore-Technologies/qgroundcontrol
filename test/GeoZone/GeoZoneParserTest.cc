@@ -958,7 +958,10 @@ void GeoZoneParserTest::_testLimitTexts_data()
     QTest::newRow("ft AGL in ft") << 0.0 << 400.0 << "AGL" << "AGL" << true << true << "GND - 400 ft AGL";
     QTest::newRow("ft AMSL in m") << 1000.0 << 2500.0 << "AMSL" << "AMSL" << true << false << "305 m AMSL (1000 ft) - 762 m AMSL (2500 ft)";
     QTest::newRow("m AMSL in ft") << 150.0 << 300.0 << "AMSL" << "AMSL" << false << true << "492 ft AMSL (150 m) - 984 ft AMSL (300 m)";
-    QTest::newRow("ft STD in m") << 9500.0 << 19500.0 << "STD" << "STD" << true << false << "2896 m STD (9500 ft) - 5944 m STD (19500 ft)";
+    // Flight levels are shown with their approximate height above mean sea level with the QNH, standard here
+    QTest::newRow("ft STD in m") << 9500.0 << 19500.0 << "STD" << "STD" << true << false << "FL 95 ≈ 2896 m AMSL - FL 195 ≈ 5944 m AMSL (QNH 1013.25 hPa)";
+    QTest::newRow("m STD in ft") << 2895.6 << 99999.0 << "STD" << "STD" << false << true << "FL 95 ≈ 9500 ft AMSL - Unlimited (QNH 1013.25 hPa)";
+    QTest::newRow("AGL to STD in ft") << 0.0 << 2895.6 << "AGL" << "STD" << false << true << "GND - FL 95 ≈ 9500 ft AMSL (QNH 1013.25 hPa)";
     QTest::newRow("m WGS84 in m") << 500.0 << 1000.0 << "WGS84" << "WGS84" << false << false << "500 m WGS84 - 1000 m WGS84";
     // Only zones from the ground start at GND, the codes are shown as published
     QTest::newRow("0 m AMSL") << 0.0 << 120.0 << "AMSL" << "AMSL" << false << false << "0 m AMSL - 120 m AMSL";
@@ -990,6 +993,57 @@ void GeoZoneParserTest::_testLimitTexts()
     data.volumes.append(volume);
     const auto units = _setVerticalUnits(shownInFeet);
     QCOMPARE(GeoZone(data).verticalLimitsText(), text);
+}
+
+void GeoZoneParserTest::_testFlightLevelQnh()
+{
+    // A zone from FL 95 up, published as pressure altitude in feet
+    QJsonObject feature = _circleFeature(QStringLiteral("FL95"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 1000);
+    QJsonObject geometry = feature.value(QStringLiteral("geometry")).toArray().first().toObject();
+    geometry.insert(QStringLiteral("uomDimensions"), QStringLiteral("FT"));
+    geometry.insert(QStringLiteral("lowerLimit"), 9500);
+    geometry.insert(QStringLiteral("lowerVerticalReference"), QStringLiteral("STD"));
+    geometry.insert(QStringLiteral("upperLimit"), 99999);
+    geometry.insert(QStringLiteral("upperVerticalReference"), QStringLiteral("AMSL"));
+    geometry.insert(QStringLiteral("horizontalProjection"), QJsonObject{ { "type", "Circle" }, { "center", QJsonArray{ 8, 47 } }, { "radius", 1000 / 0.3048 } });
+    feature.insert(QStringLiteral("geometry"), QJsonArray{ geometry });
+    const QByteArray document = QJsonDocument(QJsonObject{ { "features", QJsonArray{ feature } } }).toJson(QJsonDocument::Compact);
+
+    ScopedEnvironment environment;
+    const auto meters = _setVerticalUnits(false);
+    const auto parse = [&document]() {
+        GeoZoneParser::Result result;
+        QString errorString;
+        if (!GeoZoneParser::parse(document, result, errorString)) {
+            qWarning() << errorString;
+        }
+        return result;
+    };
+    const auto serialize = [](const GeoZoneParser::Result &result) {
+        QByteArray bytes;
+        QDataStream stream(&bytes, QIODevice::WriteOnly);
+        stream.setVersion(GeoZoneParseCache::streamVersion);
+        stream << result;
+        return bytes;
+    };
+
+    // The parse keeps the pressure altitude, so parse caches don't depend on the QNH
+    environment.setQnh(1003);
+    const GeoZoneParser::Result result = parse();
+    QCOMPARE(result.zones.count(), 1);
+    environment.setQnh(1030);
+    QCOMPARE(serialize(parse()), serialize(result));
+
+    // The same zone follows the QNH: FL 95 is compared from 2697.5 m with 1003 hPa and 2912.7 m with 1030 hPa
+    const GeoZone zone(result.zones.first());
+    QVERIFY(zone.approximateLimits());
+    const GeoZone::Position position{ QGeoCoordinate(47, 8), 2800 };
+    environment.setQnh(1003);
+    QVERIFY(zone.contains(position));
+    QCOMPARE(zone.verticalLimitsText(), QStringLiteral("FL 95 ≈ 2810 m AMSL - Unlimited (QNH 1003 hPa)"));
+    environment.setQnh(1030);
+    QVERIFY(!zone.contains(position));
+    QCOMPARE(zone.verticalLimitsText(), QStringLiteral("FL 95 ≈ 3034 m AMSL - Unlimited (QNH 1030 hPa)"));
 }
 
 void GeoZoneParserTest::_testProviders()

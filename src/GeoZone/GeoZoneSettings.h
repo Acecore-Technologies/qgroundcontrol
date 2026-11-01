@@ -29,6 +29,7 @@ public:
     DEFINE_SETTINGFACT(approachDistance)
     DEFINE_SETTINGFACT(approachVerticalDistance)
     DEFINE_SETTINGFACT(approachTime)
+    DEFINE_SETTINGFACT(qnhHPa)
     DEFINE_SETTINGFACT(feedRefreshHours)
     DEFINE_SETTINGFACT(liveFeedRefreshMinutes)
     DEFINE_SETTINGFACT(staleDays)

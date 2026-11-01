@@ -58,6 +58,12 @@ double terrainElevation(const QGeoCoordinate &coordinate)
     return hooks().terrainElevation ? hooks().terrainElevation(coordinate) : qQNaN();
 }
 
+double qnhHPa()
+{
+    const double qnh = hooks().qnhHPa ? hooks().qnhHPa() : kStandardPressureHPa;
+    return ((qnh >= kMinQnhHPa) && (qnh <= kMaxQnhHPa)) ? qnh : kStandardPressureHPa;
+}
+
 void prepareDownload(QNetworkReply &reply)
 {
     if (hooks().prepareDownload) {

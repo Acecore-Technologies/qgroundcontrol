@@ -69,6 +69,17 @@
     "default":      30
 },
 {
+    "name":         "qnhHPa",
+    "shortDesc":    "QNH",
+    "longDesc":     "Local sea level pressure (altimeter setting) used to convert geozone limits published as flight levels to approximate heights above mean sea level. 1013.25 hPa is the standard pressure of flight levels.",
+    "type":         "double",
+    "units":        "hPa",
+    "min":          850,
+    "max":          1100,
+    "decimalPlaces": 2,
+    "default":      1013.25
+},
+{
     "name":         "feedRefreshHours",
     "shortDesc":    "Feed refresh interval",
     "longDesc":     "Hours after which downloaded geozone feeds are downloaded again.",

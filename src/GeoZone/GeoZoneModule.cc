@@ -32,6 +32,8 @@
 
 #include <QtQml/QQmlEngine>
 
+#include <atomic>
+
 namespace GeoZoneModule {
 
 namespace {
@@ -45,6 +47,12 @@ const QGCLoggingCategory qgcCategoryGeoZoneSourceLog(QString::fromLatin1(GeoZone
 
 void installEnvironment()
 {
+    // Read by checks on worker threads, so the setting is copied when it changes rather than read from them
+    static std::atomic<double> qnhHPa = GeoZoneEnvironment::kStandardPressureHPa;
+    Fact *const qnhFact = GeoZoneSettings::instance()->qnhHPa();
+    qnhHPa = qnhFact->rawValue().toDouble();
+    (void) QObject::connect(qnhFact, &Fact::rawValueChanged, qnhFact, [](const QVariant &value) { qnhHPa = value.toDouble(); });
+
     GeoZoneEnvironment::Hooks hooks;
     hooks.sourceSettings = []() {
         GeoZoneSettings *const settings = GeoZoneSettings::instance();
@@ -65,6 +73,7 @@ void installEnvironment()
         }
         return altitudes.constFirst();
     };
+    hooks.qnhHPa = []() { return qnhHPa.load(); };
     hooks.prepareDownload = [](QNetworkReply &reply) { QGCFileDownload::setIgnoreSSLErrorsIfNeeded(reply); };
     GeoZoneEnvironment::setHooks(hooks);
 }

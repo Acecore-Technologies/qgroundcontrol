@@ -793,8 +793,10 @@ void GeoZoneGeometryTest::_testVerticalOverlap_data()
     const QGeoCoordinate zurich(47.37, 8.54);
     QTest::newRow("WGS84 above floor") << 500.0 << 1000.0 << "WGS84" << "WGS84" << false << zurich << 460.0 << 460.0 << 400.0 << 0.0 << true;
     QTest::newRow("WGS84 below floor") << 500.0 << 1000.0 << "WGS84" << "WGS84" << false << zurich << 440.0 << 440.0 << 400.0 << 0.0 << false;
-    // Flight levels depend on the air pressure and unknown codes like FL can't be compared either
-    QTest::newRow("STD floor") << 1000.0 << 99999.0 << "STD" << "AMSL" << true << center << 0.0 << 0.0 << 0.0 << 0.0 << true;
+    // Flight levels are converted with the QNH, standard here, and floors are lowered by 4 %: 1000 ft is 304.8 m,
+    // compared from 292.6 m. Unknown codes like FL can't be compared.
+    QTest::newRow("STD below floor") << 1000.0 << 99999.0 << "STD" << "AMSL" << true << center << 290.0 << 290.0 << 0.0 << 0.0 << false;
+    QTest::newRow("STD floor margin") << 1000.0 << 99999.0 << "STD" << "AMSL" << true << center << 295.0 << 295.0 << 0.0 << 0.0 << true;
     QTest::newRow("FL unknown") << 95.0 << 195.0 << "FL" << "FL" << false << center << 0.0 << 0.0 << 0.0 << 0.0 << true;
     // Aliases of the codes, ground to 120 m above mean sea level
     QTest::newRow("SFC MSL inside") << 0.0 << 120.0 << " sfc" << "msl " << false << center << 110.0 << 110.0 << 400.0 << 0.0 << true;
@@ -825,6 +827,69 @@ void GeoZoneGeometryTest::_testVerticalOverlap()
     volume.setReferences(lowerReference, upperReference);
     QCOMPARE(GeoZone::verticalOverlap(volume, GeoZone::Position{ coordinate, fromAltitude, terrain }, GeoZone::Position{ coordinate, toAltitude, terrain }, margin),
              overlap);
+}
+
+void GeoZoneGeometryTest::_testFlightLevels_data()
+{
+    QTest::addColumn<double>("qnh");
+    QTest::addColumn<double>("floorAMSL");
+    QTest::addColumn<double>("ceilingAMSL");
+    QTest::addColumn<QString>("text");
+
+    // FL 95 to FL 195 in the standard atmosphere, whose sea level pressure is the QNH: 8.36 m lower per hPa below the
+    // standard pressure and 8.27 m higher per hPa above it
+    QTest::newRow("QNH 1013.25") << 1013.25 << 2895.60 << 5943.60 << QStringLiteral("FL 95 ≈ 2896 m AMSL - FL 195 ≈ 5944 m AMSL (QNH 1013.25 hPa)");
+    QTest::newRow("QNH 1003") << 1003.0 << 2809.93 << 5857.93 << QStringLiteral("FL 95 ≈ 2810 m AMSL - FL 195 ≈ 5858 m AMSL (QNH 1003 hPa)");
+    QTest::newRow("QNH 1030") << 1030.0 << 3034.11 << 6082.11 << QStringLiteral("FL 95 ≈ 3034 m AMSL - FL 195 ≈ 6082 m AMSL (QNH 1030 hPa)");
+}
+
+void GeoZoneGeometryTest::_testFlightLevels()
+{
+    QFETCH(double, qnh);
+    QFETCH(double, floorAMSL);
+    QFETCH(double, ceilingAMSL);
+    QFETCH(QString, text);
+
+    ScopedEnvironment environment;
+    environment.setQnh(qnh);
+    const auto meters = _setVerticalUnits(false);
+    QCOMPARE(GeoZoneEnvironment::qnhHPa(), qnh);
+    QVERIFY(qAbs(GeoZone::pressureAltitudeToAMSL(9500 * 0.3048, qnh) - floorAMSL) < 0.01);
+
+    const QGeoCoordinate center(47, 8);
+    GeoZone::Volume volume;
+    volume.isCircle = true;
+    volume.center = center;
+    volume.radius = 500;
+    volume.feet = true;
+    volume.lowerLimit = 9500;
+    volume.upperLimit = 19500;
+    volume.setReferences(QStringLiteral("STD"), QStringLiteral("STD"));
+    QVERIFY(volume.approximateLimits());
+
+    // Checks lower the floor and raise the ceiling by the margin for air colder than standard
+    const auto at = [&center](double altitude) { return GeoZone::Position{ center, altitude }; };
+    const double floor = floorAMSL * (1 - GeoZone::flightLevelMargin);
+    const double ceiling = ceilingAMSL * (1 + GeoZone::flightLevelMargin);
+    QVERIFY(qAbs(GeoZone::limitAMSL(volume, false, at(qQNaN())) - floor) < 0.01);
+    QVERIFY(qAbs(GeoZone::limitAMSL(volume, true, at(qQNaN())) - ceiling) < 0.01);
+    QCOMPARE(GeoZone::verticalPosition(volume, at(floor - 1)), GeoZone::VerticalPosition::Below);
+    QCOMPARE(GeoZone::verticalPosition(volume, at(floor + 1)), GeoZone::VerticalPosition::Inside);
+    QCOMPARE(GeoZone::verticalPosition(volume, at(ceiling + 1)), GeoZone::VerticalPosition::Above);
+    const std::optional<std::pair<double, double>> interval = GeoZone::verticalInterval(volume, at(floor - 100), at(floor + 100));
+    QVERIFY(interval && (qAbs(interval->first - 0.5) < 1e-4) && (interval->second == 1));
+
+    GeoZone::Data data;
+    data.volumes.append(volume);
+    const GeoZone zone(data);
+    QVERIFY(zone.approximateLimits());
+    QCOMPARE(zone.verticalLimitsText(), text);
+
+    // Implausible values from the application are replaced by the standard pressure
+    environment.setQnh(0);
+    QCOMPARE(GeoZoneEnvironment::qnhHPa(), GeoZoneEnvironment::kStandardPressureHPa);
+    environment.setQnh(qQNaN());
+    QCOMPARE(GeoZoneEnvironment::qnhHPa(), GeoZoneEnvironment::kStandardPressureHPa);
 }
 
 void GeoZoneGeometryTest::_testAreaIntersection()

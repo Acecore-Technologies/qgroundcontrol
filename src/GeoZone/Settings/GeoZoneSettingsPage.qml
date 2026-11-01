@@ -108,6 +108,19 @@ SettingsPage {
 
     SettingsGroupLayout {
         Layout.fillWidth:   true
+        heading:            qsTr("Altitude Limits")
+        headingDescription: _geoZoneSettings.qnhHPa.longDescription
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.qnhHPa
+            visible:            fact.visible
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:   true
         heading:            qsTr("Data Updates")
         headingDescription: qsTr("Feeds are downloaded again periodically. Sources with older data are reported as outdated.")
 

@@ -106,9 +106,10 @@ struct ZoneOwner {
 };
 
 
-/// Replaces the clock and the terrain of GeoZoneEnvironment while in scope, so that tests don't depend on when and
-/// where they run. The clock stands still at the second it was created, or the time it is set to, until the test
-/// advances it. The terrain is unknown until set. The previous hooks are restored when the workers are done.
+/// Replaces the clock, the terrain and the QNH of GeoZoneEnvironment while in scope, so that tests don't depend on when
+/// and where they run. The clock stands still at the second it was created, or the time it is set to, until the test
+/// advances it. The terrain is unknown until set, the QNH standard. The previous hooks are restored when the workers
+/// are done.
 class ScopedEnvironment
 {
 public:
@@ -125,6 +126,7 @@ public:
             const QMutexLocker locker(&state->mutex);
             return state->terrain ? state->terrain(coordinate) : qQNaN();
         };
+        hooks.qnhHPa = [state = _state]() { return state->qnhHPa.load(); };
         GeoZoneEnvironment::setHooks(hooks);
     }
 
@@ -148,10 +150,12 @@ public:
         _state->terrain = terrain;
     }
     void setTerrain(double elevation) { setTerrain([elevation](const QGeoCoordinate &) { return elevation; }); }
+    void setQnh(double qnhHPa) { _state->qnhHPa = qnhHPa; }
 
 private:
     struct State {
         std::atomic<qint64> msecs = 0;
+        std::atomic<double> qnhHPa = GeoZoneEnvironment::kStandardPressureHPa;
         QMutex mutex;
         Terrain terrain;
     };

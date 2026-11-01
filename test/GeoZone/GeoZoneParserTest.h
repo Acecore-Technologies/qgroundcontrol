@@ -38,5 +38,6 @@ private slots:
     void _testDisplayText();
     void _testLimitTexts_data();
     void _testLimitTexts();
+    void _testFlightLevelQnh();
     void _testProviders();
 };

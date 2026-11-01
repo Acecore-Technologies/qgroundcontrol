@@ -1073,10 +1073,17 @@ void GeoZoneManagerTest::_testManagerStartup()
 
 void GeoZoneManagerTest::_testSettings()
 {
-    const ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    // The application converts flight levels with the QNH setting, also on the worker threads of checks
+    settings->qnhHPa()->setRawValue(1003.0);
+    const double workerQnh = QtConcurrent::run([]() { return GeoZoneEnvironment::qnhHPa(); }).result();
+    settings->qnhHPa()->setRawValue(settings->qnhHPa()->rawDefaultValue());
+    QCOMPARE(workerQnh, 1003.0);
+    QCOMPARE(GeoZoneEnvironment::qnhHPa(), GeoZoneEnvironment::kStandardPressureHPa);
+
+    const ScopedEnvironment environment;
     const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(),
-                                 settings->feedRefreshHours(), settings->liveFeedRefreshMinutes() };
+                                 settings->feedRefreshHours(), settings->liveFeedRefreshMinutes(), settings->qnhHPa() };
     const auto restoreDefaults = qScopeGuard([&facts]() {
         for (Fact *fact : facts) {
             fact->setRawValue(fact->rawDefaultValue());
@@ -1140,6 +1147,12 @@ void GeoZoneManagerTest::_testSettings()
     monitor.evaluate({ center.atDistanceAndAzimuth(500, 0) });
     QCOMPARE(alertSpy.count(), 1);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));
+
+    // A new QNH converts flight levels differently, the checks using the zones are updated
+    QSignalSpy zonesSpy(&manager, &GeoZoneManager::zonesChanged);
+    settings->qnhHPa()->setRawValue(1003.0);
+    QCOMPARE(zonesSpy.count(), 1);
+    QCOMPARE(zonesSpy.last()[0].value<GeoZoneSource*>(), nullptr);
 }
 
 void GeoZoneManagerTest::_testLabelZonesLimit()

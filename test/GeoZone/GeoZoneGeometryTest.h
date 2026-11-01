@@ -28,6 +28,8 @@ private slots:
     void _testAltitudeLimits();
     void _testVerticalOverlap_data();
     void _testVerticalOverlap();
+    void _testFlightLevels_data();
+    void _testFlightLevels();
     void _testAreaIntersection();
     void _testShapeSimplification();
 #ifndef GEOZONE_CORE_TEST

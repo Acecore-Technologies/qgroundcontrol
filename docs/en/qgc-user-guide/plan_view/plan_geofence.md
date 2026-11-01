@@ -136,6 +136,8 @@ The indicator lists the **Recent Alerts** of the session, newest first, followed
 
 Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 geoid, within a few meters.
 
+Limits published as flight levels (pressure altitude, `STD`) are approximate: their height depends on the air pressure and temperature. They are converted to heights above mean sea level with the **QNH** setting, as an altimeter set to it would read them in the ICAO standard atmosphere: the pressure altitude less 44330.8 m × (1 − (QNH / 1013.25 hPa)^0.190263), about 8.3 m lower per hPa below 1013.25 hPa. The zone details show both, like "FL 95 ≈ 2810 m AMSL (QNH 1003 hPa)". Since flight levels are lower in air colder than standard (by about 4 % of their height per 10 °C), the checks, alerts, altitude profile and strip lower floors and raise ceilings given as flight levels by 4 % of their height. Set the local QNH before planning or flying near such zones; a change applies at once to the checks and alerts.
+
 ### Pre-flight Briefing
 
 **Export Briefing...** in the Plan View **Geozones** panel or in the geozone banner above the map saves a briefing of the geozones of the planned mission. The file dialog proposes the folder and name of the open plan with `-briefing.pdf`; the extension of the file name chooses the format:
@@ -178,6 +180,7 @@ Besides the sources, the **Geozones** page of the _Application Settings_ sets:
 - **Flight alerts**: turns the flight alerts and the nearby zones of the toolbar indicator on or off, **Speak flight alerts** turns their audio on or off and **Log flight alerts** the CSV log.
 - **Approach alert distance** and **Approach alert height margin**: how close horizontally and vertically the vehicle can come to a zone before it is alerted.
 - **Approach alert time**: how many seconds before entering a zone, at its current velocity, the vehicle is alerted. 0 turns these alerts off.
+- **QNH**: the local sea level pressure (altimeter setting, 850 to 1100 hPa) converting flight levels to heights above mean sea level. The default, 1013.25 hPa, is the standard pressure of flight levels.
 - **Feed refresh interval** and **Live restrictions refresh interval** (TFRs): how often feeds are downloaded again.
 - **Outdated data warning** and **Outdated live restrictions warning** (TFRs): the data age at which a source is reported as outdated.
 

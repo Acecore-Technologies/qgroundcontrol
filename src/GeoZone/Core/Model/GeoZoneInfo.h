@@ -39,6 +39,7 @@ class GeoZoneInfo
     Q_PROPERTY(QString          issuesText              READ issuesText             CONSTANT FINAL)  ///< Problems reading the zone, one per line
     Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
     Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT FINAL)
+    Q_PROPERTY(bool             approximateLimits       READ approximateLimits      CONSTANT FINAL)   ///< Flight levels converted with the QNH
     Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT FINAL)
     Q_PROPERTY(QGeoRectangle    boundingBox             READ boundingBox            CONSTANT FINAL)
     Q_PROPERTY(bool             active                  READ active                 CONSTANT FINAL)   ///< When read
@@ -69,6 +70,7 @@ public:
     QString issuesText() const { return _zone ? _zone->issuesText() : QString(); }
     QString applicabilityText() const { return _zone ? _zone->applicabilityText() : QString(); }
     QString verticalLimitsText() const { return _zone ? _zone->verticalLimitsText() : QString(); }
+    bool approximateLimits() const { return _zone && _zone->approximateLimits(); }
     QGeoCoordinate center() const { return _zone ? _zone->center() : QGeoCoordinate(); }
     QGeoRectangle boundingBox() const { return _zone ? _zone->boundingBox() : QGeoRectangle(); }
     bool active() const { return _zone && _zone->active(); }
