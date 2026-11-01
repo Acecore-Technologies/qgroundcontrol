@@ -27,15 +27,11 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QLocale>
-#include <QtCore/QMap>
 #include <QtCore/QSet>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtQml/QQmlEngine>
-
-#include <algorithm>
-#include <numeric>
 
 QGC_LOGGING_CATEGORY(GeoZoneManagerLog, "qgc.geozone.geozonemanager")
 
@@ -76,8 +72,6 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
 
 GeoZoneManager::~GeoZoneManager()
 {
-    // Shapes are owned by the sources
-    _shapes.clear();
 }
 
 GeoZoneManager *GeoZoneManager::instance()
@@ -508,52 +502,26 @@ void GeoZoneManager::_beginZonesChange(GeoZoneSource *source)
 
 void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
 {
-    _zoneList.clear();
-    _shapes.clear();
-    QGeoRectangle boundingBox;
+    QList<const GeoZoneSource*> sources;
     for (int i = 0; i < _sources->count(); i++) {
-        const GeoZoneSource *const zoneSource = _sources->value<GeoZoneSource*>(i);
-        _zoneList.append(zoneSource->zones());
-        _shapes.append(zoneSource->shapes());
-        if (zoneSource->boundingBox().isValid()) {
-            boundingBox = boundingBox.isValid() ? boundingBox.united(zoneSource->boundingBox()) : zoneSource->boundingBox();
-        }
+        sources.append(_sources->value<GeoZoneSource*>(i));
     }
-    const bool boundingBoxChanged = (boundingBox != _boundingBox);
-    _boundingBox = boundingBox;
-
-    QHash<const GeoZone*, qsizetype> zoneIndexes;
-    zoneIndexes.reserve(_zoneList.count());
-    for (qsizetype i = 0; i < _zoneList.count(); i++) {
-        zoneIndexes.insert(_zoneList[i], i);
-    }
-    _zoneShapes = QList<QList<const GeoZoneShape*>>(_zoneList.count());
-    for (const GeoZoneShape *shape : std::as_const(_shapes)) {
-        _zoneShapes[zoneIndexes.value(shape->zone())].append(shape);
-    }
-    _index.build(_zoneList);
+    const QGeoRectangle previousBoundingBox = _catalog.boundingBox();
+    _catalog.rebuild(sources);
 
     // A single reset, so bindings to the count don't see the zones of other sources disappear
-    (void) _zones->swapObjectList(QList<QObject*>(_zoneList.cbegin(), _zoneList.cend()));
-    if (_zoneList.isEmpty()) {
+    const QList<GeoZone*> &zones = _catalog.zones();
+    (void) _zones->swapObjectList(QList<QObject*>(zones.cbegin(), zones.cend()));
+    if (zones.isEmpty()) {
         _activeTimer->stop();
     } else if (!_activeTimer->isActive()) {
         _activeTimer->start();
     }
 
     emit zonesChanged(source);
-    if (boundingBoxChanged) {
-        emit this->boundingBoxChanged();
+    if (_catalog.boundingBox() != previousBoundingBox) {
+        emit boundingBoxChanged();
     }
-}
-
-QList<const GeoZoneShape*> GeoZoneManager::shapesInArea(double south, double west, double north, double east) const
-{
-    QList<const GeoZoneShape*> shapes;
-    for (const int index : _index.query(south, west, north, east)) {
-        shapes.append(_zoneShapes[index]);
-    }
-    return shapes;
 }
 
 void GeoZoneManager::loadStoredSources(LoadMode mode)
@@ -665,157 +633,18 @@ void GeoZoneManager::_updateValidity()
 
 QList<QObject*> GeoZoneManager::labelZones(const QGeoRectangle &region) const
 {
-    QList<GeoZone*> candidates;
-    for (const int index : _index.query(region)) {
-        GeoZone *const zone = _zoneList[index];
-        if (region.contains(zone->center())) {
-            candidates.append(zone);
-        }
-    }
-
-    if (candidates.count() > maxLabelCount) {
-        std::stable_sort(candidates.begin(), candidates.end(), [](const GeoZone *a, const GeoZone *b) {
-            return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
-        });
-        candidates.resize(maxLabelCount);
-    }
-
-    return QList<QObject*>(candidates.cbegin(), candidates.cend());
+    const QList<GeoZone*> zones = _catalog.labelZones(region, maxLabelCount);
+    return QList<QObject*>(zones.cbegin(), zones.cend());
 }
 
 QList<QObject*> GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
 {
-    QList<GeoZone*> zones;
-    if (!coordinate.isValid()) {
-        return {};
-    }
-    for (const int index : _index.query(coordinate.latitude(), coordinate.longitude(), coordinate.latitude(), coordinate.longitude())) {
-        GeoZone *const zone = _zoneList[index];
-        const QList<GeoZone::Volume> &volumes = zone->data().volumes;
-        if (std::any_of(volumes.cbegin(), volumes.cend(), [&coordinate](const GeoZone::Volume &volume) { return GeoZone::volumeContains(volume, coordinate); })) {
-            zones.append(zone);
-        }
-    }
-    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
-        if (a->active() != b->active()) {
-            return a->active();
-        }
-        return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
-    });
+    const QList<GeoZone*> zones = _catalog.zonesAt(coordinate);
     return QList<QObject*>(zones.cbegin(), zones.cend());
 }
 
 QList<QObject*> GeoZoneManager::searchZones(const QString &text, int maxResults) const
 {
-    const QString query = text.trimmed();
-    if (query.isEmpty() || (maxResults <= 0)) {
-        return {};
-    }
-
-    struct Match {
-        GeoZone *zone;
-        bool prefix;
-    };
-    QList<Match> matches;
-    for (GeoZone *zone : _zoneList) {
-        const QString name = zone->displayName();
-        if (name.startsWith(query, Qt::CaseInsensitive) || zone->identifier().startsWith(query, Qt::CaseInsensitive)) {
-            matches.append({ zone, true });
-        } else if (name.contains(query, Qt::CaseInsensitive) || zone->identifier().contains(query, Qt::CaseInsensitive)) {
-            matches.append({ zone, false });
-        }
-    }
-    std::stable_sort(matches.begin(), matches.end(), [](const Match &a, const Match &b) {
-        if (a.prefix != b.prefix) {
-            return a.prefix;
-        }
-        const int severityA = GeoZone::restrictionSeverity(a.zone->restriction());
-        const int severityB = GeoZone::restrictionSeverity(b.zone->restriction());
-        if (severityA != severityB) {
-            return severityA < severityB;
-        }
-        return a.zone->displayName().compare(b.zone->displayName(), Qt::CaseInsensitive) < 0;
-    });
-
-    QList<QObject*> zones;
-    for (qsizetype i = 0; i < (std::min)(matches.count(), qsizetype{ maxResults }); i++) {
-        zones.append(matches[i].zone);
-    }
-    return zones;
-}
-
-QList<GeoZone*> GeoZoneManager::zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
-                                            const QDateTime &activeFrom, const QDateTime &activeTo) const
-{
-    QList<int> candidates;
-    if (area.isValid()) {
-        candidates = _index.query(area);
-    } else {
-        candidates.resize(_zoneList.count());
-        std::iota(candidates.begin(), candidates.end(), 0);
-    }
-
-    QList<GeoZone*> zones;
-    for (const int index : std::as_const(candidates)) {
-        GeoZone *const zone = _zoneList[index];
-        if (!restrictions.contains(zone->restriction())) {
-            continue;
-        }
-        if (activeFrom.isValid() && !(activeTo.isValid() ? zone->isActiveDuring(activeFrom, activeTo) : zone->isActiveAt(activeFrom))) {
-            continue;
-        }
-        zones.append(zone);
-    }
-    return zones;
-}
-
-QList<GeoZone*> GeoZoneManager::zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const
-{
-    // Candidates near any segment, checked once per path
-    QMap<int, QList<int>> candidatePaths;
-    for (int pathIndex = 0; pathIndex < paths.count(); pathIndex++) {
-        const QList<GeoZone::Position> &path = paths[pathIndex];
-        for (qsizetype i = 0; i < path.count(); i++) {
-            const QGeoCoordinate &from = path[std::max<qsizetype>(i - 1, 0)].coordinate;
-            const QGeoCoordinate &to = path[i].coordinate;
-            const QList<int> candidates = _index.query(std::min(from.latitude(), to.latitude()), std::min(from.longitude(), to.longitude()),
-                                                       std::max(from.latitude(), to.latitude()), std::max(from.longitude(), to.longitude()));
-            for (const int index : candidates) {
-                QList<int> &candidatePathList = candidatePaths[index];
-                if (candidatePathList.isEmpty() || (candidatePathList.last() != pathIndex)) {
-                    candidatePathList.append(pathIndex);
-                }
-            }
-        }
-    }
-
-    QList<GeoZone*> zones;
-    for (auto it = candidatePaths.cbegin(); it != candidatePaths.cend(); ++it) {
-        GeoZone *const zone = _zoneList[it.key()];
-        if (!restrictions.contains(zone->restriction())) {
-            continue;
-        }
-        const QList<int> &pathIndexes = it.value();
-        if (std::any_of(pathIndexes.cbegin(), pathIndexes.cend(), [zone, &paths](int pathIndex) { return zone->intersectsPath(paths[pathIndex]); })) {
-            zones.append(zone);
-        }
-    }
-    return zones;
-}
-
-QList<GeoZone*> GeoZoneManager::zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const
-{
-    QList<GeoZone*> zones;
-    for (const GeoZone::Area &area : areas) {
-        if (area.polygon.count() < 3) {
-            continue;
-        }
-        for (const int index : _index.query(QGeoRectangle(area.polygon))) {
-            GeoZone *const zone = _zoneList[index];
-            if (restrictions.contains(zone->restriction()) && !zones.contains(zone) && zone->intersectsArea(area)) {
-                zones.append(zone);
-            }
-        }
-    }
-    return zones;
+    const QList<GeoZone*> zones = _catalog.search(text, maxResults);
+    return QList<QObject*>(zones.cbegin(), zones.cend());
 }

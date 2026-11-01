@@ -4,6 +4,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZone.h
         GeoZoneAlertLog.cc
         GeoZoneAlertLog.h
+        GeoZoneCatalog.cc
+        GeoZoneCatalog.h
         GeoZoneDownloader.cc
         GeoZoneDownloader.h
         GeoZoneFenceImporter.cc

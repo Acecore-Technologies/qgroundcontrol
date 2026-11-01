@@ -19,8 +19,8 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZone.h"
+#include "GeoZoneCatalog.h"
 #include "GeoZoneDownloader.h"
-#include "GeoZoneIndex.h"
 #include "GeoZoneLoader.h"
 #include "GeoZoneStore.h"
 
@@ -115,22 +115,31 @@ public:
     /// @return Zones matching one of the restrictions which intersect the area. An invalid area matches all zones.
     /// @param activeFrom When valid, only zones active at this time or, with a valid activeTo, at any time until activeTo
     QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
-                                const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime()) const;
+                                const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime()) const
+    {
+        return _catalog.zonesInArea(restrictions, area, activeFrom, activeTo);
+    }
 
     /// @return Zones matching one of the restrictions which one of the paths enters, see GeoZone::intersectsPath
-    QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const;
+    QList<GeoZone*> zonesCrossingPaths(const QList<GeoZone::Restriction> &restrictions, const QList<QList<GeoZone::Position>> &paths) const
+    {
+        return _catalog.zonesCrossingPaths(restrictions, paths);
+    }
 
     /// @return Zones matching one of the restrictions which overlap one of the areas, see GeoZone::intersectsArea
-    QList<GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const;
+    QList<GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Restriction> &restrictions, const QList<GeoZone::Area> &areas) const
+    {
+        return _catalog.zonesIntersectingAreas(restrictions, areas);
+    }
 
     QmlObjectListModel *zones() const { return _zones; }
     QmlObjectListModel *sources() const { return _sources; }
     GeoZoneSource *source(const QString &key) const;
     /// Polygons and circles of all zones for map display
-    const QList<GeoZoneShape*> &shapes() const { return _shapes; }
+    const QList<GeoZoneShape*> &shapes() const { return _catalog.shapes(); }
     /// @return Shapes of the zones whose bounding box intersects the bounds in degrees
-    QList<const GeoZoneShape*> shapesInArea(double south, double west, double north, double east) const;
-    QGeoRectangle boundingBox() const { return _boundingBox; }
+    QList<const GeoZoneShape*> shapesInArea(double south, double west, double north, double east) const { return _catalog.shapesInArea(south, west, north, east); }
+    QGeoRectangle boundingBox() const { return _catalog.boundingBox(); }
     bool visible() const;
     void setVisible(bool visible);
     bool busy() const { return _pendingCount > 0; }
@@ -181,13 +190,9 @@ private:
     GeoZoneDownloader *_downloader = nullptr;
     QmlObjectListModel *_zones = nullptr;
     QmlObjectListModel *_sources = nullptr;
-    QList<GeoZoneShape*> _shapes;
-    QList<GeoZone*> _zoneList;          ///< Same as _zones, indexed by _index
-    QList<QList<const GeoZoneShape*>> _zoneShapes;  ///< Shapes of each zone of _zoneList
-    GeoZoneIndex _index;
+    GeoZoneCatalog _catalog;            ///< Same zones as _zones, for queries
     QTimer *_activeTimer = nullptr;
     QTimer *_refreshTimer = nullptr;
-    QGeoRectangle _boundingBox;
     int _pendingCount = 0;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
     QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
