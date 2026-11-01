@@ -43,6 +43,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Flight/GeoZoneAlertLog.h
         Flight/GeoZoneMonitor.cc
         Flight/GeoZoneMonitor.h
+        Flight/GeoZoneVehicleMonitor.cc
+        Flight/GeoZoneVehicleMonitor.h
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME}

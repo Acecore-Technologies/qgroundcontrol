@@ -8,14 +8,21 @@
  ****************************************************************************/
 
 #include "GeoZoneMonitorTest.h"
-#include "GeoZoneAlertArbiter.h"
 #include "GeoZoneTestHelpers.h"
+#include "Vehicle.h"
 
 #include <memory>
 
 using namespace GeoZoneTestHelpers;
 
 namespace {
+
+mavlink_message_t globalPositionMessage(int vehicleId, int16_t vx, int16_t vy, int16_t vz)
+{
+    mavlink_message_t message{};
+    (void) mavlink_msg_global_position_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, 470000000, 80000000, 500000, 100000, vx, vy, vz, UINT16_MAX);
+    return message;
+}
 
 /// Keeps what would be spoken
 class RecordingAudioSink : public GeoZoneAlertArbiter::AudioSink
@@ -337,46 +344,39 @@ void GeoZoneMonitorTest::_testTerrainAhead()
 
 void GeoZoneMonitorTest::_testVehicleTelemetry()
 {
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    GeoZoneMonitor monitor(&manager);
     const int vehicleId = 1;
     const QGeoCoordinate start(47, 8);
-    const auto globalPosition = [](int16_t vx, int16_t vy, int16_t vz) {
-        mavlink_message_t message{};
-        (void) mavlink_msg_global_position_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, 470000000, 80000000, 500000, 100000, vx, vy, vz, UINT16_MAX);
-        return message;
-    };
+    const GeoZoneVehicleMonitor::Clock clock = []() { return qint64{ 0 }; };
+    GeoZoneVehicleMonitor monitor(nullptr, vehicleId, 1, clock);
 
     // The velocity sent with the position is used while recent, north east up from north east down
-    monitor.handleVehicleMessage(vehicleId, globalPosition(2500, -500, 300), 1000);
-    GeoZoneMonitor::Velocity velocity = monitor.vehicleVelocity(vehicleId, 1500, { start, 500 });
+    monitor.handleMessage(globalPositionMessage(vehicleId, 2500, -500, 300), 1000);
+    GeoZoneVehicleMonitor::Velocity velocity = monitor.velocity(1500, { start, 500 });
     QVERIFY(velocity.valid);
     QCOMPARE(velocity.north, 25.0);
     QCOMPARE(velocity.east, -5.0);
     QCOMPARE(velocity.up, -3.0);
 
     // Old velocities give way to the positions, which haven't moved
-    velocity = monitor.vehicleVelocity(vehicleId, 1000 + GeoZoneMonitor::reportedVelocityMaxAgeMSecs + 1500, { start, 500 });
+    velocity = monitor.velocity(1000 + GeoZoneVehicleMonitor::reportedVelocityMaxAgeMSecs + 1500, { start, 500 });
     QVERIFY(velocity.valid);
     QCOMPARE(velocity.groundSpeed(), 0.0);
 
     // Vehicles sending zero velocities while their positions move are estimated
-    GeoZoneMonitor estimating(&manager);
-    estimating.handleVehicleMessage(vehicleId, globalPosition(0, 0, 0), 0);
-    (void) estimating.vehicleVelocity(vehicleId, 0, { start, 500 });
-    estimating.handleVehicleMessage(vehicleId, globalPosition(0, 0, 0), 1000);
-    velocity = estimating.vehicleVelocity(vehicleId, 1000, { start.atDistanceAndAzimuth(20, 90), 500 });
+    GeoZoneVehicleMonitor estimating(nullptr, vehicleId, 2, clock);
+    estimating.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), 0);
+    (void) estimating.velocity(0, { start, 500 });
+    estimating.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), 1000);
+    velocity = estimating.velocity(1000, { start.atDistanceAndAzimuth(20, 90), 500 });
     QVERIFY(qAbs(velocity.east - 20) < 0.1);
 
     // Positions are stale after the timeout, or three of their usual intervals on slow links
-    QVERIFY(!monitor.positionStale(vehicleId, 1000 + GeoZoneMonitor::positionTimeoutMSecs));
-    QVERIFY(monitor.positionStale(vehicleId, 1000 + GeoZoneMonitor::positionTimeoutMSecs + 1));
-    monitor.handleVehicleMessage(vehicleId, globalPosition(0, 0, 0), 21000);
-    QVERIFY(!monitor.positionStale(vehicleId, 21000 + 50000));
-    QVERIFY(monitor.positionStale(vehicleId, 21000 + 60001));
-    QVERIFY(!monitor.positionStale(2, 100000));
+    QVERIFY(!monitor.positionStale(1000 + GeoZoneVehicleMonitor::positionTimeoutMSecs));
+    QVERIFY(monitor.positionStale(1000 + GeoZoneVehicleMonitor::positionTimeoutMSecs + 1));
+    monitor.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), 21000);
+    QVERIFY(!monitor.positionStale(21000 + 50000));
+    QVERIFY(monitor.positionStale(21000 + 60001));
+    QVERIFY(!GeoZoneVehicleMonitor(nullptr, 2, 3, clock).positionStale(100000));
 }
 
 void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
@@ -424,7 +424,7 @@ void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
     monitor.setActiveVehicleId(2);
 
     // A removed vehicle alerts again when it reconnects, the others keep their state
-    monitor.removeVehicle(1);
+    monitor.removePositionMonitor(1);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 1);
     QCOMPARE(alertSpy.count(), 4);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Vehicle 1: Entered geozone P")));
@@ -576,26 +576,27 @@ void GeoZoneMonitorTest::_testFenceStatus()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     GeoZoneMonitor monitor(&manager);
-    const int vehicleId = 1;
-    monitor.setActiveVehicleId(vehicleId);
+    Vehicle vehicle(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    (void) monitor.addVehicle(&vehicle);
+    monitor.setActiveVehicle(&vehicle);
     const auto fenceStatus = [](uint8_t breachStatus, uint16_t breachCount, uint8_t breachType) {
         mavlink_message_t message{};
-        (void) mavlink_msg_fence_status_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, breachStatus, breachCount, breachType, 0, FENCE_MITIGATE_NONE);
+        (void) mavlink_msg_fence_status_pack(1, MAV_COMP_ID_AUTOPILOT1, &message, breachStatus, breachCount, breachType, 0, FENCE_MITIGATE_NONE);
         return message;
     };
     QSignalSpy breachSpy(&monitor, &GeoZoneMonitor::fenceBreach);
     QSignalSpy statusSpy(&monitor, &GeoZoneMonitor::fenceStatusChanged);
 
-    // Not breached
+    // Not breached, as received from the vehicle
     QVERIFY(!monitor.fenceStatusKnown());
-    monitor.handleVehicleMessage(vehicleId, fenceStatus(0, 0, FENCE_BREACH_NONE), 0);
+    emit vehicle.mavlinkMessageReceived(fenceStatus(0, 0, FENCE_BREACH_NONE));
     QVERIFY(monitor.fenceStatusKnown());
     QVERIFY(!monitor.fenceBreached());
     QCOMPARE(statusSpy.count(), 1);
 
     // A breach is announced once while it lasts
-    monitor.handleVehicleMessage(vehicleId, fenceStatus(1, 1, FENCE_BREACH_BOUNDARY), 1000);
-    monitor.handleVehicleMessage(vehicleId, fenceStatus(1, 1, FENCE_BREACH_BOUNDARY), 2000);
+    emit vehicle.mavlinkMessageReceived(fenceStatus(1, 1, FENCE_BREACH_BOUNDARY));
+    emit vehicle.mavlinkMessageReceived(fenceStatus(1, 1, FENCE_BREACH_BOUNDARY));
     QVERIFY(monitor.fenceBreached());
     QCOMPARE(monitor.fenceBreachText(), QStringLiteral("Boundary fence breached"));
     QCOMPARE(breachSpy.count(), 1);
@@ -603,20 +604,117 @@ void GeoZoneMonitorTest::_testFenceStatus()
     QCOMPARE(statusSpy.count(), 2);
 
     // Cleared, then breached again at the maximum altitude
-    monitor.handleVehicleMessage(vehicleId, fenceStatus(0, 1, FENCE_BREACH_NONE), 3000);
+    emit vehicle.mavlinkMessageReceived(fenceStatus(0, 1, FENCE_BREACH_NONE));
     QVERIFY(!monitor.fenceBreached());
     QVERIFY(monitor.fenceBreachText().isEmpty());
-    monitor.handleVehicleMessage(vehicleId, fenceStatus(1, 2, FENCE_BREACH_MAXALT), 4000);
+    emit vehicle.mavlinkMessageReceived(fenceStatus(1, 2, FENCE_BREACH_MAXALT));
     QCOMPARE(breachSpy.count(), 2);
     QCOMPARE(monitor.fenceBreachText(), QStringLiteral("Maximum altitude fence breached (2 time(s))"));
 
-    // Other vehicles don't change the status shown
-    monitor.handleVehicleMessage(vehicleId + 1, fenceStatus(0, 0, FENCE_BREACH_NONE), 5000);
+    // Other vehicles don't change the status shown, their breaches are announced naming them
+    Vehicle other(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    (void) monitor.addVehicle(&other);
+    emit other.mavlinkMessageReceived(fenceStatus(0, 0, FENCE_BREACH_NONE));
     QVERIFY(monitor.fenceBreached());
-    monitor.setActiveVehicleId(vehicleId + 1);
-    QVERIFY(!monitor.fenceBreached());
-    monitor.removeVehicle(vehicleId + 1);
+    emit other.mavlinkMessageReceived(fenceStatus(1, 1, FENCE_BREACH_MINALT));
+    QCOMPARE(breachSpy.count(), 3);
+    QCOMPARE(breachSpy.last().first().toString(), QStringLiteral("Vehicle %1: Minimum altitude fence breached").arg(other.id()));
+    monitor.setActiveVehicle(&other);
+    QCOMPARE(monitor.fenceBreachText(), QStringLiteral("Minimum altitude fence breached"));
+    monitor.removeVehicle(&other);
     QVERIFY(!monitor.fenceStatusKnown());
+}
+
+void GeoZoneMonitorTest::_testVehicleMonitors()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    QVERIFY(!monitor.monitoring());
+
+    // Offline vehicles, which all have the same system id
+    auto first = std::make_unique<Vehicle>(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    Vehicle second(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    QCOMPARE(first->id(), second.id());
+    GeoZoneVehicleMonitor *const firstMonitor = monitor.addVehicle(first.get());
+    GeoZoneVehicleMonitor *const secondMonitor = monitor.addVehicle(&second);
+    QVERIFY(firstMonitor && secondMonitor && (firstMonitor != secondMonitor));
+    QCOMPARE(monitor.addVehicle(&second), secondMonitor);
+    QCOMPARE(monitor.vehicleMonitor(&second), secondMonitor);
+    QVERIFY(monitor.monitoring());
+    monitor.setActiveVehicle(first.get());
+
+    // Each vehicle has its own alert states, nearby zones and vertical bands, and is named in the alerts
+    const GeoZone::Position inside{ center.atDistanceAndAzimuth(250, 0), 450, 400 };
+    const GeoZone::Position away{ center.atDistanceAndAzimuth(5000, 0), 600, 400 };
+    monitor.evaluate(first.get(), inside);
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle %1: Entered geozone P (Prohibited)").arg(first->id()));
+    QVERIFY(monitor.inside());
+    QCOMPARE(monitor.verticalBands().count(), 1);
+    QCOMPARE(monitor.altitudeAMSL(), 450.0);
+    monitor.evaluate(&second, away);
+    QCOMPARE(alertSpy.count(), 1);
+    QVERIFY(secondMonitor->nearby().isEmpty());
+    QVERIFY(monitor.inside());
+    monitor.evaluate(&second, inside);
+    QCOMPARE(alertSpy.count(), 2);
+    monitor.evaluate(first.get(), inside);
+    QCOMPARE(alertSpy.count(), 2);
+
+    // The published state follows the active vehicle
+    monitor.evaluate(&second, away);
+    QSignalSpy nearbySpy(&monitor, &GeoZoneMonitor::nearbyZonesChanged);
+    monitor.setActiveVehicle(&second);
+    QCOMPARE(nearbySpy.count(), 1);
+    QVERIFY(!monitor.inside());
+    QVERIFY(monitor.verticalBands().isEmpty());
+    QCOMPARE(monitor.altitudeAMSL(), 600.0);
+    monitor.setActiveVehicle(first.get());
+    QVERIFY(monitor.inside());
+
+    // The messages of each vehicle reach its monitor, timed by the monitor's clock
+    now = 1000;
+    emit second.mavlinkMessageReceived(globalPositionMessage(second.id(), 0, 0, 0));
+    now += GeoZoneVehicleMonitor::positionTimeoutMSecs + 1;
+    QVERIFY(secondMonitor->positionStale(now));
+    QVERIFY(!firstMonitor->positionStale(now));
+
+    // A vehicle reconnecting with the same system id starts clean, even when it is added before the old one is
+    // removed. The old one is forgotten when it is destroyed.
+    Vehicle reconnected(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    GeoZoneVehicleMonitor *const reconnectedMonitor = monitor.addVehicle(&reconnected);
+    QVERIFY((reconnectedMonitor != firstMonitor) && (reconnectedMonitor != secondMonitor));
+    QVERIFY(reconnectedMonitor->nearby().isEmpty());
+    nearbySpy.clear();
+    first.reset();
+    QCOMPARE(nearbySpy.count(), 1);
+    QVERIFY(!monitor.inside());
+    monitor.setActiveVehicle(&reconnected);
+    monitor.evaluate(&reconnected, inside);
+    QCOMPARE(alertSpy.count(), 3);
+    QVERIFY(monitor.inside());
+
+    // Removed vehicles are no longer evaluated, nor named once a single vehicle is left
+    monitor.removeVehicle(&second);
+    QVERIFY(!monitor.vehicleMonitor(&second));
+    monitor.evaluate(&second, { center });
+    QCOMPARE(alertSpy.count(), 3);
+    monitor.evaluate(&reconnected, away);
+    monitor.evaluate(&reconnected, inside);
+    QCOMPARE(alertSpy.count(), 4);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone P (Prohibited)"));
+    monitor.removeVehicle(&reconnected);
+    QVERIFY(!monitor.monitoring());
+    QVERIFY(!monitor.inside());
 }
 
 void GeoZoneMonitorTest::_testAlertArbiter()
@@ -730,4 +828,111 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     arbiter.submit(arbiterAlert(16, 1, QStringLiteral("P4"), GeoZone::Prohibited, true));
     QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P4"));
     QCOMPARE(sink->spoken.last(), QStringLiteral("Still inside P3"));
+}
+
+void GeoZoneMonitorTest::_testSpokenAlerts()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center, 500),
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(100, 0), 50),
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(100, 180), 50),
+    }), errorString), qPrintable(errorString));
+
+    // The monitor speaks with the sink and clock given, using the settings given rather than the application's
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    GeoZoneMonitor::Settings settings;
+    settings.limits.distance = 100;
+    settings.limits.verticalDistance = 30;
+    monitor.setSettings(settings);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    QSignalSpy repeatSpy(&monitor, &GeoZoneMonitor::alertRepeated);
+    QSignalSpy mutedSpy(&monitor, &GeoZoneMonitor::alertsMutedChanged);
+
+    // The alerts of an evaluation are shown one by one, but spoken as one message, the most severe first
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 3);
+    QCOMPARE(sink->spoken, QStringList{ QStringLiteral("Approaching geozone P (Prohibited). Approaching geozone A (Authorisation required), and 1 more") });
+
+    // Entering the prohibited zone right after is more urgent and spoken at once
+    const GeoZone::Position inProhibited{ center.atDistanceAndAzimuth(100, 180) };
+    const GeoZone::Position away{ center.atDistanceAndAzimuth(5000, 0) };
+    now += 1000;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(alertSpy.count(), 4);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Entered geozone P (Prohibited)"));
+    const int breachId = alertSpy.last()[2].toInt();
+    QVERIFY(breachId > alertSpy.first()[2].toInt());
+
+    // Repeated and shown again while the vehicle stays inside, until it is acknowledged
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(sink->spoken.count(), 3);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Still inside geozone P (Prohibited)"));
+    QCOMPARE(repeatSpy.count(), 1);
+    QCOMPARE(repeatSpy.last()[0].toString(), sink->spoken.last());
+    QCOMPARE(repeatSpy.last()[2].toInt(), breachId);
+    QCOMPARE(alertSpy.count(), 4);
+    monitor.acknowledgeAlert(breachId);
+    GeoZoneAlertHistory *const history = monitor.alertHistory();
+    QVERIFY(history->data(history->index(0), GeoZoneAlertHistory::AcknowledgedRole).toBool());
+    QCOMPARE(history->unacknowledgedCount(), 3);
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(sink->spoken.count(), 3);
+
+    // Acknowledging in the history ends the repeats too
+    monitor.evaluate(away);
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Entered geozone P (Prohibited). Entered geozone C (Conditional)"));
+    history->acknowledgeAll();
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(sink->spoken.count(), 4);
+
+    // Muted, approaches and entries aren't spoken, but a new entry into a prohibited zone is
+    monitor.muteAlerts();
+    QVERIFY(monitor.alertsMuted());
+    QCOMPARE(mutedSpy.count(), 1);
+    monitor.evaluate(away);
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 9);
+    QCOMPARE(sink->spoken.count(), 4);
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(alertSpy.count(), 10);
+    QCOMPARE(sink->spoken.count(), 5);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Entered geozone P (Prohibited)"));
+
+    // Its repeats wait for the end of the mute
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(sink->spoken.count(), 5);
+    now += GeoZoneAlertArbiter::defaultMuteMSecs;
+    monitor.evaluate(inProhibited);
+    QVERIFY(!monitor.alertsMuted());
+    QCOMPARE(mutedSpy.count(), 2);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Still inside geozone P (Prohibited)"));
+
+    // Removing the vehicle ends its repeats
+    monitor.removePositionMonitor(GeoZoneMonitor::noVehicle);
+    QCOMPARE(monitor.arbiter().breachCount(), 0);
+
+    // Shown but not spoken with the audio turned off
+    settings.audioAlerts = false;
+    monitor.setSettings(settings);
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    monitor.evaluate(inProhibited);
+    QCOMPARE(alertSpy.count(), 12);
+    QCOMPARE(sink->spoken.count(), 6);
 }

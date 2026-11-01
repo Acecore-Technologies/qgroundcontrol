@@ -61,6 +61,8 @@ public:
 
     Q_INVOKABLE void acknowledge(int row);
     Q_INVOKABLE void acknowledgeAll();
+    /// Acknowledges the alert by GeoZoneMonitor::AlertEvent::id
+    void acknowledgeAlert(int alertId);
     /// Shows the zone of the alert with its details and the vehicle position on the visible map
     Q_INVOKABLE void show(int row);
     Q_INVOKABLE void clearShownPosition();
@@ -74,6 +76,9 @@ public slots:
 signals:
     void countChanged();
     void unacknowledgedCountChanged();
+    /// An alert of the session was acknowledged, by GeoZoneMonitor::AlertEvent::id
+    void alertAcknowledged(int alertId);
+    void allAcknowledged();
     void shownPositionChanged();
 
 private:

@@ -11,7 +11,7 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
-#include <QtCore/QHash>
+#include <QtCore/QList>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -20,9 +20,15 @@
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
+#include "GeoZoneAlertArbiter.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneNearbyModel.h"
-#include "QGCMAVLink.h"
+#include "GeoZonePolicy.h"
+#include "GeoZoneVehicleMonitor.h"
+
+#include <functional>
+#include <memory>
+#include <optional>
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneMonitorLog)
 
@@ -37,9 +43,10 @@ class GeoZoneSource;
 class Vehicle;
 
 /// Alerts the user once when a vehicle approaches or enters an active restricted geozone or U-space airspace,
-/// considering the zone altitude limits. Every connected vehicle is monitored with a GeoZoneAlertTracker, the nearby
-/// zones and vertical bands shown are those of the active vehicle. Alerts and the approach distances are set in
-/// GeoZoneSettings.
+/// considering the zone altitude limits. Each connected vehicle has a GeoZoneVehicleMonitor, keyed by its Vehicle
+/// object so that a vehicle reconnecting with the same system id starts clean. The monitor publishes the nearby zones,
+/// vertical bands, predicted entry and fence status of the active vehicle, shows and logs the alerts of all vehicles,
+/// and lets a GeoZoneAlertArbiter decide what is spoken. Alerts and the approach distances are set in GeoZoneSettings.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -56,7 +63,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
     Q_PROPERTY(double       altitudeAMSL        READ altitudeAMSL       NOTIFY verticalBandsChanged FINAL)    ///< Of the active vehicle, NaN when unknown
     Q_PROPERTY(double       terrainAMSL         READ terrainAMSL        NOTIFY verticalBandsChanged FINAL)    ///< Below the active vehicle, NaN when unknown
-    Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)
+    Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)  ///< The active vehicle has no current position, its alerts are paused
     /// Where the active vehicle enters a nearby zone first at its current velocity within the approach time: the path
     /// from the vehicle to the entry, the entry position, the seconds until then and the zone (GeoZoneInfo). Empty,
     /// invalid and -1 without such an entry.
@@ -67,24 +74,27 @@ class GeoZoneMonitor : public QObject
     /// The active vehicle reports a breach of its own fence (FENCE_STATUS), with the kind of breach and their count
     Q_PROPERTY(bool             fenceBreached       READ fenceBreached      NOTIFY fenceStatusChanged FINAL)
     Q_PROPERTY(QString          fenceBreachText     READ fenceBreachText    NOTIFY fenceStatusChanged FINAL)
-    Q_PROPERTY(bool             fenceStatusKnown    READ fenceStatusKnown   NOTIFY fenceStatusChanged FINAL)     ///< The active vehicle sends FENCE_STATUS    ///< The active vehicle has no current position, its alerts are paused
+    Q_PROPERTY(bool             fenceStatusKnown    READ fenceStatusKnown   NOTIFY fenceStatusChanged FINAL)     ///< The active vehicle sends FENCE_STATUS
+    Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< Spoken alerts are muted, see muteAlerts()
+    Q_PROPERTY(int              defaultMuteSecs     READ defaultMuteSecs    CONSTANT FINAL)
 
 public:
-    /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
+    /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
+    /// and speaks them with AudioOutput
     explicit GeoZoneMonitor(QObject *parent = nullptr);
 
-    /// Monitors positions passed to evaluate() against the zones of the manager
+    /// Monitors the vehicles added and the positions passed to evaluate() against the zones of the manager. It speaks
+    /// nothing until given an audio sink.
     explicit GeoZoneMonitor(GeoZoneManager *manager, QObject *parent = nullptr);
 
     static GeoZoneMonitor *instance();
 
     static constexpr int evaluateIntervalMSecs = 1000;
-    static constexpr int positionTimeoutMSecs = 5000;       ///< Positions are stale after this, or three times their usual interval
-    static constexpr int reportedVelocityMaxAgeMSecs = 2000;    ///< Velocities reported by vehicles are used up to this age
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
 
     /// An approach or entry alert
     struct AlertEvent {
+        int id = 0;                 ///< Unique for the session, 0 for alerts read from a log
         QDateTime time;             ///< UTC
         int vehicleId = noVehicle;
         GeoZone::Position position;
@@ -99,31 +109,73 @@ public:
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
     };
 
-    using Velocity = GeoZoneAlertTracker::Velocity;
+    /// What the monitor uses of GeoZoneSettings
+    struct Settings {
+        bool alertsEnabled = true;
+        bool audioAlerts = true;
+        GeoZoneAlertTracker::Limits limits;
 
-    /// Updates the alert state of the zones for a position of the vehicle. Unknown altitudes are inside all
-    /// vertical limits. The nearby zones follow the active vehicle, or positions without a vehicle.
-    /// With a valid velocity, the vehicle is also alerted when it would enter a zone within the approach time.
+        /// @return The settings of GeoZoneSettings::instance()
+        static Settings fromApplication();
+    };
+
+    using Velocity = GeoZoneAlertTracker::Velocity;
+    /// @return Monotonic milliseconds
+    using Clock = std::function<qint64()>;
+
+    /// Monitors a vehicle, as done for those of MultiVehicleManager, until it is removed or destroyed
+    /// @return Its monitor, also when it was monitored already
+    GeoZoneVehicleMonitor *addVehicle(Vehicle *vehicle);
+    /// Stops monitoring the vehicle, forgetting its state
+    void removeVehicle(Vehicle *vehicle);
+    /// @return Monitor of the vehicle, null when it isn't monitored
+    GeoZoneVehicleMonitor *vehicleMonitor(const Vehicle *vehicle) const;
+    /// Vehicle whose nearby zones, bands, prediction and fence status are published
+    void setActiveVehicle(Vehicle *vehicle);
+
+    /// Evaluates a position of a monitored vehicle, like the monitor does every evaluateIntervalMSecs with the
+    /// position the vehicle reports, and announces its alerts
+    void evaluate(Vehicle *vehicle, const GeoZone::Position &position, const Velocity &velocity = Velocity());
+
+    /// Evaluates a position which doesn't come from a Vehicle object, like those of tests and tools, monitored by
+    /// vehicle id, and announces its alerts. Unknown altitudes are inside all vertical limits. With a valid velocity,
+    /// the vehicle is also alerted when it would enter a zone within the approach time.
     void evaluate(const GeoZone::Position &position, int vehicleId, const Velocity &velocity);
     void evaluate(const GeoZone::Position &position, int vehicleId = noVehicle) { evaluate(position, vehicleId, Velocity()); }
+    /// @return Monitor of the positions passed to evaluate() for the vehicle id, null before the first
+    GeoZoneVehicleMonitor *positionMonitor(int vehicleId) const;
+    /// Forgets the positions of the vehicle id, so that its alerts repeat
+    void removePositionMonitor(int vehicleId);
+    /// Publishes the positions passed to evaluate() for the vehicle id, noVehicle by default
+    void setActiveVehicleId(int vehicleId);
+    int activeVehicleId() const { return _activeVehicleId; }
 
-    /// @return Position of the vehicle with its altitude above mean sea level and the terrain elevation from its
-    ///         altitude above terrain or GeoZoneTerrain, which is unknown without terrain data
-    static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate);
+    /// @return Position of the vehicle, see GeoZoneVehicleMonitor::vehiclePosition
+    static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate) { return GeoZoneVehicleMonitor::vehiclePosition(vehicle, coordinate); }
+    /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
+    static QString fenceBreachText(int breachType, int breachCount) { return GeoZoneVehicleMonitor::fenceBreachText(breachType, breachCount); }
 
-    /// Records when a vehicle sent its position, the velocity sent with it, and the status of its fence
-    /// @param msecs Time of the monitor's clock
-    void handleVehicleMessage(int vehicleId, const mavlink_message_t &message, qint64 msecs);
+    /// Replaces the clock of the vehicles' messages and of the spoken alerts, like tests do
+    void setClock(const Clock &clock) { _clock = clock; }
+    /// Replaces how the alerts are spoken, see GeoZoneAlertArbiter
+    void setAudioSink(const std::shared_ptr<GeoZoneAlertArbiter::AudioSink> &sink) { _arbiter.setAudioSink(sink); }
+    /// Uses the settings instead of following GeoZoneSettings, like tests do
+    void setSettings(const Settings &settings);
+    /// The settings in use, read from GeoZoneSettings again after they change
+    const Settings &settings() const;
+    const GeoZoneAlertArbiter &arbiter() const { return _arbiter; }
 
-    /// @return Velocity the vehicle reported with its position when recent, otherwise estimated from its positions,
-    ///         after adding the position to the estimate
-    Velocity vehicleVelocity(int vehicleId, qint64 msecs, const GeoZone::Position &position);
-
-    /// @return true if the vehicle sent no position for longer than its timeout
-    bool positionStale(int vehicleId, qint64 msecs) const;
+    /// Acknowledges an alert in the history and stops repeating it
+    Q_INVOKABLE void acknowledgeAlert(int alertId);
+    /// Mutes the spoken alerts for the seconds, defaultMuteSecs when 0, except new entries into prohibited zones
+    Q_INVOKABLE void muteAlerts(int seconds = 0);
+    Q_INVOKABLE void unmuteAlerts();
 
     GeoZoneManager *manager() const { return _manager; }
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
+    /// Log of the alerts of vehicles, null for monitors constructed with a manager
+    GeoZoneAlertLog *alertLog() const { return _alertLog; }
+    GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
 
     bool monitoring() const;
     QVariantList nearbyZones() const;
@@ -133,34 +185,25 @@ public:
     QVariantList verticalBands() const;
     double altitudeAMSL() const;
     double terrainAMSL() const;
-    bool positionUnavailable() const { return _telemetry.value(_activeVehicleId).unavailable; }
-
-    /// Vehicle whose nearby zones are published, noVehicle by default
-    int activeVehicleId() const { return _activeVehicleId; }
-    void setActiveVehicleId(int vehicleId);
-
-    /// Forgets the alert state of a vehicle, so that its alerts repeat
-    void removeVehicle(int vehicleId);
-
-    /// Log of the alerts of vehicles, null for monitors of positions passed to evaluate()
-    GeoZoneAlertLog *alertLog() const { return _alertLog; }
-    GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
+    bool positionUnavailable() const;
     QVariantList predictedPath() const;
     QGeoCoordinate predictedEntry() const;
     int predictedEntryTime() const;
     QVariant predictedEntryZone() const;
-    bool fenceBreached() const { return _telemetry.value(_activeVehicleId).fenceBreached; }
-    bool fenceStatusKnown() const { return _telemetry.value(_activeVehicleId).fenceStatusKnown; }
+    bool fenceBreached() const;
+    bool fenceStatusKnown() const;
     QString fenceBreachText() const;
-
-    /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
-    static QString fenceBreachText(int breachType, int breachCount);
+    bool alertsMuted() const { return _arbiter.muted(); }
+    static int defaultMuteSecs() { return GeoZoneAlertArbiter::defaultMuteMSecs / 1000; }
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
     /// several vehicles are monitored. The alerts of an evaluation are emitted most severe first.
     /// @param severity GeoZone::restrictionSeverity of the zone
-    void alert(const QString &message, int severity);
+    /// @param alertId See AlertEvent::id and acknowledgeAlert()
+    void alert(const QString &message, int severity, int alertId);
+    /// An unacknowledged entry into a prohibited zone was spoken again, the vehicle is still inside
+    void alertRepeated(const QString &message, int severity, int alertId);
     void alertEvent(const GeoZoneMonitor::AlertEvent &event);
     void monitoringChanged();
     void nearbyZonesChanged();
@@ -168,64 +211,62 @@ signals:
     void positionUnavailableChanged();
     void predictionChanged();
     void fenceStatusChanged();
-    /// The vehicle started breaching its fence. The vehicle announces it, so it isn't spoken.
+    /// A vehicle started breaching its fence. The vehicle announces it, so it isn't spoken.
     void fenceBreach(const QString &message);
+    void alertsMutedChanged();
 
 private slots:
-    void _vehicleAdded(Vehicle *vehicle);
-    void _vehicleRemoved(Vehicle *vehicle);
-    void _activeVehicleChanged(Vehicle *vehicle);
     void _evaluateVehicles();
     void _updateEvaluateTimer();
     void _forgetZones(GeoZoneSource *source);
-    void _alertsEnabledChanged();
+    void _zonesChanged(GeoZoneSource *source);
+    void _applicationSettingsChanged();
+    void _updateMuted();
 
 private:
     using Nearby = GeoZoneAlertTracker::Nearby;
 
-    /// Monitoring state of one vehicle
-    /// Position messages of one vehicle
-    struct Telemetry {
-        qint64 positionMSecs = -1;          ///< Last position message, -1 without
-        qint64 positionIntervalMSecs = 0;   ///< Between the last two position messages
-        qint64 velocityMSecs = -1;
-        Velocity reported;
-        GeoZoneVelocityEstimator estimator;
-        bool unavailable = false;           ///< Alerts are paused for lack of a current position
-        bool fenceStatusKnown = false;
-        bool fenceBreached = false;
-        int fenceBreachType = FENCE_BREACH_NONE;
-        int fenceBreachCount = 0;
-    };
-
-    struct Tracker {
-        GeoZoneAlertTracker alerts;
-        QList<Nearby> nearby;
-        QList<GeoZoneVerticalBand> bands;
-        GeoZone::Position position;     ///< Last evaluated position
-        std::optional<GeoZoneAlertTracker::Entry> entry;    ///< First predicted entry from the last evaluated position
-        QGeoCoordinate entryFrom;       ///< Position the entry is predicted from
-    };
-    /// @return First predicted entry of the active vehicle, nothing while it has no current position
-    const std::optional<GeoZoneAlertTracker::Entry> &_activeEntry() const;
-
-    const Tracker *_activeTracker() const;
-    void _setPositionUnavailable(int vehicleId, bool unavailable);
-    AlertEvent _alertEvent(const GeoZoneAlertTracker::Alert &alert, const GeoZone::Position &position, int vehicleId) const;
-
-    static void _speak(const QString &message);
+    GeoZoneVehicleMonitor *_createMonitor(Vehicle *vehicle, int vehicleId);
+    void _removeMonitor(GeoZoneVehicleMonitor *monitor);
+    GeoZoneVehicleMonitor *_activeMonitor() const { return _active; }
+    /// Finds the monitor of the active vehicle again, publishing its state when it changed
+    void _resolveActive();
     const QList<Nearby> &_activeNearby() const;
+    std::optional<GeoZoneAlertTracker::Entry> _activeEntry() const;
     void _publishNearby();
-    QString _vehicleLabel(int vehicleId) const;
-    void _resetTrackers();
+    void _publishActive();
+
+    /// @return What the vehicles are evaluated against, kept until the settings or zones change
+    GeoZoneVehicleMonitor::Context _context() const;
+    void _evaluate(GeoZoneVehicleMonitor *monitor, const GeoZone::Position &position, const Velocity &velocity);
+    /// Shows, logs and submits the alerts of a vehicle to the arbiter
+    void _raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneAlertTracker::Alert> &alerts);
+    /// Lets the arbiter speak the alerts raised since the last time
+    void _announce();
+    void _settingsChanged(const Settings &previous);
+    void _resetMonitors();
+
+    AlertEvent _alertEvent(const GeoZoneAlertTracker::Alert &alert, const GeoZone::Position &position, int vehicleId);
+    /// @return The message naming the vehicle while several are monitored
+    QString _labelled(int vehicleId, const QString &message) const;
+    qint64 _now() const { return _clock ? _clock() : _elapsed.elapsed(); }
 
     GeoZoneManager *_manager = nullptr;
-    QHash<int, Tracker> _trackers;              ///< By vehicle id
-    QHash<int, Telemetry> _telemetry;           ///< By vehicle id
-    QList<QPointer<Vehicle>> _vehicles;         ///< Monitored vehicles of MultiVehicleManager
+    QList<GeoZoneVehicleMonitor*> _monitors;    ///< Children: of vehicles, and of positions by vehicle id
+    QPointer<Vehicle> _activeVehicle;
     int _activeVehicleId = noVehicle;
+    QPointer<GeoZoneVehicleMonitor> _active;    ///< Of _activeVehicle, or of the positions of _activeVehicleId without
+    int _nextVehicleKey = 1;
+    int _nextAlertId = 1;
     QTimer _evaluateTimer;
-    QElapsedTimer _clock;
+    QElapsedTimer _elapsed;
+    Clock _clock;                               ///< _elapsed when empty
+    GeoZoneAlertArbiter _arbiter;
+    QTimer _muteTimer;                          ///< Notifies the end of the mute
+    bool _alertsMuted = false;                  ///< As last notified
+    std::optional<Settings> _fixedSettings;     ///< Set by setSettings()
+    mutable std::optional<Settings> _settings;  ///< Of GeoZoneSettings, until they change
+    mutable std::optional<GeoZonePolicy> _policy;   ///< Until the zones change
     GeoZoneAlertLog *_alertLog = nullptr;
     GeoZoneNearbyModel *_nearbyModel = nullptr;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;

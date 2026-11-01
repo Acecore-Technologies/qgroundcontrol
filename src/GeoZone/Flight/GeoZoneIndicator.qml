@@ -118,6 +118,24 @@ Item {
                             visible:            control._monitor.monitoring && control._monitor.positionUnavailable
                         }
 
+                        RowLayout {
+                            Layout.fillWidth:   true
+                            spacing:            ScreenTools.defaultFontPixelWidth
+                            visible:            control._monitor.alertsMuted
+
+                            QGCLabel {
+                                Layout.fillWidth:   true
+                                wrapMode:           Text.WordWrap
+                                color:              qgcPal.warningText
+                                text:               qsTr("Spoken alerts are muted, except entries into prohibited zones.")
+                            }
+
+                            QGCButton {
+                                text:       qsTr("Unmute")
+                                onClicked:  control._monitor.unmuteAlerts()
+                            }
+                        }
+
                         Repeater {
                             model: control._monitor.monitoring ? control._monitor.nearbyModel : null
 

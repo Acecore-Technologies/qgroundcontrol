@@ -15,6 +15,7 @@
 #include <QtCore/QMetaEnum>
 #include <QtCore/QTextStream>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -222,6 +223,20 @@ void GeoZoneAlertHistory::acknowledge(int row)
     _entries[row].acknowledged = true;
     emit dataChanged(index(row), index(row), { AcknowledgedRole });
     emit unacknowledgedCountChanged();
+    if (_entries[row].event.id > 0) {
+        emit alertAcknowledged(_entries[row].event.id);
+    }
+}
+
+void GeoZoneAlertHistory::acknowledgeAlert(int alertId)
+{
+    if (alertId <= 0) {
+        return;
+    }
+    const auto it = std::find_if(_entries.cbegin(), _entries.cend(), [alertId](const Entry &entry) { return entry.event.id == alertId; });
+    if (it != _entries.cend()) {
+        acknowledge(static_cast<int>(std::distance(_entries.cbegin(), it)));
+    }
 }
 
 void GeoZoneAlertHistory::acknowledgeAll()
@@ -234,6 +249,7 @@ void GeoZoneAlertHistory::acknowledgeAll()
     }
     emit dataChanged(index(0), index(count() - 1), { AcknowledgedRole });
     emit unacknowledgedCountChanged();
+    emit allAcknowledged();
 }
 
 void GeoZoneAlertHistory::show(int row)
