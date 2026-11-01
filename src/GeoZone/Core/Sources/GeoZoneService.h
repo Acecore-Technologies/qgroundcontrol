@@ -59,6 +59,7 @@ public:
     QString responseMember;     ///< Member of the JSON response holding the zones, dot separated, like "data.geojson"
     bool areaOfInterest = false;    ///< The request takes the area of interest, the zones are downloaded again when it moves out
     int timeWindowHours = 24;   ///< Time of interest after the request
+    double maxAreaKm2 = 0;      ///< Largest area the service answers, the margin around the area of interest shrinks to fit. 0 without limit.
     QString sha256Url;          ///< Template of the URL publishing the SHA-256 of the data, empty when not published
 
     bool isEmpty() const;
@@ -76,6 +77,10 @@ public:
 
     /// @return true when the URL template has placeholders of the area
     static bool hasAreaPlaceholders(const QString &urlTemplate);
+    /// @return Approximate surface of the area in km²
+    static double areaKm2(const QGeoRectangle &area);
+    /// @return true when the service answers the area
+    bool acceptsArea(const QGeoRectangle &area) const { return (maxAreaKm2 <= 0) || (areaKm2(area) <= maxAreaKm2); }
     /// @return The URL template with the placeholders filled
     static QString resolve(const QString &urlTemplate, const QGeoRectangle &area, const QDateTime &start, const QDateTime &end);
     /// @return ED-318 UASZonesRequest of the zones in the area during the time

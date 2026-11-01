@@ -1539,6 +1539,30 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
     QVERIFY(std::any_of(server.requestedPaths.cbegin(), server.requestedPaths.cend(), [&](const QByteArray &path) { return server.url(QString::fromUtf8(path)) == storedUrl; }));
     QCOMPARE(feed->area(), stored);
 
+    // Services answering areas up to a size get a smaller margin, larger areas aren't requested
+    const QTemporaryDir limitedDir;
+    GeoZoneManager limitedManager(limitedDir.path());
+    limitedManager.repository()->setAreaMargin(5000);
+    limitedManager.repository()->setVehiclePosition(QGeoCoordinate(47.5, 8.5));
+    QSignalSpy limitedSpy(&limitedManager, &GeoZoneManager::sourceAdded);
+    GeoZoneService limited;
+    limited.areaOfInterest = true;
+    limited.maxAreaKm2 = 10;
+    const QString limitedUrl = server.url(QStringLiteral("/zones?limited={bbox}"));
+    limitedManager.addService(limitedUrl, limited.toVariantMap(), QString());
+    QVERIFY(limitedSpy.wait(10000));
+    QTRY_VERIFY(!limitedManager.busy());
+    const GeoZoneSource *const limitedFeed = limitedManager.source(limitedUrl);
+    QVERIFY(limitedFeed->area().contains(QGeoCoordinate(47.5, 8.5)));
+    QVERIFY(GeoZoneService::areaKm2(limitedFeed->area()) <= 9.5);
+    QVERIFY(GeoZoneService::areaKm2(limitedFeed->area()) > 9);
+    const QObject largeMission;
+    limitedManager.setMissionArea(&largeMission, QGeoRectangle(QGeoCoordinate(47.6, 8.4), QGeoCoordinate(47.4, 8.6)));
+    QTRY_VERIFY(!limitedManager.busy());
+    QVERIFY2(limitedFeed->errorString().contains(QStringLiteral("is larger than the 10 km² the service answers")), qPrintable(limitedFeed->errorString()));
+    QCOMPARE(limitedFeed->zoneCount(), 3);
+    limitedManager.setMissionArea(&largeMission, QGeoRectangle());
+
     // Across the antimeridian
     const QGeoRectangle crossing = GeoZoneSourceRepository::expanded(QGeoRectangle(QGeoCoordinate(-17.0, 179.99), QGeoCoordinate(-17.0, 179.99)), 5000);
     QVERIFY(crossing.topLeft().longitude() > 179.9);
@@ -1636,6 +1660,11 @@ void GeoZoneManagerTest::_testIntegrity()
     server.headers.insert("/tampered", "Digest: SHA-256=" + QCryptographicHash::hash("other", QCryptographicHash::Sha256).toBase64() + "\r\n");
     server.files.insert("/signed.json", server.body);
     server.files.insert("/signed.json.sha256", sha256.toHex() + "  signed.json\n");
+    // A compressed response, whose digest is of the compressed data
+    const QByteArray compressed = qCompress(server.body).mid(4);
+    server.files.insert("/compressed", compressed);
+    server.headers.insert("/compressed", "Content-Encoding: deflate\r\nRepr-Digest: sha-256=:" +
+                          QCryptographicHash::hash(compressed, QCryptographicHash::Sha256).toBase64() + ":\r\n");
 
     const QTemporaryDir storageDir;
     QVERIFY(storageDir.isValid());
@@ -1651,6 +1680,15 @@ void GeoZoneManagerTest::_testIntegrity()
     QVERIFY(digest->verified());
     QCOMPARE(digest->provenance().integrityText, QStringLiteral("repr-digest header"));
     QVERIFY(digest->provenanceText().contains(QStringLiteral("verified")));
+
+    // The digest of compressed data can't be checked against the data Qt decompressed
+    manager.addUrl(server.url(QStringLiteral("/compressed")));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    const GeoZoneSource *const compressedFeed = manager.source(server.url(QStringLiteral("/compressed")));
+    QCOMPARE(compressedFeed->zoneCount(), 3);
+    QCOMPARE(compressedFeed->provenance().integrity, GeoZoneProvenance::Integrity::Unchecked);
+    QCOMPARE(compressedFeed->provenance().sha256, sha256);
 
     // Data which doesn't match isn't loaded
     manager.addUrl(server.url(QStringLiteral("/tampered")));

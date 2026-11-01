@@ -249,10 +249,26 @@ QGeoRectangle GeoZoneSourceRepository::_requestArea(const QString &key) const
     const GeoZoneSource *const existing = source(key);
     const QGeoRectangle downloaded = existing ? existing->area() : QGeoRectangle();
     const QGeoRectangle interest = areaOfInterest();
-    if (interest.isValid() && (!downloaded.isValid() || (_followArea && !downloaded.contains(interest)))) {
-        return expanded(interest, _areaMargin);
+    if (!interest.isValid() || (downloaded.isValid() && (!_followArea || downloaded.contains(interest)))) {
+        return downloaded;
     }
-    return downloaded;
+    // Services answering areas up to a size get a smaller margin, a little under their limit
+    const GeoZoneService service = _services.value(key);
+    const QGeoRectangle area = expanded(interest, _areaMargin);
+    if ((service.maxAreaKm2 <= 0) || (GeoZoneService::areaKm2(area) <= (0.95 * service.maxAreaKm2))) {
+        return area;
+    }
+    double low = 0;
+    double high = _areaMargin;
+    for (int i = 0; i < 20; i++) {
+        const double margin = (low + high) / 2;
+        if (GeoZoneService::areaKm2(expanded(interest, margin)) <= (0.95 * service.maxAreaKm2)) {
+            low = margin;
+        } else {
+            high = margin;
+        }
+    }
+    return expanded(interest, low);
 }
 
 void GeoZoneSourceRepository::_checkAreas()

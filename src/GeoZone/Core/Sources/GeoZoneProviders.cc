@@ -108,6 +108,7 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
     dfs.service.method = GeoZoneService::Method::Ed318Post;
     dfs.service.auth = GeoZoneService::Auth::Basic;
     dfs.service.areaOfInterest = true;
+    dfs.service.maxAreaKm2 = 100;
     dfs.note = tr("Requires a dipul account, requested from DFS through the dipul contact form. The service answers areas up to 100 km².");
     templates.append(dfs);
 

@@ -12,6 +12,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QUrl>
+#include <QtCore/QtMath>
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +32,7 @@ constexpr const char *responseMemberKey = "responseMember";
 constexpr const char *areaOfInterestKey = "areaOfInterest";
 constexpr const char *timeWindowKey = "timeWindowHours";
 constexpr const char *sha256UrlKey = "sha256Url";
+constexpr const char *maxAreaKey = "maxAreaKm2";
 
 const QStringList kAreaPlaceholders = {
     QStringLiteral("{west}"), QStringLiteral("{south}"), QStringLiteral("{east}"), QStringLiteral("{north}"), QStringLiteral("{bbox}"),
@@ -104,6 +106,9 @@ QJsonObject GeoZoneService::toJson() const
     object.insert(QLatin1String(areaOfInterestKey), areaOfInterest);
     object.insert(QLatin1String(timeWindowKey), timeWindowHours);
     insert(sha256UrlKey, sha256Url);
+    if (maxAreaKm2 > 0) {
+        object.insert(QLatin1String(maxAreaKey), maxAreaKm2);
+    }
     return object;
 }
 
@@ -131,6 +136,7 @@ GeoZoneService GeoZoneService::fromJson(const QJsonObject &object)
     service.areaOfInterest = object.value(QLatin1String(areaOfInterestKey)).toBool();
     service.timeWindowHours = std::clamp(object.value(QLatin1String(timeWindowKey)).toInt(24), 1, 24 * 31);
     service.sha256Url = object.value(QLatin1String(sha256UrlKey)).toString().trimmed();
+    service.maxAreaKm2 = (std::max)(0.0, object.value(QLatin1String(maxAreaKey)).toDouble());
     return service;
 }
 
@@ -139,6 +145,16 @@ bool GeoZoneService::hasAreaPlaceholders(const QString &urlTemplate)
     return std::any_of(kAreaPlaceholders.cbegin(), kAreaPlaceholders.cend(), [&urlTemplate](const QString &placeholder) {
         return urlTemplate.contains(placeholder) || urlTemplate.contains(QString(placeholder).replace(QLatin1Char('{'), QStringLiteral("%7B")).replace(QLatin1Char('}'), QStringLiteral("%7D")), Qt::CaseInsensitive);
     });
+}
+
+double GeoZoneService::areaKm2(const QGeoRectangle &area)
+{
+    if (!area.isValid()) {
+        return 0;
+    }
+    constexpr double kmPerDegree = 111.32;
+    const double latitude = qDegreesToRadians(area.center().latitude());
+    return (area.height() * kmPerDegree) * (area.width() * kmPerDegree * std::cos(latitude));
 }
 
 QString GeoZoneService::resolve(const QString &urlTemplate, const QGeoRectangle &area, const QDateTime &start, const QDateTime &end)

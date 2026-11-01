@@ -161,13 +161,13 @@ QString GeoZoneProvenance::summary() const
 
 QByteArray GeoZoneProvenance::digestHeaderSha256(const QHash<QByteArray, QByteArray> &headers, QString &headerName)
 {
-    // RFC 9530 dictionaries: sha-256=:base64:, Content-Digest is of the encoded content, which Qt decodes
+    // The digests are of the content as encoded, which Qt decodes, so encoded responses can't be checked
     const QByteArray encoding = headers.value("content-encoding").trimmed().toLower();
-    QList<QByteArray> names = { "repr-digest" };
-    if (encoding.isEmpty() || (encoding == "identity")) {
-        names.append("content-digest");
+    if (!encoding.isEmpty() && (encoding != "identity")) {
+        return QByteArray();
     }
-    for (const QByteArray &name : std::as_const(names)) {
+    // RFC 9530 dictionaries: sha-256=:base64:
+    for (const QByteArray &name : { QByteArray("repr-digest"), QByteArray("content-digest") }) {
         for (const QByteArray &member : headers.value(name).split(',')) {
             const QByteArray trimmed = member.trimmed();
             if (trimmed.toLower().startsWith("sha-256=:") && trimmed.endsWith(':') && (trimmed.size() > 10)) {

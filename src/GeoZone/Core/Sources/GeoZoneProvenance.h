@@ -59,8 +59,8 @@ public:
 
     static QString integrityToString(Integrity integrity);
 
-    /// @return The SHA-256 a response's Repr-Digest, Content-Digest (unless the content was encoded) or Digest header
-    ///         gives, empty without
+    /// @return The SHA-256 a response's Repr-Digest, Content-Digest or Digest header gives, empty without or when the
+    ///         content was encoded, like compressed, since the digests are of the encoded content
     /// @param headers By lower case name
     static QByteArray digestHeaderSha256(const QHash<QByteArray, QByteArray> &headers, QString &headerName);
     /// @return The SHA-256 of a .sha256 file: the hexadecimal hash, alone or followed by the file name like sha256sum
