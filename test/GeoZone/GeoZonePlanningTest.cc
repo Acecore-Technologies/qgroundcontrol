@@ -1523,6 +1523,78 @@ void GeoZonePlanningTest::_testPlanAudit()
     QVERIFY(!manager.planning()->planAudit().has_value());
 }
 
+void GeoZonePlanningTest::_testPlanSave()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneSourceRepository *const repository = manager.repository();
+    repository->setAreaMargin(1000);
+    repository->setFollowArea(true);
+
+    // A service downloading its zones for the area of interest, around the vehicle for now
+    repository->setVehiclePosition(QGeoCoordinate(47.0, 8.0));
+    const QString url = server.url(QStringLiteral("/zones?bbox={bbox}"));
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.addService(url, GeoZoneService().toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(manager.source(url)->followsArea());
+
+    // A mission away from the vehicle, whose zones the service would download for a check following it
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(QGeoCoordinate(47.5, 8.5), 1);
+    (void) missionController->insertSimpleMissionItem(QGeoCoordinate(47.52, 8.5), 2);
+    QTRY_VERIFY(!GeoZoneMissionPath::fromMission(missionController).paths().isEmpty());
+
+    // Saving neither sets the area of interest nor downloads, and records the audit
+    const QGeoRectangle area = repository->areaOfInterest();
+    const int requests = server.requestCount;
+    QJsonObject planJson;
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    QVERIFY(!manager.busy());
+    QCOMPARE(repository->areaOfInterest(), area);
+    QTest::qWait(200);
+    QCOMPARE(server.requestCount, requests);
+    const std::optional<GeoZonePlanAudit::Record> saved =
+        GeoZonePlanAudit::Record::fromJson(planJson[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("audit")].toObject());
+    QVERIFY(saved.has_value());
+    QCOMPARE(manager.planning()->planAudit(), saved);
+
+    // The Plan View's check follows the mission, the plan is saved with its result once settled, the same
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    QVERIFY(!check.settled());
+    QVERIFY(!GeoZoneMissionCheck::settledCheck(&manager, missionController));
+    QTRY_VERIFY(!manager.busy() && check.settled());
+    QCOMPARE(GeoZoneMissionCheck::settledCheck(&manager, missionController), &check);
+    QVERIFY(repository->areaOfInterest().contains(QGeoCoordinate(47.51, 8.5)));
+    QJsonObject resaved;
+    GeoZonePlanData::save(&masterController, resaved, &manager);
+    QCOMPARE(resaved[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("audit")].toObject(), check.auditRecord().toJson());
+    // While a change waits to be checked, the plan is evaluated for saving, with the result of the check
+    check.setUpdateDelay(600000);
+    (void) missionController->insertSimpleMissionItem(QGeoCoordinate(47.54, 8.5), 3);
+    QTRY_VERIFY(!check.settled());
+    QVERIFY(!GeoZoneMissionCheck::settledCheck(&manager, missionController));
+    QJsonObject edited;
+    GeoZonePlanData::save(&masterController, edited, &manager);
+    QVERIFY(!manager.busy());
+    check.update();
+    QVERIFY(check.settled());
+    QCOMPARE(edited[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("audit")].toObject(), check.auditRecord().toJson());
+    QTRY_VERIFY(!manager.busy());
+    manager.clear();
+}
+
 void GeoZonePlanningTest::_testPlannedStartPerPlan()
 {
     // Plan files are loaded and saved with the application's manager

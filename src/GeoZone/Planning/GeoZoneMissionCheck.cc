@@ -33,6 +33,17 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+
+/// The checks alive, on the GUI thread
+QList<const GeoZoneMissionCheck*> &checks()
+{
+    static QList<const GeoZoneMissionCheck*> list;
+    return list;
+}
+
+} // namespace
+
 GeoZoneMissionCheck::GeoZoneMissionCheck(QObject *parent)
     : GeoZoneMissionCheck(GeoZoneManager::instance(), parent)
 {
@@ -43,6 +54,7 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
     , _manager(manager ? manager : GeoZoneManager::instance())
     , _worker(new GeoZoneMissionWorker(_updateDelayMSecs, this))
 {
+    checks().append(this);
     (void) connect(_worker, &GeoZoneMissionWorker::triggered, this, &GeoZoneMissionCheck::_updateConcurrently);
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMissionCheck::_clearZones);
@@ -64,6 +76,26 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
     (void) connect(this, &QObject::destroyed, _manager, [manager = _manager, owner = static_cast<const QObject*>(this)]() {
         manager->setMissionArea(owner, QGeoRectangle());
     });
+}
+
+GeoZoneMissionCheck::~GeoZoneMissionCheck()
+{
+    (void) checks().removeOne(this);
+}
+
+bool GeoZoneMissionCheck::settled() const
+{
+    return _worker->settled();
+}
+
+const GeoZoneMissionCheck *GeoZoneMissionCheck::settledCheck(const GeoZoneManager *manager, const MissionController *missionController)
+{
+    for (const GeoZoneMissionCheck *check : std::as_const(checks())) {
+        if ((check->_manager == manager) && (check->_worker->missionController() == missionController) && !check->_flightNow && check->settled()) {
+            return check;
+        }
+    }
+    return nullptr;
 }
 
 MissionController *GeoZoneMissionCheck::missionController() const
@@ -473,6 +505,12 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
     return evaluation;
 }
 
+GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluatePlan(const GeoZoneManager *manager, MissionController *missionController)
+{
+    const auto [start, end] = plannedFlightTimes(manager, missionController);
+    return evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController, true), start, end);
+}
+
 QHash<const GeoZone*, QStringList> GeoZoneMissionCheck::groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result)
 {
     QHash<const GeoZone*, QStringList> labels;
@@ -502,66 +540,63 @@ QHash<const GeoZone*, QStringList> GeoZoneMissionCheck::groupContingencies(const
     return labels;
 }
 
-void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
+GeoZoneMissionCheck::Classification GeoZoneMissionCheck::classify(const Evaluation &evaluation, const GeoZoneAuthorisations *authorisations)
 {
+    Classification classification;
     QList<const GeoZone*> zones = evaluation.zones;
     // Zones which aren't active while the mission flies through them don't apply
-    const int inactiveZoneCount = static_cast<int>(zones.removeIf([&evaluation](const GeoZone *zone) { return evaluation.inactiveZones.contains(zone); }));
+    classification.inactiveZoneCount = static_cast<int>(zones.removeIf([&evaluation](const GeoZone *zone) { return evaluation.inactiveZones.contains(zone); }));
     // Zones authorised during the whole flight are listed for information
-    const GeoZonePolicy policy = GeoZonePolicy::mission(evaluation.start, evaluation.end).excludingAuthorised(_manager->planning()->authorisations());
+    const GeoZonePolicy policy = GeoZonePolicy::mission(evaluation.start, evaluation.end).excludingAuthorised(authorisations);
 
     // Restricted zones only the returns from along the mission enter, unless authorised
-    QList<const GeoZone*> contingency;
-    QHash<const GeoZone*, QStringList> contingencyZoneLabels;
     for (const GeoZone *zone : evaluation.contingencyZones) {
         if (GeoZonePolicy::isRestricted(zone->restriction()) && !zones.contains(zone) && !policy.authorised(zone)) {
-            contingency.append(zone);
-            contingencyZoneLabels.insert(zone, evaluation.contingencyLabels.value(zone));
+            classification.contingencyZones.append(zone);
+            classification.contingencyLabels.insert(zone, evaluation.contingencyLabels.value(zone));
         }
     }
 
-    QList<const GeoZone*> authorised;
     for (const GeoZone *zone : std::as_const(zones)) {
         if (policy.authorised(zone)) {
-            authorised.append(zone);
-        }
-    }
-    (void) zones.removeIf([&policy](const GeoZone *zone) { return policy.authorised(zone); });
-
-    QList<const GeoZone*> crossed;
-    QList<const GeoZone*> uSpace;
-    QList<const GeoZone*> permitted;
-    for (const GeoZone *zone : std::as_const(zones)) {
-        if (GeoZonePolicy::isRestricted(zone->restriction())) {
-            crossed.append(zone);
+            classification.authorisedZones.append(zone);
+        } else if (GeoZonePolicy::isRestricted(zone->restriction())) {
+            classification.crossedZones.append(zone);
         } else if (zone->restriction() == GeoZone::USpace) {
-            uSpace.append(zone);
+            classification.uSpaceZones.append(zone);
         } else {
-            permitted.append(zone);
+            classification.permittedZones.append(zone);
         }
     }
+    return classification;
+}
+
+void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
+{
+    const Classification classification = classify(evaluation, _manager->planning()->authorisations());
 
     // Vehicles which support a fence can be stopped at prohibited zones by it
     QList<const GeoZone*> unfenced;
     if (_geoFenceController && _geoFenceController->supported()) {
-        for (const GeoZone *zone : std::as_const(crossed)) {
+        for (const GeoZone *zone : classification.crossedZones) {
             if ((zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(_geoFenceController, zone)) {
                 unfenced.append(zone);
             }
         }
     }
 
-    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (authorised != _authorisedZones) || (inactiveZoneCount != _inactiveZoneCount) ||
-        (unfenced != _unfencedZones) || (evaluation.pathLabels != _pathLabels) || (contingency != _contingencyZones) || (contingencyZoneLabels != _contingencyLabels)) {
+    if ((classification.crossedZones != _crossedZones) || (classification.uSpaceZones != _uSpaceZones) || (classification.permittedZones != _permittedZones) ||
+        (classification.authorisedZones != _authorisedZones) || (classification.inactiveZoneCount != _inactiveZoneCount) || (unfenced != _unfencedZones) ||
+        (evaluation.pathLabels != _pathLabels) || (classification.contingencyZones != _contingencyZones) || (classification.contingencyLabels != _contingencyLabels)) {
         _pathLabels = evaluation.pathLabels;
-        _contingencyZones = contingency;
-        _contingencyLabels = contingencyZoneLabels;
+        _contingencyZones = classification.contingencyZones;
+        _contingencyLabels = classification.contingencyLabels;
         _unfencedZones = unfenced;
-        _crossedZones = crossed;
-        _uSpaceZones = uSpace;
-        _permittedZones = permitted;
-        _authorisedZones = authorised;
-        _inactiveZoneCount = inactiveZoneCount;
+        _crossedZones = classification.crossedZones;
+        _uSpaceZones = classification.uSpaceZones;
+        _permittedZones = classification.permittedZones;
+        _authorisedZones = classification.authorisedZones;
+        _inactiveZoneCount = classification.inactiveZoneCount;
         emit crossedZonesChanged();
     }
     _relevantZones = evaluation.relevantZones;
@@ -571,7 +606,12 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
 
 GeoZonePlanAudit::Record GeoZoneMissionCheck::auditRecord() const
 {
-    return GeoZonePlanAudit::Record::make(_relevantZones, GeoZoneSourceVersion::covering(_manager->repository()->sourceList(), _area),
+    return auditRecord(_manager, _relevantZones, _area);
+}
+
+GeoZonePlanAudit::Record GeoZoneMissionCheck::auditRecord(const GeoZoneManager *manager, const QList<const GeoZone*> &relevantZones, const GeoZoneBox &area)
+{
+    return GeoZonePlanAudit::Record::make(relevantZones, GeoZoneSourceVersion::covering(manager->repository()->sourceList(), area),
                                           GeoZoneEnvironment::currentDateTimeUtc());
 }
 

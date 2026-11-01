@@ -32,6 +32,7 @@ private slots:
     void _testBriefing();
     void _testBriefingExport();
     void _testPlanAudit();
+    void _testPlanSave();
     void _testPlannedStartPerPlan();
     void _testRoutePlanner();
     void _testRouteConcave_data();

@@ -23,6 +23,7 @@
 #include "GeoZonePlanAudit.h"
 
 class GeoFenceController;
+class GeoZoneAuthorisations;
 class GeoZoneCatalog;
 class GeoZoneManager;
 class GeoZoneMissionWorker;
@@ -73,6 +74,7 @@ public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
     /// @param manager Zones to check, GeoZoneManager::instance() when null
     explicit GeoZoneMissionCheck(GeoZoneManager *manager, QObject *parent = nullptr);
+    ~GeoZoneMissionCheck() override;
 
     static constexpr int maxListedZones = 5;
 
@@ -113,6 +115,8 @@ public:
     const QList<const GeoZone*> &relevantZones() const { return _relevantZones; }
     /// @return The record of the zones relevant to the mission and the sources covering it, for the plan file
     GeoZonePlanAudit::Record auditRecord() const;
+    /// @return The record of the zones relevant to a mission and the manager's sources covering its area
+    static GeoZonePlanAudit::Record auditRecord(const GeoZoneManager *manager, const QList<const GeoZone*> &relevantZones, const GeoZoneBox &area);
     QString auditText() const { return _auditText; }
     QStringList auditDetails() const { return _auditDetails; }
     /// Accepts the changes of the geozone data since the plan was saved, until it changes again
@@ -125,6 +129,12 @@ public:
     /// @return Start and end of the planned flight from the planned start of the manager and the mission duration,
     ///         invalid without a planned start
     static std::pair<QDateTime, QDateTime> plannedFlightTimes(const GeoZoneManager *manager, const MissionController *missionController);
+
+    /// @return true if the result is that of the current mission, zones and planned start: no change waits to be checked
+    bool settled() const;
+    /// @return A check of the planned flight of the controller's mission against the manager's zones whose result is
+    ///         settled, like the Plan View's, null without
+    static const GeoZoneMissionCheck *settledCheck(const GeoZoneManager *manager, const MissionController *missionController);
 
     /// Re-evaluates immediately on this thread instead of after changes settle on another one
     Q_INVOKABLE void update();
@@ -148,6 +158,22 @@ public:
     ///         any time without start. Can run on any thread with a copy of the catalog.
     static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start = QDateTime(),
                                const QDateTime &end = QDateTime());
+    /// @return The evaluation of the planned flight of the controller's mission with the manager's zones and planned
+    ///         start, on the calling thread without side effects, like setting the area of interest
+    static Evaluation evaluatePlan(const GeoZoneManager *manager, MissionController *missionController);
+
+    /// Zones of an evaluation sorted by the policies of its flight, see the properties of the same names
+    struct Classification {
+        QList<const GeoZone*> crossedZones;
+        QList<const GeoZone*> uSpaceZones;
+        QList<const GeoZone*> permittedZones;
+        QList<const GeoZone*> authorisedZones;
+        QList<const GeoZone*> contingencyZones;
+        QHash<const GeoZone*, QStringList> contingencyLabels;
+        int inactiveZoneCount = 0;
+    };
+    /// @return The zones of the evaluation which apply during its flight, by restriction, authorised zones apart
+    static Classification classify(const Evaluation &evaluation, const GeoZoneAuthorisations *authorisations);
     /// @return The labels of the contingency paths the evaluator result has entering zones while active, grouped by
     ///         label with the items they start from, like "a return to launch from items 3–7", by zone
     static QHash<const GeoZone*, QStringList> groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result);
