@@ -11,6 +11,7 @@
 #include "GeoZoneInfo.h"
 #include "GeoFenceController.h"
 #include "GeoZone.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"
@@ -44,7 +45,7 @@ QList<const GeoZone*> GeoZoneFenceImporter::_zonesToImport(const QVariantList &r
     QDateTime activeFrom;
     QDateTime activeTo;
     if (activeWithinHours >= 0) {
-        activeFrom = QDateTime::currentDateTimeUtc();
+        activeFrom = GeoZoneEnvironment::currentDateTimeUtc();
         if (activeWithinHours > 0) {
             activeTo = activeFrom.addSecs(activeWithinHours * 3600);
         }

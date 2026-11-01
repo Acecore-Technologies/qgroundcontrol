@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneGuidedCheck.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMonitor.h"
@@ -33,7 +34,7 @@ QString GeoZoneGuidedCheck::pathWarning(const GeoZonePathEvaluator::Path &path) 
 {
     GeoZoneManager *const manager = _monitor->manager();
     GeoZonePathEvaluator evaluator(manager->catalog(), GeoZonePolicy::alerts().excludingAuthorised(manager->planning()->authorisations()),
-                                   QDateTime::currentDateTimeUtc());
+                                   GeoZoneEnvironment::currentDateTimeUtc());
     evaluator.setTerrainLookup(GeoZoneTerrain::elevationAt);
     QList<const GeoZone*> zones;
     for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate({ path }).zones) {

@@ -257,17 +257,15 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
 
 void GeoZoneMonitorTest::_testTerrainAhead()
 {
+    ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restore = qScopeGuard([settings]() {
-        settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue());
-        GeoZoneTerrain::setLookup({});
-    });
+    const auto restore = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
     settings->approachTime()->setRawValue(60);
 
     // A plateau 300 m above the valley from 47.01 north, with a zone up to 120 m above the ground
     const QGeoCoordinate valley(47, 8);
     const QGeoCoordinate plateauZone(47.02, 8);
-    GeoZoneTerrain::setLookup([](const QGeoCoordinate &coordinate) { return (coordinate.latitude() >= 47.01) ? 400.0 : 100.0; });
+    environment.setTerrain([](const QGeoCoordinate &coordinate) { return (coordinate.latitude() >= 47.01) ? 400.0 : 100.0; });
     QJsonObject zone = _circleFeature(QStringLiteral("PLATEAU"), QStringLiteral("PROHIBITED"), plateauZone, 500);
     QJsonArray geometry = zone[QStringLiteral("geometry")].toArray();
     QJsonObject layer = geometry[0].toObject();
@@ -300,7 +298,7 @@ void GeoZoneMonitorTest::_testTerrainAhead()
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Approaching geozone PLATEAU (Prohibited), entry in about 43 s"));
 
     // Without terrain tiles the ground below the vehicle is used, which puts the zone below the vehicle
-    GeoZoneTerrain::setLookup([](const QGeoCoordinate &) { return qQNaN(); });
+    environment.setTerrain(qQNaN());
     GeoZoneMonitor noTerrain(&manager);
     QSignalSpy noTerrainSpy(&noTerrain, &GeoZoneMonitor::alert);
     noTerrain.evaluate({ valley, 450, 100 }, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ 40, 0, 0, true });
@@ -404,6 +402,8 @@ void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
 
 void GeoZoneMonitorTest::_testAlertLog()
 {
+    // The alerts are logged on the same day whenever the test runs
+    const ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
 
@@ -425,10 +425,8 @@ void GeoZoneMonitorTest::_testAlertLog()
     monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 520, 400 }, 3);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
     QCOMPARE(eventSpy.count(), 2);
-    const QDate logDate = eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>().time.date();
-    if (eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().time.date() != logDate) {
-        QSKIP("The alerts were logged on both sides of midnight UTC");
-    }
+    const QDate logDate = environment.now().date();
+    QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().time, environment.now());
 
     QFile file(log.filePath(logDate));
     QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
@@ -460,7 +458,7 @@ void GeoZoneMonitorTest::_testAlertLog()
 
     // Feed text starting like a spreadsheet formula stays text
     GeoZoneMonitor::AlertEvent event;
-    event.time = QDateTime::currentDateTimeUtc();
+    event.time = environment.now();
     event.zoneName = QStringLiteral("=1+1");
     event.zoneIdentifier = QStringLiteral("@A1");
     QVERIFY(GeoZoneAlertLog::line(event).contains(QStringLiteral(",'@A1,'=1+1,")));
@@ -468,6 +466,7 @@ void GeoZoneMonitorTest::_testAlertLog()
 
 void GeoZoneMonitorTest::_testAlertHistory()
 {
+    const ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
     settings->logAlerts()->setRawValue(true);
@@ -514,7 +513,7 @@ void GeoZoneMonitorTest::_testAlertHistory()
         log.append(arguments.first().value<GeoZoneMonitor::AlertEvent>());
     }
     GeoZoneMonitor::AlertEvent formula;
-    formula.time = QDateTime::currentDateTimeUtc();
+    formula.time = environment.now();
     formula.zoneIdentifier = QStringLiteral("F1");
     formula.zoneName = QStringLiteral("=1+1");
     formula.restriction = GeoZone::Conditional;
@@ -522,9 +521,6 @@ void GeoZoneMonitorTest::_testAlertHistory()
     formula.timeToEntry = 12;
     log.append(formula);
     const QDate logDate = formula.time.date();
-    if (eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>().time.date() != logDate) {
-        QSKIP("The alerts were logged on both sides of midnight UTC");
-    }
     GeoZoneAlertHistory later(&manager);
     later.append(formula);
     later.loadLog(log.filePath(logDate));

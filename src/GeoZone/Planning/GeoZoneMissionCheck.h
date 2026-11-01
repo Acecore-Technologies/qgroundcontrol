@@ -97,6 +97,8 @@ public:
 
     /// Re-evaluates immediately on this thread instead of after changes settle on another one
     Q_INVOKABLE void update();
+    /// Sets how long changes settle before the mission is checked again, half a second by default
+    void setUpdateDelay(int msecs) { _updateTimer.setInterval(msecs); }
 
     /// Zones a mission path enters
     struct Evaluation {

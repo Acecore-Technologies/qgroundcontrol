@@ -15,6 +15,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneTestHelpers.h"
 #include "MissionController.h"
 #include "MultiVehicleManager.h"
 #include "ParameterManager.h"
@@ -30,6 +31,8 @@
 
 #include <algorithm>
 #include <cmath>
+
+using namespace GeoZoneTestHelpers;
 
 namespace {
 
@@ -142,6 +145,8 @@ void GeoZoneFlightTest::cleanup()
 
 void GeoZoneFlightTest::_testFlightAlertSequence()
 {
+    // Unknown terrain unless given with the positions
+    const ScopedEnvironment environment;
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.path());
@@ -182,6 +187,7 @@ void GeoZoneFlightTest::_testFlightAlertSequence()
 
 void GeoZoneFlightTest::_testMissionCrossedZones()
 {
+    const ScopedEnvironment environment;
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.path());
@@ -193,6 +199,7 @@ void GeoZoneFlightTest::_testMissionCrossedZones()
     masterController.start();
     MissionController *const missionController = masterController.missionController();
     GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
     check.setMissionController(missionController);
 
     // The simulated flight as a mission. Whether or not terrain heights are available, it enters the prison zone
@@ -218,6 +225,8 @@ void GeoZoneFlightTest::_testMissionCrossedZones()
 
 void GeoZoneFlightTest::_testMockLinkVehicle()
 {
+    // The alerts are logged on one day, the guided checks have no terrain tiles
+    const ScopedEnvironment environment;
     GeoZoneManager *const manager = GeoZoneManager::instance();
     QString errorString;
     QVERIFY2(manager->loadFile(kZonesFile, errorString), qPrintable(errorString));
@@ -232,7 +241,6 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     monitor.alertLog()->setDirectory(logDir.path());
     QVERIFY(!monitor.monitoring());
 
-    const QDate startDate = QDateTime::currentDateTimeUtc().date();
     _connectMockLink(MAV_AUTOPILOT_PX4);
     Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
     QVERIFY(vehicle);
@@ -248,7 +256,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     // A parked vehicle is on the ground below the CTRs, even before terrain data is received
     QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
     QVERIFY(!vehicle->armed());
-    QTest::qWait(1500);
+    QTRY_VERIFY(!std::isnan(monitor.altitudeAMSL()));
     QVERIFY(!monitor.inside());
     QVERIFY(spiedAlerts(alertSpy).filter(QStringLiteral("Entered")).isEmpty());
 
@@ -275,13 +283,9 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));
 
     // The alerts are logged with the vehicle, in a file per day
-    QStringList logLines;
-    for (QDate date = startDate; date <= QDateTime::currentDateTimeUtc().date(); date = date.addDays(1)) {
-        QFile log(monitor.alertLog()->filePath(date));
-        if (log.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            logLines.append(QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts));
-        }
-    }
+    QFile log(monitor.alertLog()->filePath(environment.now().date()));
+    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+    QStringList logLines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     (void) logLines.removeAll(GeoZoneAlertLog::header());
     QCOMPARE(logLines.count(), alertSpy.count());
     QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
@@ -297,9 +301,8 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     settings->alertsEnabled()->setRawValue(false);
     QVERIFY(!monitor.monitoring());
     QVERIFY(monitor.nearbyZones().isEmpty());
-    const qsizetype alertCount = alertSpy.count();
-    QTest::qWait(1500);
-    QCOMPARE(alertSpy.count(), alertCount);
+    // Not even after the vehicle is evaluated again
+    QVERIFY(!alertSpy.wait(GeoZoneMonitor::evaluateIntervalMSecs + 200));
     QVERIFY(monitor.nearbyZones().isEmpty());
 
     // Disconnecting the vehicle while monitoring clears its state

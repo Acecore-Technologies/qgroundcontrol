@@ -506,6 +506,9 @@ void GeoZonePlanningTest::_testAntimeridianQueries()
 
 void GeoZonePlanningTest::_testMissionCheck()
 {
+    // Before the temporary restriction of 2027
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(10, 0)));
     const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -538,6 +541,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     MissionController *const missionController = masterController.missionController();
 
     GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
     check.setMissionController(missionController);
 
     // Passes the no restriction zone only, which is reported without a warning
@@ -643,6 +647,7 @@ void GeoZonePlanningTest::_testMissionCheck()
 
 void GeoZonePlanningTest::_testMissionCoverage()
 {
+    const ScopedEnvironment environment;
     // L under a loiter circle away from the legs, V past a back transition, and R on the way home above the mission
     const QGeoCoordinate home(47, 8);
     const QGeoCoordinate loiter = home.atDistanceAndAzimuth(2000, 90);
@@ -685,6 +690,7 @@ void GeoZonePlanningTest::_testMissionCoverage()
 
     // The drawn flight path enters none of them, the vehicle's return altitude is unknown offline
     GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
     check.setMissionController(missionController);
     QTRY_COMPARE(check.crossedZones().count(), 3);
     const auto zone = [&check](const QString &identifier) {
@@ -704,6 +710,9 @@ void GeoZonePlanningTest::_testMissionCoverage()
 
 void GeoZonePlanningTest::_testAuthorisations()
 {
+    // Authorisations are for local days, the test stays within one
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(12, 0)));
     const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -725,6 +734,7 @@ void GeoZonePlanningTest::_testAuthorisations()
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
     GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
     check.setMissionController(missionController);
     QTRY_COMPARE(check.crossedZones().count(), 1);
 
@@ -734,7 +744,7 @@ void GeoZonePlanningTest::_testAuthorisations()
     QCOMPARE(authorisations->count(), 0);
 
     // An authorisation without end is listed for information instead of warned about
-    const QDate today = QDate::currentDate();
+    const QDate today = environment.now().toLocalTime().date();
     QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral(" P-123 "), QString(), QString()).isEmpty());
     QCOMPARE(authorisations->count(), 1);
     QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("permit")].toString(), QStringLiteral("P-123"));
@@ -806,6 +816,7 @@ void GeoZonePlanningTest::_testAuthorisations()
 
 void GeoZonePlanningTest::_testRoutePlanner()
 {
+    ScopedEnvironment environment;
     const QGeoCoordinate center(47, 8);
     const QGeoCoordinate west = center.atDistanceAndAzimuth(2000, 270);
     const QGeoCoordinate east = center.atDistanceAndAzimuth(2000, 90);
@@ -874,6 +885,7 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QVERIFY(planner.applySuggestion(detourIndex));
     QVERIFY(missionController->visualItems()->count() > itemCount);
     GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
     check.setMissionController(missionController);
     QTRY_VERIFY_WITH_TIMEOUT(check.crossedZones().isEmpty(), 5000);
     QTRY_VERIFY(planner.suggestions().isEmpty());
@@ -910,7 +922,7 @@ void GeoZonePlanningTest::_testRoutePlanner()
 
     // A leg through a zone above the sea can be lowered below its floor, where the terrain is known whether or not
     // the terrain tiles are received
-    GeoZoneTerrain::setLookup([](const QGeoCoordinate &) { return 0.0; });
+    environment.setTerrain(0.0);
     const QGeoCoordinate seaCenter(0.5, -25);
     const auto seaZone = [&seaCenter](const QString &identifier, double floor) {
         QJsonObject feature = _circleFeature(identifier, QStringLiteral("REQ_AUTHORISATION"), seaCenter, 200);
@@ -965,7 +977,6 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("sea_low.json"), QJsonArray{ seaZone(QStringLiteral("T"), 15) }), errorString), qPrintable(errorString));
     QTRY_VERIFY((lowerPlanner.update(), suggestionTexts().contains(QStringLiteral("floor of T"))));
     QCOMPARE(floorSuggestion(), -1);
-    GeoZoneTerrain::setLookup({});
 }
 
 void GeoZonePlanningTest::_testProfileBands()

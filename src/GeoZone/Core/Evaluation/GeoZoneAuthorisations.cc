@@ -207,14 +207,14 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
     if (!validFrom.trimmed().isEmpty()) {
         const QDate date = QDate::fromString(validFrom.trimmed(), Qt::ISODate);
         if (!date.isValid()) {
-            return tr("Enter the first day like %1.").arg(QDate::currentDate().toString(Qt::ISODate));
+            return tr("Enter the first day like %1.").arg(GeoZoneEnvironment::currentDateTimeUtc().toLocalTime().date().toString(Qt::ISODate));
         }
         authorisation.validFrom = QDateTime(date, QTime(0, 0)).toUTC();
     }
     if (!validTo.trimmed().isEmpty()) {
         const QDate date = QDate::fromString(validTo.trimmed(), Qt::ISODate);
         if (!date.isValid()) {
-            return tr("Enter the last day like %1.").arg(QDate::currentDate().toString(Qt::ISODate));
+            return tr("Enter the last day like %1.").arg(GeoZoneEnvironment::currentDateTimeUtc().toLocalTime().date().toString(Qt::ISODate));
         }
         authorisation.validTo = QDateTime(date.addDays(1), QTime(0, 0)).toUTC();
     }

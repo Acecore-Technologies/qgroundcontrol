@@ -261,6 +261,7 @@ void GeoZoneManagerTest::_testManagerStoreFailures()
 
 void GeoZoneManagerTest::_testManagerBackgroundLoad()
 {
+    const ScopedEnvironment environment;
     const QTemporaryDir storageDir;
     const QTemporaryDir sourceDir;
     QVERIFY(storageDir.isValid() && sourceDir.isValid());
@@ -308,7 +309,7 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     QCOMPARE(manager.zoneCount(), 3);
     // The user's file is read in place, never removed
     QVERIFY(QFile::exists(ed318File));
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QDateTime now = environment.now();
     QVERIFY(!feed->refreshDue(now));
     QVERIFY(feed->refreshDue(now.addSecs(25 * 3600)));
 
@@ -424,6 +425,7 @@ void GeoZoneManagerTest::_testReloadChanges()
 
 void GeoZoneManagerTest::_testFeedNotModified()
 {
+    ScopedEnvironment environment;
     QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));
     QVERIFY(fixture.open(QIODevice::ReadOnly));
     QByteArray body = fixture.readAll();
@@ -475,7 +477,7 @@ void GeoZoneManagerTest::_testFeedNotModified()
         // An unchanged feed is not downloaded again but counts as current
         QSignalSpy aboutToChangeSpy(&manager, &GeoZoneManager::zonesAboutToChange);
         const QDateTime loadedAt = feed->loadedAt();
-        QTest::qWait(10);
+        environment.addSecs(60);
         manager.refreshFeeds();
         QTRY_VERIFY(!manager.busy());
         QCOMPARE(notModifiedCount, 1);
@@ -532,10 +534,11 @@ void GeoZoneManagerTest::_testFeedNotModified()
 
 void GeoZoneManagerTest::_testSourceValidity()
 {
+    const ScopedEnvironment environment;
     GeoZoneSource source(QStringLiteral("zones.json"), QString());
     GeoZoneParser::Result result;
     result.format = GeoZoneParser::Format::ED269;
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QDateTime now = environment.now();
 
     // Without an issue date the file date counts
     source.setResult(result, now, now.addDays(-10));
@@ -571,18 +574,18 @@ void GeoZoneManagerTest::_testSourceValidity()
     feed.setStoredDates(now, now);
     QVERIFY(!feed.refreshDue(now.addSecs(60)));
     feed.setErrorString(QStringLiteral("Server unavailable"));
-    QVERIFY(!feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 0.79)));
-    QVERIFY(feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 1.21)));
+    QVERIFY(!feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 0.79)));
+    QVERIFY(feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 1.21)));
     for (int failure = 2; failure <= 3; failure++) {
         feed.setErrorString(QStringLiteral("Server unavailable"));
     }
-    QVERIFY(!feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 4 * 0.79)));
-    QVERIFY(feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 4 * 1.21)));
+    QVERIFY(!feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 4 * 0.79)));
+    QVERIFY(feed.refreshDue(now.addSecs(GeoZoneSource::minRetrySecs * 4 * 1.21)));
     // Up to the maximum, or the refresh interval when shorter
     for (int failure = 4; failure <= 20; failure++) {
         feed.setErrorString(QStringLiteral("Server unavailable"));
     }
-    QVERIFY(feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::maxRetrySecs * 1.21)));
+    QVERIFY(feed.refreshDue(now.addSecs(GeoZoneSource::maxRetrySecs * 1.21)));
     // A successful refresh follows the refresh interval again
     feed.setErrorString(QString());
     QVERIFY(!feed.retryAt().isValid());
@@ -722,6 +725,7 @@ void GeoZoneManagerTest::_testDownloadFailures()
 
 void GeoZoneManagerTest::_testManagerStartup()
 {
+    const ScopedEnvironment environment;
     TestFeedServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
     const QString url = server.url(QStringLiteral("/ok"));
@@ -743,7 +747,7 @@ void GeoZoneManagerTest::_testManagerStartup()
     indexFile.close();
     QJsonArray sources = index[QStringLiteral("sources")].toArray();
     QCOMPARE(sources.count(), 1);
-    const QDateTime downloaded = QDateTime::currentDateTimeUtc().addDays(-2);
+    const QDateTime downloaded = environment.now().addDays(-2);
     QJsonObject entry = sources[0].toObject();
     entry[QStringLiteral("loadedAt")] = downloaded.toString(Qt::ISODate);
     sources[0] = entry;
@@ -768,6 +772,7 @@ void GeoZoneManagerTest::_testManagerStartup()
 
 void GeoZoneManagerTest::_testSettings()
 {
+    const ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(),
                                  settings->feedRefreshHours(), settings->liveFeedRefreshMinutes() };
@@ -793,7 +798,7 @@ void GeoZoneManagerTest::_testSettings()
     const QGeoCoordinate center(47, 8);
     const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) });
     QFile file(fileName);
-    QVERIFY(file.open(QIODevice::ReadWrite) && file.setFileTime(QDateTime::currentDateTimeUtc().addDays(-10), QFileDevice::FileModificationTime));
+    QVERIFY(file.open(QIODevice::ReadWrite) && file.setFileTime(environment.now().addDays(-10), QFileDevice::FileModificationTime));
     file.close();
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
@@ -816,11 +821,11 @@ void GeoZoneManagerTest::_testSettings()
     GeoZoneSource feed(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));
     GeoZoneParser::Result result;
     result.format = GeoZoneParser::Format::ED318;
-    feed.setResult(result, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    feed.setResult(result, environment.now(), environment.now());
     settings->feedRefreshHours()->setRawValue(6);
     QCOMPARE(feed.refreshIntervalSecs(), 6 * 3600);
     result.format = GeoZoneParser::Format::FaaTfr;
-    feed.setResult(result, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    feed.setResult(result, environment.now(), environment.now());
     settings->liveFeedRefreshMinutes()->setRawValue(30);
     QCOMPARE(feed.refreshIntervalSecs(), 30 * 60);
 

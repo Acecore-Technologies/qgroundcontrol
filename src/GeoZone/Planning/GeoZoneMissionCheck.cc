@@ -12,6 +12,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneCatalog.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePathEvaluator.h"
@@ -226,7 +227,7 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::_flightTimes() const
 {
     if (_flightNow) {
-        const QDateTime start = QDateTime::currentDateTimeUtc();
+        const QDateTime start = GeoZoneEnvironment::currentDateTimeUtc();
         return { start, start.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0))) };
     }
     return plannedFlightTimes(_manager, _missionController);

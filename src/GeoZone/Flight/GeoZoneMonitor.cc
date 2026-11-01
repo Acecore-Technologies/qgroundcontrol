@@ -13,6 +13,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAlertHistory.h"
 #include "GeoZoneAlertLog.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
@@ -40,7 +41,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     _alertLog = new GeoZoneAlertLog(this);
     (void) connect(this, &GeoZoneMonitor::alertEvent, _alertLog, &GeoZoneAlertLog::append);
     // Alerts of earlier sessions today, before those of this session are logged
-    _alertHistory->loadLog(_alertLog->filePath(QDateTime::currentDateTimeUtc().date()));
+    _alertHistory->loadLog(_alertLog->filePath(GeoZoneEnvironment::currentDateTimeUtc().date()));
 
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
@@ -516,7 +517,7 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZoneAlertTracker
     qCDebug(GeoZoneMonitorLog) << message << "distance" << alert.distance << "time to entry" << alert.timeToEntry;
 
     AlertEvent event;
-    event.time = QDateTime::currentDateTimeUtc();
+    event.time = GeoZoneEnvironment::currentDateTimeUtc();
     event.vehicleId = vehicleId;
     event.position = position;
     event.inside = alert.inside;

@@ -13,30 +13,12 @@
 
 namespace GeoZoneTerrain {
 
-namespace {
-
-Lookup &testLookup()
-{
-    static Lookup lookup;
-    return lookup;
-}
-
-} // namespace
-
 double elevationAt(const QGeoCoordinate &coordinate)
 {
     if (!coordinate.isValid()) {
         return qQNaN();
     }
-    if (testLookup()) {
-        return testLookup()(coordinate);
-    }
     return GeoZoneEnvironment::terrainElevation(coordinate);
-}
-
-void setLookup(const Lookup &lookup)
-{
-    testLookup() = lookup;
 }
 
 QList<GeoZone::Position> withTerrain(const QList<GeoZone::Position> &path, double spacing)

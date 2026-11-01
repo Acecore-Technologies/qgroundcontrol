@@ -66,19 +66,23 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QMutex>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QSet>
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QThreadPool>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrl>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <memory>
 
 /// Fixtures and helpers shared by the geozone tests
 namespace GeoZoneTestHelpers {
@@ -94,6 +98,60 @@ struct ZoneOwner {
     }
 };
 
+
+/// Replaces the clock and the terrain of GeoZoneEnvironment while in scope, so that tests don't depend on when and
+/// where they run. The clock stands still at the second it was created, or the time it is set to, until the test
+/// advances it. The terrain is unknown until set. The previous hooks are restored when the workers are done.
+class ScopedEnvironment
+{
+public:
+    using Terrain = std::function<double(const QGeoCoordinate &coordinate)>;
+
+    ScopedEnvironment()
+        : _saved(GeoZoneEnvironment::hooks())
+    {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        _state->msecs = now - (now % 1000);
+        GeoZoneEnvironment::Hooks hooks = _saved;
+        hooks.currentDateTimeUtc = [state = _state]() { return QDateTime::fromMSecsSinceEpoch(state->msecs, QTimeZone::UTC); };
+        hooks.terrainElevation = [state = _state](const QGeoCoordinate &coordinate) {
+            const QMutexLocker locker(&state->mutex);
+            return state->terrain ? state->terrain(coordinate) : qQNaN();
+        };
+        GeoZoneEnvironment::setHooks(hooks);
+    }
+
+    ~ScopedEnvironment()
+    {
+        // Evaluations on worker threads may still use the hooks
+        (void) QThreadPool::globalInstance()->waitForDone(10000);
+        GeoZoneEnvironment::setHooks(_saved);
+    }
+
+    Q_DISABLE_COPY_MOVE(ScopedEnvironment)
+
+    QDateTime now() const { return QDateTime::fromMSecsSinceEpoch(_state->msecs, QTimeZone::UTC); }
+    void setNow(const QDateTime &now) { _state->msecs = now.toMSecsSinceEpoch(); }
+    void addSecs(qint64 secs) { _state->msecs += secs * 1000; }
+
+    /// @param terrain Ground elevation in meters AMSL, NaN where unknown
+    void setTerrain(const Terrain &terrain)
+    {
+        const QMutexLocker locker(&_state->mutex);
+        _state->terrain = terrain;
+    }
+    void setTerrain(double elevation) { setTerrain([elevation](const QGeoCoordinate &) { return elevation; }); }
+
+private:
+    struct State {
+        std::atomic<qint64> msecs = 0;
+        QMutex mutex;
+        Terrain terrain;
+    };
+
+    const GeoZoneEnvironment::Hooks _saved;
+    const std::shared_ptr<State> _state = std::make_shared<State>();
+};
 
 inline GeoZoneParser::Result _parseResource(const QString &name)
 {

@@ -9,6 +9,7 @@
 
 #include "GeoZoneManager.h"
 #include "GeoZoneDisplay.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneSettings.h"
@@ -132,7 +133,7 @@ void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
 
 void GeoZoneManager::_updateActive()
 {
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     bool changed = false;
     for (GeoZone *zone : _catalog.zones()) {
         changed = zone->updateActive(now) || changed;
