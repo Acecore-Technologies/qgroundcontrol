@@ -154,7 +154,7 @@ QList<RawVertex> followGreatCircles(const QList<RawVertex> &vertices)
                 const double fraction = fractions[k];
                 result.append(RawVertex{ GeoZone::toCoordinate(GeoZoneGeometry::greatCircleInterpolate(a, b, fraction)), interpolate(from.altitude, vertex.altitude, fraction),
                                          interpolate(from.terrain, vertex.terrain, fraction), interpolate(from.msecs, vertex.msecs, fraction),
-                                         interpolate(from.source, vertex.source, fraction), approximations | from.approximations });
+                                         interpolate(from.source, vertex.source, fraction), approximations });
             }
             vertex.approximations |= approximations;
         }
