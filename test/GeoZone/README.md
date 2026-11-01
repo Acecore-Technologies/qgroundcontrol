@@ -46,8 +46,9 @@ through the targets in both cases.
 `GeoZoneBenchmark` measures the core with 10000 synthetic zones over central Europe, about the size of a large
 national dataset: parsing the 5 MB ED-269 file, restoring it as a stored source at startup by parsing it and writing
 its parse cache or from the cache (with the stored copy hashed when its time changed), loading it into a source,
-rebuilding the catalog with its index, 1000 `zonesAt` and 1000 `zonesInArea` queries of 10 km areas, and evaluating a
-mission of 500 waypoints over 1000 km. It takes a few seconds and is a test of its own, labeled `benchmark`, which the sanitizer workflow doesn't run:
+rebuilding the catalog with its index, 1000 `zonesAt` and 1000 `zonesInArea` queries of 10 km areas, evaluating a
+mission of 500 waypoints over 1000 km, and searching the routes around the zones of 50 legs of 20 km with
+`GeoZoneRouteSearch`. It takes a few seconds and is a test of its own, labeled `benchmark`, which the sanitizer workflow doesn't run:
 
 ```sh
 ctest -L benchmark -V          # or ./GeoZoneBenchmark, with QtTest options like -iterations 20

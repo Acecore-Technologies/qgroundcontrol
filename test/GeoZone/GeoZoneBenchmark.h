@@ -22,7 +22,8 @@
 #include "GeoZoneSource.h"
 
 /// Benchmarks of the geozone core with 10000 synthetic zones over central Europe, the size of a large national
-/// dataset: parsing, loading, indexing, the queries of maps and alerts, and the evaluation of a long mission.
+/// dataset: parsing, loading, indexing, the queries of maps and alerts, the evaluation of a long mission and the
+/// search of routes around the zones.
 /// Run on their own, see test/GeoZone/README.md.
 class GeoZoneBenchmark : public QObject
 {
@@ -40,6 +41,7 @@ private slots:
     void _benchmarkZonesAt();
     void _benchmarkZonesInArea();
     void _benchmarkPathEvaluation();
+    void _benchmarkRouteSearch();
 
 private:
     QByteArray _document;                       ///< ED-269 file with the zones

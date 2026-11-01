@@ -10,6 +10,7 @@
 #include "GeoZoneBenchmark.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneRouteSearch.h"
 #include "GeoZoneTestHelpers.h"
 
 #include <QtCore/QFileInfo>
@@ -26,6 +27,7 @@ namespace {
 constexpr int kZoneCount = 10000;
 constexpr int kQueryCount = 1000;   ///< Positions and areas queried in each iteration
 constexpr int kMissionWaypoints = 500;
+constexpr int kRouteLegs = 50;
 
 // Zones are spread over 10 degrees of latitude and longitude
 constexpr double kSouth = 45;
@@ -248,6 +250,38 @@ void GeoZoneBenchmark::_benchmarkPathEvaluation()
         result = evaluator.evaluate({ path });
     }
     QVERIFY(result.activeEnteredZones().count() > 10);
+}
+
+void GeoZoneBenchmark::_benchmarkRouteSearch()
+{
+    // Legs of 20 km in all directions between waypoints outside the zones, 100 m above the terrain, each with a detour,
+    // a climb and a descent searched when it enters restricted zones
+    QRandomGenerator random(3);
+    QList<GeoZoneRouteSearch::Leg> legs;
+    while (legs.count() < kRouteLegs) {
+        const QGeoCoordinate from = randomCoordinate(random);
+        const QGeoCoordinate to = from.atDistanceAndAzimuth(20000, random.bounded(360.0));
+        if (_catalog.zonesAt(from).isEmpty() && _catalog.zonesAt(to).isEmpty()) {
+            legs.append(GeoZoneRouteSearch::Leg{ GeoZone::Position{ from, 400 }, GeoZone::Position{ to, 400 } });
+        }
+    }
+    GeoZoneRouteSearch search(_catalog, GeoZonePolicy::routing(QDateTime(), QDateTime()));
+    search.setTerrainLookup([](const QGeoCoordinate &) { return 300.0; });
+
+    int crossing = 0;
+    int routed = 0;
+    QBENCHMARK {
+        crossing = 0;
+        routed = 0;
+        for (const GeoZoneRouteSearch::Leg &leg : std::as_const(legs)) {
+            const GeoZoneRouteSearch::Result result = search.plan(leg);
+            crossing += result.crossedZones.isEmpty() ? 0 : 1;
+            routed += result.best() ? 1 : 0;
+        }
+    }
+    qInfo() << routed << "of" << crossing << "legs entering zones routed";
+    QVERIFY(crossing > 10);
+    QVERIFY(routed > (crossing / 2));
 }
 
 QTEST_GUILESS_MAIN(GeoZoneBenchmark)

@@ -32,6 +32,11 @@ private slots:
     void _testBriefingExport();
     void _testPlanAudit();
     void _testRoutePlanner();
+    void _testRouteConcave_data();
+    void _testRouteConcave();
+    void _testRouteVertical_data();
+    void _testRouteVertical();
+    void _testRouteFailures();
     void _testProfileBands();
     void _testGeoFenceImport();
     void _testGeoFenceSelection();

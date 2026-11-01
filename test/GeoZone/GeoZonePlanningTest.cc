@@ -12,6 +12,7 @@
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneFenceTags.h"
 #include "GeoZonePlanAudit.h"
+#include "GeoZoneRouteSearch.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestHelpers.h"
@@ -100,6 +101,23 @@ GeoZonePathEvaluator::Path _evaluatorPath(const QList<QGeoCoordinate> &coordinat
         path.vertices.append(GeoZonePathEvaluator::Vertex{ coordinates[i], altitudes.value(i, qQNaN()), qQNaN(), QDateTime() });
     }
     return path;
+}
+
+/// @return Smallest horizontal distance from the path, sampled every few meters, to the zones
+double _pathClearance(const QList<QGeoCoordinate> &path, const QList<const GeoZone*> &zones, double step = 5)
+{
+    double clearance = std::numeric_limits<double>::infinity();
+    for (qsizetype i = 1; i < path.count(); i++) {
+        const double length = path[i - 1].distanceTo(path[i]);
+        const double azimuth = path[i - 1].azimuthTo(path[i]);
+        for (double along = 0; along <= length; along += step) {
+            const QGeoCoordinate point = path[i - 1].atDistanceAndAzimuth(along, azimuth);
+            for (const GeoZone *zone : zones) {
+                clearance = (std::min)(clearance, zone->distanceTo(point));
+            }
+        }
+    }
+    return clearance;
 }
 
 bool _near(double value, double expected, double tolerance = 1)
@@ -1599,6 +1617,299 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("sea_low.json"), QJsonArray{ seaZone(QStringLiteral("T"), 15) }), errorString), qPrintable(errorString));
     QTRY_VERIFY((lowerPlanner.update(), suggestionTexts().contains(QStringLiteral("floor of T"))));
     QCOMPARE(floorSuggestion(), -1);
+}
+
+namespace {
+
+/// Prohibited zone with a polygon volume given in meters around the origin, with an optional hole
+const GeoZone *_localPolygonZone(ZoneOwner &owner, const GeoZoneGeometry::LocalProjection &projection, const QString &name, const QList<QPointF> &ring,
+                                 const QList<QPointF> &hole = {})
+{
+    const auto toRing = [&projection](const QList<QPointF> &points) {
+        QList<QGeoCoordinate> coordinates;
+        for (const QPointF &point : points) {
+            coordinates.append(projection.toGeo(point));
+        }
+        return GeoZone::toRing(coordinates);
+    };
+    GeoZone::Volume volume;
+    volume.rings.append(toRing(ring));
+    if (!hole.isEmpty()) {
+        volume.rings.append(toRing(hole));
+    }
+    GeoZone::Data data;
+    data.identifier = name;
+    data.restriction = GeoZone::Prohibited;
+    data.volumes.append(volume);
+    return owner.add(data);
+}
+
+/// U open to the north, width by height meters, with a notch of the width and depth
+QList<QPointF> _uShape(double width, double height, double notchWidth, double notchDepth)
+{
+    const double w = width / 2;
+    const double h = height / 2;
+    const double n = notchWidth / 2;
+    return { { -w, -h }, { w, -h }, { w, h }, { n, h }, { n, h - notchDepth }, { -n, h - notchDepth }, { -n, h }, { -w, h } };
+}
+
+QList<QPointF> _square(double halfSize)
+{
+    return { { -halfSize, -halfSize }, { halfSize, -halfSize }, { halfSize, halfSize }, { -halfSize, halfSize } };
+}
+
+/// @return The path from the start to the end through the waypoints of the route
+QList<QGeoCoordinate> _routePath(const QGeoCoordinate &from, const GeoZoneRouteSearch::Route &route, const QGeoCoordinate &to)
+{
+    QList<QGeoCoordinate> path = { from };
+    path.append(route.waypoints);
+    path.append(to);
+    return path;
+}
+
+} // namespace
+
+void GeoZonePlanningTest::_testRouteConcave_data()
+{
+    QTest::addColumn<QList<QPointF>>("ring");
+    QTest::addColumn<QList<QPointF>>("hole");
+    QTest::addColumn<QPointF>("start");
+    QTest::addColumn<QPointF>("end");
+    QTest::addColumn<int>("failure");
+    QTest::addColumn<int>("minWaypoints");
+    QTest::addColumn<double>("maxLength");   ///< Meters, 0 for no limit
+
+    using Failure = GeoZoneRouteSearch::Failure;
+    // A notch wider than twice the margin can be entered, the corner of the U's arm is passed at the margin. Convex
+    // hulls would block it.
+    QTest::newRow("into wide notch") << _uShape(1500, 1500, 600, 1000) << QList<QPointF>() << QPointF(1500, 2500) << QPointF(0, 0)
+                                     << int(Failure::None) << 1 << 3000.0;
+    // A notch narrower than twice the margin is passed around, not through
+    QTest::newRow("across narrow notch") << _uShape(1500, 1500, 120, 1000) << QList<QPointF>() << QPointF(-2000, 300) << QPointF(2000, 300)
+                                         << int(Failure::None) << 2 << 5200.0;
+    // Around the closed side of a U opening towards the start, not into the notch
+    QTest::newRow("around U") << _uShape(1500, 1500, 600, 1000) << QList<QPointF>() << QPointF(0, 2000) << QPointF(0, -2000)
+                              << int(Failure::None) << 2 << 5200.0;
+    // Inside a hole the zone is open, so the leg needs no detour, but it surrounds the hole
+    QTest::newRow("within hole") << _square(2000) << _square(1500) << QPointF(-1000, -1000) << QPointF(1000, 1000) << int(Failure::None) << 0 << 0.0;
+    QTest::newRow("into hole") << _square(2000) << _square(1500) << QPointF(-3000, 0) << QPointF(0, 0) << int(Failure::Enclosed) << 0 << 0.0;
+    QTest::newRow("start inside") << _square(500) << QList<QPointF>() << QPointF(0, 0) << QPointF(2000, 0) << int(Failure::StartInside) << 0 << 0.0;
+    QTest::newRow("end inside") << _square(500) << QList<QPointF>() << QPointF(-2000, 0) << QPointF(100, 100) << int(Failure::EndInside) << 0 << 0.0;
+}
+
+void GeoZonePlanningTest::_testRouteConcave()
+{
+    QFETCH(QList<QPointF>, ring);
+    QFETCH(QList<QPointF>, hole);
+    QFETCH(QPointF, start);
+    QFETCH(QPointF, end);
+    QFETCH(int, failure);
+    QFETCH(int, minWaypoints);
+    QFETCH(double, maxLength);
+
+    const GeoZoneGeometry::LocalProjection projection(QGeoCoordinate(47, 8));
+    ZoneOwner owner;
+    const GeoZone *const zone = _localPolygonZone(owner, projection, QStringLiteral("U"), ring, hole);
+    const QGeoCoordinate from = projection.toGeo(start);
+    const QGeoCoordinate to = projection.toGeo(end);
+    const GeoZoneRouteSearch::Settings settings;
+    const GeoZoneRouteSearch::Route route = GeoZoneRouteSearch::detourAround(from, to, { zone }, settings);
+    QCOMPARE(int(route.failure), failure);
+    if (!route.isValid()) {
+        QCOMPARE(route.zones, QStringList{ QStringLiteral("U") });
+        return;
+    }
+    QVERIFY2(route.waypoints.count() >= minWaypoints, qPrintable(QString::number(route.waypoints.count())));
+    const QList<QGeoCoordinate> path = _routePath(from, route, to);
+    QVERIFY(!zone->intersectsPath(path));
+    // The margin from the concave outline, not only from its corners
+    const double clearance = _pathClearance(path, { zone });
+    QVERIFY2(clearance > (settings.margin - 1), qPrintable(QString::number(clearance)));
+    if (maxLength > 0) {
+        QVERIFY2(route.length < maxLength, qPrintable(QString::number(route.length)));
+    }
+    QVERIFY(route.statistics.rounds >= 1);
+}
+
+void GeoZonePlanningTest::_testRouteVertical_data()
+{
+    QTest::addColumn<double>("radius");
+    QTest::addColumn<double>("floor");          ///< Meters AMSL, NaN for the ground
+    QTest::addColumn<double>("ceiling");        ///< Meters AMSL, NaN without
+    QTest::addColumn<double>("terrain");        ///< Meters AMSL, of a hill of 600 m radius at the zone center with hill
+    QTest::addColumn<bool>("hill");             ///< The terrain is 0 elsewhere
+    QTest::addColumn<int>("best");              ///< Kind, -1 without
+    QTest::addColumn<int>("climbFailure");
+    QTest::addColumn<int>("descentFailure");
+    QTest::addColumn<double>("climbLimit");     ///< Height above ground of the failed climb, NaN to skip
+    QTest::addColumn<double>("descentLimit");   ///< Height above ground of the failed descent, NaN to skip
+
+    using Failure = GeoZoneRouteSearch::Failure;
+    using Kind = GeoZoneRouteSearch::Kind;
+    const double nan = qQNaN();
+    // The leg flies at 50 m AMSL from 6 km west to 6 km east of the zone center
+    QTest::newRow("climb cheaper") << 3000.0 << nan << 100.0 << 0.0 << false << int(Kind::Climb) << int(Failure::None) << int(Failure::ReachesGround)
+                                   << nan << nan;
+    QTest::newRow("ceiling too high") << 3000.0 << nan << 500.0 << 0.0 << false << int(Kind::Detour) << int(Failure::AboveMaxAltitude)
+                                      << int(Failure::ReachesGround) << 510.0 << nan;
+    QTest::newRow("detour cheaper") << 300.0 << nan << 100.0 << 0.0 << false << int(Kind::Detour) << int(Failure::None) << int(Failure::ReachesGround)
+                                    << nan << nan;
+    QTest::newRow("descent") << 3000.0 << 40.0 << 1000.0 << 0.0 << false << int(Kind::Descent) << int(Failure::AboveMaxAltitude) << int(Failure::None)
+                             << 1010.0 << nan;
+    QTest::newRow("descent too low") << 3000.0 << 40.0 << 1000.0 << 25.0 << false << int(Kind::Detour) << int(Failure::AboveMaxAltitude)
+                                     << int(Failure::BelowMinClearance) << 985.0 << 5.0;
+    QTest::newRow("descent over hill") << 3000.0 << 40.0 << 1000.0 << 25.0 << true << int(Kind::Detour) << int(Failure::AboveMaxAltitude)
+                                       << int(Failure::BelowMinClearance) << 1010.0 << 5.0;
+    QTest::newRow("descent terrain unknown") << 3000.0 << 40.0 << 1000.0 << nan << false << int(Kind::Detour) << int(Failure::TerrainUnknown)
+                                             << int(Failure::TerrainUnknown) << nan << nan;
+}
+
+void GeoZonePlanningTest::_testRouteVertical()
+{
+    QFETCH(double, radius);
+    QFETCH(double, floor);
+    QFETCH(double, ceiling);
+    QFETCH(double, terrain);
+    QFETCH(bool, hill);
+    QFETCH(int, best);
+    QFETCH(int, climbFailure);
+    QFETCH(int, descentFailure);
+    QFETCH(double, climbLimit);
+    QFETCH(double, descentLimit);
+
+    const QGeoCoordinate center(47, 8);
+    QJsonObject feature = _circleFeature(QStringLiteral("Z"), QStringLiteral("PROHIBITED"), center, radius);
+    if (!qIsNaN(floor) || !qIsNaN(ceiling)) {
+        feature = _withLimits(feature, qIsNaN(floor) ? 0 : floor, qIsNaN(floor) ? QStringLiteral("AGL") : QStringLiteral("AMSL"), ceiling, QStringLiteral("AMSL"));
+    }
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
+
+    const GeoZonePathEvaluator::TerrainLookup lookup = [&center, terrain, hill](const QGeoCoordinate &coordinate) {
+        return (!hill || (coordinate.distanceTo(center) < 600)) ? terrain : 0.0;
+    };
+    const GeoZonePolicy policy = GeoZonePolicy::routing(QDateTime(), QDateTime());
+    GeoZoneRouteSearch search(manager.catalog(), policy);
+    search.setTerrainLookup(lookup);
+    GeoZoneRouteSearch::Leg leg;
+    leg.from = GeoZone::Position{ center.atDistanceAndAzimuth(6000, 270), 50 };
+    leg.to = GeoZone::Position{ center.atDistanceAndAzimuth(6000, 90), 50 };
+    const GeoZoneRouteSearch::Result result = search.plan(leg);
+    QCOMPARE(result.crossedZones, QStringList{ QStringLiteral("Z") });
+    QCOMPARE(result.routes.count(), 3);
+    const GeoZoneRouteSearch::Route *const bestRoute = result.best();
+    QVERIFY(bestRoute);
+    QCOMPARE(int(bestRoute->kind), best);
+    for (const GeoZoneRouteSearch::Route &route : result.routes) {
+        if (route.kind == GeoZoneRouteSearch::Kind::Detour) {
+            QVERIFY(route.isValid());
+        } else {
+            const bool climb = (route.kind == GeoZoneRouteSearch::Kind::Climb);
+            QVERIFY2(int(route.failure) == (climb ? climbFailure : descentFailure), qPrintable(QStringLiteral("%1 %2").arg(int(route.kind)).arg(int(route.failure))));
+            const double limit = climb ? climbLimit : descentLimit;
+            if (!qIsNaN(limit)) {
+                QVERIFY2(_near(route.limit, limit), qPrintable(QString::number(route.limit)));
+            }
+        }
+        if (!route.isValid()) {
+            QCOMPARE(route.zones, QStringList{ QStringLiteral("Z") });
+            continue;
+        }
+        // Valid routes keep out of the zone, as the evaluator finds
+        GeoZonePathEvaluator evaluator(manager.catalog(), policy);
+        evaluator.setTerrainLookup(lookup);
+        QList<GeoZone::Position> positions;
+        if (route.kind == GeoZoneRouteSearch::Kind::Detour) {
+            for (const QGeoCoordinate &coordinate : _routePath(leg.from.coordinate, route, leg.to.coordinate)) {
+                positions.append(GeoZone::Position{ coordinate, 50 });
+            }
+            QVERIFY(_pathClearance(_routePath(leg.from.coordinate, route, leg.to.coordinate), manager.catalog().search(QStringLiteral("Z"), 1), 20) > 99);
+            QVERIFY(_near(route.cost, route.length - leg.from.coordinate.distanceTo(leg.to.coordinate), 5));
+        } else {
+            const double target = (route.kind == GeoZoneRouteSearch::Kind::Climb) ? (ceiling + 10) : (floor - 10);
+            QVERIFY(_near(route.altitude, target, 0.01));
+            QVERIFY(_near(route.fromAltitude, target, 0.01));
+            QVERIFY(_near(route.toAltitude, target, 0.01));
+            QVERIFY(_near(route.cost, std::abs(target - 50) * (search.settings().climbWeight + search.settings().descentWeight), 0.1));
+            positions = { GeoZone::Position{ leg.from.coordinate, route.fromAltitude }, GeoZone::Position{ leg.to.coordinate, route.toAltitude } };
+        }
+        QVERIFY(evaluator.evaluate({ GeoZonePathEvaluator::Path::fromPositions(positions) }).activeEnteredZones().isEmpty());
+    }
+}
+
+void GeoZonePlanningTest::_testRouteFailures()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    // A wall of 20 km across the leg, and a zone around the start
+    const GeoZoneGeometry::LocalProjection projection(center);
+    QList<QGeoCoordinate> wall;
+    for (const QPointF &point : { QPointF(-100, -10000), QPointF(100, -10000), QPointF(100, 10000), QPointF(-100, 10000) }) {
+        wall.append(projection.toGeo(point));
+    }
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _polygonFeature(QStringLiteral("Wall"), QStringLiteral("PROHIBITED"), wall),
+        _circleFeature(QStringLiteral("Start"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 90), 300) }), errorString), qPrintable(errorString));
+    GeoZoneRouteSearch search(manager.catalog(), GeoZonePolicy::routing(QDateTime(), QDateTime()));
+    search.setTerrainLookup([](const QGeoCoordinate &) { return 0.0; });
+    const auto failureOf = [](const GeoZoneRouteSearch::Result &result, GeoZoneRouteSearch::Kind kind) {
+        for (const GeoZoneRouteSearch::Route &route : result.routes) {
+            if (route.kind == kind) {
+                return route;
+            }
+        }
+        return GeoZoneRouteSearch::Route();
+    };
+
+    // Going around the wall is longer than the limit, three times the leg or 3 km more
+    GeoZoneRouteSearch::Leg leg{ GeoZone::Position{ projection.toGeo(QPointF(-500, 0)), 50 }, GeoZone::Position{ projection.toGeo(QPointF(500, 0)), 50 } };
+    GeoZoneRouteSearch::Result result = search.plan(leg);
+    QVERIFY(!result.best());
+    GeoZoneRouteSearch::Route detour = failureOf(result, GeoZoneRouteSearch::Kind::Detour);
+    QCOMPARE(detour.failure, GeoZoneRouteSearch::Failure::TooLong);
+    QCOMPARE(detour.zones, QStringList{ QStringLiteral("Wall") });
+    QVERIFY(_near(detour.limit, 4000, 1));
+    QVERIFY2(detour.length > 20000, qPrintable(QString::number(detour.length)));
+    QCOMPARE(failureOf(result, GeoZoneRouteSearch::Kind::Climb).failure, GeoZoneRouteSearch::Failure::NoCeiling);
+    QCOMPARE(failureOf(result, GeoZoneRouteSearch::Kind::Descent).failure, GeoZoneRouteSearch::Failure::ReachesGround);
+    // Unless the leg is long enough
+    GeoZoneRouteSearch::Settings settings;
+    settings.maxDetourFactor = 30;
+    search.setSettings(settings);
+    QVERIFY(search.plan(leg).best());
+    search.setSettings(GeoZoneRouteSearch::Settings());
+
+    // From inside a zone
+    leg.from = GeoZone::Position{ center.atDistanceAndAzimuth(5000, 90), 50 };
+    leg.to = GeoZone::Position{ center.atDistanceAndAzimuth(5000, 90).atDistanceAndAzimuth(2000, 0), 50 };
+    detour = failureOf(search.plan(leg), GeoZoneRouteSearch::Kind::Detour);
+    QCOMPARE(detour.failure, GeoZoneRouteSearch::Failure::StartInside);
+    QCOMPARE(detour.zones, QStringList{ QStringLiteral("Start") });
+    std::swap(leg.from, leg.to);
+    QCOMPARE(failureOf(search.plan(leg), GeoZoneRouteSearch::Kind::Detour).failure, GeoZoneRouteSearch::Failure::EndInside);
+
+    // Without altitudes, only a detour
+    leg = GeoZoneRouteSearch::Leg{ GeoZone::Position{ center.atDistanceAndAzimuth(5000, 270) }, GeoZone::Position{ center.atDistanceAndAzimuth(5000, 90) } };
+    leg.from.coordinate = leg.from.coordinate.atDistanceAndAzimuth(3000, 0);
+    leg.to.coordinate = leg.to.coordinate.atDistanceAndAzimuth(3000, 0);
+    result = search.plan(leg);
+    QCOMPARE(failureOf(result, GeoZoneRouteSearch::Kind::Climb).failure, GeoZoneRouteSearch::Failure::AltitudeUnknown);
+
+    // Cancelled before or during the search
+    GeoZoneCancelToken cancel;
+    cancel.cancel();
+    search.setCancelToken(cancel);
+    result = search.plan(leg);
+    QVERIFY(result.cancelled);
+    QVERIFY(result.routes.isEmpty());
+    QCOMPARE(GeoZoneRouteSearch::detourAround(leg.from.coordinate, leg.to.coordinate, manager.catalog().search(QStringLiteral("Wall"), 1), settings, cancel).failure,
+             GeoZoneRouteSearch::Failure::Cancelled);
 }
 
 void GeoZonePlanningTest::_testProfileBands()
