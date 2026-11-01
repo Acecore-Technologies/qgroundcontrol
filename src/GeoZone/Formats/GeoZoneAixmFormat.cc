@@ -270,6 +270,10 @@ public:
     QString name() const final { return QStringLiteral("AIXM 5.1"); }
     int detectionOrder() const final { return 40; }
     bool isXml() const final { return true; }
+    bool detectXml(QStringView rootElement, QStringView namespaceUri) const final
+    {
+        return (rootElement == QLatin1String("AIXMBasicMessage")) || namespaceUri.startsWith(QLatin1String("http://www.aixm.aero/schema/5.1"));
+    }
     bool parseXml(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString) const final { return _parseAixm(xml, result, errorString); }
 };
 

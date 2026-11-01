@@ -11,6 +11,11 @@
 
 #include <algorithm>
 
+bool GeoZoneFormat::detectXml(QStringView, QStringView) const
+{
+    return false;
+}
+
 bool GeoZoneFormat::parseXml(const QByteArray &, GeoZoneParser::Result &, QString &) const
 {
     return false;

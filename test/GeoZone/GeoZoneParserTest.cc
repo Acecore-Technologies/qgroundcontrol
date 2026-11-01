@@ -685,3 +685,66 @@ void GeoZoneParserTest::_testProviders()
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://example.com/zones.json")), GeoZoneParser::Format::Unknown);
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://notfaa.gov/zones.json")), GeoZoneParser::Format::Unknown);
 }
+
+void GeoZoneParserTest::_testXmlAndPackages()
+{
+    // XML documents go to the format recognizing their root element, others are reported
+    GeoZoneParser::Result result;
+    QString errorString;
+    QFile aixmFile(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(aixmFile.open(QIODevice::ReadOnly));
+    const QByteArray aixmBytes = aixmFile.readAll();
+    QVERIFY2(GeoZoneParser::parse(aixmBytes, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::Aixm);
+    QVERIFY(!GeoZoneParser::parse(R"(<?xml version="1.0"?><ows:ExceptionReport xmlns:ows="http://www.opengis.net/ows/1.1"><ows:Exception><ows:ExceptionText>Illegal BBOX</ows:ExceptionText></ows:Exception></ows:ExceptionReport>)",
+                                  result, errorString));
+    QCOMPARE(errorString, QStringLiteral("The server reported an error: Illegal BBOX"));
+    QVERIFY(!GeoZoneParser::parse("<!DOCTYPE html><html><body>Maintenance</body></html>", result, errorString));
+    QCOMPARE(errorString, QStringLiteral("The address returned a web page instead of geozone data."));
+    QVERIFY(!GeoZoneParser::parse("<metadata><title>Zones</title></metadata>", result, errorString));
+    QCOMPARE(errorString, QStringLiteral("Unsupported XML document (metadata)."));
+
+    // A package with the zones split into two files, one zone in both, and a metadata file
+    QFile ed269File(QStringLiteral(":/unittest/ed269_test.json"));
+    QVERIFY(ed269File.open(QIODevice::ReadOnly));
+    QByteArray ed269 = ed269File.readAll();
+    if (ed269.startsWith("\xEF\xBB\xBF")) {
+        ed269.remove(0, 3);
+    }
+    const QJsonObject document = QJsonDocument::fromJson(ed269).object();
+    const QJsonArray features = document.value(QStringLiteral("features")).toArray();
+    QCOMPARE(features.count(), 4);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid() && QDir(dir.path()).mkpath(QStringLiteral("package")));
+    const auto writePart = [&dir, &document, &features](const QString &name, qsizetype first, qsizetype last) {
+        QJsonObject part = document;
+        QJsonArray partFeatures;
+        for (qsizetype i = first; i <= last; i++) {
+            partFeatures.append(features[i]);
+        }
+        part.insert(QStringLiteral("features"), partFeatures);
+        QFile file(dir.filePath(QStringLiteral("package/") + name));
+        return file.open(QIODevice::WriteOnly) && (file.write(QJsonDocument(part).toJson()) > 0);
+    };
+    QVERIFY(writePart(QStringLiteral("part1.json"), 0, 2));
+    QVERIFY(writePart(QStringLiteral("part2.json"), 2, 3));
+    QFile metadata(dir.filePath(QStringLiteral("package/metadata.xml")));
+    QVERIFY(metadata.open(QIODevice::WriteOnly) && (metadata.write("<metadata><title>Zones</title></metadata>") > 0));
+    metadata.close();
+    const QString packagePath = dir.filePath(QStringLiteral("package.zip"));
+    QVERIFY(QGCZip::zipDirectory(dir.filePath(QStringLiteral("package")), packagePath));
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QVERIFY2(manager.loadFile(packagePath, errorString), qPrintable(errorString));
+    // The fourth feature has no supported geometry, the zone in both files is loaded once
+    QCOMPARE(manager.zoneCount(), 3);
+    QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-269"));
+
+    QFile archive(packagePath);
+    QVERIFY(archive.open(QIODevice::ReadOnly));
+    const QList<GeoZoneZip::File> files = GeoZoneZip::files(archive.readAll(), { QStringLiteral(".json"), QStringLiteral(".xml") }, 1 << 20, errorString);
+    QCOMPARE(files.count(), 3);
+    QVERIFY(files.first().data.size() >= files.last().data.size());
+}

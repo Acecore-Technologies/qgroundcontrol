@@ -34,6 +34,8 @@ public:
 
     /// XML formats parse whole documents with parseXml(), JSON formats one feature at a time
     virtual bool isXml() const { return false; }
+    /// @return true if an XML document with the root element is in this format
+    virtual bool detectXml(QStringView rootElement, QStringView namespaceUri) const;
     virtual bool parseXml(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString) const;
 
     /// @return true if the JSON document is in this format

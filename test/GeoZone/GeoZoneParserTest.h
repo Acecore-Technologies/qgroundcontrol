@@ -22,6 +22,7 @@ private slots:
     void _testParseNationalFormats();
     void _testLiveNationalFeeds();
     void _testParseErrors();
+    void _testXmlAndPackages();
     void _testParserFuzz();
     void _testDisplayText();
     void _testProviders();

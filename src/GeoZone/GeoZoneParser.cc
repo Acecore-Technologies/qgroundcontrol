@@ -17,6 +17,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QXmlStreamReader>
 
 #include <algorithm>
 #include <cctype>
@@ -42,6 +43,52 @@ bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &
     return parse(file.readAll(), result, errorString);
 }
 
+bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &errorString, Format formatHint)
+{
+    QXmlStreamReader reader(xml);
+    while (!reader.atEnd() && !reader.isStartElement()) {
+        (void) reader.readNext();
+    }
+    if (!reader.isStartElement()) {
+        errorString = tr("Invalid XML: %1 (line %2)").arg(reader.errorString()).arg(reader.lineNumber());
+        return false;
+    }
+    const QString rootElement = reader.name().toString();
+    const QString namespaceUri = reader.namespaceUri().toString();
+
+    // Web services report errors as XML, web servers as HTML pages
+    if (rootElement.endsWith(QLatin1String("ExceptionReport"))) {
+        QStringList texts;
+        while (!reader.atEnd()) {
+            if (reader.readNext() == QXmlStreamReader::StartElement) {
+                if ((reader.name() == QLatin1String("ExceptionText")) || (reader.name() == QLatin1String("ServiceException"))) {
+                    texts.append(reader.readElementText(QXmlStreamReader::IncludeChildElements).simplified());
+                }
+            }
+        }
+        errorString = tr("The server reported an error: %1").arg(texts.isEmpty() ? rootElement : texts.join(QStringLiteral(" ")));
+        return false;
+    }
+    if (rootElement.compare(QLatin1String("html"), Qt::CaseInsensitive) == 0) {
+        errorString = tr("The address returned a web page instead of geozone data.");
+        return false;
+    }
+
+    // The format expected from the address first
+    const GeoZoneFormat *hinted = GeoZoneFormat::find(formatHint);
+    const GeoZoneFormat *format = (hinted && hinted->isXml() && hinted->detectXml(rootElement, namespaceUri)) ? hinted : nullptr;
+    for (const GeoZoneFormat *candidate : GeoZoneFormat::formats()) {
+        if (!format && candidate->isXml() && candidate->detectXml(rootElement, namespaceUri)) {
+            format = candidate;
+        }
+    }
+    if (!format) {
+        errorString = tr("Unsupported XML document (%1).").arg(rootElement);
+        return false;
+    }
+    return format->parseXml(xml, result, errorString);
+}
+
 bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint, const QString &language)
 {
     result = Result();
@@ -55,11 +102,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     const QByteArray json = QByteArray::fromRawData(bytes.constData() + bomSize, bytes.size() - bomSize);
     const auto firstCharacter = std::find_if_not(json.cbegin(), json.cend(), [](char c) { return std::isspace(static_cast<unsigned char>(c)); });
     if ((firstCharacter != json.cend()) && (*firstCharacter == '<')) {
-        for (const GeoZoneFormat *format : GeoZoneFormat::formats()) {
-            if (format->isXml()) {
-                return format->parseXml(json, result, errorString);
-            }
-        }
+        return _parseXml(json, result, errorString, formatHint);
     }
 
     QJsonParseError parseError;

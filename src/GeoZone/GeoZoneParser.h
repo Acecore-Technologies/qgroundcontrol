@@ -70,4 +70,8 @@ public:
                       const QString &language = QString());
 
     static QString formatToString(Format format);
+
+private:
+    /// Parses with the XML format recognizing the root element, the hinted one first
+    static bool _parseXml(const QByteArray &xml, Result &result, QString &errorString, Format formatHint);
 };

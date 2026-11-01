@@ -14,6 +14,9 @@
 
 #include <zlib.h>
 
+#include <algorithm>
+#include <optional>
+
 namespace GeoZoneZip {
 
 namespace {
@@ -114,9 +117,11 @@ QByteArray entryData(const QByteArray &archive, const Entry &entry, qint64 maxBy
 
 } // namespace
 
-QByteArray largestFile(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString)
+namespace {
+
+/// @return The entries of the central directory with one of the suffixes, nothing when the archive is damaged
+std::optional<QList<Entry>> wantedEntries(const QByteArray &archive, const QStringList &suffixes, QString &errorString)
 {
-    errorString.clear();
     const Reader reader(archive);
 
     // The end record is followed by a comment of up to 64 KiB
@@ -129,22 +134,21 @@ QByteArray largestFile(const QByteArray &archive, const QStringList &suffixes, q
     }
     if (endOffset < 0) {
         errorString = tr("The zip archive is damaged.");
-        return QByteArray();
+        return std::nullopt;
     }
     const int entryCount = reader.u16(endOffset + 10);
     const qint64 directoryOffset = reader.u32(endOffset + 16);
     if (entryCount > maxEntries) {
         errorString = tr("The zip archive has too many files.");
-        return QByteArray();
+        return std::nullopt;
     }
 
-    Entry best;
-    bool found = false;
+    QList<Entry> entries;
     qint64 offset = directoryOffset;
     for (int i = 0; i < entryCount; i++) {
         if (!reader.has(offset, kCentralEntrySize) || (reader.u32(offset) != kCentralDirectoryEntry)) {
             errorString = tr("The zip archive is damaged.");
-            return QByteArray();
+            return std::nullopt;
         }
         Entry entry;
         entry.flags = reader.u16(offset + 8);
@@ -158,28 +162,44 @@ QByteArray largestFile(const QByteArray &archive, const QStringList &suffixes, q
         entry.localHeaderOffset = reader.u32(offset + 42);
         if (!reader.has(offset + kCentralEntrySize, nameLength)) {
             errorString = tr("The zip archive is damaged.");
-            return QByteArray();
+            return std::nullopt;
         }
         entry.name = QString::fromUtf8(reader.bytes(offset + kCentralEntrySize, nameLength));
         offset += kCentralEntrySize + nameLength + extraLength + commentLength;
 
         const bool wanted = std::any_of(suffixes.cbegin(), suffixes.cend(), [&entry](const QString &suffix) { return entry.name.endsWith(suffix, Qt::CaseInsensitive); });
-        if (!wanted || entry.name.endsWith(QLatin1Char('/'))) {
-            continue;
-        }
-        // Metadata files of the archive are small, the data is the largest file
-        if (!found || (entry.size > best.size)) {
-            best = entry;
-            found = true;
+        if (wanted && !entry.name.endsWith(QLatin1Char('/'))) {
+            entries.append(entry);
         }
     }
-
-    if (!found) {
+    if (entries.isEmpty()) {
         errorString = tr("The zip archive has no geozone file.");
+        return std::nullopt;
+    }
+    return entries;
+}
+
+bool supported(const Entry &entry, QString &errorString)
+{
+    if ((entry.flags & 0x1) || ((entry.method != kStored) && (entry.method != kDeflated))) {
+        errorString = tr("The zip archive is encrypted or compressed in an unsupported way.");
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+QByteArray largestFile(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString)
+{
+    errorString.clear();
+    const std::optional<QList<Entry>> entries = wantedEntries(archive, suffixes, errorString);
+    if (!entries) {
         return QByteArray();
     }
-    if ((best.flags & 0x1) || ((best.method != kStored) && (best.method != kDeflated))) {
-        errorString = tr("The zip archive is encrypted or compressed in an unsupported way.");
+    // Metadata files of the archive are small, the data is the largest file
+    const Entry &best = *std::max_element(entries->cbegin(), entries->cend(), [](const Entry &a, const Entry &b) { return a.size < b.size; });
+    if (!supported(best, errorString)) {
         return QByteArray();
     }
     if (best.size > maxBytes) {
@@ -187,6 +207,36 @@ QByteArray largestFile(const QByteArray &archive, const QStringList &suffixes, q
         return QByteArray();
     }
     return entryData(archive, best, maxBytes, errorString);
+}
+
+QList<File> files(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString)
+{
+    errorString.clear();
+    const std::optional<QList<Entry>> entries = wantedEntries(archive, suffixes, errorString);
+    if (!entries) {
+        return {};
+    }
+    QList<File> result;
+    qint64 remaining = maxBytes;
+    for (const Entry &entry : *entries) {
+        if (!supported(entry, errorString)) {
+            return {};
+        }
+        // The declared sizes count against the limit before inflating, the inflated sizes are checked again
+        if (entry.size > remaining) {
+            errorString = tr("The files in the zip archive are too large.");
+            return {};
+        }
+        QByteArray data = entryData(archive, entry, remaining, errorString);
+        if (data.isEmpty() && !errorString.isEmpty()) {
+            return {};
+        }
+        remaining -= data.size();
+        result.append(File{ entry.name, std::move(data) });
+    }
+    // The largest first, usually the data and not metadata
+    std::stable_sort(result.begin(), result.end(), [](const File &a, const File &b) { return a.data.size() > b.data.size(); });
+    return result;
 }
 
 } // namespace GeoZoneZip
