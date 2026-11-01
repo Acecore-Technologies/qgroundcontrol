@@ -18,8 +18,10 @@
 
 #include "GeoZone.h"
 #include "GeoZoneInfo.h"
+#include "GeoZoneMissionPath.h"
 
 class GeoFenceController;
+class GeoZoneCatalog;
 class GeoZoneManager;
 class GeoZoneSource;
 class MissionController;
@@ -55,8 +57,6 @@ public:
     explicit GeoZoneMissionCheck(GeoZoneManager *manager, QObject *parent = nullptr);
 
     static constexpr int maxListedZones = 5;
-    static constexpr double maxStepDistance = 1000;     ///< Meters between points along long legs
-    static constexpr int maxStepsPerSegment = 10000;
 
     MissionController *missionController() const;
     void setMissionController(MissionController *missionController);
@@ -90,22 +90,12 @@ public:
     ///         invalid without a planned start
     static std::pair<QDateTime, QDateTime> plannedFlightTimes(const GeoZoneManager *manager, const MissionController *missionController);
 
-    /// Re-evaluates immediately instead of after changes settle
+    /// Re-evaluates immediately on this thread instead of after changes settle on another one
     Q_INVOKABLE void update();
 
-    /// Straight flight path segment between two mission items
-    struct Segment {
-        QGeoCoordinate from;
-        QGeoCoordinate to;
-        double fromAltitudeAMSL = qQNaN();
-        double toAltitudeAMSL = qQNaN();
-        QList<double> terrainAMSL;  ///< Ground elevation every terrainSpacing meters from the start, the last sample at the end
-        double terrainSpacing = 0;
-    };
-
-    /// Splits flight path segments into connected paths with a position at each terrain sample, or along the great
-    /// circle every maxStepDistance without terrain samples. Altitudes are interpolated.
-    static QList<QList<GeoZone::Position>> pathsFromSegments(const QList<Segment> &segments);
+    /// @return Zones the path or its areas enter whatever their schedule and authorisations, most restrictive first.
+    ///         Can run on any thread with a copy of the catalog.
+    static QList<GeoZone*> zonesOnPath(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path);
 
 signals:
     void missionControllerChanged();
@@ -116,9 +106,10 @@ signals:
 private:
     void _scheduleUpdate();
     void _clearZones(GeoZoneSource *source);
-    QList<Segment> _missionSegments() const;
-    /// Survey, corridor and structure scan areas
-    QList<GeoZone::Area> _missionAreas() const;
+    /// Evaluates the mission path on another thread, the result is dropped when the mission or zones change meanwhile
+    void _updateConcurrently();
+    /// Sorts the zones on the path by the policies of the planned flight
+    void _apply(QList<GeoZone*> zones);
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
@@ -131,6 +122,7 @@ private:
     QPointer<GeoFenceController> _geoFenceController;
     QList<GeoZone*> _unfencedZones;
     QTimer _updateTimer;
+    quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones
 
     static constexpr int _updateDelayMSecs = 500;
 };

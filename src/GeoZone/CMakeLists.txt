@@ -36,6 +36,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneModule.cc
         GeoZoneModule.h
         GeoZoneMissionCheck.h
+        GeoZoneMissionPath.cc
+        GeoZoneMissionPath.h
         GeoZoneMonitor.cc
         GeoZoneMonitor.h
         GeoZoneNearbyModel.cc

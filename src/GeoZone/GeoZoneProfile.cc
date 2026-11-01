@@ -8,44 +8,22 @@
  ****************************************************************************/
 
 #include "GeoZoneProfile.h"
-#include "ComplexMissionItem.h"
-#include "FlightPathSegment.h"
+#include "GeoZoneCatalog.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "MissionController.h"
-#include "QmlObjectListModel.h"
-#include "VisualMissionItem.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QSet>
 #include <QtPositioning/QGeoRectangle>
 
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QFutureWatcher>
+
 #include <algorithm>
 #include <cmath>
 #include <optional>
-
-namespace {
-
-/// Ground elevation at a distance along a segment, NaN without terrain samples
-double terrainAt(const GeoZoneProfile::Segment &segment, double along, double length)
-{
-    const qsizetype count = segment.terrainAMSL.count();
-    if ((count < 2) || (segment.terrainSpacing <= 0)) {
-        return qQNaN();
-    }
-    const qsizetype last = count - 1;
-    const auto sampleDistance = [&segment, last, length](qsizetype index) {
-        return (index == last) ? length : std::min(index * segment.terrainSpacing, length);
-    };
-    const qsizetype index = std::clamp<qsizetype>(static_cast<qsizetype>(along / segment.terrainSpacing), 0, last - 1);
-    const double start = sampleDistance(index);
-    const double end = sampleDistance(index + 1);
-    const double fraction = (end > start) ? std::clamp((along - start) / (end - start), 0.0, 1.0) : 0.0;
-    return segment.terrainAMSL[index] + ((segment.terrainAMSL[index + 1] - segment.terrainAMSL[index]) * fraction);
-}
-
-} // namespace
 
 GeoZoneProfile::GeoZoneProfile(QObject *parent)
     : GeoZoneProfile(GeoZoneManager::instance(), parent)
@@ -58,7 +36,7 @@ GeoZoneProfile::GeoZoneProfile(GeoZoneManager *manager, QObject *parent)
 {
     _updateTimer.setSingleShot(true);
     _updateTimer.setInterval(_updateDelayMSecs);
-    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneProfile::update);
+    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneProfile::_updateConcurrently);
 
     // The bands reference no zones, but they are outdated
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneProfile::_clear);
@@ -95,6 +73,7 @@ void GeoZoneProfile::setMissionController(MissionController *missionController)
 void GeoZoneProfile::_clear()
 {
     _updateTimer.stop();
+    _evaluation++;
     if (!_bandList.isEmpty()) {
         _bandList.clear();
         _bands.clear();
@@ -119,57 +98,40 @@ void GeoZoneProfile::setActive(bool active)
 void GeoZoneProfile::update()
 {
     _updateTimer.stop();
+    _evaluation++;
     if (!_active) {
         return;
     }
     const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    const QList<Band> bands = computeBands(_missionSegments(), _manager, plannedStart, plannedEnd);
+    _apply(computeBands(GeoZoneMissionPath::fromMission(_missionController).segments(), _manager->catalog(), plannedStart, plannedEnd));
+}
+
+void GeoZoneProfile::_updateConcurrently()
+{
+    const quint64 evaluation = ++_evaluation;
+    if (!_active) {
+        return;
+    }
+    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
+    const GeoZoneCatalog catalog = _manager->catalog();
+    const QList<GeoZoneMissionPath::Segment> segments = GeoZoneMissionPath::fromMission(_missionController).segments();
+    auto *const watcher = new QFutureWatcher<QList<Band>>(this);
+    (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {
+        watcher->deleteLater();
+        if (evaluation == _evaluation) {
+            _apply(watcher->result());
+        }
+    });
+    watcher->setFuture(QtConcurrent::run([segments, catalog, start = plannedStart, end = plannedEnd]() { return computeBands(segments, catalog, start, end); }));
+}
+
+void GeoZoneProfile::_apply(const QList<Band> &bands)
+{
     if (bands != _bandList) {
         _bandList = bands;
         _bands = toVariantList(_bandList);
         emit bandsChanged();
     }
-}
-
-QList<GeoZoneProfile::Segment> GeoZoneProfile::_missionSegments() const
-{
-    QList<Segment> segments;
-    const QmlObjectListModel *const visualItems = _missionController ? _missionController->visualItems() : nullptr;
-    if (!visualItems) {
-        return segments;
-    }
-
-    const auto appendSegment = [&segments](const FlightPathSegment *flightPathSegment) {
-        Segment segment;
-        segment.from = flightPathSegment->coordinate1();
-        segment.to = flightPathSegment->coordinate2();
-        segment.distance = flightPathSegment->totalDistance();
-        for (const QVariant &height : flightPathSegment->amslTerrainHeights()) {
-            segment.terrainAMSL.append(height.toDouble());
-        }
-        segment.terrainSpacing = flightPathSegment->distanceBetween();
-        segments.append(segment);
-    };
-
-    // Same order and distances as TerrainProfile
-    for (int i = 0; i < visualItems->count(); i++) {
-        VisualMissionItem *const visualItem = visualItems->value<VisualMissionItem*>(i);
-        if (ComplexMissionItem *const complexItem = qobject_cast<ComplexMissionItem*>(visualItem)) {
-            const QmlObjectListModel *const complexSegments = complexItem->flightPathSegments();
-            if (complexSegments->count() == 0) {
-                Segment gap;
-                gap.distance = complexItem->complexDistance();
-                segments.append(gap);
-            }
-            for (int j = 0; j < complexSegments->count(); j++) {
-                appendSegment(complexSegments->value<const FlightPathSegment*>(j));
-            }
-        }
-        if (visualItem && visualItem->simpleFlightPathSegment()) {
-            appendSegment(visualItem->simpleFlightPathSegment());
-        }
-    }
-    return segments;
 }
 
 QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
@@ -195,7 +157,7 @@ QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
     return list;
 }
 
-QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &segments, const GeoZoneManager *manager,
+QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<GeoZoneMissionPath::Segment> &segments, const GeoZoneCatalog &catalog,
                                                          const QDateTime &activeFrom, const QDateTime &activeTo)
 {
     const GeoZonePolicy policy = GeoZonePolicy::profile(activeFrom, activeTo);
@@ -215,13 +177,13 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         }
         runs.clear();
     };
-    const auto validSegment = [](const Segment &segment) {
-        return segment.from.isValid() && segment.to.isValid() && (segment.distance > 0);
+    const auto validSegment = [](const GeoZoneMissionPath::Segment &segment) {
+        return segment.isValid() && (segment.distance > 0);
     };
 
     // One spacing for the whole path, so that long missions are sampled up to their end
     double totalLength = 0;
-    for (const Segment &segment : segments) {
+    for (const GeoZoneMissionPath::Segment &segment : segments) {
         if (validSegment(segment)) {
             totalLength += segment.from.distanceTo(segment.to);
         }
@@ -235,7 +197,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
     };
 
     double offset = 0;
-    for (const Segment &segment : segments) {
+    for (const GeoZoneMissionPath::Segment &segment : segments) {
         if (!validSegment(segment)) {
             closeAll();
             offset += segment.distance;
@@ -243,7 +205,6 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         }
 
         const double length = segment.from.distanceTo(segment.to);
-        const double azimuth = segment.from.azimuthTo(segment.to);
         const double segmentMinLatitude = (std::min)(segment.from.latitude(), segment.to.latitude());
         const double segmentMaxLatitude = (std::max)(segment.from.latitude(), segment.to.latitude());
         // Longitudes are continuous across the antimeridian, east past 180 degrees when crossing it
@@ -252,7 +213,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         const auto [segmentWest, segmentEast] = continuousSpan(segmentSpan.first, segmentSpan.second);
 
         QList<Candidate> candidates;
-        for (const GeoZone *zone : manager->catalog().zonesInArea(QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), policy)) {
+        for (const GeoZone *zone : catalog.zonesInArea(QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), policy)) {
             const QList<GeoZone::Volume> &volumes = zone->data().volumes;
             for (int v = 0; v < volumes.count(); v++) {
                 const QGeoRectangle box = volumes[v].boundingBox();
@@ -276,9 +237,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         for (int i = 0; i <= sampleCount; i++) {
             const double fraction = static_cast<double>(i) / sampleCount;
             const double along = length * fraction;
-            GeoZone::Position position;
-            position.coordinate = (i == 0) ? segment.from : ((i == sampleCount) ? segment.to : segment.from.atDistanceAndAzimuth(along, azimuth));
-            position.terrainAMSL = terrainAt(segment, along, length);
+            const GeoZone::Position position = segment.positionAt(along);
             const double distance = offset + (segment.distance * fraction);
 
             QSet<std::pair<const GeoZone*, int>> inside;

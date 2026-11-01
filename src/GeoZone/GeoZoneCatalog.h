@@ -22,7 +22,8 @@ class GeoZoneShape;
 class GeoZoneSource;
 
 /// The zones and shapes of all sources with a spatial index, for the queries of maps, mission checks and alerts.
-/// Rebuilt when the zones change, the zones and shapes belong to their sources.
+/// Rebuilt when the zones change, the zones and shapes belong to their sources. Copies are cheap and keep the zones
+/// alive, so that another thread can query a copy while the sources change, but not the shapes.
 class GeoZoneCatalog
 {
 public:
@@ -67,6 +68,7 @@ public:
 
 private:
     QList<GeoZone*> _zones;
+    QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Keeps the zones of copies alive
     QList<GeoZoneShape*> _shapes;
     QList<QList<const GeoZoneShape*>> _zoneShapes;  ///< Shapes of each zone of _zones
     GeoZoneIndex _index;                            ///< Indexes into _zones

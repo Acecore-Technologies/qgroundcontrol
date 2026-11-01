@@ -18,10 +18,12 @@
 void GeoZoneCatalog::rebuild(const QList<const GeoZoneSource*> &sources)
 {
     _zones.clear();
+    _sharedZones.clear();
     _shapes.clear();
     _boundingBox = QGeoRectangle();
     for (const GeoZoneSource *source : sources) {
         _zones.append(source->zones());
+        _sharedZones.append(source->sharedZones());
         _shapes.append(source->shapes());
         if (source->boundingBox().isValid()) {
             _boundingBox = _boundingBox.isValid() ? _boundingBox.united(source->boundingBox()) : source->boundingBox();

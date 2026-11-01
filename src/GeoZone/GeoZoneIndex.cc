@@ -66,7 +66,6 @@ void GeoZoneIndex::clear()
     _boxes.clear();
     _cells.clear();
     _largeZones.clear();
-    _marks.clear();
 }
 
 void GeoZoneIndex::build(const QList<GeoZone*> &zones)
@@ -97,8 +96,6 @@ void GeoZoneIndex::build(const QList<GeoZone*> &zones)
             }
         }
     }
-    _marks.fill(0, _boxes.count());
-    _stamp = 0;
 }
 
 QList<int> GeoZoneIndex::query(const QGeoRectangle &area) const
@@ -130,33 +127,22 @@ QList<int> GeoZoneIndex::query(double south, double west, double north, double e
         return result;
     }
 
-    if (++_stamp == 0) {
-        _marks.fill(0);
-        _stamp = 1;
-    }
-    const auto consider = [this, &queryBox, &result](int index) {
-        if (_marks[index] != _stamp) {
-            _marks[index] = _stamp;
-            if (_boxes[index].intersects(queryBox)) {
-                result.append(index);
-            }
-        }
-    };
-
-    for (const int index : _largeZones) {
-        consider(index);
-    }
+    // Zones spanning several cells are found once per cell
+    QList<int> candidates = _largeZones;
     for (int latitudeCell = southCell; latitudeCell <= northCell; latitudeCell++) {
         for (int longitudeCell = westCell; longitudeCell <= eastCell; longitudeCell++) {
             const auto it = _cells.constFind(_key(latitudeCell, _wrappedLongitudeCell(longitudeCell)));
             if (it != _cells.constEnd()) {
-                for (const int index : it.value()) {
-                    consider(index);
-                }
+                candidates.append(it.value());
             }
         }
     }
-
-    std::sort(result.begin(), result.end());
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    for (const int index : std::as_const(candidates)) {
+        if (_boxes[index].intersects(queryBox)) {
+            result.append(index);
+        }
+    }
     return result;
 }

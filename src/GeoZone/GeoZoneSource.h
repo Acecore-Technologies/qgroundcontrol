@@ -75,6 +75,8 @@ public:
     void setEnabled(bool enabled);
 
     const QList<GeoZone*> &zones() const { return _zones; }
+    /// The zones, to keep them alive while another thread uses them
+    const QList<QSharedPointer<GeoZone>> &sharedZones() const { return _sharedZones; }
     /// Volumes sharing a footprint have one shape
     const QList<GeoZoneShape*> &shapes() const { return _shapes; }
     QGeoRectangle boundingBox() const { return _boundingBox; }

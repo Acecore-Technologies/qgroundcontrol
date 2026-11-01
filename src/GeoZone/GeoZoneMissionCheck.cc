@@ -8,12 +8,11 @@
  ****************************************************************************/
 
 #include "GeoZoneMissionCheck.h"
-#include "ComplexMissionItem.h"
-#include "FlightPathSegment.h"
 #include "GeoFenceController.h"
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneGeometry.h"
+#include "GeoZoneCatalog.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSource.h"
 #include "MissionController.h"
@@ -21,8 +20,9 @@
 #include "QGCFencePolygon.h"
 #include "QGCMapPolygon.h"
 #include "QmlObjectListModel.h"
-#include "StructureScanComplexItem.h"
-#include "TransectStyleComplexItem.h"
+
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QFutureWatcher>
 
 #include <algorithm>
 #include <cmath>
@@ -38,7 +38,7 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
 {
     _updateTimer.setSingleShot(true);
     _updateTimer.setInterval(_updateDelayMSecs);
-    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneMissionCheck::update);
+    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneMissionCheck::_updateConcurrently);
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMissionCheck::_clearZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
@@ -246,6 +246,7 @@ void GeoZoneMissionCheck::_scheduleUpdate()
 
 void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 {
+    _evaluation++;
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
@@ -259,7 +260,49 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 void GeoZoneMissionCheck::update()
 {
     _updateTimer.stop();
+    _evaluation++;
+    _apply(zonesOnPath(_manager->catalog(), GeoZoneMissionPath::fromMission(_missionController)));
+}
 
+void GeoZoneMissionCheck::_updateConcurrently()
+{
+    const quint64 evaluation = ++_evaluation;
+    const GeoZoneCatalog catalog = _manager->catalog();
+    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController);
+    auto *const watcher = new QFutureWatcher<QList<GeoZone*>>(this);
+    (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {
+        watcher->deleteLater();
+        // Zones of an outdated evaluation may be gone
+        if (evaluation == _evaluation) {
+            _apply(watcher->result());
+        }
+    });
+    watcher->setFuture(QtConcurrent::run([catalog, path]() { return zonesOnPath(catalog, path); }));
+}
+
+QList<GeoZone*> GeoZoneMissionCheck::zonesOnPath(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path)
+{
+    const GeoZonePolicy anyTime = GeoZonePolicy::mission(QDateTime(), QDateTime());
+    QList<GeoZone*> zones;
+    for (const GeoZoneCatalog::PathHit &hit : catalog.pathHits(path.positionLists(), anyTime)) {
+        if (!zones.contains(hit.zone)) {
+            zones.append(hit.zone);
+        }
+    }
+    // Camera footprints and turns extend past the flight lines, so whole areas count
+    for (GeoZone *zone : catalog.zonesIntersectingAreas(path.areas(), anyTime)) {
+        if (!zones.contains(zone)) {
+            zones.append(zone);
+        }
+    }
+    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
+        return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
+    });
+    return zones;
+}
+
+void GeoZoneMissionCheck::_apply(QList<GeoZone*> zones)
+{
     // Zones which aren't active at any time during the planned flight don't apply
     auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
     if (_flightNow) {
@@ -268,24 +311,7 @@ void GeoZoneMissionCheck::update()
     }
     // Zones authorised during the whole flight are listed for information
     const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd).excludingAuthorised(_manager->authorisations());
-    const GeoZonePolicy anyTime = GeoZonePolicy::mission(QDateTime(), QDateTime());
 
-    const GeoZoneCatalog &catalog = _manager->catalog();
-    QList<GeoZone*> zones;
-    for (const GeoZoneCatalog::PathHit &hit : catalog.pathHits(pathsFromSegments(_missionSegments()), anyTime)) {
-        if (!zones.contains(hit.zone)) {
-            zones.append(hit.zone);
-        }
-    }
-    // Camera footprints and turns extend past the flight lines, so whole areas count
-    for (GeoZone *zone : catalog.zonesIntersectingAreas(_missionAreas(), anyTime)) {
-        if (!zones.contains(zone)) {
-            zones.append(zone);
-        }
-    }
-    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
-        return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
-    });
     const int inactiveZoneCount = static_cast<int>(zones.removeIf([&policy](const GeoZone *zone) { return !policy.acceptsSchedule(zone); }));
     QList<GeoZone*> authorised;
     for (GeoZone *zone : std::as_const(zones)) {
@@ -328,163 +354,4 @@ void GeoZoneMissionCheck::update()
         _inactiveZoneCount = inactiveZoneCount;
         emit crossedZonesChanged();
     }
-}
-
-QList<GeoZoneMissionCheck::Segment> GeoZoneMissionCheck::_missionSegments() const
-{
-    QList<Segment> segments;
-    if (!_missionController) {
-        return segments;
-    }
-
-    const auto appendSegments = [&segments](const QmlObjectListModel *model) {
-        for (int i = 0; i < model->count(); i++) {
-            const FlightPathSegment *const flightPathSegment = model->value<const FlightPathSegment*>(i);
-            if (!flightPathSegment) {
-                continue;
-            }
-            Segment segment;
-            segment.from = flightPathSegment->coordinate1();
-            segment.to = flightPathSegment->coordinate2();
-            segment.fromAltitudeAMSL = flightPathSegment->coord1AMSLAlt();
-            segment.toAltitudeAMSL = flightPathSegment->coord2AMSLAlt();
-            for (const QVariant &height : flightPathSegment->amslTerrainHeights()) {
-                segment.terrainAMSL.append(height.toDouble());
-            }
-            segment.terrainSpacing = flightPathSegment->distanceBetween();
-            segments.append(segment);
-        }
-    };
-
-    appendSegments(_missionController->simpleFlightPathSegments());
-    const QmlObjectListModel *const visualItems = _missionController->visualItems();
-    for (int i = 0; visualItems && (i < visualItems->count()); i++) {
-        ComplexMissionItem *const complexItem = visualItems->value<ComplexMissionItem*>(i);
-        if (complexItem) {
-            appendSegments(complexItem->flightPathSegments());
-        }
-    }
-    return segments;
-}
-
-QList<GeoZone::Area> GeoZoneMissionCheck::_missionAreas() const
-{
-    QList<GeoZone::Area> areas;
-    const QmlObjectListModel *const visualItems = _missionController ? _missionController->visualItems() : nullptr;
-    for (int i = 0; visualItems && (i < visualItems->count()); i++) {
-        ComplexMissionItem *const complexItem = visualItems->value<ComplexMissionItem*>(i);
-        if (!complexItem) {
-            continue;
-        }
-
-        QList<QGeoCoordinate> polygon;
-        if (TransectStyleComplexItem *const transectItem = qobject_cast<TransectStyleComplexItem*>(complexItem)) {
-            polygon = transectItem->surveyAreaPolygon()->coordinateList();
-        } else if (StructureScanComplexItem *const structureItem = qobject_cast<StructureScanComplexItem*>(complexItem)) {
-            polygon = structureItem->flightPolygon()->coordinateList();
-        }
-        if (polygon.count() < 3) {
-            continue;
-        }
-
-        // Terrain along the item's flight path bounds the height above ground, it stays unknown without samples
-        double minTerrain = qQNaN();
-        double maxTerrain = qQNaN();
-        const QmlObjectListModel *const segments = complexItem->flightPathSegments();
-        for (int j = 0; j < segments->count(); j++) {
-            for (const QVariant &height : segments->value<const FlightPathSegment*>(j)->amslTerrainHeights()) {
-                const double terrain = height.toDouble();
-                minTerrain = qIsNaN(minTerrain) ? terrain : std::min(minTerrain, terrain);
-                maxTerrain = qIsNaN(maxTerrain) ? terrain : std::max(maxTerrain, terrain);
-            }
-        }
-
-        const QGeoCoordinate center = QGeoRectangle(polygon).center();
-        areas.append(GeoZone::Area{ polygon,
-                                    GeoZone::Position{ center, complexItem->minAMSLAltitude(), maxTerrain },
-                                    GeoZone::Position{ center, complexItem->maxAMSLAltitude(), minTerrain } });
-    }
-    return areas;
-}
-
-QList<QList<GeoZone::Position>> GeoZoneMissionCheck::pathsFromSegments(const QList<Segment> &segments)
-{
-    QList<QList<GeoZone::Position>> paths;
-    for (const Segment &segment : segments) {
-        if (!segment.from.isValid() || !segment.to.isValid()) {
-            continue;
-        }
-
-        const double distance = segment.from.distanceTo(segment.to);
-        const double azimuth = segment.from.azimuthTo(segment.to);
-        // A vertical segment, such as a takeoff climb at the launch position, has its terrain samples at the same place
-        const bool terrainKnown = (segment.terrainAMSL.count() >= 2) && ((segment.terrainSpacing > 0) || (distance <= 0));
-
-        // Distance along the segment, fraction of the segment and the terrain elevation there
-        struct Sample {
-            double along;
-            double fraction;
-            double terrain;
-        };
-        QList<Sample> samples;
-        if (terrainKnown) {
-            const qsizetype lastIndex = segment.terrainAMSL.count() - 1;
-            for (qsizetype i = 0; i <= lastIndex; i++) {
-                const double along = (i == lastIndex) ? distance : std::min(i * segment.terrainSpacing, distance);
-                samples.append({ along, (distance > 0) ? (along / distance) : (static_cast<double>(i) / lastIndex), segment.terrainAMSL[i] });
-            }
-        } else {
-            // Vehicles fly long legs along the great circle, which zone checks only follow with intermediate points
-            const int steps = std::max(1, std::min(static_cast<int>(std::ceil(distance / maxStepDistance)), maxStepsPerSegment));
-            for (int step = 0; step <= steps; step++) {
-                samples.append({ distance * step / steps, static_cast<double>(step) / steps, qQNaN() });
-            }
-        }
-
-        QList<GeoZone::Position> positions;
-        for (const auto &[along, fraction, terrain] : std::as_const(samples)) {
-            GeoZone::Position position;
-            if (fraction <= 0) {
-                position.coordinate = segment.from;
-            } else if (fraction >= 1) {
-                position.coordinate = segment.to;
-            } else {
-                position.coordinate = segment.from.atDistanceAndAzimuth(along, azimuth);
-            }
-            position.altitudeAMSL = segment.fromAltitudeAMSL + ((segment.toAltitudeAMSL - segment.fromAltitudeAMSL) * fraction);
-            position.terrainAMSL = terrain;
-            positions.append(position);
-        }
-
-        // Continue the previous path, keeping both ends when the altitude changes at the shared waypoint
-        if (!paths.isEmpty() && (paths.last().last().coordinate == segment.from)) {
-            GeoZone::Position &last = paths.last().last();
-            const bool sameAltitude = (last.altitudeAMSL == positions.first().altitudeAMSL) ||
-                                      (qIsNaN(last.altitudeAMSL) && qIsNaN(positions.first().altitudeAMSL));
-            if (sameAltitude) {
-                if (qIsNaN(last.terrainAMSL)) {
-                    last.terrainAMSL = positions.first().terrainAMSL;
-                }
-                positions.removeFirst();
-            }
-            paths.last().append(positions);
-        } else {
-            paths.append(positions);
-        }
-    }
-
-    // Positions without terrain samples, such as a takeoff climb before its terrain is received, take the terrain known at the same place
-    for (QList<GeoZone::Position> &path : paths) {
-        for (qsizetype i = path.count() - 2; i >= 0; i--) {
-            if (qIsNaN(path[i].terrainAMSL) && (path[i].coordinate.distanceTo(path[i + 1].coordinate) < 0.01)) {
-                path[i].terrainAMSL = path[i + 1].terrainAMSL;
-            }
-        }
-        for (qsizetype i = 1; i < path.count(); i++) {
-            if (qIsNaN(path[i].terrainAMSL) && (path[i].coordinate.distanceTo(path[i - 1].coordinate) < 0.01)) {
-                path[i].terrainAMSL = path[i - 1].terrainAMSL;
-            }
-        }
-    }
-    return paths;
 }

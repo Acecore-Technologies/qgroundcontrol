@@ -393,7 +393,7 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
         }
         return result;
     };
-    QList<QList<GeoZone::Position>> paths = GeoZoneMissionCheck::pathsFromSegments({ { a, b }, { b, c }, { QGeoCoordinate(), d }, { d, a } });
+    QList<QList<GeoZone::Position>> paths = GeoZoneMissionPath::fromSegments({ { a, b }, { b, c }, { QGeoCoordinate(), d }, { d, a } }).positionLists();
     QCOMPARE(paths.count(), 2);
     QCOMPARE(coordinates(paths[0]), QList<QGeoCoordinate>({ a, b, c }));
     QCOMPARE(paths[1].count(), 6);
@@ -404,9 +404,9 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     // Positions at the terrain samples with interpolated altitudes, and a climb at a shared waypoint is kept.
     // The climb starts at the launch position, whose coordinate has an altitude.
     const QGeoCoordinate launch(a.latitude(), a.longitude(), 300);
-    GeoZoneMissionCheck::Segment climb{ launch, a, 400, 500 };
-    GeoZoneMissionCheck::Segment leg{ a, b, 500, 600, { 300, 350, 320 }, 300 };
-    paths = GeoZoneMissionCheck::pathsFromSegments({ climb, leg });
+    GeoZoneMissionPath::Segment climb{ launch, a, 400, 500 };
+    GeoZoneMissionPath::Segment leg{ a, b, 500, 600, { 300, 350, 320 }, 300 };
+    paths = GeoZoneMissionPath::fromSegments({ climb, leg }).positionLists();
     QCOMPARE(paths.count(), 1);
     QCOMPARE(paths[0].count(), 4);
     QCOMPARE(paths[0][0].altitudeAMSL, 400.0);
@@ -419,9 +419,26 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     QVERIFY(qAbs(paths[0][2].coordinate.distanceTo(a) - 300) < 1);
     QCOMPARE(paths[0][3].coordinate, b);
     QCOMPARE(paths[0][3].terrainAMSL, 320.0);
+    // The profile samples between terrain samples
+    QVERIFY(qAbs(leg.terrainAt(150) - 325) < 1e-9);
+    const GeoZone::Position halfway = leg.positionAt(a.distanceTo(b) / 2);
+    QVERIFY(qAbs(halfway.altitudeAMSL - 550) < 1e-9);
+    QVERIFY(qAbs(halfway.coordinate.distanceTo(a) - (a.distanceTo(b) / 2)) < 0.01);
+
+    // Paths remember the mission item of their first segment
+    GeoZoneMissionPath::Segment first{ a, b };
+    first.itemIndex = 1;
+    GeoZoneMissionPath::Segment second{ b, c };
+    second.itemIndex = 2;
+    GeoZoneMissionPath::Segment third{ d, a };
+    third.itemIndex = 4;
+    const QList<GeoZoneMissionPath::Path> itemPaths = GeoZoneMissionPath::pathsFromSegments({ first, second, third });
+    QCOMPARE(itemPaths.count(), 2);
+    QCOMPARE(itemPaths[0].itemIndex, 1);
+    QCOMPARE(itemPaths[1].itemIndex, 4);
 
     // A PX4 takeoff at the launch position: a vertical segment whose terrain samples have no spacing
-    paths = GeoZoneMissionCheck::pathsFromSegments({ { launch, a, 500, 500, { 310, 310 }, 0 }, leg });
+    paths = GeoZoneMissionPath::fromSegments({ { launch, a, 500, 500, { 310, 310 }, 0 }, leg }).positionLists();
     QCOMPARE(paths.count(), 1);
     QCOMPARE(paths[0].first().terrainAMSL, 310.0);
     QVERIFY(std::none_of(paths[0].cbegin(), paths[0].cend(), [](const GeoZone::Position &position) { return qIsNaN(position.terrainAMSL); }));

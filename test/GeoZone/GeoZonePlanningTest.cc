@@ -408,25 +408,25 @@ void GeoZonePlanningTest::_testProfileBands()
     QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
 
     // West to east over flat ground at 400 m, then a pattern without a flight path, then east again without terrain
-    GeoZoneProfile::Segment west;
+    GeoZoneMissionPath::Segment west;
     west.from = center.atDistanceAndAzimuth(1000, 270);
     west.to = center;
     west.distance = 1000;
     west.terrainSpacing = 100;
     west.terrainAMSL = QList<double>(11, 400);
-    GeoZoneProfile::Segment east = west;
+    GeoZoneMissionPath::Segment east = west;
     east.from = center;
     east.to = center.atDistanceAndAzimuth(1000, 90);
-    GeoZoneProfile::Segment gap;
+    GeoZoneMissionPath::Segment gap;
     gap.distance = 250;
-    GeoZoneProfile::Segment beyond;
+    GeoZoneMissionPath::Segment beyond;
     beyond.from = center.atDistanceAndAzimuth(1000, 90);
     beyond.to = center.atDistanceAndAzimuth(1300, 90);
     beyond.distance = 300;
 
-    const QVariantList bands = GeoZoneProfile::bandsForSegments({ west, east, gap, beyond }, &manager);
+    const QVariantList bands = GeoZoneProfile::bandsForSegments({ west, east, gap, beyond }, manager.catalog());
     // Bands with unbounded limits compare equal, so recomputing unchanged bands doesn't repaint
-    QCOMPARE(GeoZoneProfile::computeBands({ west, east, gap, beyond }, &manager), GeoZoneProfile::computeBands({ west, east, gap, beyond }, &manager));
+    QCOMPARE(GeoZoneProfile::computeBands({ west, east, gap, beyond }, manager.catalog()), GeoZoneProfile::computeBands({ west, east, gap, beyond }, manager.catalog()));
     QStringList names;
     for (const QVariant &band : bands) {
         names.append(band.toMap()[QStringLiteral("name")].toString());
@@ -455,24 +455,24 @@ void GeoZonePlanningTest::_testProfileBands()
     QVERIFY(qAbs(value(afterGap.last(), "distance") - 2450) <= GeoZoneProfile::minSampleSpacing);
 
     // Limits above unknown terrain are unknown
-    const QVariantList unknownTerrain = GeoZoneProfile::bandsForSegments({ beyond }, &manager);
+    const QVariantList unknownTerrain = GeoZoneProfile::bandsForSegments({ beyond }, manager.catalog());
     QCOMPARE(unknownTerrain.count(), 1);
     beyond.from = center.atDistanceAndAzimuth(100, 270);
     beyond.to = center.atDistanceAndAzimuth(100, 90);
-    const QVariantList noTerrain = GeoZoneProfile::bandsForSegments({ beyond }, &manager);
+    const QVariantList noTerrain = GeoZoneProfile::bandsForSegments({ beyond }, manager.catalog());
     QCOMPARE(noTerrain.count(), 1);
     QVERIFY(qIsNaN(value(noTerrain[0].toMap()[QStringLiteral("points")].toList().first(), "ceiling")));
 
     // Long paths are sampled more sparsely up to their end
-    QList<GeoZoneProfile::Segment> longPath;
+    QList<GeoZoneMissionPath::Segment> longPath;
     for (int i = 0; i < 60; i++) {
-        GeoZoneProfile::Segment leg;
+        GeoZoneMissionPath::Segment leg;
         leg.from = center.atDistanceAndAzimuth(i * 3000, 90);
         leg.to = center.atDistanceAndAzimuth((i + 1) * 3000, 90);
         leg.distance = 3000;
         longPath.append(leg);
     }
-    const QVariantList longBands = GeoZoneProfile::bandsForSegments(longPath, &manager);
+    const QVariantList longBands = GeoZoneProfile::bandsForSegments(longPath, manager.catalog());
     const auto end = std::find_if(longBands.cbegin(), longBands.cend(), [](const QVariant &band) {
         return band.toMap()[QStringLiteral("name")].toString() == QStringLiteral("END");
     });

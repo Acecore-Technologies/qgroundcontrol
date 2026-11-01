@@ -17,7 +17,8 @@
 
 class GeoZone;
 
-/// Grid of zone bounding boxes to find the zones near an area without testing every zone
+/// Grid of zone bounding boxes to find the zones near an area without testing every zone. Queries don't modify the
+/// index, so they can run on several threads.
 class GeoZoneIndex
 {
 public:
@@ -61,6 +62,4 @@ private:
     QList<Box> _boxes;
     QHash<quint64, QList<int>> _cells;
     QList<int> _largeZones;
-    mutable QList<quint32> _marks;
-    mutable quint32 _stamp = 0;
 };

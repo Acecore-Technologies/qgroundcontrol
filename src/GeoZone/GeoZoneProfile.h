@@ -16,9 +16,11 @@
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
+#include "GeoZoneMissionPath.h"
 
 #include <cmath>
 
+class GeoZoneCatalog;
 class GeoZoneManager;
 class MissionController;
 
@@ -52,15 +54,6 @@ public:
     bool active() const { return _active; }
     void setActive(bool active);
 
-    /// Flight path segment between two mission items, in path order
-    struct Segment {
-        QGeoCoordinate from;
-        QGeoCoordinate to;
-        double distance = 0;        ///< Meters along the profile, which can differ slightly from the great circle
-        QList<double> terrainAMSL;  ///< Ground elevation from the start to the end at even spacing, empty when unknown
-        double terrainSpacing = 0;
-    };
-
     struct BandPoint {
         double distance = 0;
         double floor = qQNaN();
@@ -83,15 +76,15 @@ public:
     };
 
     /// @return Bands of the zones along consecutive segments, see the bands property. Segments with a zero distance
-    ///         and invalid coordinates only advance the distance.
+    ///         and invalid coordinates only advance the distance. Can run on any thread with a copy of the catalog.
     /// @param activeFrom, activeTo When valid, only zones active at some time between them
-    static QList<Band> computeBands(const QList<Segment> &segments, const GeoZoneManager *manager,
+    static QList<Band> computeBands(const QList<GeoZoneMissionPath::Segment> &segments, const GeoZoneCatalog &catalog,
                                     const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime());
     /// @return The bands in the form of the bands property
     static QVariantList toVariantList(const QList<Band> &bands);
-    static QVariantList bandsForSegments(const QList<Segment> &segments, const GeoZoneManager *manager) { return toVariantList(computeBands(segments, manager)); }
+    static QVariantList bandsForSegments(const QList<GeoZoneMissionPath::Segment> &segments, const GeoZoneCatalog &catalog) { return toVariantList(computeBands(segments, catalog)); }
 
-    /// Re-evaluates immediately instead of after changes settle
+    /// Re-evaluates immediately on this thread instead of after changes settle on another one
     Q_INVOKABLE void update();
 
 signals:
@@ -100,8 +93,9 @@ signals:
     void activeChanged();
 
 private:
-    QList<Segment> _missionSegments() const;
     void _clear();
+    void _updateConcurrently();
+    void _apply(const QList<Band> &bands);
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
@@ -109,6 +103,7 @@ private:
     QVariantList _bands;
     bool _active = true;
     QTimer _updateTimer;
+    quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones
 
     static constexpr int _updateDelayMSecs = 500;
 };

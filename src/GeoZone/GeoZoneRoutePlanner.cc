@@ -9,20 +9,19 @@
 
 #include "GeoZoneRoutePlanner.h"
 #include "FactMetaData.h"
-#include "FlightPathSegment.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneMissionPath.h"
 #include "GeoZoneTerrain.h"
 #include "MissionController.h"
-#include "QmlObjectListModel.h"
-#include "VisualMissionItem.h"
 
 #include <QtCore/QtMath>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 
 namespace {
 
@@ -295,48 +294,23 @@ void GeoZoneRoutePlanner::update()
 {
     _updateTimer.stop();
     QList<Suggestion> suggestions;
-    const QmlObjectListModel *const visualItems = _missionController ? _missionController->visualItems() : nullptr;
-
-    QList<int> coordinateItems;
-    for (int i = 0; visualItems && (i < visualItems->count()); i++) {
-        const VisualMissionItem *const item = visualItems->value<const VisualMissionItem*>(i);
-        if (item && item->specifiesCoordinate() && !item->isStandaloneCoordinate()) {
-            coordinateItems.append(i);
-        }
-    }
-
-    for (qsizetype k = 1; k < coordinateItems.count(); k++) {
-        VisualMissionItem *const fromItem = visualItems->value<VisualMissionItem*>(coordinateItems[k - 1]);
-        const VisualMissionItem *const toItem = visualItems->value<const VisualMissionItem*>(coordinateItems[k]);
-        const QGeoCoordinate from = fromItem->exitCoordinate();
-        const QGeoCoordinate to = toItem->coordinate();
-        if (!from.isValid() || !to.isValid() || (from.distanceTo(to) < 1)) {
+    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(_missionController);
+    for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
+        const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
+        const QGeoCoordinate &from = segment.from;
+        const QGeoCoordinate &to = segment.to;
+        if (!segment.isValid() || (from.distanceTo(to) < 1)) {
             continue;
         }
 
-        // Altitudes and terrain of the leg from its flight path segment
-        GeoZoneMissionCheck::Segment segment;
-        segment.from = from;
-        segment.to = to;
+        // The leg's average terrain stands in for the terrain along detours where it isn't loaded
         double legTerrain = qQNaN();
-        const FlightPathSegment *const flightPathSegment = fromItem->simpleFlightPathSegment();
-        if (flightPathSegment && (flightPathSegment->coordinate2().distanceTo(to) < 1)) {
-            segment.fromAltitudeAMSL = flightPathSegment->coord1AMSLAlt();
-            segment.toAltitudeAMSL = flightPathSegment->coord2AMSLAlt();
-            double terrainSum = 0;
-            for (const QVariant &height : flightPathSegment->amslTerrainHeights()) {
-                segment.terrainAMSL.append(height.toDouble());
-                terrainSum += height.toDouble();
-            }
-            segment.terrainSpacing = flightPathSegment->distanceBetween();
-            if (!segment.terrainAMSL.isEmpty()) {
-                legTerrain = terrainSum / segment.terrainAMSL.count();
-            }
+        if (!segment.terrainAMSL.isEmpty()) {
+            legTerrain = std::accumulate(segment.terrainAMSL.cbegin(), segment.terrainAMSL.cend(), 0.0) / segment.terrainAMSL.count();
         }
-        const QList<QList<GeoZone::Position>> legPaths = GeoZoneMissionCheck::pathsFromSegments({ segment });
         QList<GeoZone*> crossed;
-        for (const QList<GeoZone::Position> &path : legPaths) {
-            for (GeoZone *zone : _zonesOnPath(path)) {
+        for (const GeoZoneMissionPath::Path &path : GeoZoneMissionPath::pathsFromSegments({ segment })) {
+            for (GeoZone *zone : _zonesOnPath(path.positions)) {
                 if (!crossed.contains(zone)) {
                     crossed.append(zone);
                 }
@@ -346,7 +320,7 @@ void GeoZoneRoutePlanner::update()
             continue;
         }
 
-        const QString leg = tr("Leg to item %1").arg(toItem->sequenceNumber());
+        const QString leg = tr("Leg to item %1").arg(missionLeg.toSequenceNumber);
 
         // Zones which don't reach the ground can be flown under
         for (const GeoZone *zone : std::as_const(crossed)) {
@@ -376,13 +350,13 @@ void GeoZoneRoutePlanner::update()
             for (qsizetype i = 1; i < points.count(); i++) {
                 totalLength += points[i - 1].distanceTo(points[i]);
             }
-            QList<GeoZoneMissionCheck::Segment> detourSegments;
+            QList<GeoZoneMissionPath::Segment> detourSegments;
             double along = 0;
             const auto altitudeAt = [&segment, totalLength](double distance) {
                 return segment.fromAltitudeAMSL + ((segment.toAltitudeAMSL - segment.fromAltitudeAMSL) * (distance / totalLength));
             };
             for (qsizetype i = 1; i < points.count(); i++) {
-                GeoZoneMissionCheck::Segment detourSegment;
+                GeoZoneMissionPath::Segment detourSegment;
                 detourSegment.from = points[i - 1];
                 detourSegment.to = points[i];
                 detourSegment.fromAltitudeAMSL = altitudeAt(along);
@@ -391,9 +365,9 @@ void GeoZoneRoutePlanner::update()
                 detourSegments.append(detourSegment);
             }
             QList<GeoZone*> entered;
-            for (const QList<GeoZone::Position> &detourPath : GeoZoneMissionCheck::pathsFromSegments(detourSegments)) {
+            for (const GeoZoneMissionPath::Path &detourPath : GeoZoneMissionPath::pathsFromSegments(detourSegments)) {
                 // The terrain tiles give the terrain along the detour where they are loaded, the leg's is close elsewhere
-                QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain(detourPath);
+                QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain(detourPath.positions);
                 for (GeoZone::Position &position : path) {
                     if (std::isnan(position.terrainAMSL)) {
                         position.terrainAMSL = legTerrain;
@@ -427,7 +401,7 @@ void GeoZoneRoutePlanner::update()
                                                          .arg(FactMetaData::appSettingsHorizontalDistanceUnitsString());
             suggestions.append(Suggestion{ tr("%1: detour around %2, %n waypoint(s) adding %3.", nullptr, static_cast<int>(waypoints.count()))
                                                .arg(leg, names.join(QStringLiteral(", ")), addedText),
-                                           coordinateItems[k], waypoints });
+                                           missionLeg.toItemIndex, waypoints });
         } else {
             suggestions.append(Suggestion{ tr("%1: no detour around %2 was found, a waypoint is within %3 m of a zone or the zones surround it.")
                                                .arg(leg, names.join(QStringLiteral(", "))).arg(detourMargin) });
