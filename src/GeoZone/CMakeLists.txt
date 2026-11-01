@@ -28,6 +28,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneParser.h
         GeoZoneProfile.cc
         GeoZoneProfile.h
+        GeoZoneRoutePlanner.cc
+        GeoZoneRoutePlanner.h
         GeoZoneSchedule.cc
         GeoZoneSchedule.h
         GeoZoneShape.cc
@@ -61,6 +63,7 @@ qt_add_qml_module(GeoZoneModule
         GeoZoneMapVisuals.qml
         GeoZoneMissionBanner.qml
         GeoZoneProfileOverlay.qml
+        GeoZoneRouteDialog.qml
         GeoZoneSearch.qml
         GeoZoneSettingsPage.qml
         GeoZoneSourcesPanel.qml

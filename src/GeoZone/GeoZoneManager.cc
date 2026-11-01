@@ -13,6 +13,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneProfile.h"
+#include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
@@ -87,6 +88,7 @@ void GeoZoneManager::registerQmlTypes()
     (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
     (void) qmlRegisterType<GeoZoneFenceImporter>("QGroundControl.GeoZone", 1, 0, "GeoZoneFenceImporter");
     (void) qmlRegisterType<GeoZoneProfile>("QGroundControl.GeoZone", 1, 0, "GeoZoneProfile");
+    (void) qmlRegisterType<GeoZoneRoutePlanner>("QGroundControl.GeoZone", 1, 0, "GeoZoneRoutePlanner");
 }
 
 void GeoZoneManager::init()

@@ -21,6 +21,7 @@
 #include "GeoZoneMonitor.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneProfile.h"
+#include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
@@ -31,6 +32,7 @@
 #include "QmlObjectListModel.h"
 #include "QGCMapPolygon.h"
 #include "SettingsManager.h"
+#include "SimpleMissionItem.h"
 #include "SurveyComplexItem.h"
 #include "UnitsSettings.h"
 #include "Vehicle.h"
@@ -1553,6 +1555,82 @@ void GeoZoneTest::_testMissionCheck()
     // Zones are released before the manager deletes them
     manager.clear();
     QVERIFY(check.crossedZones().isEmpty());
+}
+
+void GeoZoneTest::_testRoutePlanner()
+{
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(2000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(2000, 90);
+    QJsonObject raised = _circleFeature(QStringLiteral("R"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1200, 90), 200);
+    QJsonArray geometry = raised[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = 30;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
+    geometry[0] = layer;
+    raised[QStringLiteral("geometry")] = geometry;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), raised }), errorString), qPrintable(errorString));
+    const GeoZone *const prohibited = manager.searchZones(QStringLiteral("P")).isEmpty() ? nullptr : qobject_cast<const GeoZone*>(manager.searchZones(QStringLiteral("P")).first());
+    QVERIFY(prohibited && (prohibited->identifier() == QStringLiteral("P")));
+
+    // Around the zone, keeping the margin
+    const std::optional<QList<QGeoCoordinate>> detour = GeoZoneRoutePlanner::detourAround(west, east, { prohibited });
+    QVERIFY(detour && !detour->isEmpty());
+    QList<QGeoCoordinate> path = { west };
+    path.append(*detour);
+    path.append(east);
+    QVERIFY(!prohibited->intersectsPath(path));
+    for (qsizetype i = 1; i < path.count(); i++) {
+        for (int step = 0; step <= 10; step++) {
+            const QGeoCoordinate point = path[i - 1].atDistanceAndAzimuth(path[i - 1].distanceTo(path[i]) * step / 10, path[i - 1].azimuthTo(path[i]));
+            QVERIFY2(prohibited->distanceTo(point) > (GeoZoneRoutePlanner::detourMargin / 2), qPrintable(QString::number(prohibited->distanceTo(point))));
+        }
+    }
+    // Not needed, or impossible from inside
+    QVERIFY(GeoZoneRoutePlanner::detourAround(west, center.atDistanceAndAzimuth(2000, 0), { prohibited })->isEmpty());
+    QVERIFY(!GeoZoneRoutePlanner::detourAround(center.atDistanceAndAzimuth(350, 0), east, { prohibited }));
+
+    // Suggestions for a mission through both zones at 50 m
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    for (const QGeoCoordinate &coordinate : { west, east }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->altitude()->setRawValue(50);
+    }
+    GeoZoneRoutePlanner planner(&manager);
+    planner.setMissionController(missionController);
+    planner.update();
+    QStringList texts;
+    int detourIndex = -1;
+    for (int i = 0; i < planner.suggestions().count(); i++) {
+        const QVariantMap suggestion = planner.suggestions()[i].toMap();
+        texts.append(suggestion[QStringLiteral("text")].toString());
+        if (suggestion[QStringLiteral("canApply")].toBool()) {
+            detourIndex = i;
+        }
+    }
+    QVERIFY2(texts.filter(QStringLiteral("fly below the floor of R")).count() == 1, qPrintable(texts.join(QStringLiteral(" | "))));
+    QVERIFY2(detourIndex >= 0, qPrintable(texts.join(QStringLiteral(" | "))));
+    QVERIFY(texts[detourIndex].contains(QStringLiteral("detour around P, R")));
+
+    // Inserting the detour leaves the zones
+    const int itemCount = missionController->visualItems()->count();
+    QVERIFY(planner.applySuggestion(detourIndex));
+    QVERIFY(missionController->visualItems()->count() > itemCount);
+    GeoZoneMissionCheck check(&manager);
+    check.setMissionController(missionController);
+    QTRY_VERIFY_WITH_TIMEOUT(check.crossedZones().isEmpty(), 5000);
+    QTRY_VERIFY(planner.suggestions().isEmpty());
+    QVERIFY(!planner.applySuggestion(0));
 }
 
 void GeoZoneTest::_testMonitorAlerts()

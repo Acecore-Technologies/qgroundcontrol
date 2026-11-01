@@ -75,6 +75,12 @@ Rectangle {
         geoFenceController: control.geoFenceController
     }
 
+    Component {
+        id: routeDialogComponent
+
+        GeoZoneRouteDialog { }
+    }
+
     GeoZoneFenceImporter {
         id:                 fenceImporter
         geoFenceController: control.geoFenceController
@@ -143,6 +149,13 @@ Rectangle {
             text:                       qsTr("Add Exclusion Fences")
             visible:                    fenceLabel.visible
             onClicked:                  fenceImporter.addZones(check.unfencedZones)
+        }
+
+        QGCButton {
+            anchors.horizontalCenter:   parent.horizontalCenter
+            text:                       qsTr("Route Around Zones...")
+            visible:                    check.warningText !== ""
+            onClicked:                  routeDialogComponent.createObject(mainWindow, { missionController: control.missionController }).open()
         }
 
         QGCLabel {
