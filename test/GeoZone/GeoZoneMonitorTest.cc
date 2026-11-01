@@ -1196,3 +1196,113 @@ void GeoZoneMonitorTest::_testAlertActions()
     monitor.removeVehicle(&vehicle);
     QVERIFY(monitor.alertActions(entryId).isEmpty());
 }
+
+void GeoZoneMonitorTest::_testTraffic()
+{
+    // No terrain data, a prohibited zone at any height and one up to 120 m above the ground
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate lowCenter = center.atDistanceAndAzimuth(3000, 270);
+    QJsonObject low = _circleFeature(QStringLiteral("LOW"), QStringLiteral("REQ_AUTHORISATION"), lowCenter, 300);
+    QJsonArray geometry = low[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = 0;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
+    layer[QStringLiteral("upperLimit")] = 120;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AGL");
+    geometry[0] = layer;
+    low[QStringLiteral("geometry")] = geometry;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), low,
+    }), errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    GeoZoneMonitor::Settings settings;
+    settings.limits.distance = 100;
+    settings.limits.verticalDistance = 30;
+    settings.traffic.enabled = true;
+    monitor.setSettings(settings);
+    GeoZoneTrafficMonitor *const traffic = monitor.traffic();
+    QVERIFY(traffic->enabled());
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+
+    const auto aircraft = [](quint32 address, const QString &callsign, const QGeoCoordinate &coordinate, double altitude) {
+        GeoZoneTrafficMonitor::Aircraft plane;
+        plane.address = address;
+        plane.callsign = callsign;
+        plane.coordinate = QGeoCoordinate(coordinate.latitude(), coordinate.longitude(), altitude);
+        return plane;
+    };
+    const GeoZoneTrafficMonitor::Aircraft inP = aircraft(0x4B1234, QStringLiteral("SWR123 ") + QChar(0), center.atDistanceAndAzimuth(100, 90), 600);
+    const GeoZoneTrafficMonitor::Aircraft nearP = aircraft(0x4B5678, QString(), center.atDistanceAndAzimuth(360, 90), 700);
+    const GeoZoneTrafficMonitor::Aircraft far = aircraft(0x4B9999, QStringLiteral("FAR"), center.atDistanceAndAzimuth(20000, 0), 600);
+
+    // Traffic is checked around the active vehicle, here 5 km north of the prohibited zone, within the radius
+    monitor.evaluateTraffic({ inP });
+    QCOMPARE(traffic->count(), 0);
+    monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0), 500, 400 });
+    QCOMPARE(alertSpy.count(), 0);
+    QSignalSpy trafficSpy(traffic, &GeoZoneTrafficMonitor::aircraftChanged);
+    monitor.evaluateTraffic({ far, nearP, inP });
+    QCOMPARE(trafficSpy.count(), 1);
+    QCOMPARE(traffic->count(), 2);
+    const QVariantList listed = traffic->aircraft();
+    QCOMPARE(listed[0].toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("SWR123"));
+    QVERIFY(listed[0].toMap().value(QStringLiteral("inside")).toBool());
+    QCOMPARE(listed[0].toMap().value(QStringLiteral("altitude")).toDouble(), 600.0);
+    QCOMPARE(GeoZoneInfo::fromVariant(listed[0].toMap().value(QStringLiteral("zone")))->identifier(), QStringLiteral("P"));
+    QCOMPARE(listed[1].toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("4B5678"));
+    QVERIFY(!listed[1].toMap().value(QStringLiteral("inside")).toBool());
+    QCOMPARE(listed[1].toMap().value(QStringLiteral("distance")).toInt(), 60);
+
+    // The aircraft entering the zone is shown, less urgent than the vehicles, but not spoken by default
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Traffic SWR123 entered geozone P (Prohibited)"));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneMonitor::trafficSeverity + GeoZone::restrictionSeverity(GeoZone::Prohibited));
+    QVERIFY(sink->spoken.isEmpty());
+    const GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Traffic);
+    QCOMPARE(event.traffic, QStringLiteral("SWR123"));
+    QCOMPARE(event.vehicleId, GeoZoneMonitor::noVehicle);
+    QVERIFY(monitor.alertActions(event.id).isEmpty());
+    const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(GeoZoneAlertLog::line(event));
+    QVERIFY(read && (read->kind == GeoZoneMonitor::AlertEvent::Traffic));
+    QCOMPARE(read->traffic, QStringLiteral("SWR123"));
+    QCOMPARE(read->message, event.message);
+
+    // Once per entry, and aircraft gone are forgotten
+    monitor.evaluateTraffic({ inP });
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(traffic->count(), 1);
+
+    // Spoken when asked, an aircraft coming back enters again
+    settings.traffic.alerts = GeoZoneTrafficMonitor::SpeakAlerts;
+    monitor.setSettings(settings);
+    monitor.evaluateTraffic({ inP, aircraft(0x4B5678, QString(), center, 700) });
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(sink->spoken, QStringList{ QStringLiteral("Traffic 4B5678 entered geozone P (Prohibited)") });
+
+    // Without terrain data below an aircraft, the ground below the vehicle is used for limits above the ground
+    settings.traffic.alerts = GeoZoneTrafficMonitor::NoAlerts;
+    monitor.setSettings(settings);
+    monitor.evaluateTraffic({ aircraft(1, QStringLiteral("HIGH"), lowCenter, 600), aircraft(2, QStringLiteral("LOW"), lowCenter, 450) });
+    QCOMPARE(traffic->count(), 1);
+    QCOMPARE(traffic->aircraft().first().toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("LOW"));
+    QCOMPARE(alertSpy.count(), 2);
+
+    // Turned off, the traffic is forgotten
+    settings.traffic.enabled = false;
+    monitor.setSettings(settings);
+    QVERIFY(!traffic->enabled());
+    QCOMPARE(traffic->count(), 0);
+    monitor.evaluateTraffic({ inP });
+    QCOMPARE(traffic->count(), 0);
+}

@@ -43,6 +43,8 @@ QString eventText(GeoZoneMonitor::AlertEvent::Kind kind)
         return QStringLiteral("entered");
     case GeoZoneMonitor::AlertEvent::PositionLost:
         return QStringLiteral("position_lost");
+    case GeoZoneMonitor::AlertEvent::Traffic:
+        return QStringLiteral("traffic_entered");
     case GeoZoneMonitor::AlertEvent::Approach:
         break;
     }
@@ -67,7 +69,7 @@ QString GeoZoneAlertLog::filePath(const QDate &date) const
 
 QString GeoZoneAlertLog::header()
 {
-    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s");
+    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic");
 }
 
 QString GeoZoneAlertLog::line(const GeoZoneMonitor::AlertEvent &event)
@@ -87,6 +89,7 @@ QString GeoZoneAlertLog::line(const GeoZoneMonitor::AlertEvent &event)
         QString::fromLatin1(restrictions.valueToKey(event.restriction)),
         csvField(event.sourceText),
         number(event.timeToEntry, 0),
+        csvField(event.traffic),
     }.join(QLatin1Char(','));
 }
 

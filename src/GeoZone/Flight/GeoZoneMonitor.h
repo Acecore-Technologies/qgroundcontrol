@@ -26,6 +26,7 @@
 #include "GeoZoneAlertArbiter.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneTrafficMonitor.h"
 #include "GeoZoneVehicleMonitor.h"
 
 #include <functional>
@@ -52,6 +53,8 @@ class Vehicle;
 /// vertical bands, predicted entry and fence status of the active vehicle with a GeoZoneActiveVehicleView, shows and
 /// logs the alerts of all vehicles, and lets a GeoZoneAlertArbiter decide which are announced and repeated. The
 /// announcements are spoken when spoken alerts are on. Alerts and the approach distances are set in GeoZoneSettings.
+/// The ADS-B and Remote ID traffic around the active vehicle is checked against the zones too, see
+/// GeoZoneTrafficMonitor.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -63,6 +66,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< Alerts are neither spoken nor repeated, see muteAlerts()
     Q_PROPERTY(int              defaultMuteSecs     READ defaultMuteSecs    CONSTANT FINAL)
     Q_PROPERTY(QStringList      mutedZoneKeys       READ mutedZoneKeys      NOTIFY zoneMutesChanged FINAL)   ///< Zones muted for the active vehicle until it leaves them, see muteZone()
+    Q_PROPERTY(GeoZoneTrafficMonitor *traffic       READ traffic            CONSTANT FINAL)                      ///< Traffic in or near zones
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
@@ -79,6 +83,7 @@ public:
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
     static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see alertActions()
     static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
+    static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
 
     /// An alert of a vehicle about a zone
     struct AlertEvent {
@@ -86,6 +91,7 @@ public:
             Approach,               ///< The vehicle came near the zone
             Entry,                  ///< The vehicle entered the zone
             PositionLost,           ///< The vehicle lost its position near or inside the zone
+            Traffic,                ///< An aircraft of the traffic entered the zone
         };
 
         int id = 0;                 ///< Unique for the session, 0 for alerts read from a log
@@ -102,6 +108,7 @@ public:
         QString message;            ///< As shown to the user
         QString zoneKey;            ///< See GeoZone::key, empty for alerts read from a log
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
+        QString traffic;            ///< Callsign or ICAO address of the aircraft of a Traffic alert
     };
 
     /// Speaks the announcements of the alerts, like AudioOutput
@@ -117,6 +124,7 @@ public:
         bool alertsEnabled = true;
         bool audioAlerts = true;
         GeoZoneAlertTracker::Limits limits;
+        GeoZoneTrafficMonitor::Settings traffic;
 
         /// @return The settings of GeoZoneSettings::instance()
         static Settings fromApplication();
@@ -159,6 +167,10 @@ public:
     /// it is alerted once that its position is lost near or inside the most restrictive zone around its last position,
     /// and its breaches aren't repeated meanwhile
     void positionLost(int vehicleId);
+    /// Checks the aircraft against the zones around the active vehicle, like the monitor does with the traffic of
+    /// ADSBVehicleManager every GeoZoneTrafficMonitor::evaluateIntervalMSecs, and raises the alerts of those entering
+    /// a zone as the traffic settings ask
+    void evaluateTraffic(const QList<GeoZoneTrafficMonitor::Aircraft> &aircraft);
     /// Publishes the positions passed to evaluate() for the vehicle id, noVehicle by default
     void setActiveVehicleId(int vehicleId);
     int activeVehicleId() const { return _activeVehicleId; }
@@ -200,6 +212,7 @@ public:
 
     GeoZoneManager *manager() const { return _manager; }
     GeoZoneActiveVehicleView *activeView() const { return _activeView; }
+    GeoZoneTrafficMonitor *traffic() const { return _traffic; }
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
     /// Log of the alerts of vehicles, null for monitors constructed with a manager
     GeoZoneAlertLog *alertLog() const { return _alertLog; }
@@ -213,7 +226,7 @@ public:
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
     /// several vehicles are monitored. The alerts of an evaluation are emitted most severe first.
-    /// @param severity GeoZone::restrictionSeverity of the zone
+    /// @param severity GeoZone::restrictionSeverity of the zone, plus trafficSeverity for traffic
     /// @param alertId See AlertEvent::id and acknowledgeAlert()
     void alert(const QString &message, int severity, int alertId);
     /// An unacknowledged entry into a prohibited zone was announced again, the vehicle is still inside. Also when the
@@ -228,6 +241,8 @@ signals:
 
 private slots:
     void _updateEvaluateTimer();
+    void _updateTrafficTimer();
+    void _evaluateADSBTraffic();
     void _forgetZones(GeoZoneSource *source);
     void _zonesChanged(GeoZoneSource *source);
     void _applicationSettingsChanged();
@@ -252,7 +267,9 @@ private:
     void _settingsChanged(const Settings &previous);
     void _resetMonitors();
 
-    AlertEvent _alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId);
+    AlertEvent _alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId, const QString &traffic = QString());
+    /// Shows, logs and possibly speaks that an aircraft entered a zone
+    void _raiseTraffic(const GeoZoneTrafficMonitor::Entry &entry);
     /// @return Meters to climb above the zone by climbClearance, NaN when it has no known ceiling at the vehicle
     static double _climbHeight(const GeoZoneVehicleMonitor *monitor, const GeoZone *zone);
     GeoZoneVehicleMonitor *_monitorByKey(int key) const;
@@ -274,8 +291,10 @@ private:
     };
     QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
     QTimer _evaluateTimer;
+    QTimer _trafficTimer;                       ///< Checks the ADS-B traffic, in the application
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty
+    bool _adsbTraffic = false;                  ///< Checks the traffic of ADSBVehicleManager
     GeoZoneAlertArbiter _arbiter;
     std::shared_ptr<AudioSink> _audioSink;
     QTimer _muteTimer;                          ///< Notifies the end of the mute
@@ -285,6 +304,7 @@ private:
     mutable std::optional<GeoZonePolicy> _policy;   ///< Until the zones change
     GeoZoneAlertLog *_alertLog = nullptr;
     GeoZoneActiveVehicleView *_activeView = nullptr;   ///< Of _activeVehicle, or of the positions of _activeVehicleId without
+    GeoZoneTrafficMonitor *_traffic = nullptr;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;
     GeoZoneAlertHistory *_alertHistory = nullptr;
 };

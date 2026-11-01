@@ -69,6 +69,33 @@
     "default":      30
 },
 {
+    "name":         "trafficEnabled",
+    "shortDesc":    "Check traffic against geozones",
+    "longDesc":     "List the ADS-B and Remote ID aircraft received by QGroundControl near the active vehicle which are in or near active geozones.",
+    "type":         "bool",
+    "default":      false
+},
+{
+    "name":         "trafficRadius",
+    "shortDesc":    "Traffic check radius",
+    "longDesc":     "Distance from the active vehicle within which traffic is checked against geozones.",
+    "type":         "double",
+    "units":        "m",
+    "min":          500,
+    "max":          100000,
+    "decimalPlaces": 0,
+    "default":      10000
+},
+{
+    "name":         "trafficAlerts",
+    "shortDesc":    "Traffic alerts",
+    "longDesc":     "What happens when an aircraft of the traffic enters a geozone. Its alerts are less urgent than those of the vehicles.",
+    "type":         "uint32",
+    "enumStrings":  "Off,Shown,Shown and spoken",
+    "enumValues":   "0,1,2",
+    "default":      1
+},
+{
     "name":         "qnhHPa",
     "shortDesc":    "QNH",
     "longDesc":     "Local sea level pressure (altimeter setting) used to convert geozone limits published as flight levels to approximate heights above mean sea level. 1013.25 hPa is the standard pressure of flight levels.",

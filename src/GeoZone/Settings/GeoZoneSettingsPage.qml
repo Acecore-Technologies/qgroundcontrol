@@ -108,6 +108,36 @@ SettingsPage {
 
     SettingsGroupLayout {
         Layout.fillWidth:   true
+        heading:            qsTr("Traffic")
+        headingDescription: _geoZoneSettings.trafficEnabled.longDescription
+
+        FactCheckBoxSlider {
+            Layout.fillWidth:   true
+            text:               fact.shortDescription
+            fact:               _geoZoneSettings.trafficEnabled
+            visible:            fact.visible
+        }
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.trafficRadius
+            visible:            fact.visible
+            enabled:            _geoZoneSettings.trafficEnabled.rawValue
+        }
+
+        LabelledFactComboBox {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.trafficAlerts
+            indexModel:         false
+            visible:            fact.visible
+            enabled:            _geoZoneSettings.trafficEnabled.rawValue && _geoZoneSettings.alertsEnabled.rawValue
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:   true
         heading:            qsTr("Altitude Limits")
         headingDescription: _geoZoneSettings.qnhHPa.longDescription
 

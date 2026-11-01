@@ -28,6 +28,7 @@
 #include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneTrafficMonitor.h"
 #include "QGCApplication.h"
 #include "QGCFileDownload.h"
 #include "QGCLoggingCategory.h"
@@ -102,6 +103,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneFenceUpload>(kUri, 1, 0, "GeoZoneFenceUpload", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneActiveVehicleView>(kUri, 1, 0, "GeoZoneActiveVehicleView", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneTrafficMonitor>(kUri, 1, 0, "GeoZoneTrafficMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneSettings>(kUri, 1, 0, "GeoZoneSettings", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>(kUri, 1, 0, "GeoZoneMapModel");

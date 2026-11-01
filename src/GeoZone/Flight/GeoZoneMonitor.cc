@@ -8,6 +8,8 @@
  ****************************************************************************/
 
 #include "GeoZoneMonitor.h"
+#include "ADSBVehicle.h"
+#include "ADSBVehicleManager.h"
 #include "AudioOutput.h"
 #include "GeoZone.h"
 #include "GeoZoneActiveVehicleView.h"
@@ -58,6 +60,14 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::evaluateVehicles);
     (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateEvaluateTimer);
 
+    // The traffic is checked less often than the vehicles, it changes slower relative to the zones
+    _adsbTraffic = true;
+    _trafficTimer.setInterval(GeoZoneTrafficMonitor::evaluateIntervalMSecs);
+    (void) connect(&_trafficTimer, &QTimer::timeout, this, &GeoZoneMonitor::_evaluateADSBTraffic);
+    (void) connect(_traffic, &GeoZoneTrafficMonitor::enabledChanged, this, &GeoZoneMonitor::_updateTrafficTimer);
+    (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateTrafficTimer);
+    _updateTrafficTimer();
+
     MultiVehicleManager *const multiVehicleManager = MultiVehicleManager::instance();
     (void) connect(multiVehicleManager, &MultiVehicleManager::vehicleAdded, this, &GeoZoneMonitor::addVehicle);
     (void) connect(multiVehicleManager, &MultiVehicleManager::vehicleRemoved, this, &GeoZoneMonitor::removeVehicle);
@@ -72,6 +82,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
     , _activeView(new GeoZoneActiveVehicleView(this))
+    , _traffic(new GeoZoneTrafficMonitor(this))
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
 {
@@ -93,9 +104,11 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachDistance(),
-                              settings->approachVerticalDistance(), settings->approachTime() }) {
+                              settings->approachVerticalDistance(), settings->approachTime(), settings->trafficEnabled(),
+                              settings->trafficRadius(), settings->trafficAlerts() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMonitor::_applicationSettingsChanged);
     }
+    _traffic->setEnabled(this->settings().traffic.enabled);
 }
 
 GeoZoneMonitor *GeoZoneMonitor::instance()
@@ -112,6 +125,9 @@ GeoZoneMonitor::Settings GeoZoneMonitor::Settings::fromApplication()
     result.limits.distance = settings->approachDistance()->rawValue().toDouble();
     result.limits.verticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
     result.limits.time = settings->approachTime()->rawValue().toDouble();
+    result.traffic.enabled = settings->trafficEnabled()->rawValue().toBool();
+    result.traffic.radius = settings->trafficRadius()->rawValue().toDouble();
+    result.traffic.alerts = static_cast<GeoZoneTrafficMonitor::AlertMode>(settings->trafficAlerts()->rawValue().toInt());
     return result;
 }
 
@@ -149,6 +165,7 @@ void GeoZoneMonitor::_settingsChanged(const Settings &previous)
         _resetMonitors();
         emit monitoringChanged();
     }
+    _traffic->setEnabled(settings().traffic.enabled);
 }
 
 void GeoZoneMonitor::_resetMonitors()
@@ -268,6 +285,76 @@ void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
 void GeoZoneMonitor::_resolveActive()
 {
     _activeView->setMonitor(_activeVehicle ? vehicleMonitor(_activeVehicle) : positionMonitor(_activeVehicleId));
+}
+
+void GeoZoneMonitor::_updateTrafficTimer()
+{
+    if (_adsbTraffic && _traffic->enabled() && (_manager->zoneCount() > 0)) {
+        if (!_trafficTimer.isActive()) {
+            _trafficTimer.start();
+        }
+    } else {
+        _trafficTimer.stop();
+        _traffic->clear();
+    }
+}
+
+void GeoZoneMonitor::_evaluateADSBTraffic()
+{
+    const QmlObjectListModel *const adsbVehicles = ADSBVehicleManager::instance()->adsbVehicles();
+    QList<GeoZoneTrafficMonitor::Aircraft> aircraft;
+    aircraft.reserve(adsbVehicles->count());
+    for (int i = 0; i < adsbVehicles->count(); i++) {
+        const ADSBVehicle *const adsbVehicle = adsbVehicles->value<const ADSBVehicle*>(i);
+        if (!adsbVehicle) {
+            continue;
+        }
+        GeoZoneTrafficMonitor::Aircraft plane;
+        plane.address = adsbVehicle->icaoAddress();
+        plane.callsign = adsbVehicle->callsign();
+        plane.coordinate = adsbVehicle->coordinate();
+        plane.heading = adsbVehicle->heading();
+        plane.speed = adsbVehicle->velocity();
+        plane.verticalSpeed = adsbVehicle->verticalVel();
+        aircraft.append(plane);
+    }
+    evaluateTraffic(aircraft);
+}
+
+void GeoZoneMonitor::evaluateTraffic(const QList<GeoZoneTrafficMonitor::Aircraft> &aircraft)
+{
+    // The traffic around the active vehicle, where it is now
+    const GeoZoneVehicleMonitor *const active = _activeView->monitor();
+    if (!active || active->positionUnavailable() || !active->position().coordinate.isValid()) {
+        _traffic->clear();
+        return;
+    }
+    const QList<GeoZoneTrafficMonitor::Entry> entries = _traffic->evaluate(aircraft, active->position(), settings().traffic.radius, _context());
+    if (entries.isEmpty() || !settings().alertsEnabled || (settings().traffic.alerts == GeoZoneTrafficMonitor::NoAlerts)) {
+        return;
+    }
+    for (const GeoZoneTrafficMonitor::Entry &entry : entries) {
+        _raiseTraffic(entry);
+    }
+    _announce();
+}
+
+void GeoZoneMonitor::_raiseTraffic(const GeoZoneTrafficMonitor::Entry &entry)
+{
+    const AlertEvent event = _alertEvent(entry.zone, AlertEvent::Traffic, true, 0, qQNaN(), entry.position, noVehicle, entry.aircraft.label());
+    const int severity = trafficSeverity + GeoZone::restrictionSeverity(event.restriction);
+    emit alertEvent(event);
+    emit alert(event.message, severity, event.id);
+    if (settings().traffic.alerts == GeoZoneTrafficMonitor::SpeakAlerts) {
+        // Not about a vehicle, so never a breach nor muted with a zone
+        GeoZoneAlertArbiter::Alert announced;
+        announced.id = event.id;
+        announced.zoneKey = event.zoneKey;
+        announced.severity = severity;
+        announced.inside = true;
+        announced.message = event.message;
+        _arbiter.submit(announced);
+    }
 }
 
 void GeoZoneMonitor::_updateEvaluateTimer()
@@ -530,6 +617,7 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
     for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
         monitor->forgetZones(source->key());
     }
+    _traffic->forgetZones(source->key());
 }
 
 void GeoZoneMonitor::_zonesChanged(GeoZoneSource *source)
@@ -563,6 +651,8 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
     case AlertEvent::PositionLost:
         return event.inside ? tr("Position lost inside geozone %1 (%2)").arg(zoneName, restrictionText) :
                               tr("Position lost near geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::Traffic:
+        return tr("Traffic %1 entered geozone %2 (%3)").arg(event.traffic, zoneName, restrictionText);
     case AlertEvent::Approach:
         break;
     }
@@ -572,7 +662,7 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
     return tr("Approaching geozone %1 (%2)").arg(zoneName, restrictionText);
 }
 
-GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId)
+GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId, const QString &traffic)
 {
     AlertEvent event;
     event.id = _nextAlertId++;
@@ -588,6 +678,7 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZone *zone, Aler
     event.sourceText = zone->sourceText();
     event.zoneKey = zone->key();
     event.timeToEntry = timeToEntry;
+    event.traffic = traffic;
     event.message = _labelled(vehicleId, alertMessage(event, zone->displayName(), zone->restrictionText()));
     qCDebug(GeoZoneMonitorLog) << event.message << "distance" << distance << "time to entry" << timeToEntry;
     return event;

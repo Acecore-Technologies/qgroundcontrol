@@ -20,7 +20,8 @@ import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
 /// Shows whether the active vehicle is in or near restricted geozones, with the map legend and geozone options. A badge
-/// marks the nearby zones stale while the vehicle's position is lost.
+/// marks the nearby zones stale while the vehicle's position is lost. The ADS-B and Remote ID traffic in or near zones
+/// is listed when it is checked.
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
@@ -31,6 +32,7 @@ Item {
 
     readonly property var _monitor:         GeoZoneMonitor
     readonly property var _active:          GeoZoneMonitor.activeVehicle
+    readonly property var _traffic:         GeoZoneMonitor.traffic
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
@@ -43,6 +45,11 @@ Item {
     function _distanceText(meters) {
         return Math.round(QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)) + " " +
                 QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
+    }
+
+    function _altitudeText(meters) {
+        return isNaN(meters) ? "" : qsTr("%1 %2 AMSL").arg(Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(meters)))
+                                                     .arg(QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsString)
     }
 
     QGCPalette { id: qgcPal }
@@ -237,6 +244,57 @@ Item {
                     }
 
                     SettingsGroupLayout {
+                        heading:            qsTr("Traffic in or near Geozones")
+                        headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(control._distanceText(control._geoZoneSettings.trafficRadius.rawValue))
+                        visible:            control._traffic.enabled
+
+                        QGCLabel {
+                            text:       qsTr("No traffic in or near zones")
+                            visible:    control._traffic.count === 0
+                        }
+
+                        Repeater {
+                            model: control._traffic.aircraft
+
+                            RowLayout {
+                                id:         trafficRow
+                                spacing:    ScreenTools.defaultFontPixelWidth
+
+                                required property var modelData
+
+                                Rectangle {
+                                    Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
+                                    Layout.preferredHeight: Layout.preferredWidth
+                                    radius:                 width / 2
+                                    color:                  control._restrictionColor(trafficRow.modelData.zone.restriction)
+                                }
+
+                                QGCLabel {
+                                    text:           trafficRow.modelData.callsign
+                                    textFormat:     Text.PlainText
+                                    font.bold:      true
+                                }
+
+                                QGCLabel {
+                                    Layout.fillWidth:   true
+                                    text:               trafficRow.modelData.zone.displayName
+                                    textFormat:         Text.PlainText
+                                    elide:              Text.ElideRight
+                                }
+
+                                QGCLabel {
+                                    text: trafficRow.modelData.inside ? qsTr("Inside") : control._distanceText(trafficRow.modelData.distance)
+                                }
+
+                                QGCLabel {
+                                    text:           control._altitudeText(trafficRow.modelData.altitude)
+                                    font.pointSize: ScreenTools.smallFontPointSize
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsGroupLayout {
                         heading:            qsTr("Recent Alerts")
                         headingDescription: qsTr("Alerts of this session and earlier today, newest first. Show puts the zone and the vehicle position on the map.")
                         visible:            control._history.count > 0
@@ -384,6 +442,30 @@ Item {
                             fact:               control._geoZoneSettings.approachTime
                             visible:            fact.visible
                             enabled:            control._alertsEnabled
+                        }
+
+                        FactCheckBoxSlider {
+                            Layout.fillWidth:   true
+                            text:               fact.shortDescription
+                            fact:               control._geoZoneSettings.trafficEnabled
+                            visible:            fact.visible
+                        }
+
+                        LabelledFactTextField {
+                            Layout.fillWidth:   true
+                            label:              fact.shortDescription
+                            fact:               control._geoZoneSettings.trafficRadius
+                            visible:            fact.visible
+                            enabled:            control._traffic.enabled
+                        }
+
+                        LabelledFactComboBox {
+                            Layout.fillWidth:   true
+                            label:              fact.shortDescription
+                            fact:               control._geoZoneSettings.trafficAlerts
+                            indexModel:         false
+                            visible:            fact.visible
+                            enabled:            control._traffic.enabled && control._alertsEnabled
                         }
                     }
 

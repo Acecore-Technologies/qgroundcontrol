@@ -187,6 +187,8 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
         event.kind = GeoZoneMonitor::AlertEvent::Entry;
     } else if (fields[6] == QStringLiteral("position_lost")) {
         event.kind = GeoZoneMonitor::AlertEvent::PositionLost;
+    } else if (fields[6] == QStringLiteral("traffic_entered")) {
+        event.kind = GeoZoneMonitor::AlertEvent::Traffic;
     } else if (fields[6] != QStringLiteral("approaching")) {
         return std::nullopt;
     }
@@ -200,7 +202,8 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.position.altitudeAMSL = number(fields[4]);
     event.position.terrainAMSL = number(fields[5]);
     event.distance = number(fields[7]);
-    event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
+    event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || (event.kind == GeoZoneMonitor::AlertEvent::Traffic) ||
+                   ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
     event.zoneIdentifier = fields[8];
     event.zoneName = fields[9];
     bool restrictionOk = false;
@@ -208,6 +211,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.restriction = restrictionOk ? static_cast<GeoZone::Restriction>(restriction) : GeoZone::Unknown;
     event.sourceText = fields[11];
     event.timeToEntry = (fields.count() > 12) ? number(fields[12]) : qQNaN();
+    event.traffic = (fields.count() > 13) ? fields[13] : QString();
 
     // The messages of the monitor
     const QString name = event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName;
