@@ -622,6 +622,32 @@ void GeoZoneMissionCheck::acknowledgeAudit()
     }
 }
 
+QStringList GeoZoneMissionCheck::uploadReasons() const
+{
+    QStringList reasons;
+    // Authorised zones aren't crossed zones
+    QList<const GeoZone*> prohibited = _crossedZones;
+    (void) prohibited.removeIf([](const GeoZone *zone) { return zone->restriction() != GeoZone::Prohibited; });
+    if (!prohibited.isEmpty()) {
+        QString reason = tr("The mission path enters prohibited geozones: %1.").arg(GeoZonePathEvaluator::zoneNames(prohibited, maxListedZones, false));
+        const auto unfenced = std::count_if(prohibited.cbegin(), prohibited.cend(), [this](const GeoZone *zone) { return _unfencedZones.contains(zone); });
+        if (unfenced > 0) {
+            reason += QStringLiteral(" ") + tr("The GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.",
+                                               nullptr, static_cast<int>(unfenced));
+        }
+        reasons.append(reason);
+    }
+    if (!_auditText.isEmpty()) {
+        QStringList lines = { _auditText };
+        lines.append(_auditDetails.first((std::min)(_auditDetails.count(), static_cast<qsizetype>(maxListedChanges))));
+        if (_auditDetails.count() > maxListedChanges) {
+            lines.append(tr("%n more change(s).", nullptr, static_cast<int>(_auditDetails.count() - maxListedChanges)));
+        }
+        reasons.append(lines.join(QStringLiteral("\n")));
+    }
+    return reasons;
+}
+
 void GeoZoneMissionCheck::_updateAudit()
 {
     QString text;

@@ -46,25 +46,19 @@ Rectangle {
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth
     readonly property real _availableWidth: Math.max(rightLimit - leftLimit, ScreenTools.defaultFontPixelWidth * 20)
 
-    /// Asks for confirmation before uploading a mission which enters prohibited zones, then calls uploadFunction
+    /// Asks for confirmation before uploading a mission which enters prohibited zones without authorisation, or whose
+    /// geozone data changed since the plan was saved, listing why, then calls uploadFunction unless cancelled
     function confirmUpload(uploadFunction) {
         // The banner updates after changes settle, so check the current plan
         check.update()
-        var prohibitedZones = check.crossedZones.filter(zone => zone.restriction === GeoZone.Prohibited)
-        if (prohibitedZones.length === 0) {
+        const reasons = check.uploadReasons()
+        if (reasons.length === 0) {
             uploadFunction()
             return
         }
-        // The message dialog detects rich text, so markup in names from the files is defused
-        var names = prohibitedZones.slice(0, 5).map(zone => zone.displayName.replace(/</g, "\u2039").replace(/>/g, "\u203A")).join(", ")
-        if (prohibitedZones.length > 5) {
-            names += qsTr(" and %1 more").arg(prohibitedZones.length - 5)
-        }
-        // Fences are only checked with the current plan, so recheck the zones the fence leaves out
-        const unfenced = check.unfencedZones.filter(zone => zone.restriction === GeoZone.Prohibited)
-        const fenceNote = unfenced.length > 0 ? qsTr("\n\nThe GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.", "", unfenced.length) : ""
         mainWindow.showMessageDialog(qsTr("Plan Upload"),
-                                     qsTr("The mission path enters prohibited geozones: %1%2\n\nClick 'Ok' to upload the Plan anyway.").arg(names).arg(fenceNote),
+                                     qsTr("Confirm the upload of this plan:\n\n%1\n\nClick 'Ok' to upload the Plan anyway.")
+                                        .arg(reasons.map(reason => "\u2022 " + control._plainText(reason)).join("\n\n")),
                                      Dialog.Ok | Dialog.Cancel,
                                      uploadFunction)
     }

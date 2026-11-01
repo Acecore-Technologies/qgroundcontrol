@@ -1798,6 +1798,59 @@ void GeoZonePlanningTest::_testPlanSave()
     manager.clear();
 }
 
+void GeoZonePlanningTest::_testUploadReasons()
+{
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    const QJsonObject prohibited = _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 200);
+    const QJsonObject authorisation = _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(600, 90), 200);
+    const auto load = [&](const QJsonArray &features) {
+        QString errorString;
+        return manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString);
+    };
+    QVERIFY(load({ prohibited, authorisation }));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    check.setGeoFenceController(masterController.geoFenceController());
+    QTRY_COMPARE(check.crossedZones().count(), 2);
+
+    // The prohibited zone the fence doesn't exclude, not the zone requiring an authorisation
+    QStringList reasons = check.uploadReasons();
+    QCOMPARE(reasons.count(), 1);
+    QVERIFY2(reasons[0].startsWith(QStringLiteral("The mission path enters prohibited geozones: P.")), qPrintable(reasons[0]));
+    QVERIFY(reasons[0].contains(QStringLiteral("doesn't exclude 1 of them")));
+    // Nor once authorised
+    GeoZone *const zone = manager.zoneList().constFirst()->identifier() == QStringLiteral("P") ? manager.zoneList().constFirst() : manager.zoneList().constLast();
+    QCOMPARE(zone->identifier(), QStringLiteral("P"));
+    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(zone)), QStringLiteral("P-1"), QString(), QString()).isEmpty());
+    QTRY_VERIFY(check.uploadReasons().isEmpty());
+    QCOMPARE(check.authorisedZones().count(), 1);
+
+    // Geozone data changed since the plan was saved, until acknowledged
+    QJsonObject planJson;
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    QVERIFY(load({ prohibited, _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(600, 90), 250) }));
+    QTRY_VERIFY(!check.auditText().isEmpty());
+    reasons = check.uploadReasons();
+    QCOMPARE(reasons.count(), 1);
+    QVERIFY2(reasons[0].startsWith(check.auditText()), qPrintable(reasons[0]));
+    QVERIFY2(reasons[0].contains(QStringLiteral("Modified: A (Authorisation required)")), qPrintable(reasons[0]));
+    check.acknowledgeAudit();
+    QTRY_VERIFY(check.uploadReasons().isEmpty());
+    manager.clear();
+}
+
 void GeoZonePlanningTest::_testPlannedStartPerPlan()
 {
     // Plan files are loaded and saved with the application's manager

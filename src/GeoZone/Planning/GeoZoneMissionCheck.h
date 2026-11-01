@@ -122,6 +122,14 @@ public:
     /// Accepts the changes of the geozone data since the plan was saved, until it changes again
     Q_INVOKABLE void acknowledgeAudit();
 
+    /// @return Why uploading the mission needs the pilot's confirmation, one paragraph per reason, empty when it doesn't:
+    ///         the mission enters prohibited zones without an authorisation covering the flight, naming those the fence
+    ///         doesn't exclude, or the geozone data changed since the plan was saved and the changes weren't
+    ///         acknowledged, with the changes. Of the last check, see update().
+    Q_INVOKABLE QStringList uploadReasons() const;
+
+    static constexpr int maxListedChanges = 5;   ///< Changes of the geozone data listed by uploadReasons
+
     /// @return true if exclusion fences of the controller cover the whole zone, like the fences GeoZoneFenceImporter
     ///         adds for it with any simplification, see GeoZoneFences::fencesCover
     static bool fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone);

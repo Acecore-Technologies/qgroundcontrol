@@ -72,7 +72,8 @@ Item {
         return true
     }
 
-    /// Asks for confirmation before uploading a mission which enters prohibited zones, then calls uploadFunction
+    /// Asks for confirmation before uploading a mission which enters prohibited zones without authorisation, or whose
+    /// geozone data changed since the plan was saved, then calls uploadFunction, see GeoZoneMissionCheck::uploadReasons
     function confirmUpload(uploadFunction) {
         banner.confirmUpload(uploadFunction)
     }

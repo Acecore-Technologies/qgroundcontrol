@@ -141,7 +141,7 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/API/QGCCorePlugin.cc` | +1 | `GeoZoneIndicator.qml` in the toolbar indicators |
 | `src/UI/AppSettings/SettingsPagesModel.qml` | +8 | The Geozones settings page |
 | `src/UI/MainWindow.qml` | +8 | `GeoZoneAlertPopup` |
-| `src/QmlControls/PlanView.qml` | +26/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks and the upload confirmation |
+| `src/QmlControls/PlanView.qml` | +26/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks and the upload confirmation (`GeoZoneMissionCheck::uploadReasons()`) |
 | `src/QmlControls/GeoFenceEditor.qml` | +5/-164 | `GeoZoneFenceList` in place of the lists of polygon and circular fences |
 | `src/QmlControls/TerrainStatus.qml` | +7 | `GeoZoneProfileOverlay` |
 | `src/QmlControls/QGCFileDialog.qml` | +5 | `fileName` proposed when saving, for the briefing export |

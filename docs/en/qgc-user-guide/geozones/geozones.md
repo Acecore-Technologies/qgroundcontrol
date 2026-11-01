@@ -134,7 +134,7 @@ When the planned mission path or the area of a survey, corridor scan or structur
 Besides the drawn flight path, the check follows loiter circles with a radius, the loiter of landing patterns, the distance VTOL transitions fly on past their waypoint (**VTOL TransitionDistance** in _Application Settings > Plan View_), the loops of **DO_JUMP** items, and the return the vehicle flies after a **Return To Launch** item (see [Return and Contingency Paths](#return-and-contingency-paths)). The warning names what enters zones the drawn flight path doesn't, like "Only the loiter at item 3 enters ..." or "Only the jump at item 8 enters ...".
 A **DO_JUMP** flies the items from its target to the jump again as many times as its repeat count, including the straight leg back to the target, so zone schedules are checked at the times the repeats are flown. A jump repeating without end is flown once more and named "repeated without end"; very long repeats are cut off after about 5000 legs. A jump past a **Return To Launch** skips it: the check follows the items after it, whose legs the Plan View doesn't draw, as part of the jump, and only the return the vehicle reaches is flown.
 U-space airspaces the mission enters are listed too, since flying there requires a flight authorisation from a U-space service provider. Zones without restriction are listed for their conditions, they never hide restricted zones.
-Uploading a mission which enters a prohibited zone asks for confirmation.
+Uploading a mission asks for confirmation, listing the reasons, when it enters prohibited zones you have no authorisation for (naming those the GeoFence doesn't exclude) or when the geozone data changed since the plan was saved and you didn't acknowledge the changes (see [Plan Data Audit](#plan-data-audit)). **Cancel** leaves the mission on the vehicle as it is.
 
 The check compares the planned altitudes with the zone altitude limits, using the terrain elevation along the path for limits above ground. Between waypoints the altitude is taken to change evenly, so a leg which descends below a zone's ceiling only after passing it doesn't enter the zone. When the terrain or altitude is not known, the zone is assumed to apply.
 
@@ -209,7 +209,7 @@ When the plan is opened again, and whenever the sources reload while it is open,
 - **new**: a zone the mission now enters which came with updated or newly loaded data. Zones the mission enters only because you edited it don't count.
 - **source updated** or **removed**: the data of a source covering the mission changed, even when the zones of the mission didn't.
 
-**Details** lists the changes and **Acknowledge** hides the warning until the data changes again. Saving the plan records the current data, so the warning disappears. Plans saved without this record, like older plans, open without warning.
+**Details** lists the changes and **Acknowledge** hides the warning, and the confirmation it asks for on upload, until the data changes again. Saving the plan records the current data, so the warning disappears. Plans saved without this record, like older plans, open without warning.
 
 ### Add Geozones to the GeoFence {#add-geozones-to-the-geofence}
 
