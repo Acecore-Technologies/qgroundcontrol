@@ -31,7 +31,8 @@ class MissionController;
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
 /// altitudes. U-space airspaces and no restriction zones are reported separately, they never hide
 /// restricted zones. With a planned start in GeoZoneManager, only zones active while the mission flies through them
-/// are reported, estimating the times from the mission duration, otherwise zone schedules are not considered since
+/// are reported, estimating the times from the mission duration with a tolerance, see
+/// GeoZonePathEvaluator::defaultScheduleToleranceSecs, otherwise zone schedules are not considered since
 /// the mission may be flown at any time. Zones authorised for the whole flight, or from now on without a planned
 /// start, are listed as information. See GeoZonePathEvaluator.
 class GeoZoneMissionCheck : public QObject

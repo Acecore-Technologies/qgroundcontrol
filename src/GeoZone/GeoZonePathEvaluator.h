@@ -16,6 +16,7 @@
 #include <QtCore/QStringList>
 #include <QtPositioning/QGeoCoordinate>
 
+#include <algorithm>
 #include <functional>
 
 #include "GeoZone.h"
@@ -38,6 +39,9 @@ public:
 
     static constexpr double defaultTerrainSpacing = 100;    ///< Meters between the positions added along paths with a terrain lookup
     static constexpr int defaultMaxTerrainPositions = 100;  ///< Positions of a path after adding the terrain, the spacing grows for long paths
+    /// Seconds the estimated times of crossings are widened by on both sides for zone schedules, since the take-off may
+    /// be early or late and the vehicle may fly at another pace than estimated
+    static constexpr int defaultScheduleToleranceSecs = 15 * 60;
 
     /// Datum of the altitudes of a path
     enum class AltitudeReference {
@@ -100,8 +104,8 @@ public:
         PathPoint entry;
         PathPoint exit;
         /// The zone applies during the crossing: the policy accepts zones whatever their schedule, or the zone is active
-        /// at some time between the estimated times of the entry and the exit, or, without times, as the policy's
-        /// schedule accepts it at the evaluation time
+        /// at some time from the estimated time of the entry to that of the exit, widened by the schedule tolerance, or,
+        /// without times, as the policy's schedule accepts it at the evaluation time
         bool active = true;
     };
 
@@ -148,6 +152,10 @@ public:
     /// above ground follow the terrain. The lookup is called from the evaluating thread.
     void setTerrainLookup(const TerrainLookup &lookup, double spacing = defaultTerrainSpacing, int maxPositions = defaultMaxTerrainPositions);
 
+    /// Sets the seconds the estimated times of crossings are widened by on both sides, see defaultScheduleToleranceSecs
+    void setScheduleTolerance(int seconds) { _scheduleToleranceSecs = (std::max)(seconds, 0); }
+    int scheduleTolerance() const { return _scheduleToleranceSecs; }
+
     /// @return How the paths and the areas, like mission patterns, interact with the zones accepted by the policy
     Result evaluate(const QList<Path> &paths, const QList<GeoZone::Area> &areas = {}) const;
 
@@ -182,4 +190,5 @@ private:
     TerrainLookup _terrainLookup;
     double _terrainSpacing = defaultTerrainSpacing;
     int _maxTerrainPositions = defaultMaxTerrainPositions;
+    int _scheduleToleranceSecs = defaultScheduleToleranceSecs;
 };

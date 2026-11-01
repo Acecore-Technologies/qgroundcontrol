@@ -352,7 +352,9 @@ bool GeoZonePathEvaluator::_activeDuring(const GeoZone *zone, const QDateTime &s
         return true;
     }
     if (start.isValid()) {
-        return (end.isValid() && (end > start)) ? zone->isActiveDuring(start, end) : zone->isActiveAt(start);
+        // Estimated times are uncertain, so zones active a little before or after them count too
+        const QDateTime last = (end.isValid() && (end > start)) ? end : start;
+        return zone->isActiveDuring(start.addSecs(-_scheduleToleranceSecs), last.addSecs(_scheduleToleranceSecs));
     }
     if (_policy.schedule() == GeoZonePolicy::Schedule::Current) {
         return _time.isValid() ? zone->isActiveAt(_time) : zone->active();

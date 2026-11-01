@@ -302,19 +302,30 @@ void GeoZonePlanningTest::_testEvaluatorSchedules()
     QVERIFY(crossing->active);
     QCOMPARE(result.activeEnteredZones().count(), 1);
 
-    // Leaving before it becomes active, although it is active during the flight
-    result = evaluateFrom(QTime(9, 30));
-    QCOMPARE(result.zones.count(), 1);
-    QVERIFY(result.zones[0].entered());
-    QVERIFY(!result.zones[0].active());
-    QVERIFY(!result.zones[0].crossings[0].active);
-    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 51)))) <= 2);
-    QVERIFY(result.activeEnteredZones().isEmpty());
-
     // Entering just before and leaving after it becomes active
     result = evaluateFrom(QTime(9, 40));
     QVERIFY(qAbs(result.zones[0].crossings[0].entry.time.secsTo(_utc(day, QTime(9, 59)))) <= 2);
     QVERIFY(result.zones[0].crossings[0].active);
+
+    // Leaving 10 minutes before it becomes active counts, since the take-off or the pace may differ from the estimate
+    QCOMPARE(GeoZonePathEvaluator::defaultScheduleToleranceSecs, 15 * 60);
+    result = evaluateFrom(QTime(9, 29));
+    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 50)))) <= 2);
+    QVERIFY(result.zones[0].crossings[0].active);
+    QCOMPARE(result.activeEnteredZones().count(), 1);
+    // Like entering 10 minutes after it ends
+    result = evaluateFrom(QTime(11, 51));
+    QVERIFY(qAbs(result.zones[0].crossings[0].entry.time.secsTo(_utc(day, QTime(12, 10)))) <= 2);
+    QVERIFY(result.zones[0].crossings[0].active);
+
+    // Leaving 30 minutes before it becomes active doesn't, although it is active during the flight
+    result = evaluateFrom(QTime(9, 9));
+    QCOMPARE(result.zones.count(), 1);
+    QVERIFY(result.zones[0].entered());
+    QVERIFY(!result.zones[0].active());
+    QVERIFY(!result.zones[0].crossings[0].active);
+    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 30)))) <= 2);
+    QVERIFY(result.activeEnteredZones().isEmpty());
 
     // Without times the zone applies when active at some time of the flight, or whatever its schedule without one
     path.setTimes(QDateTime(), QDateTime());
