@@ -12,6 +12,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QTemporaryDir>
 #include <QtPositioning/QGeoCoordinate>
 
 #include <memory>
@@ -31,6 +32,9 @@ private slots:
     void initTestCase();
 
     void _benchmarkParse();
+    void _benchmarkRestoreParsing();
+    void _benchmarkRestoreFromCache();
+    void _benchmarkRestoreFromCacheHashing();
     void _benchmarkLoadSource();
     void _benchmarkCatalogRebuild();
     void _benchmarkZonesAt();
@@ -39,6 +43,7 @@ private slots:
 
 private:
     QByteArray _document;                       ///< ED-269 file with the zones
+    QTemporaryDir _storageDir;                  ///< With the document as the stored copy of a source
     GeoZoneParser::Result _result;
     std::unique_ptr<GeoZoneSource> _source;
     GeoZoneCatalog _catalog;

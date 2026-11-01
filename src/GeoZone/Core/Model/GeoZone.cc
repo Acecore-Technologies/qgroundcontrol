@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZone.h"
+#include "GeoZoneDataStream.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneGeometry.h"
 
@@ -738,4 +739,86 @@ int GeoZone::restrictionSeverity(Restriction restriction)
         break;
     }
     return 5;
+}
+
+// Fields added to the zones must be serialized here, see GeoZoneParseCache::formatVersion
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZone::Volume) == 128), "Serialize the new fields of GeoZone::Volume");
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZone::Data) == 392), "Serialize the new fields of GeoZone::Data");
+
+QDataStream &operator<<(QDataStream &stream, const GeoZone::Volume &volume)
+{
+    stream << volume.isCircle;
+    GeoZoneDataStream::writeCount(stream, volume.rings.count());
+    for (const GeoZone::Ring &ring : volume.rings) {
+        GeoZoneDataStream::writePoints(stream, ring);
+    }
+    stream << volume.center.latitude() << volume.center.longitude() << volume.center.altitude() << volume.radius;
+    stream << volume.lowerLimit << volume.upperLimit;
+    stream << static_cast<quint8>(volume.lowerReference) << static_cast<quint8>(volume.upperReference);
+    return stream << volume.lowerReferenceCode << volume.upperReferenceCode << volume.feet;
+}
+
+QDataStream &operator>>(QDataStream &stream, GeoZone::Volume &volume)
+{
+    volume = GeoZone::Volume();
+    stream >> volume.isCircle;
+    qsizetype ringCount = 0;
+    if (!GeoZoneDataStream::readCount(stream, sizeof(quint32), ringCount)) {
+        return stream;
+    }
+    for (qsizetype i = 0; i < ringCount; i++) {
+        GeoZone::Ring ring;
+        if (!GeoZoneDataStream::readPoints(stream, ring)) {
+            return stream;
+        }
+        volume.rings.append(ring);
+    }
+    double latitude = qQNaN();
+    double longitude = qQNaN();
+    double altitude = qQNaN();
+    stream >> latitude >> longitude >> altitude >> volume.radius >> volume.lowerLimit >> volume.upperLimit;
+    // Set one at a time, the constructor drops coordinates out of range
+    volume.center.setLatitude(latitude);
+    volume.center.setLongitude(longitude);
+    volume.center.setAltitude(altitude);
+    if (!GeoZoneDataStream::readEnum(stream, volume.lowerReference, GeoZone::VerticalReference::FlightLevel) ||
+        !GeoZoneDataStream::readEnum(stream, volume.upperReference, GeoZone::VerticalReference::FlightLevel)) {
+        return stream;
+    }
+    return stream >> volume.lowerReferenceCode >> volume.upperReferenceCode >> volume.feet;
+}
+
+QDataStream &operator<<(QDataStream &stream, const GeoZone::Data &data)
+{
+    stream << data.identifier << data.country << data.name << data.restrictionCode << static_cast<quint8>(data.restriction);
+    GeoZoneDataStream::writeList(stream, data.reasons);
+    stream << data.otherReasonInfo << data.restrictionConditions << data.message;
+    GeoZoneDataStream::writeList(stream, data.authorities);
+    GeoZoneDataStream::writeList(stream, data.applicability);
+    GeoZoneDataStream::writeList(stream, data.volumes);
+    stream << data.uSpaceClass << data.regulationExemption;
+    GeoZoneDataStream::writeList(stream, data.extendedProperties);
+    GeoZoneDataStream::writeList(stream, data.issues);
+    return stream << data.contentHash;
+}
+
+QDataStream &operator>>(QDataStream &stream, GeoZone::Data &data)
+{
+    data = GeoZone::Data();
+    stream >> data.identifier >> data.country >> data.name >> data.restrictionCode;
+    if (!GeoZoneDataStream::readEnum(stream, data.restriction, GeoZone::Unknown) || !GeoZoneDataStream::readStrings(stream, data.reasons)) {
+        return stream;
+    }
+    stream >> data.otherReasonInfo >> data.restrictionConditions >> data.message;
+    // Periods take at least their flag, two dates of a day, a time and a time spec each, and a count; volumes their
+    // flag, count, four coordinates, two limits, references, codes and unit
+    if (!GeoZoneDataStream::readStrings(stream, data.authorities) || !GeoZoneDataStream::readList(stream, data.applicability, 31) ||
+        !GeoZoneDataStream::readList(stream, data.volumes, 63)) {
+        return stream;
+    }
+    stream >> data.uSpaceClass >> data.regulationExemption;
+    if (!GeoZoneDataStream::readStrings(stream, data.extendedProperties) || !GeoZoneDataStream::readStrings(stream, data.issues)) {
+        return stream;
+    }
+    return stream >> data.contentHash;
 }

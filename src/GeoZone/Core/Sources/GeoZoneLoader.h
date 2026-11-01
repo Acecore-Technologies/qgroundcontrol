@@ -20,7 +20,8 @@
 
 class GeoZoneStore;
 
-/// Reads and parses a geozone source and stores a copy of it. Jobs are self-contained and run on worker threads.
+/// Reads and parses a geozone source and stores a copy of it with its parse cache, see GeoZoneParseCache. Jobs are
+/// self-contained and run on worker threads.
 class GeoZoneLoader
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneLoader)
@@ -36,6 +37,7 @@ public:
         QString key;                ///< File name, or the URL of a feed
         QString url;                ///< Empty for files
         QString sourcePath;         ///< File to parse
+        bool fromStore = false;     ///< sourcePath is the stored copy of a source restored at startup, read from its parse cache when current
         bool downloaded = false;    ///< sourcePath is a download, which becomes the stored copy or is removed
         QString storedFileName;     ///< Name of the copy to write in the storage directory, empty to not copy
         QDateTime loadedAt;
@@ -58,6 +60,7 @@ public:
         bool stored = false;        ///< The copy was written
         QString storeError;
         bool cancelled = false;     ///< The job was canceled, nothing was stored
+        bool fromCache = false;     ///< The result was read from the parse cache of the stored copy
     };
 
     /// @return Job loading a local file or file: URL, keyed by fileKey

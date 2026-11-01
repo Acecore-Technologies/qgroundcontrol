@@ -125,7 +125,7 @@ public:
         QStringList extendedProperties; ///< Publisher specific properties, one "name: value" line each
         QStringList issues;             ///< Problems found while reading the zone, translated, like an unknown unit
         QByteArray contentHash;         ///< Of the published feature, to recognize changed zones when a source reloads
-    };
+    };  // Fields added here must be serialized, see operator<<
 
     explicit GeoZone(const Data &data);
 
@@ -276,3 +276,9 @@ private:
     mutable std::once_flag _projectedOnce;
     mutable std::unique_ptr<const Projected> _projectedData;
 };
+
+/// Binary serialization of the zones as parsed, see GeoZoneDataStream. Fields added to them must be serialized too.
+QDataStream &operator<<(QDataStream &stream, const GeoZone::Volume &volume);
+QDataStream &operator>>(QDataStream &stream, GeoZone::Volume &volume);
+QDataStream &operator<<(QDataStream &stream, const GeoZone::Data &data);
+QDataStream &operator>>(QDataStream &stream, GeoZone::Data &data);

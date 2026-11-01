@@ -519,6 +519,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         job.key = entry.key;
         job.url = entry.url;
         job.sourcePath = _store.path(entry.fileName);
+        job.fromStore = true;
         job.loadedAt = entry.loadedAt;
         job.fileDate = entry.fileDate;
         job.checkedAt = entry.checkedAt;

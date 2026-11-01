@@ -47,6 +47,10 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
     const auto storedFiles = [&storageDir]() {
         return QDir(storageDir.path()).entryList({ QStringLiteral("*.json") }, QDir::Files);
     };
+    // Parse caches of the stored copies, see GeoZoneParseCache
+    const auto storedCaches = [&storageDir]() {
+        return QDir(storageDir.path()).entryList({ QStringLiteral("*.gzc") }, QDir::Files);
+    };
 
     {
         GeoZoneManager manager(storageDir.path());
@@ -73,6 +77,7 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         QVERIFY(ed318Source->detailsText().contains(QStringLiteral("issued 2026-08-13")));
         QCOMPARE(manager.zoneList().at(0)->sourceText(), QStringLiteral("Test GeoZones (issued 2026-08-13)"));
         QVERIFY(QFile::exists(QDir(storageDir.path()).filePath(manager.storedFileName(ed318Source->key()))));
+        QCOMPARE(storedCaches(), QStringList({ GeoZoneParseCache::path(manager.storedFileName(ed318Source->key())) }));
 
         // A failed load keeps the current zones
         QVERIFY(!manager.loadFile(sourceDir.filePath(QStringLiteral("missing.json")), errorString));
@@ -96,6 +101,7 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         QCOMPARE(manager.zoneCount(), 6);
         QVERIFY(manager.storedFileName(ed318Source->key()) != previousStoredFile);
         QCOMPARE(storedFiles().count(), 3);
+        QCOMPARE(storedCaches().count(), 2);
 
         // Zones of sources turned off are left out, loading the file again turns it on
         GeoZoneSource *const ed269Source = manager.sources()->value<GeoZoneSource*>(1);
@@ -129,16 +135,20 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-318"));
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->key(), GeoZoneLoader::fileKey(ed269File));
         QVERIFY(!strayFile.exists());
+        QCOMPARE(storedCaches().count(), 2);
 
+        // The parse cache goes with the stored copy
         manager.removeSource(0);
         QCOMPARE(manager.sources()->count(), 1);
         QCOMPARE(manager.zoneCount(), 3);
         QCOMPARE(storedFiles().count(), 2);
+        QCOMPARE(storedCaches(), QStringList({ GeoZoneParseCache::path(manager.storedFileName(GeoZoneLoader::fileKey(ed269File))) }));
 
         manager.clear();
         QCOMPARE(manager.zoneCount(), 0);
         QVERIFY(manager.shapes().isEmpty());
         QVERIFY(storedFiles().isEmpty());
+        QVERIFY(storedCaches().isEmpty());
     }
 
     GeoZoneManager manager(storageDir.path());

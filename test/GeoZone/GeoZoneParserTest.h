@@ -30,6 +30,9 @@ private slots:
     void _testParseErrors();
     void _testXmlAndPackages();
     void _testParseCancel();
+    void _testParseCacheRoundTrip_data();
+    void _testParseCacheRoundTrip();
+    void _testParseCacheValidation();
     void _testParserFuzz();
     void _testFuzzFindings();
     void _testDisplayText();

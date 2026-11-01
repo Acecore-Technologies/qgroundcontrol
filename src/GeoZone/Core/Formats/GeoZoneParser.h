@@ -31,6 +31,12 @@ class GeoZoneParser
     Q_DECLARE_TR_FUNCTIONS(GeoZoneParser)
 
 public:
+    /// Version of what the parser produces from a document. Bump it with any change of the parser, the formats or
+    /// GeoZoneParserUtils which changes the result for the same bytes: the zones and their fields, texts, issues and
+    /// hashes, or the metadata. Stored sources are restored from parse caches of the same version only, the others
+    /// are parsed again, see GeoZoneParseCache.
+    static constexpr quint16 version = 1;
+
     enum class Format {
         Unknown,
         ED269,
@@ -61,7 +67,7 @@ public:
         int missingFeatures = 0;    ///< Features of a WFS response the server left out because of its limit
         QMap<QString, int> issues;  ///< Problems found in the zones, with the number of zones having each
         Companions companions;      ///< Of a composite document, see composite()
-    };
+    };  // Fields added here must be serialized, see operator<<
 
     /// How parse() reads a document
     struct Options {
@@ -88,3 +94,7 @@ private:
     /// @return true if the options accept documents in the format
     static bool _acceptsFormat(const GeoZoneFormat *format, const Options &options, QString &errorString);
 };
+
+/// Binary serialization of parse results, see GeoZoneParseCache
+QDataStream &operator<<(QDataStream &stream, const GeoZoneParser::Result &result);
+QDataStream &operator>>(QDataStream &stream, GeoZoneParser::Result &result);

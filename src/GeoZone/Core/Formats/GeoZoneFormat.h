@@ -18,7 +18,8 @@
 /// A geozone data format, which recognizes its documents and converts their features into zones. Formats are stateless
 /// and used from worker threads. Adding a format takes a class in the Formats directory registered with
 /// GEOZONE_REGISTER_FORMAT and listed in formats(), a GeoZoneParser::Format value, and its services in
-/// GeoZoneProviders::services().
+/// GeoZoneProviders::services(). Changing the zones a format makes from the same document takes a new
+/// GeoZoneParser::version, so that stored sources are parsed again instead of restored from their parse caches.
 class GeoZoneFormat
 {
 public:

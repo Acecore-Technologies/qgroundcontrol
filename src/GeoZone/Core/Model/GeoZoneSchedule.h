@@ -16,6 +16,8 @@
 #include <QtCore/QTime>
 #include <QtPositioning/QGeoCoordinate>
 
+class QDataStream;
+
 /// When a geozone applies: validity periods with optional daily schedules, whose times can be daylight events
 class GeoZoneSchedule
 {
@@ -54,3 +56,9 @@ public:
     ///         sun doesn't cross the event altitude that day.
     static QDateTime daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location);
 };
+
+/// Binary serialization, see GeoZoneDataStream
+QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod &period);
+QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &period);
+QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::TimePeriod &period);
+QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::TimePeriod &period);

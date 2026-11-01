@@ -10,13 +10,16 @@
 #include "GeoZoneLoader.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneParseCache.h"
 #include "GeoZoneProviders.h"
+#include "GeoZoneSource.h"
 #include "GeoZoneStore.h"
 #include "GeoZoneZip.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -236,6 +239,14 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
         loadResult.cancelled = true;
         return loadResult;
     }
+    QElapsedTimer timer;
+    timer.start();
+    const GeoZoneParseCache::Key cacheKey{ job.language, job.formatHint };
+    if (job.fromStore && GeoZoneParseCache::read(job.sourcePath, cacheKey, loadResult.result)) {
+        loadResult.fromCache = true;
+        qCDebug(GeoZoneSourceLog) << "Read" << loadResult.result.zones.count() << "zones of" << job.key << "from the parse cache in" << timer.elapsed() << "ms";
+        return loadResult;
+    }
     if (!job.pagePaths.isEmpty()) {
         mergePages(job.sourcePath, job.pagePaths);
     }
@@ -266,6 +277,10 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     options.cancelToken = job.cancelToken;
     QString parseError;
     const bool parsed = parse(content, loadResult.result, parseError, options);
+    // The parse cache identifies the stored copy by its size and hash
+    const bool writeCache = parsed && (job.fromStore || !job.storedFileName.isEmpty());
+    const qint64 contentSize = content.size();
+    const QByteArray contentHash = writeCache ? GeoZoneParseCache::hash(content) : QByteArray();
     content.clear();
     if (mapped) {
         (void) file.unmap(mapped);
@@ -280,9 +295,14 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
         loadResult.errorString = parseError;
         return loadResult;
     }
+    qCDebug(GeoZoneSourceLog) << "Parsed" << loadResult.result.zones.count() << "zones of" << job.key << "in" << timer.elapsed() << "ms";
     if (!job.storedFileName.isEmpty()) {
         loadResult.stored = job.downloaded ? store.adoptFile(job.sourcePath, job.storedFileName, loadResult.storeError)
                                            : store.copyFile(job.sourcePath, job.storedFileName, loadResult.storeError);
+    }
+    if (writeCache && (loadResult.stored || job.fromStore) && !job.cancelToken.isCancelled()) {
+        const QString storedPath = job.fromStore ? job.sourcePath : store.path(job.storedFileName);
+        (void) GeoZoneParseCache::write(storedPath, contentSize, contentHash, cacheKey, loadResult.result);
     }
 
     return loadResult;

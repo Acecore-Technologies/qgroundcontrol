@@ -14,7 +14,8 @@
 #include <QtCore/QString>
 
 /// Keeps copies of the geozone sources in a directory, see GeoZoneSourceIndex for the index of their origin, dates
-/// and HTTP validators. Methods only access the files, so a copy of the store can be used from worker threads.
+/// and HTTP validators, and GeoZoneParseCache for the parse caches next to them. Methods only access the files, so a
+/// copy of the store can be used from worker threads.
 class GeoZoneStore
 {
 public:
@@ -38,8 +39,9 @@ public:
     QString downloadDir() const;
     /// Removes downloads left by a previous session
     void clearDownloads() const;
+    /// Removes a stored copy with its parse cache, see GeoZoneParseCache
     void removeFile(const QString &fileName) const;
-    /// Removes stored copies which aren't referenced
+    /// Removes stored copies which aren't referenced, and parse caches of files which aren't
     void removeOrphanFiles(const QSet<QString> &referencedFileNames) const;
 
 private:

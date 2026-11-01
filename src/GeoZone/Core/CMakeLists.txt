@@ -11,6 +11,7 @@ qt_add_library(GeoZoneCore STATIC
     Model/GeoZoneBox.h
     Model/GeoZoneCatalog.cc
     Model/GeoZoneCatalog.h
+    Model/GeoZoneDataStream.h
     Model/GeoZoneGeometry.cc
     Model/GeoZoneGeometry.h
     Model/GeoZoneIndex.cc
@@ -43,6 +44,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneFeedFetch.h
     Sources/GeoZoneLoader.cc
     Sources/GeoZoneLoader.h
+    Sources/GeoZoneParseCache.cc
+    Sources/GeoZoneParseCache.h
     Sources/GeoZoneProviders.cc
     Sources/GeoZoneProviders.h
     Sources/GeoZoneRefreshScheduler.cc

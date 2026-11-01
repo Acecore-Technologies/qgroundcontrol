@@ -12,6 +12,7 @@
 #include "GeoZonePolicy.h"
 #include "GeoZoneTestHelpers.h"
 
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -111,6 +112,66 @@ void GeoZoneBenchmark::initTestCase()
         _points.append(randomCoordinate(random));
     }
     qInfo() << "Document of" << (_document.size() / 1024) << "KiB," << _catalog.shapes().count() << "shapes";
+
+    QVERIFY(_storageDir.isValid());
+    QVERIFY(GeoZoneStore(_storageDir.path()).writeFile(QStringLiteral("zones.json"), _document, errorString));
+}
+
+namespace {
+
+/// Job restoring the stored copy of the benchmark source at startup
+GeoZoneLoader::Job restoreJob(const GeoZoneStore &store)
+{
+    GeoZoneLoader::Job job;
+    job.key = QStringLiteral("benchmark.json");
+    job.sourcePath = store.path(QStringLiteral("zones.json"));
+    job.fromStore = true;
+    return job;
+}
+
+} // namespace
+
+void GeoZoneBenchmark::_benchmarkRestoreParsing()
+{
+    // The first start after loading or updating, which parses and writes the parse cache
+    const GeoZoneStore store(_storageDir.path());
+    const GeoZoneLoader::Job job = restoreJob(store);
+    QBENCHMARK {
+        GeoZoneParseCache::remove(job.sourcePath);
+        const GeoZoneLoader::Result result = GeoZoneLoader::run(job, store);
+        QVERIFY(!result.fromCache);
+        QCOMPARE(result.result.zones.count(), kZoneCount);
+    }
+    qInfo() << "Parse cache of" << (QFileInfo(GeoZoneParseCache::path(job.sourcePath)).size() / 1024) << "KiB";
+}
+
+void GeoZoneBenchmark::_benchmarkRestoreFromCache()
+{
+    const GeoZoneStore store(_storageDir.path());
+    const GeoZoneLoader::Job job = restoreJob(store);
+    (void) GeoZoneLoader::run(job, store);
+    QBENCHMARK {
+        const GeoZoneLoader::Result result = GeoZoneLoader::run(job, store);
+        QVERIFY(result.fromCache);
+        QCOMPARE(result.result.zones.count(), kZoneCount);
+    }
+}
+
+void GeoZoneBenchmark::_benchmarkRestoreFromCacheHashing()
+{
+    // The stored copy has another modification time, like after copying the settings, so it is hashed first
+    const GeoZoneStore store(_storageDir.path());
+    const GeoZoneLoader::Job job = restoreJob(store);
+    (void) GeoZoneLoader::run(job, store);
+    QFile file(job.sourcePath);
+    QVERIFY(file.open(QIODevice::ReadWrite));
+    QDateTime modified = file.fileTime(QFileDevice::FileModificationTime);
+    QBENCHMARK {
+        modified = modified.addSecs(1);
+        QVERIFY(file.setFileTime(modified, QFileDevice::FileModificationTime));
+        const GeoZoneLoader::Result result = GeoZoneLoader::run(job, store);
+        QVERIFY(result.fromCache);
+    }
 }
 
 void GeoZoneBenchmark::_benchmarkParse()

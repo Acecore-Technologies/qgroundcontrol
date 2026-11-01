@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneParser.h"
+#include "GeoZoneDataStream.h"
 #include "GeoZoneFormat.h"
 #include "GeoZoneParserUtils.h"
 
@@ -246,4 +247,71 @@ QString GeoZoneParser::formatToString(Format format)
 {
     const GeoZoneFormat *const found = GeoZoneFormat::find(format);
     return found ? found->name() : tr("Unknown");
+}
+
+// Fields added to the result must be serialized here, see GeoZoneParseCache::formatVersion
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneParser::Result) == 160), "Serialize the new fields of GeoZoneParser::Result");
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneParser::Companion) == 48), "Serialize the new fields of GeoZoneParser::Companion");
+
+QDataStream &operator<<(QDataStream &stream, const GeoZoneParser::Result &result)
+{
+    stream << static_cast<quint8>(result.format) << result.title << result.provider << result.issued << result.validFrom << result.validTo;
+    GeoZoneDataStream::writeList(stream, result.zones);
+    stream << static_cast<qint32>(result.skippedFeatures) << result.contentHash << static_cast<qint32>(result.missingFeatures);
+    GeoZoneDataStream::writeCount(stream, result.issues.count());
+    for (auto it = result.issues.cbegin(); it != result.issues.cend(); ++it) {
+        stream << it.key() << static_cast<qint32>(it.value());
+    }
+    // In key order, the order of a hash differs between runs
+    QStringList companionKeys = result.companions.keys();
+    companionKeys.sort();
+    GeoZoneDataStream::writeCount(stream, companionKeys.count());
+    for (const QString &key : std::as_const(companionKeys)) {
+        const GeoZoneParser::Companion &companion = result.companions[key];
+        stream << key << companion.version << companion.data;
+    }
+    return stream;
+}
+
+QDataStream &operator>>(QDataStream &stream, GeoZoneParser::Result &result)
+{
+    result = GeoZoneParser::Result();
+    quint8 format = 0;
+    stream >> format;
+    if ((format != static_cast<quint8>(GeoZoneParser::Format::Unknown)) && !GeoZoneFormat::find(static_cast<GeoZoneParser::Format>(format))) {
+        stream.setStatus(QDataStream::ReadCorruptData);
+        return stream;
+    }
+    result.format = static_cast<GeoZoneParser::Format>(format);
+    stream >> result.title >> result.provider >> result.issued >> result.validFrom >> result.validTo;
+    // Zones take at least their 13 strings and lists, restriction, periods and volumes
+    if (!GeoZoneDataStream::readList(stream, result.zones, 65)) {
+        return stream;
+    }
+    qint32 skippedFeatures = 0;
+    qint32 missingFeatures = 0;
+    stream >> skippedFeatures >> result.contentHash >> missingFeatures;
+    result.skippedFeatures = skippedFeatures;
+    result.missingFeatures = missingFeatures;
+
+    qsizetype count = 0;
+    if (!GeoZoneDataStream::readCount(stream, sizeof(quint32) + sizeof(qint32), count)) {
+        return stream;
+    }
+    for (qsizetype i = 0; (i < count) && (stream.status() == QDataStream::Ok); i++) {
+        QString issue;
+        qint32 zoneCount = 0;
+        stream >> issue >> zoneCount;
+        result.issues.insert(issue, zoneCount);
+    }
+    if (!GeoZoneDataStream::readCount(stream, 3 * sizeof(quint32), count)) {
+        return stream;
+    }
+    for (qsizetype i = 0; (i < count) && (stream.status() == QDataStream::Ok); i++) {
+        QString key;
+        GeoZoneParser::Companion companion;
+        stream >> key >> companion.version >> companion.data;
+        result.companions.insert(key, companion);
+    }
+    return stream;
 }

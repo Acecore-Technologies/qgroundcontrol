@@ -18,6 +18,136 @@ using namespace GeoZoneTestHelpers;
 
 namespace {
 
+/// @return The first difference between the results, compared field by field with NaN equal to NaN, empty without
+QString _resultDifference(const GeoZoneParser::Result &a, const GeoZoneParser::Result &b)
+{
+    const auto sameDouble = [](double x, double y) { return (qIsNaN(x) && qIsNaN(y)) || (x == y); };
+    const auto sameDateTime = [](const QDateTime &x, const QDateTime &y) {
+        return (x == y) && (x.isValid() == y.isValid()) && (x.timeRepresentation() == y.timeRepresentation());
+    };
+    const auto sameCoordinate = [&sameDouble](const QGeoCoordinate &x, const QGeoCoordinate &y) {
+        return sameDouble(x.latitude(), y.latitude()) && sameDouble(x.longitude(), y.longitude()) && sameDouble(x.altitude(), y.altitude());
+    };
+    const auto sameRing = [](const GeoZone::Ring &x, const GeoZone::Ring &y) {
+        return std::equal(x.cbegin(), x.cend(), y.cbegin(), y.cend(), [](const QPointF &p, const QPointF &q) { return (p.x() == q.x()) && (p.y() == q.y()); });
+    };
+    const auto sameVolume = [&](const GeoZone::Volume &x, const GeoZone::Volume &y) {
+        return (x.isCircle == y.isCircle) && std::equal(x.rings.cbegin(), x.rings.cend(), y.rings.cbegin(), y.rings.cend(), sameRing) &&
+               sameCoordinate(x.center, y.center) && sameDouble(x.radius, y.radius) && sameDouble(x.lowerLimit, y.lowerLimit) &&
+               sameDouble(x.upperLimit, y.upperLimit) && (x.lowerReference == y.lowerReference) && (x.upperReference == y.upperReference) &&
+               (x.lowerReferenceCode == y.lowerReferenceCode) && (x.upperReferenceCode == y.upperReferenceCode) && (x.feet == y.feet);
+    };
+    const auto sameDailyPeriod = [](const GeoZone::DailyPeriod &x, const GeoZone::DailyPeriod &y) {
+        return (x.days == y.days) && (x.startTime == y.startTime) && (x.endTime == y.endTime) && (x.utcOffsetSecs == y.utcOffsetSecs) &&
+               (x.startEvent == y.startEvent) && (x.endEvent == y.endEvent);
+    };
+    const auto sameTimePeriod = [&](const GeoZone::TimePeriod &x, const GeoZone::TimePeriod &y) {
+        return (x.permanent == y.permanent) && sameDateTime(x.start, y.start) && sameDateTime(x.end, y.end) &&
+               std::equal(x.schedule.cbegin(), x.schedule.cend(), y.schedule.cbegin(), y.schedule.cend(), sameDailyPeriod);
+    };
+
+    if ((a.format != b.format) || (a.title != b.title) || (a.provider != b.provider)) {
+        return QStringLiteral("format, title or provider");
+    }
+    if (!sameDateTime(a.issued, b.issued) || !sameDateTime(a.validFrom, b.validFrom) || !sameDateTime(a.validTo, b.validTo)) {
+        return QStringLiteral("dates");
+    }
+    if ((a.skippedFeatures != b.skippedFeatures) || (a.missingFeatures != b.missingFeatures) || (a.contentHash != b.contentHash) || (a.issues != b.issues)) {
+        return QStringLiteral("counts, hash or issues");
+    }
+    if (a.companions.keys() != b.companions.keys()) {
+        return QStringLiteral("companions");
+    }
+    for (auto it = a.companions.cbegin(); it != a.companions.cend(); ++it) {
+        if ((it->version != b.companions[it.key()].version) || (it->data != b.companions[it.key()].data)) {
+            return QStringLiteral("companion %1").arg(it.key());
+        }
+    }
+    if (a.zones.count() != b.zones.count()) {
+        return QStringLiteral("zone count");
+    }
+    for (qsizetype i = 0; i < a.zones.count(); i++) {
+        const GeoZone::Data &x = a.zones[i];
+        const GeoZone::Data &y = b.zones[i];
+        if ((x.identifier != y.identifier) || (x.country != y.country) || (x.name != y.name) || (x.restrictionCode != y.restrictionCode) ||
+            (x.restriction != y.restriction) || (x.reasons != y.reasons) || (x.otherReasonInfo != y.otherReasonInfo) ||
+            (x.restrictionConditions != y.restrictionConditions) || (x.message != y.message) || (x.authorities != y.authorities) ||
+            (x.uSpaceClass != y.uSpaceClass) || (x.regulationExemption != y.regulationExemption) || (x.extendedProperties != y.extendedProperties) ||
+            (x.issues != y.issues) || (x.contentHash != y.contentHash)) {
+            return QStringLiteral("texts of zone %1").arg(i);
+        }
+        if (!std::equal(x.applicability.cbegin(), x.applicability.cend(), y.applicability.cbegin(), y.applicability.cend(), sameTimePeriod)) {
+            return QStringLiteral("applicability of zone %1").arg(i);
+        }
+        if (!std::equal(x.volumes.cbegin(), x.volumes.cend(), y.volumes.cbegin(), y.volumes.cend(), sameVolume)) {
+            return QStringLiteral("volumes of zone %1").arg(i);
+        }
+    }
+    return QString();
+}
+
+/// Result with every field set, including values the fixtures don't have
+GeoZoneParser::Result _syntheticResult()
+{
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::FaaTfr;
+    result.title = QStringLiteral("Synthetic");
+    result.provider = QStringLiteral("Provider \u00e9\u00df");
+    result.issued = _utc(QDate(2026, 8, 13), QTime(6, 30));
+    result.validFrom = QDateTime(QDate(2026, 8, 14), QTime(0, 0), QTimeZone::fromSecondsAheadOfUtc(7200));
+    result.skippedFeatures = 3;
+    result.missingFeatures = 7;
+    result.contentHash = QByteArray(20, '\x5a');
+    result.issues.insert(QStringLiteral("Unknown unit FL"), 2);
+    result.issues.insert(QStringLiteral("Unknown day XYZ"), 1);
+    result.companions.insert(QStringLiteral("6/1234"), GeoZoneParser::Companion{ QStringLiteral("v2"), QByteArray("<xml>\0binary</xml>", 18) });
+    result.companions.insert(QStringLiteral("6/0001"), GeoZoneParser::Companion{ QString(), QByteArray() });
+
+    GeoZone::Data zone;
+    zone.identifier = QStringLiteral("SYN-1");
+    zone.country = QStringLiteral("CHE");
+    zone.name = QStringLiteral("Synthetic zone");
+    zone.restrictionCode = QStringLiteral("REQ_AUTHORISATION");
+    zone.restriction = GeoZone::ReqAuthorisation;
+    zone.reasons = { QStringLiteral("AIR_TRAFFIC"), QStringLiteral("OTHER") };
+    zone.otherReasonInfo = QStringLiteral("Other");
+    zone.restrictionConditions = QStringLiteral("Conditions");
+    zone.message = QStringLiteral("Message\nwith lines");
+    zone.authorities = { QStringLiteral("Authority, +41 0000") };
+    GeoZone::DailyPeriod daily;
+    daily.days = { Qt::Monday, Qt::Saturday };
+    daily.startTime = QTime(6, 0);
+    daily.utcOffsetSecs = 3600;
+    daily.endEvent = QStringLiteral("SS");
+    GeoZone::DailyPeriod events;
+    events.startEvent = QStringLiteral("BMCT");
+    events.endEvent = QStringLiteral("EECT");
+    zone.applicability = { GeoZone::TimePeriod{ false, _utc(QDate(2026, 9, 1), QTime(0, 0)), QDateTime(), { daily, events } },
+                           GeoZone::TimePeriod{ true, QDateTime(), QDateTime(), {} } };
+    GeoZone::Volume polygon;
+    polygon.rings = { { QPointF(8.1, 47.1), QPointF(8.2, 47.1), QPointF(8.2, 47.2) }, { QPointF(8.15, 47.12), QPointF(8.16, 47.12), QPointF(8.16, 47.13) } };
+    polygon.lowerLimit = 0;
+    polygon.upperLimit = 400;
+    polygon.feet = true;
+    polygon.setReferences(QStringLiteral("AGL"), QStringLiteral("FL"));
+    GeoZone::Volume circle;
+    circle.isCircle = true;
+    // Continuous across the antimeridian
+    circle.center.setLatitude(47.5);
+    circle.center.setLongitude(181.25);
+    circle.center.setAltitude(432.5);
+    circle.radius = 1234.5;
+    circle.setReferences(QStringLiteral("WGS84"), QStringLiteral("AMSL"));
+    zone.volumes = { polygon, circle };
+    zone.uSpaceClass = QStringLiteral("EUROCONTROL");
+    zone.regulationExemption = QStringLiteral("YES");
+    zone.extendedProperties = { QStringLiteral("a: 1"), QStringLiteral("b: 2") };
+    zone.issues = { QStringLiteral("Unknown unit FL") };
+    zone.contentHash = QByteArray(20, '\x01');
+    result.zones = { zone, GeoZone::Data() };
+    return result;
+}
+
 /// Canceled by cancelOnSkippedFeature
 const GeoZoneCancelToken *s_cancelOnSkip = nullptr;
 
@@ -1005,4 +1135,239 @@ void GeoZoneParserTest::_testParseCancel()
     QVERIFY(!loadResult.stored);
     QVERIFY(loadResult.result.zones.isEmpty());
     QVERIFY(!QFile::exists(store.path(job.storedFileName)));
+}
+
+void GeoZoneParserTest::_testParseCacheRoundTrip_data()
+{
+    _testParseFixtures_data();
+    QTest::newRow("synthetic") << QString() << 0 << 0 << 0 << 0 << 0;
+}
+
+void GeoZoneParserTest::_testParseCacheRoundTrip()
+{
+    QFETCH(QString, fileName);
+    QFETCH(int, formatHint);
+
+    GeoZoneParser::Result result;
+    QByteArray bytes = "synthetic";
+    if (fileName.isEmpty()) {
+        result = _syntheticResult();
+    } else {
+        QFile file(QStringLiteral(":/unittest/") + fileName);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        bytes = file.readAll();
+        QString errorString;
+        QVERIFY2(GeoZoneLoader::parse(bytes, result, errorString, static_cast<GeoZoneParser::Format>(formatHint)), qPrintable(errorString));
+    }
+    const auto serialize = [](const GeoZoneParser::Result &value) {
+        QByteArray serialized;
+        QDataStream stream(&serialized, QIODevice::WriteOnly);
+        stream.setVersion(GeoZoneParseCache::streamVersion);
+        stream << value;
+        return serialized;
+    };
+
+    // Read back, the result and its serialization are the same
+    const QByteArray serialized = serialize(result);
+    GeoZoneParser::Result readBack;
+    {
+        QDataStream stream(serialized);
+        stream.setVersion(GeoZoneParseCache::streamVersion);
+        stream >> readBack;
+        QCOMPARE(stream.status(), QDataStream::Ok);
+        QVERIFY(stream.atEnd());
+    }
+    QString difference = _resultDifference(result, readBack);
+    QVERIFY2(difference.isEmpty(), qPrintable(difference));
+    QCOMPARE(serialize(readBack), serialized);
+    for (qsizetype i = 0; i < result.zones.count(); i++) {
+        const GeoZone zone(result.zones[i]);
+        const GeoZone readZone(readBack.zones[i]);
+        QCOMPARE(readZone.applicabilityText(), zone.applicabilityText());
+        QCOMPARE(readZone.verticalLimitsText(), zone.verticalLimitsText());
+        QCOMPARE(readZone.box().toRectangle(), zone.box().toRectangle());
+    }
+
+    // Through the cache of a stored copy
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString filePath = dir.filePath(QStringLiteral("zones.json"));
+    QFile file(filePath);
+    QVERIFY(file.open(QIODevice::WriteOnly) && (file.write(bytes) == bytes.size()));
+    file.close();
+    const GeoZoneParseCache::Key key{ QStringLiteral("de"), static_cast<GeoZoneParser::Format>(formatHint) };
+    QVERIFY(!GeoZoneParseCache::write(filePath, bytes.size() + 1, GeoZoneParseCache::hash(bytes), key, result));
+    QVERIFY(GeoZoneParseCache::write(filePath, bytes.size(), GeoZoneParseCache::hash(bytes), key, result));
+    GeoZoneParser::Result cached;
+    QVERIFY(GeoZoneParseCache::read(filePath, key, cached));
+    difference = _resultDifference(result, cached);
+    QVERIFY2(difference.isEmpty(), qPrintable(difference));
+
+    // Damaged data fails the stream rather than crashing or allocating for the counts it reads
+    QRandomGenerator random(static_cast<quint32>(serialized.size()));
+    for (int i = 0; i < 300; i++) {
+        QByteArray damaged = serialized;
+        const bool truncated = (i % 2) == 0;
+        if (truncated) {
+            damaged.truncate(random.bounded(static_cast<int>(serialized.size())));
+        } else {
+            for (int j = 0; j < 4; j++) {
+                damaged[random.bounded(static_cast<int>(damaged.size()))] = static_cast<char>(random.bounded(256));
+            }
+        }
+        QDataStream stream(damaged);
+        stream.setVersion(GeoZoneParseCache::streamVersion);
+        GeoZoneParser::Result damagedResult;
+        stream >> damagedResult;
+        if (truncated) {
+            QVERIFY(stream.status() != QDataStream::Ok);
+        }
+    }
+    QByteArray huge;
+    {
+        QDataStream stream(&huge, QIODevice::WriteOnly);
+        stream.setVersion(GeoZoneParseCache::streamVersion);
+        stream << quint8(0) << QString() << QString() << QDateTime() << QDateTime() << QDateTime() << quint32(0xFFFFFFFF);
+    }
+    QDataStream stream(huge);
+    stream.setVersion(GeoZoneParseCache::streamVersion);
+    GeoZoneParser::Result hugeResult;
+    stream >> hugeResult;
+    QCOMPARE(stream.status(), QDataStream::ReadCorruptData);
+    QVERIFY(hugeResult.zones.isEmpty());
+}
+
+void GeoZoneParserTest::_testParseCacheValidation()
+{
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const GeoZoneStore store(dir.path());
+    QFile fixture(QStringLiteral(":/unittest/ed269_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    QByteArray bytes = fixture.readAll();
+    QString errorString;
+    QVERIFY(store.writeFile(QStringLiteral("zones.json"), bytes, errorString));
+    const QString filePath = store.path(QStringLiteral("zones.json"));
+    const QString cachePath = GeoZoneParseCache::path(filePath);
+    GeoZoneParser::Result parsed;
+    QVERIFY(GeoZoneLoader::parse(bytes, parsed, errorString, GeoZoneParser::Format::Unknown, QStringLiteral("en")));
+
+    const auto readFile = [](const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const auto writeAt = [](const QString &path, qint64 offset, const QByteArray &data) {
+        QFile file(path);
+        return file.open(QIODevice::ReadWrite) && file.seek(offset) && (file.write(data) == data.size());
+    };
+    const auto setModified = [](const QString &path, const QDateTime &time) {
+        QFile file(path);
+        return file.open(QIODevice::ReadWrite) && file.setFileTime(time, QFileDevice::FileModificationTime);
+    };
+    const auto bigEndian = [](auto value) {
+        QByteArray data(sizeof(value), Qt::Uninitialized);
+        qToBigEndian(value, data.data());
+        return data;
+    };
+
+    // Restoring the stored copy parses it and writes its cache, the next restores read the cache
+    GeoZoneLoader::Job job;
+    job.key = QStringLiteral("zones");
+    job.sourcePath = filePath;
+    job.fromStore = true;
+    job.language = QStringLiteral("en");
+    const auto restore = [&job, &store](bool fromCache) {
+        const GeoZoneLoader::Result loaded = GeoZoneLoader::run(job, store);
+        return loaded.errorString.isEmpty() && !loaded.stored && (loaded.fromCache == fromCache) ? loaded.result : GeoZoneParser::Result();
+    };
+    QVERIFY(!QFile::exists(cachePath));
+    QCOMPARE(restore(false).zones.count(), 3);
+    QVERIFY(QFile::exists(cachePath));
+    const QByteArray cache = readFile(cachePath);
+    QVERIFY(cache.startsWith("GZPC"));
+    const QString difference = _resultDifference(restore(true), parsed);
+    QVERIFY2(difference.isEmpty(), qPrintable(difference));
+
+    // Caches of another cache format, parser or Qt data stream version are parsed again and rewritten
+    const QList<std::pair<qint64, QByteArray>> versions = {
+        { 4, bigEndian(quint16(GeoZoneParseCache::formatVersion + 1)) },
+        { 6, bigEndian(quint16(GeoZoneParser::version + 1)) },
+        { 8, bigEndian(qint32(GeoZoneParseCache::streamVersion - 1)) },
+    };
+    for (const auto &[offset, version] : versions) {
+        QVERIFY(writeAt(cachePath, offset, version));
+        QCOMPARE(restore(false).zones.count(), 3);
+        QCOMPARE(readFile(cachePath), cache);
+        QCOMPARE(restore(true).zones.count(), 3);
+    }
+
+    // And those of another language or format hint
+    job.language = QStringLiteral("de");
+    QCOMPARE(restore(false).zones.count(), 3);
+    QCOMPARE(restore(true).zones.count(), 3);
+    job.language = QStringLiteral("en");
+    job.formatHint = GeoZoneParser::Format::ED269;
+    QCOMPARE(restore(false).zones.count(), 3);
+    job.formatHint = GeoZoneParser::Format::Unknown;
+    QCOMPARE(restore(false).zones.count(), 3);
+    QCOMPARE(readFile(cachePath), cache);
+
+    // A copied stored copy has another time and the same bytes, it is hashed and the cache takes its time
+    const QDateTime modified = QFileInfo(filePath).lastModified();
+    QVERIFY(setModified(filePath, modified.addSecs(60)));
+    QCOMPARE(restore(true).zones.count(), 3);
+    QCOMPARE(readFile(cachePath).mid(20, 8), bigEndian(modified.addSecs(60).toMSecsSinceEpoch()));
+    QCOMPARE(restore(true).zones.count(), 3);
+
+    // A stored copy with other bytes of the same size is parsed again
+    const qsizetype identifier = bytes.indexOf("\"T-PROH\"");
+    QVERIFY(identifier > 0);
+    QVERIFY(writeAt(filePath, identifier, "\"T-PROX\""));
+    QVERIFY(setModified(filePath, modified.addSecs(120)));
+    QCOMPARE(restore(false).zones.value(0).identifier, QStringLiteral("T-PROX"));
+    QCOMPARE(restore(true).zones.value(0).identifier, QStringLiteral("T-PROX"));
+    QVERIFY(writeAt(filePath, QFileInfo(filePath).size(), " "));
+    QCOMPARE(restore(false).zones.count(), 3);
+
+    // Damaged and truncated caches, or other files, are parsed again
+    const QByteArray current = readFile(cachePath);
+    const QList<QByteArray> damagedCaches = {
+        current.left(current.size() / 2),
+        current.left(current.size() - 1),
+        current.left(10),
+        QByteArray(),
+        current.left(current.size() - 1) + char(current.back() ^ 0x55),
+        QByteArray(current.size(), 'x'),
+        bytes,
+    };
+    for (const QByteArray &damaged : damagedCaches) {
+        QFile damagedFile(cachePath);
+        QVERIFY(damagedFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(damagedFile.write(damaged), damaged.size());
+        damagedFile.close();
+        QCOMPARE(restore(false).zones.value(0).identifier, QStringLiteral("T-PROX"));
+        QCOMPARE(readFile(cachePath), current);
+    }
+
+    // Loading a new copy writes its cache, which is removed with it
+    const QTemporaryDir sourceDir;
+    QVERIFY(sourceDir.isValid());
+    const QString sourcePath = sourceDir.filePath(QStringLiteral("ed318.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), sourcePath));
+    GeoZoneLoader::Job fileJob = GeoZoneLoader::fileJob(sourcePath);
+    const GeoZoneLoader::Result added = GeoZoneLoader::run(fileJob, store);
+    QVERIFY(added.stored && !added.fromCache);
+    QVERIFY(QFile::exists(GeoZoneParseCache::path(store.path(fileJob.storedFileName))));
+    store.removeFile(fileJob.storedFileName);
+    QVERIFY(!QFile::exists(store.path(fileJob.storedFileName)));
+    QVERIFY(!QFile::exists(GeoZoneParseCache::path(store.path(fileJob.storedFileName))));
+
+    // Caches of files which aren't stored anymore are removed with the unreferenced files
+    QVERIFY(store.writeFile(QStringLiteral("orphan.json.gzc"), "cache", errorString));
+    store.removeOrphanFiles({ QStringLiteral("zones.json") });
+    QVERIFY(QFile::exists(cachePath));
+    QVERIFY(!QFile::exists(store.path(QStringLiteral("orphan.json.gzc"))));
+    store.removeFile(QStringLiteral("zones.json"));
+    QVERIFY(!QFile::exists(cachePath));
+    QVERIFY(QDir(dir.path()).entryList(QDir::Files).isEmpty());
 }

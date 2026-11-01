@@ -10,6 +10,7 @@
 #include "GeoZoneStore.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneParseCache.h"
 #include "GeoZoneSource.h"
 
 #include <QtCore/QDir>
@@ -60,6 +61,7 @@ QString GeoZoneStore::moveToBackup() const
     for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
         if (fileName != QLatin1String(GeoZoneAuthorisations::fileName)) {
             moved = dir.rename(fileName, QStringLiteral("%1/%2").arg(backupName, fileName)) || moved;
+            GeoZoneParseCache::remove(dir.filePath(fileName));
         }
     }
     return moved ? dir.filePath(backupName) : QString();
@@ -128,6 +130,7 @@ void GeoZoneStore::removeFile(const QString &fileName) const
 {
     if (!fileName.isEmpty()) {
         (void) QFile::remove(path(fileName));
+        GeoZoneParseCache::remove(path(fileName));
     }
 }
 
@@ -137,6 +140,12 @@ void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) c
     for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
         if ((fileName != QLatin1String(GeoZoneAuthorisations::fileName)) && !referencedFileNames.contains(fileName)) {
             qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
+            (void) QFile::remove(dir.filePath(fileName));
+        }
+    }
+    // Caches of the files removed, or left by an interrupted removal
+    for (const QString &fileName : dir.entryList(QDir::Files)) {
+        if (GeoZoneParseCache::isCacheFileName(fileName) && !referencedFileNames.contains(QFileInfo(fileName).completeBaseName())) {
             (void) QFile::remove(dir.filePath(fileName));
         }
     }

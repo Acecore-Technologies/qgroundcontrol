@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneSchedule.h"
+#include "GeoZoneDataStream.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QTimeZone>
@@ -304,4 +305,51 @@ QString GeoZoneSchedule::text(const QList<TimePeriod> &applicability)
         }
     }
     return lines.join(QStringLiteral("\n"));
+}
+
+// Fields added to the periods must be serialized here, see GeoZoneParseCache::formatVersion
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::DailyPeriod) == 88), "Serialize the new fields of DailyPeriod");
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::TimePeriod) == 48), "Serialize the new fields of TimePeriod");
+
+QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod &period)
+{
+    GeoZoneDataStream::writeCount(stream, period.days.count());
+    for (const int day : period.days) {
+        stream << static_cast<qint32>(day);
+    }
+    return stream << period.startTime << period.endTime << static_cast<qint32>(period.utcOffsetSecs) << period.startEvent << period.endEvent;
+}
+
+QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &period)
+{
+    period = GeoZoneSchedule::DailyPeriod();
+    qsizetype count = 0;
+    if (!GeoZoneDataStream::readCount(stream, sizeof(qint32), count)) {
+        return stream;
+    }
+    for (qsizetype i = 0; i < count; i++) {
+        qint32 day = 0;
+        stream >> day;
+        period.days.append(day);
+    }
+    qint32 utcOffsetSecs = 0;
+    stream >> period.startTime >> period.endTime >> utcOffsetSecs >> period.startEvent >> period.endEvent;
+    period.utcOffsetSecs = utcOffsetSecs;
+    return stream;
+}
+
+QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::TimePeriod &period)
+{
+    stream << period.permanent << period.start << period.end;
+    GeoZoneDataStream::writeList(stream, period.schedule);
+    return stream;
+}
+
+QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::TimePeriod &period)
+{
+    period = GeoZoneSchedule::TimePeriod();
+    stream >> period.permanent >> period.start >> period.end;
+    // Days, times, offset and events
+    (void) GeoZoneDataStream::readList(stream, period.schedule, 6 * sizeof(quint32));
+    return stream;
 }
