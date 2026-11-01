@@ -28,7 +28,9 @@ class Vehicle;
 ///     Idle ──start()──> Sending ──sent──> Verifying ──read back──> Verified or Mismatch
 ///
 /// and ends in Failed when the vehicle rejects the fence, the transfer fails or the vehicle disconnects, and in Aborted
-/// when it is aborted. Each of the final states can start again.
+/// when the plan's fence is edited or the plan file changes meanwhile, since the vehicle wouldn't store the plan's
+/// fence. The plan's fence stays dirty unless the vehicle received it as it is. Each of the final states can
+/// start again.
 class GeoZoneFenceUpload : public QObject
 {
     Q_OBJECT
@@ -50,7 +52,7 @@ public:
         Verified,
         Mismatch,       ///< The fence read back differs from the one sent
         Failed,
-        Aborted,        ///< See abort
+        Aborted,        ///< The plan changed before the upload was verified, or see abort
     };
     Q_ENUM(State)
 
@@ -116,6 +118,8 @@ private:
     bool _transition(State state, const QString &message);
     void _sent(bool error);
     void _readBack();
+    /// Aborts the upload in progress when the plan's fence no longer is the one sent
+    void _checkFence();
     void _vehicleLost();
     QString _rejectionText(const QString &errorMessage) const;
 
@@ -128,6 +132,7 @@ private:
     QObject *_uploadConnections = nullptr;              ///< Receiver of the signals of the upload, deleted to disconnect them
     QPointer<Vehicle> _vehicle;
     QPointer<GeoFenceManager> _manager;
+    QString _planFile;                                  ///< Of the plan when the upload started
     FenceSnapshot _sentFence;
     QString _error;                                     ///< Reported by the fence manager
     int _ackResult = 0;                                 ///< MAV_MISSION_RESULT of the last fence MISSION_ACK, 0 when accepted

@@ -134,6 +134,7 @@ void GeoZoneFenceUpload::start()
 
     _vehicle = vehicle;
     _manager = vehicle->geoFenceManager();
+    _planFile = masterController->currentPlanFile();
     _sentFence = snapshot(_geoFenceController);
     _error.clear();
     _ackResult = MAV_MISSION_ACCEPTED;
@@ -154,7 +155,22 @@ void GeoZoneFenceUpload::start()
     (void) connect(_manager, &GeoFenceManager::error, _uploadConnections, [this](int, const QString &message) { _error = message; });
     (void) connect(_manager, &GeoFenceManager::sendComplete, _uploadConnections, [this](bool error) { _sent(error); });
     (void) connect(_manager, &GeoFenceManager::loadComplete, _uploadConnections, [this]() { _readBack(); });
+    (void) connect(vehicle, &QObject::destroyed, _uploadConnections, [this]() { _vehicleLost(); });
     (void) connect(masterController, &PlanMasterController::managerVehicleChanged, _uploadConnections, [this]() { _vehicleLost(); });
+    (void) connect(masterController, &PlanMasterController::currentPlanFileChanged, _uploadConnections, [this, masterController]() {
+        if (masterController->currentPlanFile() != _planFile) {
+            abort(tr("The plan file changed during the upload, upload the fence again."));
+        }
+    });
+    // Edits of the fence. Sending clears the dirty state of the fences, so that the first edit of each sets it again.
+    const auto edited = [this]() { _checkFence(); };
+    (void) connect(_geoFenceController, &QObject::destroyed, _uploadConnections, [this]() { abort(tr("The plan was closed during the upload.")); });
+    (void) connect(_geoFenceController, &GeoFenceController::dirtyChanged, _uploadConnections, edited);
+    (void) connect(_geoFenceController, &GeoFenceController::breachReturnPointChanged, _uploadConnections, edited);
+    for (QmlObjectListModel *const fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
+        (void) connect(fences, &QmlObjectListModel::countChanged, _uploadConnections, edited);
+        (void) connect(fences, &QmlObjectListModel::dirtyChanged, _uploadConnections, edited);
+    }
 
     _geoFenceController->sendToVehicle();
 }
@@ -166,9 +182,16 @@ void GeoZoneFenceUpload::abort(const QString &reason)
     }
 }
 
+void GeoZoneFenceUpload::_checkFence()
+{
+    if (busy() && (!_geoFenceController || (snapshot(_geoFenceController) != _sentFence))) {
+        abort(tr("The plan's fence changed during the upload, upload it again."));
+    }
+}
+
 void GeoZoneFenceUpload::_vehicleLost()
 {
-    if (busy()) {
+    if (busy() && (!_vehicle || !_manager || (_planVehicle() != _vehicle))) {
         (void) _transition(Failed, tr("The vehicle disconnected."));
     }
 }
@@ -201,6 +224,11 @@ void GeoZoneFenceUpload::_sent(bool error)
         (void) _transition(Failed, _rejectionText(_error));
         return;
     }
+    // Edits while sending leave the fence dirty, they aren't on the vehicle
+    _checkFence();
+    if (_state != Sending) {
+        return;
+    }
     // Like the plan upload once it is done, since clearing the fence's dirty state while sending leaves it set again
     // by the fences which were dirty
     _geoFenceController->setDirty(false);
@@ -208,9 +236,14 @@ void GeoZoneFenceUpload::_sent(bool error)
     _error.clear();
     // After the fence manager has finished the upload transaction
     QTimer::singleShot(0, _uploadConnections, [this]() {
-        if (_manager && (_state == Verifying)) {
-            _manager->loadFromVehicle();
+        if (_state != Verifying) {
+            return;
         }
+        if (!_manager) {
+            _vehicleLost();
+            return;
+        }
+        _manager->loadFromVehicle();
     });
 }
 
@@ -221,6 +254,15 @@ void GeoZoneFenceUpload::_readBack()
     }
     if (!_error.isEmpty()) {
         (void) _transition(Failed, tr("The fence was sent, but reading it back failed: %1").arg(_error));
+        return;
+    }
+    if (!_manager) {
+        _vehicleLost();
+        return;
+    }
+    // The vehicle stores the fence sent, which the plan no longer has
+    _checkFence();
+    if (_state != Verifying) {
         return;
     }
     const QString differences = compareFences(_sentFence, snapshot(_manager->polygons(), _manager->circles(), _manager->breachReturnPoint()));

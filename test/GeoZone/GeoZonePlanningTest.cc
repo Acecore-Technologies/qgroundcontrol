@@ -2438,6 +2438,83 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
     QVERIFY(!GeoZoneFenceUpload::compareFences(sent, received).isEmpty());
 }
 
+void GeoZonePlanningTest::_testGeoFenceUploadChanges()
+{
+    ZoneOwner zoneParent;
+    GeoZone::Volume volume;
+    volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8), 500, 40)));
+    GeoZone::Data data;
+    data.identifier = QStringLiteral("P");
+    data.restriction = GeoZone::Prohibited;
+    data.volumes.append(volume);
+    const QList<const GeoZone*> zones = { zoneParent.add(data) };
+
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(geoFenceController);
+    GeoZoneFenceUpload *const upload = importer.upload();
+    importer.select(zones, 25);
+    QCOMPARE(importer.selectedCount(), 1);
+    const auto moveVertex = [geoFenceController]() {
+        QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(0);
+        polygon->adjustVertex(0, polygon->vertexCoordinate(0).atDistanceAndAzimuth(50, 0));
+    };
+
+    // An edit while sending isn't on the vehicle, so the fence stays dirty once the transfer is done
+    importer.uploadToVehicle();
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
+    moveVertex();
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
+    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+    QVERIFY(geoFenceController->dirty());
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
+
+    // An edit while verifying: the fence read back matches the one sent, not the plan's
+    {
+        QObject context;
+        (void) connect(upload, &GeoZoneFenceUpload::stateChanged, &context, [upload, &moveVertex]() {
+            if (upload->state() == GeoZoneFenceUpload::Verifying) {
+                moveVertex();
+            }
+        });
+        upload->start();
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Aborted, 15000);
+    }
+    QVERIFY2(upload->message().contains(QStringLiteral("changed")), qPrintable(upload->message()));
+    QVERIFY(geoFenceController->dirty());
+    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
+
+    // Clearing the plan
+    upload->start();
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
+    masterController.removeAll();
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
+    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+
+    // Unchanged, the upload is verified and the fence clean
+    importer.uploadToVehicle();
+    QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
+    QVERIFY(!geoFenceController->dirty());
+
+    // The vehicle disconnecting while the fence is read back fails the upload
+    _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailReadRequestListNoResponse, MAV_MISSION_ACCEPTED);
+    upload->start();
+    QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verifying, 15000);
+    _disconnectMockLink();
+    QTRY_COMPARE(upload->state(), GeoZoneFenceUpload::Failed);
+    QVERIFY2(upload->message().contains(QStringLiteral("disconnected")), qPrintable(upload->message()));
+}
+
 void GeoZonePlanningTest::_testMapModel()
 {
     const QGeoRectangle view(QGeoCoordinate(47.1, 7.85), QGeoCoordinate(46.9, 8.15));

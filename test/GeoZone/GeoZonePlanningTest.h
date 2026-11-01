@@ -42,6 +42,7 @@ private slots:
     void _testGeoFenceImport();
     void _testGeoFenceSelection();
     void _testGeoFenceUpload();
+    void _testGeoFenceUploadChanges();
     void _testMapModel();
     void _testMapModelShapeLimit();
 };
