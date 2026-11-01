@@ -9,6 +9,7 @@
 
 #include "GeoZoneGeometryTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneFences.h"
 
 using namespace GeoZoneTestHelpers;
 
@@ -317,6 +318,247 @@ void GeoZoneGeometryTest::_testExclusionShapes()
     QCOMPARE(multiPolygons.count(), 2);
     QCOMPARE(multiPolygons[0].count(), 4);
     QCOMPARE(multiPolygons[1].count(), 3);
+}
+
+void GeoZoneGeometryTest::_testFenceCapacity()
+{
+    using namespace GeoZoneFences;
+
+    // Items and ArduPilot storage of polygons, circles and the return point
+    Usage usage;
+    usage.addPolygon(4);
+    usage.addCircle();
+    usage.addReturnPoint();
+    QCOMPARE(usage, (Usage{ 6, 34 + 13 + 9, 4 }));
+
+    // PX4 stores 64 items
+    Usage polygon64;
+    polygon64.addPolygon(64);
+    QVERIFY(Capacity::px4().fits(polygon64));
+    QVERIFY(!Capacity::px4().fits(polygon64 + usage));
+
+    // ArduPilot copters store 70 items in 560 bytes, so the polygon bytes fill the storage before the items
+    const Capacity copter = Capacity::arduPilot(true);
+    QCOMPARE(copter.maxItems, 70);
+    QVERIFY(copter.estimated);
+    Usage polygon69;
+    polygon69.addPolygon(69);
+    Usage polygon70;
+    polygon70.addPolygon(70);
+    QVERIFY(copter.fits(polygon69));
+    QVERIFY(!copter.fits(polygon70));
+    QCOMPARE(Capacity::arduPilot(false).maxItems, 84);
+    // Fences stored on the SD card hold more, but no polygon of more than 255 vertices
+    const Capacity sdCard = Capacity::arduPilot(true, 4);
+    QVERIFY(!sdCard.estimated);
+    QCOMPARE(sdCard.maxItems, 512);
+    Usage polygon255;
+    polygon255.addPolygon(255);
+    Usage polygon256;
+    polygon256.addPolygon(256);
+    QVERIFY(sdCard.fits(polygon255));
+    QVERIFY(!sdCard.fits(polygon256));
+    // Without a vehicle the fence fits both, without circles
+    QVERIFY(!Capacity::conservative().circles);
+    QVERIFY(!Capacity::conservative().fits(polygon70));
+    QVERIFY(Capacity::unsupported().fits(Usage()));
+    QVERIFY(!Capacity::unsupported().fits(usage));
+
+    // Circles become polygons enclosing them for vehicles without fence circles, fewer vertices when simplified
+    ZoneOwner owner;
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = QGeoCoordinate(47, 8);
+    circleVolume.radius = 500;
+    GeoZone::Data circleData;
+    circleData.restriction = GeoZone::Prohibited;
+    circleData.volumes = { circleVolume };
+    const GeoZone *const circle = owner.add(circleData);
+    const ZoneFences asCircle = zoneFences(circle);
+    QCOMPARE(asCircle.circles.count(), 1);
+    QVERIFY(asCircle.polygons.isEmpty());
+    const ZoneFences asPolygon = zoneFences(circle, 0, true);
+    QVERIFY(asPolygon.circles.isEmpty());
+    QCOMPARE(asPolygon.polygons.count(), 1);
+    const ZoneFences simplifiedPolygon = zoneFences(circle, 50, true);
+    QVERIFY(simplifiedPolygon.polygons.first().count() < asPolygon.polygons.first().count());
+    QVERIFY(simplifiedPolygon.polygons.first().count() >= minCircleVertices);
+    for (const ZoneFences &fences : { asPolygon, simplifiedPolygon }) {
+        QVERIFY(fencesCover(fences, circle));
+        for (const QGeoCoordinate &vertex : fences.polygons.first()) {
+            QVERIFY(vertex.distanceTo(circleVolume.center) > circleVolume.radius);
+        }
+        // Edges stay outside the circle
+        const GeoZoneGeometry::LocalProjection projection(circleVolume.center);
+        QVERIFY(GeoZoneGeometry::distanceToRing(QPointF(0, 0), projection.toLocal(fences.polygons.first())) >= circleVolume.radius);
+    }
+    QVERIFY(GeoZoneGeometry::signedArea(asPolygon.polygons.first()) < 0);
+
+    // Simplified fences of a jagged polygon never cut into it, whatever the tolerance
+    QList<QGeoCoordinate> star;
+    for (int i = 0; i < 120; i++) {
+        const double radius = ((i % 2) ? 400 : 380) + ((i % 30) < 15 ? 250 : 0);
+        star.append(QGeoCoordinate(47, 8).atDistanceAndAzimuth(radius, i * 360.0 / 120));
+    }
+    GeoZone::Volume starVolume;
+    starVolume.rings.append(GeoZone::toRing(star));
+    GeoZone::Data starData;
+    starData.restriction = GeoZone::Prohibited;
+    starData.volumes = { starVolume };
+    const GeoZone *const starZone = owner.add(starData);
+    qsizetype previousCount = star.count() + 1;
+    for (const double tolerance : { 0.0, 10.0, 25.0, 50.0, 100.0 }) {
+        const ZoneFences fences = zoneFences(starZone, tolerance);
+        QCOMPARE(fences.polygons.count(), 1);
+        QVERIFY(fences.polygons.first().count() <= previousCount);
+        previousCount = fences.polygons.first().count();
+        QVERIFY(fencesCover(fences, starZone));
+        const GeoZoneGeometry::LocalProjection projection(star.first());
+        const QList<QPointF> ring = projection.toLocal(fences.polygons.first());
+        for (const QGeoCoordinate &vertex : star) {
+            const QPointF point = projection.toLocal(vertex);
+            QVERIFY(GeoZoneGeometry::ringContains(ring, point) || (GeoZoneGeometry::distanceToRing(point, ring) <= boundaryTolerance));
+        }
+    }
+    QVERIFY(previousCount < star.count() / 4);
+}
+
+void GeoZoneGeometryTest::_testFenceSelection()
+{
+    using namespace GeoZoneFences;
+
+    ZoneOwner owner;
+    const QGeoCoordinate origin(47, 8);
+    const auto polygonZone = [&owner, &origin](const QString &name, GeoZone::Restriction restriction, double east, double north, int vertexCount, double radius = 200) {
+        GeoZone::Volume volume;
+        volume.rings.append(GeoZone::toRing(_circleRing(origin.atDistanceAndAzimuth(north, 0).atDistanceAndAzimuth(east, 90), radius, vertexCount)));
+        GeoZone::Data data;
+        data.name = name;
+        data.restriction = restriction;
+        data.volumes = { volume };
+        return owner.add(data);
+    };
+
+    // A flight path heading east from the origin
+    const QList<QList<QGeoCoordinate>> flight = { { origin, origin.atDistanceAndAzimuth(10000, 90) } };
+    const GeoZone *const enteredRound = polygonZone(QStringLiteral("Prohibited entered"), GeoZone::Prohibited, 3000, 0, 40);
+    const GeoZone *const nearProhibited = polygonZone(QStringLiteral("Prohibited near"), GeoZone::Prohibited, 5000, 600, 8);
+    const GeoZone *const farProhibited = polygonZone(QStringLiteral("Prohibited far"), GeoZone::Prohibited, 5000, 5000, 4);
+    const GeoZone *const fartherProhibited = polygonZone(QStringLiteral("Prohibited farther"), GeoZone::Prohibited, 5000, 8000, 4);
+    const GeoZone *const enteredRestricted = polygonZone(QStringLiteral("Authorisation entered"), GeoZone::ReqAuthorisation, 7000, 0, 4);
+    const GeoZone *const nearConditional = polygonZone(QStringLiteral("Conditional near"), GeoZone::Conditional, 1000, -500, 12);
+    const GeoZone *const smallConditional = polygonZone(QStringLiteral("Conditional small"), GeoZone::Conditional, 1000, -5000, 4);
+    const GeoZone *const uSpace = polygonZone(QStringLiteral("U-space"), GeoZone::USpace, 0, 0, 4, 2000);
+    const GeoZone *const overflown = polygonZone(QStringLiteral("Overflown"), GeoZone::Prohibited, 9000, 0, 4);
+    const GeoZone *const duplicate = polygonZone(QStringLiteral("Prohibited far copy"), GeoZone::Prohibited, 5000, 5000, 4);
+
+    // The evaluated paths enter some zones and only pass above one
+    GeoZonePathEvaluator::Result evaluation;
+    for (const GeoZone *zone : { enteredRound, enteredRestricted, uSpace }) {
+        GeoZonePathEvaluator::ZoneResult result;
+        result.zone = zone;
+        result.crossings.append(GeoZonePathEvaluator::Crossing());
+        result.stretches.append(GeoZonePathEvaluator::Stretch());
+        evaluation.zones.append(result);
+    }
+    GeoZonePathEvaluator::ZoneResult overflownResult;
+    overflownResult.zone = overflown;
+    overflownResult.stretches.append(GeoZonePathEvaluator::Stretch());
+    evaluation.zones.append(overflownResult);
+
+    const QList<const GeoZone*> zones = { uSpace, smallConditional, farProhibited, overflown, nearConditional, enteredRestricted, fartherProhibited, nearProhibited, enteredRound, duplicate };
+    const QList<Candidate> candidateList = candidates(zones, evaluation, flight);
+    QCOMPARE(candidateList.count(), zones.count());
+    const auto candidateOf = [&candidateList](const GeoZone *zone) {
+        return *std::find_if(candidateList.cbegin(), candidateList.cend(), [zone](const Candidate &candidate) { return candidate.zone == zone; });
+    };
+    QCOMPARE(candidateOf(enteredRound).proximity, Proximity::Entered);
+    QCOMPARE(candidateOf(overflown).proximity, Proximity::Overflown);
+    QVERIFY(candidateOf(overflown).excluded);
+    QCOMPARE(candidateOf(nearProhibited).proximity, Proximity::Near);
+    QVERIFY(qAbs(candidateOf(nearProhibited).distance - 400) < 5);
+    QCOMPARE(candidateOf(farProhibited).proximity, Proximity::Far);
+    QVERIFY(candidateOf(fartherProhibited).distance > candidateOf(farProhibited).distance);
+    // Without a flight all zones are far
+    QCOMPARE(candidates({ nearProhibited }, GeoZonePathEvaluator::Result(), {}).first().proximity, Proximity::Far);
+
+    // Prohibited zones first, entered, near, then by distance, then other restricted zones, then the others
+    const auto names = [](const auto &list, auto zoneOf) {
+        QStringList result;
+        for (const auto &entry : list) {
+            result.append(zoneOf(entry)->name());
+        }
+        return result;
+    };
+    const auto candidateZone = [](const Candidate &candidate) { return candidate.zone; };
+    const QStringList priority = { QStringLiteral("Prohibited entered"), QStringLiteral("Overflown"), QStringLiteral("Prohibited near"),
+                                   QStringLiteral("Prohibited far"), QStringLiteral("Prohibited far copy"), QStringLiteral("Prohibited farther"),
+                                   QStringLiteral("Authorisation entered"), QStringLiteral("Conditional near"), QStringLiteral("Conditional small"),
+                                   QStringLiteral("U-space") };
+    QCOMPARE(names(sortedByPriority(candidateList), candidateZone), priority);
+
+    // PX4 stores 64 points: the zones fit in priority order, a smaller one after a zone without room still fits
+    const auto choiceZone = [](const Choice &choice) { return choice.candidate.zone; };
+    Selection selection = select(candidateList, Capacity::px4());
+    QCOMPARE(names(selection.choices, choiceZone), QStringList({ QStringLiteral("Prohibited entered"), QStringLiteral("Prohibited near"), QStringLiteral("Prohibited far"),
+                                                                 QStringLiteral("Prohibited farther"), QStringLiteral("Authorisation entered"), QStringLiteral("Conditional small"),
+                                                                 QStringLiteral("Overflown"), QStringLiteral("Prohibited far copy"), QStringLiteral("Conditional near"),
+                                                                 QStringLiteral("U-space") }));
+    QCOMPARE(selection.usage.items, 64);
+    QCOMPARE(selection.selectedZones().count(), 6);
+    const auto choiceOf = [&selection](const GeoZone *zone) {
+        return *std::find_if(selection.choices.cbegin(), selection.choices.cend(), [zone](const Choice &choice) { return choice.candidate.zone == zone; });
+    };
+    QCOMPARE(choiceOf(overflown).status, Status::Excluded);
+    QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
+    QCOMPARE(choiceOf(duplicate).duplicateOf, farProhibited);
+    QCOMPARE(choiceOf(nearConditional).status, Status::NoRoom);
+    QCOMPARE(choiceOf(nearConditional).usage.items, 12);
+    for (const Choice &choice : selection.choices) {
+        QCOMPARE(statusText(choice).isEmpty(), choice.status == Status::Selected);
+        QCOMPARE(choice.fences.isEmpty(), choice.status != Status::Selected);
+    }
+    QVERIFY(statusText(choiceOf(duplicate)).contains(QStringLiteral("Prohibited far")));
+
+    // Kept fences take room, and fences which don't fit even alone are too large
+    Usage kept;
+    kept.addPolygon(30);
+    selection = select(candidateList, Capacity::px4(), kept);
+    QCOMPARE(choiceOf(enteredRound).status, Status::TooLarge);
+    QCOMPARE(choiceOf(nearProhibited).status, Status::Selected);
+    QCOMPARE(selection.reserved, kept);
+
+    // Simplifying makes room: the round zone first in priority gets the least simplified fence which fits
+    Candidate leftOut = candidateOf(uSpace);
+    leftOut.excluded = true;
+    QList<Candidate> userChoice = candidateList;
+    userChoice.erase(std::remove_if(userChoice.begin(), userChoice.end(), [uSpace](const Candidate &candidate) { return candidate.zone == uSpace; }), userChoice.end());
+    userChoice.append(leftOut);
+    selection = select(userChoice, Capacity::px4(), kept, { 0, 10, 25, 50 });
+    QCOMPARE(choiceOf(uSpace).status, Status::Excluded);
+    QCOMPARE(statusText(choiceOf(uSpace)), QStringLiteral("Left out"));
+    QCOMPARE(choiceOf(enteredRound).status, Status::Selected);
+    QVERIFY(choiceOf(enteredRound).simplifyTolerance > 0);
+    QVERIFY(choiceOf(enteredRound).usage.items < 40);
+    QCOMPARE(choiceOf(enteredRound).fences, zoneFences(enteredRound, choiceOf(enteredRound).simplifyTolerance));
+    QVERIFY(fencesCover(choiceOf(enteredRound).fences, enteredRound));
+    QVERIFY(Capacity::px4().fits(selection.usage));
+    Usage total = kept;
+    for (const Choice &choice : selection.choices) {
+        if (choice.status == Status::Selected) {
+            total += choice.usage;
+        }
+    }
+    QCOMPARE(total, selection.usage);
+    // With room to spare nothing is simplified
+    selection = select(userChoice, Capacity::arduPilot(true, 8), Usage(), { 0, 10, 25, 50 });
+    QCOMPARE(choiceOf(enteredRound).simplifyTolerance, 0.0);
+    QCOMPARE(choiceOf(nearConditional).status, Status::Selected);
+
+    // Vehicles without exclusion fences store none
+    selection = select(candidateList, Capacity::unsupported());
+    QCOMPARE(choiceOf(enteredRound).status, Status::Unsupported);
+    QCOMPARE(selection.usage, Usage());
 }
 
 void GeoZoneGeometryTest::_testContainsAndPaths()

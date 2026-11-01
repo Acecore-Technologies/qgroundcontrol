@@ -22,6 +22,8 @@ private slots:
     void _testOutwardSimplification();
     void _testSpatialIndex();
     void _testExclusionShapes();
+    void _testFenceCapacity();
+    void _testFenceSelection();
     void _testContainsAndPaths();
     void _testAltitudeLimits();
     void _testVerticalOverlap_data();
