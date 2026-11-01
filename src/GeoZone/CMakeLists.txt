@@ -1,41 +1,18 @@
+add_subdirectory(Core)
+
+# The application layer: zones on the maps, mission checks, flight monitoring, settings and QML
 target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
-        GeoZone.cc
-        GeoZone.h
         GeoZoneAlertHistory.cc
         GeoZoneAlertHistory.h
         GeoZoneAlertLog.cc
         GeoZoneAlertLog.h
-        GeoZoneAlertTracker.cc
-        GeoZoneAlertTracker.h
-        GeoZoneAuthorisations.cc
-        GeoZoneAuthorisations.h
-        GeoZoneBox.cc
-        GeoZoneBox.h
-        GeoZoneCatalog.cc
-        GeoZoneCatalog.h
         GeoZoneDisplay.cc
         GeoZoneDisplay.h
-        GeoZoneDownloader.cc
-        GeoZoneDownloader.h
-        GeoZoneEnvironment.cc
-        GeoZoneEnvironment.h
         GeoZoneFenceImporter.cc
         GeoZoneFenceImporter.h
-        GeoZoneFences.cc
-        GeoZoneFences.h
-        GeoZoneFormat.cc
-        GeoZoneFormat.h
-        GeoZoneGeometry.cc
-        GeoZoneGeometry.h
         GeoZoneGuidedCheck.cc
         GeoZoneGuidedCheck.h
-        GeoZoneIndex.cc
-        GeoZoneIndex.h
-        GeoZoneInfo.cc
-        GeoZoneInfo.h
-        GeoZoneLoader.cc
-        GeoZoneLoader.h
         GeoZoneManager.cc
         GeoZoneManager.h
         GeoZoneMapLayer.cc
@@ -43,68 +20,34 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneMapModel.cc
         GeoZoneMapModel.h
         GeoZoneMissionCheck.cc
-        GeoZoneModule.cc
-        GeoZoneModule.h
         GeoZoneMissionCheck.h
         GeoZoneMissionPath.cc
         GeoZoneMissionPath.h
+        GeoZoneModule.cc
+        GeoZoneModule.h
         GeoZoneMonitor.cc
         GeoZoneMonitor.h
         GeoZoneNearbyModel.cc
         GeoZoneNearbyModel.h
-        GeoZoneParser.cc
-        GeoZoneParser.h
-        GeoZoneParserUtils.cc
-        GeoZoneParserUtils.h
-        GeoZonePathEvaluator.cc
-        GeoZonePathEvaluator.h
         GeoZonePlanData.cc
+        GeoZonePlanData.h
         GeoZonePlanning.cc
         GeoZonePlanning.h
-        GeoZonePlanData.h
-        GeoZonePolicy.cc
-        GeoZonePolicy.h
         GeoZoneProfile.cc
         GeoZoneProfile.h
-        GeoZoneProviders.cc
-        GeoZoneProviders.h
         GeoZoneRoutePlanner.cc
         GeoZoneRoutePlanner.h
-        GeoZoneSchedule.cc
-        GeoZoneSchedule.h
         GeoZoneSettings.cc
         GeoZoneSettings.h
-        GeoZoneShape.cc
-        GeoZoneShape.h
-        GeoZoneSource.cc
-        GeoZoneSource.h
-        GeoZoneSourceRepository.cc
-        GeoZoneSourceRepository.h
-        GeoZoneStore.cc
-        GeoZoneStore.h
-        GeoZoneZip.cc
-        GeoZoneZip.h
-        GeoZoneTerrain.cc
-        GeoZoneTerrain.h
-        Formats/GeoZoneAixmFormat.cc
-        Formats/GeoZoneDipulFormat.cc
-        Formats/GeoZoneEd269Format.cc
-        Formats/GeoZoneEd318Format.cc
-        Formats/GeoZoneFaaTfrFormat.cc
-        Formats/GeoZoneFranceUasFormat.cc
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE GeoZoneCore)
 
-# Settings metadata and the EGM96 geoid for heights above the WGS84 ellipsoid
+# Settings metadata
 qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_resources"
     PREFIX "/json"
     FILES GeoZone.SettingsGroup.json
-)
-qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_geoid"
-    PREFIX "/geoid"
-    BASE Geoid
-    FILES Geoid/egm96_1deg.bin
 )
 
 # GeoZoneMapLayer triangulates the zone polygons with the triangulator of Qt Quick

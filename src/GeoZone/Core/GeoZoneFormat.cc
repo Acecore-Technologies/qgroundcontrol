@@ -45,22 +45,25 @@ QList<GeoZoneFormat::CompanionRequest> GeoZoneFormat::companionRequests(const QU
     return {};
 }
 
-QList<const GeoZoneFormat*> &GeoZoneFormat::_registered()
-{
-    static QList<const GeoZoneFormat*> registered;
-    return registered;
-}
-
-GeoZoneFormat::Registration::Registration(const GeoZoneFormat *format)
-{
-    _registered().append(format);
-}
+// Defined by GEOZONE_REGISTER_FORMAT in the Formats directory
+const GeoZoneFormat *GeoZoneAixmFormatInstance();
+const GeoZoneFormat *GeoZoneDipulFormatInstance();
+const GeoZoneFormat *GeoZoneEd269FormatInstance();
+const GeoZoneFormat *GeoZoneEd318FormatInstance();
+const GeoZoneFormat *GeoZoneFaaTfrFormatInstance();
+const GeoZoneFormat *GeoZoneFranceUasFormatInstance();
 
 const QList<const GeoZoneFormat*> &GeoZoneFormat::formats()
 {
-    // Registered while the program starts, before worker threads use them
     static const QList<const GeoZoneFormat*> formats = []() {
-        QList<const GeoZoneFormat*> sorted = _registered();
+        QList<const GeoZoneFormat*> sorted = {
+            GeoZoneAixmFormatInstance(),
+            GeoZoneDipulFormatInstance(),
+            GeoZoneEd269FormatInstance(),
+            GeoZoneEd318FormatInstance(),
+            GeoZoneFaaTfrFormatInstance(),
+            GeoZoneFranceUasFormatInstance(),
+        };
         std::stable_sort(sorted.begin(), sorted.end(), [](const GeoZoneFormat *a, const GeoZoneFormat *b) { return a->detectionOrder() < b->detectionOrder(); });
         return sorted;
     }();

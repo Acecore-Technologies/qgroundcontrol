@@ -17,7 +17,8 @@
 
 /// A geozone data format, which recognizes its documents and converts their features into zones. Formats are stateless
 /// and used from worker threads. Adding a format takes a class in the Formats directory registered with
-/// GEOZONE_REGISTER_FORMAT, a GeoZoneParser::Format value, and its services in GeoZoneProviders::services().
+/// GEOZONE_REGISTER_FORMAT and listed in formats(), a GeoZoneParser::Format value, and its services in
+/// GeoZoneProviders::services().
 class GeoZoneFormat
 {
 public:
@@ -67,20 +68,14 @@ public:
 
     /// @return true for the response of a web feature service whose features are all filtered out
     static bool isEmptyWfsResponse(const QJsonObject &root);
-
-    /// Adds a format to formats() when the program starts, see GEOZONE_REGISTER_FORMAT
-    struct Registration {
-        explicit Registration(const GeoZoneFormat *format);
-    };
-
-private:
-    static QList<const GeoZoneFormat*> &_registered();
 };
 
-/// Registers a format class with a static instance. Formats are compiled into the application, so their
-/// registrations always run.
+/// Defines the instance of a format class for GeoZoneFormat::formats(). Formats don't add themselves while the
+/// program starts since the linker leaves the files of the GeoZoneCore static library out unless they are referenced.
 #define GEOZONE_REGISTER_FORMAT(Class) \
-    namespace { \
-    const Class s_##Class; \
-    const GeoZoneFormat::Registration s_##Class##Registration(&s_##Class); \
+    const GeoZoneFormat *Class##Instance(); \
+    const GeoZoneFormat *Class##Instance() \
+    { \
+        static const Class instance; \
+        return &instance; \
     }
