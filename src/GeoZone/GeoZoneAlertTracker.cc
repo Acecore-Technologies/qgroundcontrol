@@ -172,8 +172,10 @@ QList<GeoZoneVerticalBand> GeoZoneVerticalBand::at(const GeoZoneCatalog &catalog
         if (!policy.accepts(zone)) {
             continue;
         }
-        for (const GeoZone::Volume &volume : zone->data().volumes) {
-            if (GeoZone::volumeContains(volume, position.coordinate)) {
+        const QList<GeoZone::Volume> &volumes = zone->data().volumes;
+        for (qsizetype i = 0; i < volumes.count(); i++) {
+            const GeoZone::Volume &volume = volumes[i];
+            if (zone->volumeContains(i, position.coordinate)) {
                 bands.append(GeoZoneVerticalBand{ zone, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) });
             }
         }

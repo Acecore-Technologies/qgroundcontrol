@@ -100,7 +100,7 @@ void GeoZoneParserTest::_testParseED269()
     QVERIFY(!polygon.isCircle);
     QCOMPARE(polygon.rings.count(), 1);
     QCOMPARE(polygon.rings[0].count(), 4); // Closing vertex removed
-    QCOMPARE(polygon.rings[0][1], QGeoCoordinate(47.0, 8.1)); // [lon, lat] order
+    QCOMPARE(GeoZone::toCoordinate(polygon.rings[0][1]), QGeoCoordinate(47.0, 8.1)); // [lon, lat] order
     QCOMPARE(polygon.upperLimit, 120.0);
     QCOMPARE(polygon.upperReference, GeoZone::VerticalReference::Ground);
     QCOMPARE(polygon.upperReferenceCode, QStringLiteral("AGL"));

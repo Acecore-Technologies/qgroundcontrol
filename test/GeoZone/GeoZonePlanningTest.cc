@@ -141,7 +141,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     GeoZone::Data squareData;
     squareData.restriction = GeoZone::Prohibited;
     GeoZone::Volume squareVolume;
-    squareVolume.rings = { squareZone };
+    squareVolume.rings = { GeoZone::toRing(squareZone) };
     squareData.volumes = { squareVolume };
     GeoZone square(squareData);
     QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, &square));
@@ -580,7 +580,7 @@ void GeoZonePlanningTest::_testGeoFenceImportPreview()
     QList<GeoZone*> zones;
     for (int i = 0; i < 2; i++) {
         GeoZone::Volume volume;
-        volume.rings.append(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40));
+        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
         GeoZone::Data data;
         data.identifier = QStringLiteral("Z%1").arg(i);
         data.restriction = GeoZone::Prohibited;
@@ -654,14 +654,14 @@ void GeoZonePlanningTest::_testMapModel()
     QCOMPARE(model.labelZones().count(), 0);
 
     GeoZoneMapItem *const polygonItem = model.polygons()->value<GeoZoneMapItem*>(0);
-    const qsizetype lowDetailCount = QGeoPolygon(polygonItem->geoShape()).perimeter().count();
+    const qsizetype lowDetailCount = polygonItem->mercatorRings().first().count();
     QVERIFY(lowDetailCount < 2000);
 
     // Zooming in keeps the items and adds detail. Only zones centered in the view are labelled.
     model.setView(view, 16, true);
     QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
     QCOMPARE(model.labelZones().count(), 2);
-    QVERIFY(QGeoPolygon(polygonItem->geoShape()).perimeter().count() > lowDetailCount);
+    QVERIFY(polygonItem->mercatorRings().first().count() > lowDetailCount);
 
     // Another file adds items, removing a source removes its items
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("other.json"),

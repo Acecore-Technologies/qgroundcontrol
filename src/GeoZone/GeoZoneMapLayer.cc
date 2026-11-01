@@ -17,7 +17,6 @@
 #include <QtGui/private/qtriangulator_p.h>
 #include <QtLocation/private/qdeclarativegeomap_p.h>
 #include <QtPositioning/QGeoCircle>
-#include <QtPositioning/QGeoPolygon>
 #include <QtQuick/QSGGeometryNode>
 #include <QtQuick/QSGTransformNode>
 #include <QtQuick/QSGVertexColorMaterial>
@@ -273,7 +272,7 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
         for (const QmlObjectListModel *list : { _model->polygons(), _model->circles() }) {
             for (int i = 0; i < list->count(); i++) {
                 GeoZoneMapItem *const item = list->value<GeoZoneMapItem*>(i);
-                (void) connect(item, &GeoZoneMapItem::geoShapeChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
+                (void) connect(item, &GeoZoneMapItem::zoomLevelChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
                 (void) connect(item, &GeoZoneMapItem::activeChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
                 (void) connect(item, &GeoZoneMapItem::highlightedChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
                 items.append(item);
@@ -345,23 +344,18 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
 const GeoZoneMapLayer::Triangulation &GeoZoneMapLayer::_triangulation(const GeoZoneMapItem *item)
 {
     const bool circle = item->shape()->isCircle();
-    const QGeoShape source = circle ? QGeoShape(QGeoCircle(item->center(), item->radius())) : item->geoShape();
+    // Circles don't change, polygons change with the zoom level
     auto it = _cache.find(item);
-    if ((it != _cache.end()) && (it->source == source)) {
+    if ((it != _cache.end()) && (it->zoomLevel == item->zoomLevel())) {
         return it->triangulation;
     }
 
     CachedShape cached;
-    cached.source = source;
+    cached.zoomLevel = item->zoomLevel();
     if (circle) {
         cached.triangulation = triangulateCircle(item->center(), item->radius());
     } else {
-        const QGeoPolygon polygon(source);
-        QList<QList<QPointF>> rings = { toMercator(polygon.perimeter()) };
-        for (int i = 0; i < polygon.holesCount(); i++) {
-            rings.append(toMercator(polygon.holePath(i)));
-        }
-        cached.triangulation = triangulatePolygon(rings);
+        cached.triangulation = triangulatePolygon(item->mercatorRings());
     }
     return _cache.insert(item, cached)->triangulation;
 }

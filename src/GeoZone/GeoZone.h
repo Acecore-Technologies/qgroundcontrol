@@ -21,14 +21,13 @@
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <utility>
 
+#include "GeoZoneGeometry.h"
 #include "GeoZoneSchedule.h"
-
-namespace GeoZoneGeometry {
-class LocalProjection;
-}
 
 /// A UAS geographical zone loaded from a geozone source. Zones are plain objects owned by their source through
 /// shared pointers, QML gets GeoZoneInfo values describing them. The class is a gadget for its enums.
@@ -58,10 +57,17 @@ public:
         FlightLevel,    ///< STD, pressure altitude which depends on the weather
     };
 
+    /// Unclosed polygon boundary, x is longitude and y latitude in degrees. Much smaller than QGeoCoordinate vertices.
+    using Ring = QList<QPointF>;
+
+    static Ring toRing(const QList<QGeoCoordinate> &coordinates);
+    static QList<QGeoCoordinate> toCoordinates(const Ring &ring);
+    static QGeoCoordinate toCoordinate(const QPointF &vertex) { return QGeoCoordinate(vertex.y(), vertex.x()); }
+
     /// Horizontal projection plus vertical limits of one airspace volume of a zone
     struct Volume {
         bool isCircle = false;
-        QList<QList<QGeoCoordinate>> rings; ///< Polygon only: [0] is the outer boundary, others are holes. Rings are not closed.
+        QList<Ring> rings;                  ///< Polygon only: [0] is the outer boundary, others are holes
         QGeoCoordinate center;              ///< Circle only
         double radius = 0;                  ///< Circle only, meters
         double lowerLimit = qQNaN();        ///< As published, in feet when \c feet is set. NaN when not specified.
@@ -205,8 +211,8 @@ public:
     ///         Unknown altitudes, limits and references don't limit it.
     static std::optional<std::pair<double, double>> verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin = 0);
 
-    /// @return true if the coordinate is inside the horizontal projection of the volume
-    static bool volumeContains(const Volume &volume, const QGeoCoordinate &coordinate);
+    /// @return true if the coordinate is inside the horizontal projection of the volume at the index
+    bool volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordinate) const;
 
     /// @return Lower or upper limit of the volume in meters above mean sea level at the position, using its terrain
     ///         elevation for limits above ground. NaN when the zone extends to the ground or has no ceiling, or the
@@ -225,6 +231,15 @@ private:
     /// @return Approximate distance in meters from the projection origin to the box, 0 inside
     static double _boxDistance(const QRectF &box, const GeoZoneGeometry::LocalProjection &projection);
 
+    /// Polygon volumes projected around the zone center, so that queries don't project them again
+    struct Projected {
+        explicit Projected(const QGeoCoordinate &origin) : projection(origin) {}
+        GeoZoneGeometry::LocalProjection projection;
+        QList<QList<QList<QPointF>>> volumeRings;   ///< In meters, empty for circles
+    };
+    /// Made on first use, from any thread, since most zones are never queried
+    const Projected &_projected() const;
+
     const Data _data;
     QList<QRectF> _volumeBoxes;     ///< Outer ring extents of the polygon volumes, x is longitude and y latitude
     QGeoRectangle _boundingBox;
@@ -233,4 +248,6 @@ private:
     QString _sourceText;
     QString _key;
     mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance
+    mutable std::once_flag _projectedOnce;
+    mutable std::unique_ptr<const Projected> _projectedData;
 };

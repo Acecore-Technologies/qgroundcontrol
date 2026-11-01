@@ -29,7 +29,13 @@ public:
 
     QPointF toLocal(const QGeoCoordinate &coordinate) const;
     QList<QPointF> toLocal(const QList<QGeoCoordinate> &coordinates) const;
+    /// @param lonLat x is longitude and y latitude in degrees
+    QPointF lonLatToLocal(const QPointF &lonLat) const;
+    QList<QPointF> lonLatToLocal(const QList<QPointF> &lonLats) const;
     QGeoCoordinate toGeo(const QPointF &point) const;
+    QGeoCoordinate origin() const { return QGeoCoordinate(_originLatitude, _originLongitude); }
+    /// @return Factor converting east distances of this projection to those of a projection around the latitude
+    double eastScaleAt(double latitude) const;
 
 private:
     double _originLatitude = 0;
@@ -54,7 +60,8 @@ bool segmentsIntersect(const QPointF &a1, const QPointF &a2, const QPointF &b1, 
 double distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &b);
 
 /// @return Distance to the closest edge of the unclosed ring
-double distanceToRing(const QPointF &point, const QList<QPointF> &ring);
+/// @param xScale Applied to x offsets from the point, like LocalProjection::eastScaleAt
+double distanceToRing(const QPointF &point, const QList<QPointF> &ring, double xScale = 1.0);
 
 /// @return true if a segment intersects an edge of the unclosed ring
 bool segmentIntersectsRing(const QPointF &a, const QPointF &b, const QList<QPointF> &ring);

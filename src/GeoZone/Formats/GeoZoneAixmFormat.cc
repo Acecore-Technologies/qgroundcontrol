@@ -217,7 +217,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     }
                     if ((ring.count() >= 3) && (ring.count() <= kMaxRingVertices)) {
                         volume.isCircle = false;
-                        volume.rings = { ring };
+                        volume.rings = { GeoZone::toRing(ring) };
                         _appendVolume(volume, zone.volumes);
                     }
                 }

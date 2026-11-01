@@ -59,8 +59,12 @@ void GeoZoneMapItem::setZoomLevel(int zoomLevel)
     }
 
     _zoomLevel = zoomLevel;
-    _geoShape = _shape->polygon(zoomLevel);
-    emit geoShapeChanged();
+    emit zoomLevelChanged();
+}
+
+QList<QList<QPointF>> GeoZoneMapItem::mercatorRings() const
+{
+    return _shape->mercatorRings(_zoomLevel);
 }
 
 GeoZoneMapModel::GeoZoneMapModel(QObject *parent)

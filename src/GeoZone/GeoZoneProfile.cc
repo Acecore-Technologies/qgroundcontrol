@@ -228,7 +228,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
     }
     const double spacing = (std::max)(minSampleSpacing, totalLength / maxSamples);
 
-    // Zone volume near a segment with its bounds, and its rings projected around the current stretch of the segment
+    // Zone volume near a segment with its bounds
     struct Candidate {
         const GeoZone *zone = nullptr;
         int volumeIndex = 0;
@@ -236,8 +236,6 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         double maxLatitude = 0;
         double minLongitude = 0;
         double maxLongitude = 0;
-        QList<QList<QPointF>> rings;
-        int projectedStretch = -1;  ///< Stretch the rings are projected for, they are projected when a sample needs them
     };
 
     double offset = 0;
@@ -278,9 +276,6 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         }
 
         const int sampleCount = (std::max)(1, static_cast<int>(std::ceil(length / spacing)));
-        std::optional<GeoZoneGeometry::LocalProjection> projection;
-        int stretch = -1;
-        double projectionEnd = -1;
         for (int i = 0; i <= sampleCount; i++) {
             const double fraction = static_cast<double>(i) / sampleCount;
             const double along = length * fraction;
@@ -289,40 +284,18 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
             position.terrainAMSL = terrainAt(segment, along, length);
             const double distance = offset + (segment.distance * fraction);
 
-            // The flat projection is accurate near its center, so it moves along long segments
-            if (!projection || (along > projectionEnd)) {
-                const double center = (std::min)(along + (projectionStretch / 2), length);
-                projection.emplace(segment.from.atDistanceAndAzimuth(center, azimuth));
-                projectionEnd = along + projectionStretch;
-                stretch++;
-            }
-            const QPointF point = projection->toLocal(position.coordinate);
-
             QSet<std::pair<const GeoZone*, int>> inside;
-            for (Candidate &candidate : candidates) {
+            for (const Candidate &candidate : std::as_const(candidates)) {
                 const double latitude = position.coordinate.latitude();
                 const double longitude = position.coordinate.longitude();
                 if ((latitude < candidate.minLatitude) || (latitude > candidate.maxLatitude) ||
                     (longitude < candidate.minLongitude) || (longitude > candidate.maxLongitude)) {
                     continue;
                 }
-                const GeoZone::Volume &volume = candidate.zone->data().volumes[candidate.volumeIndex];
-                bool contained = false;
-                if (volume.isCircle) {
-                    contained = volume.center.isValid() && (volume.center.distanceTo(position.coordinate) <= volume.radius);
-                } else {
-                    if (candidate.projectedStretch != stretch) {
-                        candidate.projectedStretch = stretch;
-                        candidate.rings.clear();
-                        for (const QList<QGeoCoordinate> &ring : volume.rings) {
-                            candidate.rings.append(projection->toLocal(ring));
-                        }
-                    }
-                    contained = GeoZoneGeometry::polygonContains(candidate.rings, point);
-                }
-                if (!contained) {
+                if (!candidate.zone->volumeContains(candidate.volumeIndex, position.coordinate)) {
                     continue;
                 }
+                const GeoZone::Volume &volume = candidate.zone->data().volumes[candidate.volumeIndex];
 
                 const std::pair<const GeoZone*, int> key(candidate.zone, candidate.volumeIndex);
                 inside.insert(key);

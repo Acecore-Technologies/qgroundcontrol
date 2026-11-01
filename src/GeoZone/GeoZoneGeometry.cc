@@ -377,13 +377,34 @@ LocalProjection::LocalProjection(const QGeoCoordinate &origin)
 
 QPointF LocalProjection::toLocal(const QGeoCoordinate &coordinate) const
 {
-    double longitudeDelta = coordinate.longitude() - _originLongitude;
+    return lonLatToLocal(QPointF(coordinate.longitude(), coordinate.latitude()));
+}
+
+QPointF LocalProjection::lonLatToLocal(const QPointF &lonLat) const
+{
+    double longitudeDelta = lonLat.x() - _originLongitude;
     if (longitudeDelta > 180) {
         longitudeDelta -= 360;
     } else if (longitudeDelta < -180) {
         longitudeDelta += 360;
     }
-    return QPointF(longitudeDelta * _metersPerDegreeLongitude, (coordinate.latitude() - _originLatitude) * _metersPerDegreeLatitude);
+    return QPointF(longitudeDelta * _metersPerDegreeLongitude, (lonLat.y() - _originLatitude) * _metersPerDegreeLatitude);
+}
+
+QList<QPointF> LocalProjection::lonLatToLocal(const QList<QPointF> &lonLats) const
+{
+    QList<QPointF> points;
+    points.reserve(lonLats.count());
+    for (const QPointF &lonLat : lonLats) {
+        points.append(lonLatToLocal(lonLat));
+    }
+    return points;
+}
+
+double LocalProjection::eastScaleAt(double latitude) const
+{
+    const double originCos = std::cos(_originLatitude * kDegreesToRadians);
+    return (originCos > 1e-9) ? (std::cos(latitude * kDegreesToRadians) / originCos) : 1.0;
 }
 
 QList<QPointF> LocalProjection::toLocal(const QList<QGeoCoordinate> &coordinates) const
@@ -469,11 +490,14 @@ double distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &
     return _length(a + (ab * t) - point);
 }
 
-double distanceToRing(const QPointF &point, const QList<QPointF> &ring)
+double distanceToRing(const QPointF &point, const QList<QPointF> &ring, double xScale)
 {
+    const auto offset = [&point, xScale](const QPointF &vertex) {
+        return QPointF((vertex.x() - point.x()) * xScale, vertex.y() - point.y());
+    };
     double minDistance = std::numeric_limits<double>::max();
     for (qsizetype i = 0; i < ring.count(); i++) {
-        minDistance = std::min(minDistance, distanceToSegment(point, ring[i], ring[(i + 1) % ring.count()]));
+        minDistance = std::min(minDistance, distanceToSegment(QPointF(), offset(ring[i]), offset(ring[(i + 1) % ring.count()])));
     }
     return minDistance;
 }

@@ -303,7 +303,7 @@ bool _position(const QJsonValue &value, QGeoCoordinate &coordinate)
     return coordinate.isValid();
 }
 
-bool _ring(const QJsonValue &value, QList<QGeoCoordinate> &ring)
+bool _ring(const QJsonValue &value, GeoZone::Ring &ring)
 {
     ring.clear();
     const QJsonArray positions = value.toArray();
@@ -317,7 +317,7 @@ bool _ring(const QJsonValue &value, QList<QGeoCoordinate> &ring)
         if (!_position(positionValue, coordinate)) {
             return false;
         }
-        ring.append(coordinate);
+        ring.append(QPointF(coordinate.longitude(), coordinate.latitude()));
     }
     if ((ring.count() > 1) && (ring.first() == ring.last())) {
         ring.removeLast();
@@ -331,7 +331,7 @@ bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume)
     volume.rings.clear();
     const QJsonArray rings = value.toArray();
     for (qsizetype i = 0; i < rings.count(); i++) {
-        QList<QGeoCoordinate> ring;
+        GeoZone::Ring ring;
         if (!_ring(rings[i], ring)) {
             if (i == 0) {
                 return false;

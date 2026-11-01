@@ -38,13 +38,13 @@ double _segmentDistanceSquared(const QPointF &point, const QPointF &a, const QPo
 
 } // namespace
 
-GeoZoneShape::GeoZoneShape(GeoZone *zone, const QList<QList<QGeoCoordinate>> &rings)
+GeoZoneShape::GeoZoneShape(GeoZone *zone, const QList<GeoZone::Ring> &rings)
     : _zone(zone)
     , _rings(rings)
 {
     bool first = true;
-    for (const QGeoCoordinate &coordinate : _rings.value(0)) {
-        const QPointF point = toMercator(coordinate);
+    for (const QPointF &vertex : _rings.value(0)) {
+        const QPointF point = toMercator(vertex);
         if (first) {
             _mercatorBounds = { point.x(), point.y(), point.x(), point.y() };
             first = false;
@@ -72,10 +72,25 @@ GeoZoneShape::GeoZoneShape(GeoZone *zone, const QGeoCoordinate &center, double r
 
 QPointF GeoZoneShape::toMercator(const QGeoCoordinate &coordinate)
 {
-    const double latitude = qDegreesToRadians(std::clamp(coordinate.latitude(), -kMaxMercatorLatitude, kMaxMercatorLatitude));
-    const double x = (coordinate.longitude() + 180.0) / 360.0;
+    return toMercator(QPointF(coordinate.longitude(), coordinate.latitude()));
+}
+
+QPointF GeoZoneShape::toMercator(const QPointF &lonLat)
+{
+    const double latitude = qDegreesToRadians(std::clamp(lonLat.y(), -kMaxMercatorLatitude, kMaxMercatorLatitude));
+    const double x = (lonLat.x() + 180.0) / 360.0;
     const double y = 0.5 - (std::log(std::tan((M_PI / 4.0) + (latitude / 2.0))) / (2.0 * M_PI));
     return QPointF(x, y);
+}
+
+QList<QPointF> GeoZoneShape::toMercator(const GeoZone::Ring &ring)
+{
+    QList<QPointF> points;
+    points.reserve(ring.count());
+    for (const QPointF &vertex : ring) {
+        points.append(toMercator(vertex));
+    }
+    return points;
 }
 
 QGeoCoordinate GeoZoneShape::fromMercator(const QPointF &point)
@@ -89,18 +104,14 @@ double GeoZoneShape::mercatorPixels(double zoomLevel)
     return kTilePixels * std::exp2(zoomLevel);
 }
 
-QList<QGeoCoordinate> GeoZoneShape::simplifyRing(const QList<QGeoCoordinate> &ring, double mercatorTolerance)
+QList<QPointF> GeoZoneShape::simplifyRing(const QList<QPointF> &ring, double mercatorTolerance)
 {
     const qsizetype count = ring.count();
     if ((count <= 3) || (mercatorTolerance <= 0)) {
         return ring;
     }
 
-    QList<QPointF> points;
-    points.reserve(count);
-    for (const QGeoCoordinate &coordinate : ring) {
-        points.append(toMercator(coordinate));
-    }
+    const QList<QPointF> &points = ring;
 
     // Split the closed ring at the first vertex and the vertex farthest from it
     qsizetype farthest = 0;
@@ -144,7 +155,7 @@ QList<QGeoCoordinate> GeoZoneShape::simplifyRing(const QList<QGeoCoordinate> &ri
         }
     }
 
-    QList<QGeoCoordinate> simplified;
+    QList<QPointF> simplified;
     for (qsizetype i = 0; i < count; i++) {
         if (keep[i]) {
             simplified.append(ring[i]);
@@ -153,17 +164,13 @@ QList<QGeoCoordinate> GeoZoneShape::simplifyRing(const QList<QGeoCoordinate> &ri
     return simplified;
 }
 
-QList<QGeoCoordinate> GeoZoneShape::spanningTriangle(const QList<QGeoCoordinate> &ring)
+QList<QPointF> GeoZoneShape::spanningTriangle(const QList<QPointF> &ring)
 {
     if (ring.count() <= 3) {
         return ring;
     }
 
-    QList<QPointF> points;
-    points.reserve(ring.count());
-    for (const QGeoCoordinate &coordinate : ring) {
-        points.append(toMercator(coordinate));
-    }
+    const QList<QPointF> &points = ring;
 
     qsizetype second = 1;
     double maxDistance = -1;
@@ -195,40 +202,44 @@ QList<QGeoCoordinate> GeoZoneShape::spanningTriangle(const QList<QGeoCoordinate>
     return { ring[indexes[0]], ring[indexes[1]], ring[indexes[2]] };
 }
 
-QGeoPolygon GeoZoneShape::polygon(int zoomLevel) const
+QList<QList<QPointF>> GeoZoneShape::mercatorRings(int zoomLevel) const
 {
     if (_isCircle || _rings.isEmpty()) {
-        return QGeoPolygon();
+        return {};
     }
 
     const int level = std::clamp(zoomLevel, 0, fullDetailZoomLevel);
-    const auto cached = _polygonCache.constFind(level);
-    if (cached != _polygonCache.constEnd()) {
-        return cached.value();
+    for (const auto &[cachedLevel, cachedRings] : _mercatorCache) {
+        if (cachedLevel == level) {
+            return cachedRings;
+        }
     }
 
-    QGeoPolygon polygon;
+    QList<QList<QPointF>> rings;
+    const QList<QPointF> perimeter = toMercator(_rings.first());
     if (level == fullDetailZoomLevel) {
-        polygon.setPerimeter(_rings.first());
+        // Not cached, since it is as large as the zone and the map caches its triangulation
+        rings.append(perimeter);
         for (qsizetype i = 1; i < _rings.count(); i++) {
-            polygon.addHole(_rings[i]);
+            rings.append(toMercator(_rings[i]));
         }
-    } else {
-        const double tolerance = 0.5 / mercatorPixels(level);
-        QList<QGeoCoordinate> perimeter = simplifyRing(_rings.first(), tolerance);
-        if (perimeter.count() < 3) {
-            // Shapes thinner than the tolerance still show as a small mark
-            perimeter = spanningTriangle(_rings.first());
-        }
-        polygon.setPerimeter(perimeter);
-        for (qsizetype i = 1; i < _rings.count(); i++) {
-            const QList<QGeoCoordinate> hole = simplifyRing(_rings[i], tolerance);
-            if (hole.count() >= 3) {
-                polygon.addHole(hole);
-            }
+        return rings;
+    }
+
+    const double tolerance = 0.5 / mercatorPixels(level);
+    QList<QPointF> simplified = simplifyRing(perimeter, tolerance);
+    if (simplified.count() < 3) {
+        // Shapes thinner than the tolerance still show as a small mark
+        simplified = spanningTriangle(perimeter);
+    }
+    rings.append(simplified);
+    for (qsizetype i = 1; i < _rings.count(); i++) {
+        const QList<QPointF> hole = simplifyRing(toMercator(_rings[i]), tolerance);
+        if (hole.count() >= 3) {
+            rings.append(hole);
         }
     }
 
-    _polygonCache.insert(level, polygon);
-    return polygon;
+    _mercatorCache.append({ level, rings });
+    return rings;
 }

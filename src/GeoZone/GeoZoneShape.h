@@ -9,13 +9,13 @@
 
 #pragma once
 
-#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QPointF>
 #include <QtPositioning/QGeoCoordinate>
-#include <QtPositioning/QGeoPolygon>
 
-class GeoZone;
+#include <utility>
+
+#include "GeoZone.h"
 
 /// Bounds in normalized Web Mercator coordinates: x and y in [0, 1], y increasing southwards
 struct GeoZoneMercatorBounds {
@@ -31,12 +31,13 @@ struct GeoZoneMercatorBounds {
     double height() const { return maxY - minY; }
 };
 
-/// One polygon (with holes) or circle of a GeoZone prepared for map display. Polygons provide copies
+/// One polygon (with holes) or circle of a GeoZone prepared for map display. Polygons provide Web Mercator copies
 /// simplified for each zoom level, computed on first use.
 class GeoZoneShape
 {
 public:
-    GeoZoneShape(GeoZone *zone, const QList<QList<QGeoCoordinate>> &rings);
+    /// @param rings Of a polygon volume, shared with the zone
+    GeoZoneShape(GeoZone *zone, const QList<GeoZone::Ring> &rings);
     GeoZoneShape(GeoZone *zone, const QGeoCoordinate &center, double radius);
 
     GeoZone *zone() const { return _zone; }
@@ -45,32 +46,36 @@ public:
     double radius() const { return _radius; }
     const GeoZoneMercatorBounds &mercatorBounds() const { return _mercatorBounds; }
 
-    /// @return Polygon including holes, simplified for the zoom level so that the outline moves by at most
-    ///         half a pixel. Perimeters smaller than that become a triangle spanning the shape, and holes
-    ///         are dropped. Not simplified from fullDetailZoomLevel up.
-    QGeoPolygon polygon(int zoomLevel) const;
+    /// @return Polygon rings in mercator coordinates, the outer boundary first, simplified for the zoom level so that
+    ///         the outline moves by at most half a pixel. Perimeters smaller than that become a triangle spanning the
+    ///         shape, and holes are dropped. Not simplified from fullDetailZoomLevel up. Empty for circles.
+    QList<QList<QPointF>> mercatorRings(int zoomLevel) const;
 
     static constexpr int fullDetailZoomLevel = 17;
 
     static QPointF toMercator(const QGeoCoordinate &coordinate);
+    /// @param lonLat x is longitude and y latitude in degrees
+    static QPointF toMercator(const QPointF &lonLat);
+    static QList<QPointF> toMercator(const GeoZone::Ring &ring);
     static QGeoCoordinate fromMercator(const QPointF &point);
 
     /// Size in pixels of one normalized mercator unit at the zoom level, for 256 pixel map tiles
     static double mercatorPixels(double zoomLevel);
 
-    /// Douglas-Peucker simplification of a closed ring (first vertex not repeated) in mercator space.
+    /// Douglas-Peucker simplification of a closed mercator ring (first vertex not repeated).
     /// @return Subset of the ring vertices, or fewer than 3 vertices if the ring collapses.
-    static QList<QGeoCoordinate> simplifyRing(const QList<QGeoCoordinate> &ring, double mercatorTolerance);
+    static QList<QPointF> simplifyRing(const QList<QPointF> &ring, double mercatorTolerance);
 
     /// @return The three ring vertices spanning the largest triangle found by a farthest point search
-    static QList<QGeoCoordinate> spanningTriangle(const QList<QGeoCoordinate> &ring);
+    static QList<QPointF> spanningTriangle(const QList<QPointF> &ring);
 
 private:
     GeoZone *_zone = nullptr;
     bool _isCircle = false;
-    QList<QList<QGeoCoordinate>> _rings;
+    QList<GeoZone::Ring> _rings;
     QGeoCoordinate _center;
     double _radius = 0;
     GeoZoneMercatorBounds _mercatorBounds;
-    mutable QHash<int, QGeoPolygon> _polygonCache;
+    /// By simplified zoom level, a list since few levels are used and a hash allocates much more
+    mutable QList<std::pair<int, QList<QList<QPointF>>>> _mercatorCache;
 };

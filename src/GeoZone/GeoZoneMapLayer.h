@@ -14,7 +14,7 @@
 #include <QtGui/QColor>
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QTransform>
-#include <QtPositioning/QGeoShape>
+#include <QtPositioning/QGeoCoordinate>
 #include <QtQuick/QQuickItem>
 
 #include <functional>
@@ -98,7 +98,7 @@ private:
     };
 
     struct CachedShape {
-        QGeoShape source;               ///< Shape the triangulation was made from
+        int zoomLevel = -1;             ///< Of the item the triangulation was made for
         Triangulation triangulation;
     };
 

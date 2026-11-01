@@ -77,9 +77,11 @@ QList<GeoZone*> GeoZoneCatalog::zonesAt(const QGeoCoordinate &coordinate) const
     }
     for (const int index : _index.query(coordinate.latitude(), coordinate.longitude(), coordinate.latitude(), coordinate.longitude())) {
         GeoZone *const zone = _zones[index];
-        const QList<GeoZone::Volume> &volumes = zone->data().volumes;
-        if (std::any_of(volumes.cbegin(), volumes.cend(), [&coordinate](const GeoZone::Volume &volume) { return GeoZone::volumeContains(volume, coordinate); })) {
-            zones.append(zone);
+        for (qsizetype i = 0; i < zone->data().volumes.count(); i++) {
+            if (zone->volumeContains(i, coordinate)) {
+                zones.append(zone);
+                break;
+            }
         }
     }
     std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {

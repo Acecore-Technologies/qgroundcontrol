@@ -59,7 +59,7 @@ QStringList _authorities(const QJsonValue &value);
 
 bool _position(const QJsonValue &value, QGeoCoordinate &coordinate);
 
-bool _ring(const QJsonValue &value, QList<QGeoCoordinate> &ring);
+bool _ring(const QJsonValue &value, GeoZone::Ring &ring);
 
 bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume);
 

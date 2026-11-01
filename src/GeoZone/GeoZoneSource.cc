@@ -34,9 +34,9 @@ size_t _footprintHash(const GeoZone::Volume &volume)
         return qHashMulti(0, volume.center.latitude(), volume.center.longitude(), volume.radius);
     }
     size_t hash = 0;
-    for (const QList<QGeoCoordinate> &ring : volume.rings) {
-        for (const QGeoCoordinate &coordinate : ring) {
-            hash = qHashMulti(hash, coordinate.latitude(), coordinate.longitude());
+    for (const GeoZone::Ring &ring : volume.rings) {
+        for (const QPointF &vertex : ring) {
+            hash = qHashMulti(hash, vertex.y(), vertex.x());
         }
     }
     return hash;

@@ -44,7 +44,6 @@ public:
 
     static constexpr double minSampleSpacing = 5;   ///< Meters between samples along short paths
     static constexpr int maxSamples = 20000;        ///< About the samples along the whole path, which sets the spacing of long paths
-    static constexpr double projectionStretch = 2000;   ///< Meters of a segment sharing a flat projection of the zones
 
     MissionController *missionController() const;
     void setMissionController(MissionController *missionController);

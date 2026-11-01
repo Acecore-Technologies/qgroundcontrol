@@ -143,12 +143,12 @@ inline QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double ra
     return ring;
 }
 
-inline double _distanceToRing(const QPointF &point, const QList<QGeoCoordinate> &ring)
+inline double _distanceToRing(const QPointF &point, const QList<QPointF> &ring)
 {
     double minDistance = std::numeric_limits<double>::max();
     for (qsizetype i = 0; i < ring.count(); i++) {
-        const QPointF a = GeoZoneShape::toMercator(ring[i]);
-        const QPointF b = GeoZoneShape::toMercator(ring[(i + 1) % ring.count()]);
+        const QPointF a = ring[i];
+        const QPointF b = ring[(i + 1) % ring.count()];
         const QPointF ab = b - a;
         const double lengthSquared = QPointF::dotProduct(ab, ab);
         const double t = (lengthSquared > 0) ? std::clamp(QPointF::dotProduct(point - a, ab) / lengthSquared, 0.0, 1.0) : 0.0;

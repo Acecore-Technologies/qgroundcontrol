@@ -14,7 +14,6 @@
 #include <QtCore/QPointer>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
-#include <QtPositioning/QGeoShape>
 
 #include "GeoZone.h"
 #include "GeoZoneInfo.h"
@@ -32,7 +31,6 @@ class GeoZoneMapItem : public QObject
     Q_PROPERTY(GeoZoneInfo      zone        READ zoneInfo   CONSTANT FINAL)
     Q_PROPERTY(int              restriction READ restriction CONSTANT FINAL)               ///< GeoZone::Restriction of the zone
     Q_PROPERTY(bool             active      READ active     NOTIFY activeChanged FINAL)    ///< The zone is active now
-    Q_PROPERTY(QGeoShape        geoShape    READ geoShape   NOTIFY geoShapeChanged FINAL) ///< Polygon including holes
     Q_PROPERTY(QGeoCoordinate   center      READ center     CONSTANT FINAL)               ///< Circle only
     Q_PROPERTY(double           radius      READ radius     CONSTANT FINAL)               ///< Circle only, meters
     Q_PROPERTY(bool             highlighted READ highlighted NOTIFY highlightedChanged FINAL) ///< The zone is one of the model's highlightedZones
@@ -48,7 +46,9 @@ public:
     bool active() const { return _active; }
     /// Re-reads whether the zone is active
     void updateActive();
-    QGeoShape geoShape() const { return _geoShape; }
+    /// Polygon rings at the item's level of detail, see GeoZoneShape::mercatorRings
+    QList<QList<QPointF>> mercatorRings() const;
+    int zoomLevel() const { return _zoomLevel; }
     QGeoCoordinate center() const { return _center; }
     double radius() const { return _radius; }
     bool highlighted() const { return _highlighted; }
@@ -57,7 +57,7 @@ public:
     void setZoomLevel(int zoomLevel);
 
 signals:
-    void geoShapeChanged();
+    void zoomLevelChanged();
     void highlightedChanged();
     void activeChanged();
 
@@ -70,7 +70,6 @@ private:
     bool _isCircle = false;
     bool _highlighted = false;
     int _zoomLevel = -1;
-    QGeoShape _geoShape;
 };
 
 /// Selects the GeoZone shapes and labels shown on one map, drawn by GeoZoneMapLayer. Only shapes in or near the view

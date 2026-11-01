@@ -301,7 +301,7 @@ void GeoZoneGeometryTest::_testExclusionShapes()
     const GeoZone prohibited(ed269.zones[0]);
     const QList<QList<QGeoCoordinate>> polygons = prohibited.exclusionPolygons();
     QCOMPARE(polygons.count(), 1);
-    QList<QGeoCoordinate> expected = ed269.zones[0].volumes[0].rings[0];
+    QList<QGeoCoordinate> expected = GeoZone::toCoordinates(ed269.zones[0].volumes[0].rings[0]);
     std::reverse(expected.begin(), expected.end());
     QCOMPARE(polygons[0], expected);
     QVERIFY(prohibited.exclusionCircles().isEmpty());
@@ -324,10 +324,10 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     GeoZone::Volume polygonVolume;
     // 1 km square with a 200 m hole in the middle
     const QGeoCoordinate center(47, 8);
-    polygonVolume.rings.append({ center.atDistanceAndAzimuth(707.1, 45), center.atDistanceAndAzimuth(707.1, 135),
-                                 center.atDistanceAndAzimuth(707.1, 225), center.atDistanceAndAzimuth(707.1, 315) });
-    polygonVolume.rings.append({ center.atDistanceAndAzimuth(141.4, 45), center.atDistanceAndAzimuth(141.4, 135),
-                                 center.atDistanceAndAzimuth(141.4, 225), center.atDistanceAndAzimuth(141.4, 315) });
+    polygonVolume.rings.append(GeoZone::toRing({ center.atDistanceAndAzimuth(707.1, 45), center.atDistanceAndAzimuth(707.1, 135),
+                                                 center.atDistanceAndAzimuth(707.1, 225), center.atDistanceAndAzimuth(707.1, 315) }));
+    polygonVolume.rings.append(GeoZone::toRing({ center.atDistanceAndAzimuth(141.4, 45), center.atDistanceAndAzimuth(141.4, 135),
+                                                 center.atDistanceAndAzimuth(141.4, 225), center.atDistanceAndAzimuth(141.4, 315) }));
     GeoZone::Data polygonData;
     polygonData.volumes.append(polygonVolume);
     const GeoZone polygon(polygonData);
@@ -338,6 +338,14 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     QCOMPARE(polygon.distanceTo(center.atDistanceAndAzimuth(300, 0)), 0.0);
     QVERIFY(qAbs(polygon.distanceTo(center.atDistanceAndAzimuth(600, 0)) - 100) < 1);
     QVERIFY(qAbs(polygon.distanceTo(center) - 100) < 1);
+
+    // Distances near the edge of a zone spanning two degrees of latitude are measured at the position's latitude
+    GeoZone::Data tallData;
+    tallData.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing({ QGeoCoordinate(59, 10), QGeoCoordinate(61, 10), QGeoCoordinate(61, 11), QGeoCoordinate(59, 11) }) } });
+    const GeoZone tall(tallData);
+    const QGeoCoordinate eastOfEdge = QGeoCoordinate(60.9, 11).atDistanceAndAzimuth(500, 90);
+    QVERIFY2(qAbs(tall.distanceTo(eastOfEdge) - 500) < 2, qPrintable(QString::number(tall.distanceTo(eastOfEdge))));
+    QVERIFY(tall.contains(QGeoCoordinate(60.9, 11).atDistanceAndAzimuth(10, 270)));
 
     // Paths through the zone, inside the hole only, and passing by
     QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }));
@@ -544,12 +552,12 @@ void GeoZoneGeometryTest::_testAreaIntersection()
 
     // Polygon zones inside the area, around it, and with the area in a hole
     GeoZone::Data small;
-    small.volumes.append(GeoZone::Volume{ false, { square(center.atDistanceAndAzimuth(200, 0), 10) } });
+    small.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(square(center.atDistanceAndAzimuth(200, 0), 10)) } });
     QVERIFY(GeoZone(small).intersectsArea(area(survey, 100, 200)));
     GeoZone::Data large;
-    large.volumes.append(GeoZone::Volume{ false, { square(center, 2000) } });
+    large.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(square(center, 2000)) } });
     QVERIFY(GeoZone(large).intersectsArea(area(survey, 100, 200)));
-    large.volumes[0].rings.append(square(center, 1000));
+    large.volumes[0].rings.append(GeoZone::toRing(square(center, 1000)));
     QVERIFY(!GeoZone(large).intersectsArea(area(survey, 100, 200)));
     QVERIFY(!GeoZone(small).intersectsArea(area(square(center.atDistanceAndAzimuth(3000, 0), 500), 100, 200)));
 
@@ -569,36 +577,40 @@ void GeoZoneGeometryTest::_testShapeSimplification()
     // Dense 5 km circle with a 40 m hole
     const QGeoCoordinate center(47.0, 8.0);
     const QList<QGeoCoordinate> ring = _circleRing(center, 5000, 10000);
-    const GeoZoneShape shape(nullptr, { ring, _circleRing(center, 20, 8) });
+    const GeoZoneShape shape(nullptr, { GeoZone::toRing(ring), GeoZone::toRing(_circleRing(center, 20, 8)) });
 
-    const QGeoPolygon full = shape.polygon(GeoZoneShape::fullDetailZoomLevel);
-    QCOMPARE(full.perimeter().count(), ring.count());
-    QCOMPARE(full.holesCount(), 1);
+    const QList<QList<QPointF>> full = shape.mercatorRings(GeoZoneShape::fullDetailZoomLevel);
+    QCOMPARE(full.count(), 2);
+    QCOMPARE(full.first().count(), ring.count());
 
     const int zoomLevel = 10;
-    const QGeoPolygon simplified = shape.polygon(zoomLevel);
-    QVERIFY(simplified.perimeter().count() >= 3);
-    QVERIFY(simplified.perimeter().count() < 100);
-    QCOMPARE(simplified.holesCount(), 0); // The hole is under a pixel at this zoom level
-    QCOMPARE(shape.polygon(16).holesCount(), 1);
+    const QList<QList<QPointF>> simplifiedRings = shape.mercatorRings(zoomLevel);
+    QCOMPARE(simplifiedRings.count(), 1); // The hole is under a pixel at this zoom level
+    const QList<QPointF> simplified = simplifiedRings.first();
+    QVERIFY(simplified.count() >= 3);
+    QVERIFY(simplified.count() < 100);
+    QCOMPARE(shape.mercatorRings(16).count(), 2);
 
     // Shapes under a pixel become a triangle spanning them instead of keeping every vertex
     const QList<QGeoCoordinate> smallRing = _circleRing(center, 50, 200);
-    const GeoZoneShape smallShape(nullptr, { smallRing });
-    const QList<QGeoCoordinate> triangle = smallShape.polygon(5).perimeter();
+    const GeoZoneShape smallShape(nullptr, { GeoZone::toRing(smallRing) });
+    QList<QGeoCoordinate> triangle;
+    for (const QPointF &point : smallShape.mercatorRings(5).first()) {
+        triangle.append(GeoZoneShape::fromMercator(point));
+    }
     QCOMPARE(triangle.count(), 3);
     const QList<double> sides = { triangle[0].distanceTo(triangle[1]), triangle[1].distanceTo(triangle[2]), triangle[2].distanceTo(triangle[0]) };
     QVERIFY(*std::max_element(sides.cbegin(), sides.cend()) > 95); // Spans the 100 m diameter
     QVERIFY(*std::min_element(sides.cbegin(), sides.cend()) > 65);
-    QCOMPARE(smallShape.polygon(GeoZoneShape::fullDetailZoomLevel).perimeter().count(), smallRing.count());
+    QCOMPARE(smallShape.mercatorRings(GeoZoneShape::fullDetailZoomLevel).first().count(), smallRing.count());
 
     // Simplified vertices are original vertices and every original vertex stays within half a pixel of the outline
     const double tolerance = 0.5 / GeoZoneShape::mercatorPixels(zoomLevel);
-    for (const QGeoCoordinate &vertex : simplified.perimeter()) {
-        QVERIFY(ring.contains(vertex));
+    for (const QPointF &vertex : simplified) {
+        QVERIFY(full.first().contains(vertex));
     }
-    for (const QGeoCoordinate &vertex : ring) {
-        QVERIFY(_distanceToRing(GeoZoneShape::toMercator(vertex), simplified.perimeter()) <= tolerance * 1.0001);
+    for (const QPointF &vertex : full.first()) {
+        QVERIFY(_distanceToRing(vertex, simplified) <= tolerance * 1.0001);
     }
 
     // A 1 km circle is 2000 m / 104.26 m per pixel wide at zoom level 10 and 47 degrees latitude
