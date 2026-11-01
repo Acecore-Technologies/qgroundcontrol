@@ -23,7 +23,7 @@ ColumnLayout {
 
     property bool showCrossedZones: false   ///< Includes the outline of zones crossed by the mission
 
-    readonly property var _geoZoneManager: QGroundControl.geoZoneManager
+    readonly property var _geoZoneManager: GeoZoneManager
 
     component Swatch: Rectangle {
         property int    restriction

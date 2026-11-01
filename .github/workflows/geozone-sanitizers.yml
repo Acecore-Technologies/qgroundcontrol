@@ -16,7 +16,6 @@ on:
     paths:
       - '.github/workflows/geozone-sanitizers.yml'
       - 'src/GeoZone/**'
-      - 'src/Settings/GeoZone*'
       - 'test/GeoZone/**'
 
 jobs:

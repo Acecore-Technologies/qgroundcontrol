@@ -19,7 +19,6 @@
 #include "MultiVehicleManager.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
-#include "SettingsManager.h"
 #include "SimpleMissionItem.h"
 #include "Vehicle.h"
 
@@ -125,7 +124,7 @@ QStringList spiedAlerts(const QSignalSpy &spy)
 
 void restoreSettingDefaults()
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->logAlerts() }) {
         fact->setRawValue(fact->rawDefaultValue());
     }
@@ -221,7 +220,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     GeoZoneManager *const manager = GeoZoneManager::instance();
     QString errorString;
     QVERIFY2(manager->loadFile(kZonesFile, errorString), qPrintable(errorString));
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     settings->audioAlerts()->setRawValue(false);
 
     // Monitors the vehicles like the application

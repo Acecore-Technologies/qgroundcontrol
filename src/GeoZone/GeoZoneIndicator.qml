@@ -26,10 +26,10 @@ Item {
     anchors.top:    parent.top
     anchors.bottom: parent.bottom
 
-    property bool showIndicator: QGroundControl.geoZoneManager.zoneCount > 0
+    property bool showIndicator: GeoZoneManager.zoneCount > 0
 
-    readonly property var _monitor:         QGroundControl.geoZoneMonitor
-    readonly property var _geoZoneSettings: QGroundControl.settingsManager.geoZoneSettings
+    readonly property var _monitor:         GeoZoneMonitor
+    readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
 
     function _restrictionColor(restriction) {

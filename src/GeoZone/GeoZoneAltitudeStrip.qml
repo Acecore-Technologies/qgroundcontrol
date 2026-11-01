@@ -26,7 +26,7 @@ Rectangle {
     color:      Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, 0.8)
     visible:    _monitor.monitoring && _bands.length > 0 && !isNaN(_altitude)
 
-    readonly property var   _monitor:       QGroundControl.geoZoneMonitor
+    readonly property var   _monitor:       GeoZoneMonitor
     readonly property var   _bands:         _monitor.verticalBands
     readonly property real  _altitude:      _monitor.altitudeAMSL
     readonly property real  _terrain:       _monitor.terrainAMSL

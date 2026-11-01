@@ -14,6 +14,7 @@ import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
+import QGroundControl.GeoZone
 
 /// Non-blocking popup for the flight alerts of GeoZoneMonitor, closed after a while or when clicked. Alerts
 /// arriving while it is open are added, the most severe first.
@@ -51,7 +52,7 @@ Popup {
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
     Connections {
-        target:                     QGroundControl.geoZoneMonitor
+        target:                     GeoZoneMonitor
         function onAlert(message, severity) { control.show(message, severity) }
     }
 

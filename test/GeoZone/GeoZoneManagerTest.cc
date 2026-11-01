@@ -615,7 +615,7 @@ void GeoZoneManagerTest::_testManagerStartup()
 
 void GeoZoneManagerTest::_testSettings()
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(),
                                  settings->feedRefreshHours(), settings->liveFeedRefreshMinutes() };
     const auto restoreDefaults = qScopeGuard([&facts]() {

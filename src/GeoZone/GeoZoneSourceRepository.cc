@@ -13,7 +13,6 @@
 #include "GeoZoneSettings.h"
 #include "GeoZoneSource.h"
 #include "QmlObjectListModel.h"
-#include "SettingsManager.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFile>
@@ -32,7 +31,7 @@ GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObj
 {
     _downloader->setDirectory(_store.downloadDir());
 
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     // The age at which data is outdated may have changed
     (void) connect(settings->staleDays(), &Fact::rawValueChanged, this, &GeoZoneSourceRepository::updateValidity);
     (void) connect(settings->liveStaleHours(), &Fact::rawValueChanged, this, &GeoZoneSourceRepository::updateValidity);

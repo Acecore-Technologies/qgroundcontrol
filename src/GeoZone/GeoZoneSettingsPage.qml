@@ -16,9 +16,10 @@ import QGroundControl.AppSettings
 import QGroundControl.FactSystem
 import QGroundControl.FactControls
 import QGroundControl.Controls
+import QGroundControl.GeoZone
 
 SettingsPage {
-    property var _geoZoneSettings: QGroundControl.settingsManager.geoZoneSettings
+    property var _geoZoneSettings: GeoZoneManager.settings
 
     SettingsGroupLayout {
         Layout.fillWidth:   true

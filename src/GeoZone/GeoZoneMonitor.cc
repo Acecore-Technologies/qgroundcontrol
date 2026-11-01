@@ -20,7 +20,6 @@
 #include "MultiVehicleManager.h"
 #include "QmlObjectListModel.h"
 #include "QGCLoggingCategory.h"
-#include "SettingsManager.h"
 #include "Vehicle.h"
 
 #include <QtCore/qapplicationstatic.h>
@@ -44,7 +43,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 
     (void) connect(this, &GeoZoneMonitor::alert, this, &GeoZoneMonitor::_speak);
     (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateEvaluateTimer);
-    (void) connect(SettingsManager::instance()->geoZoneSettings()->alertsEnabled(), &Fact::rawValueChanged, this, &GeoZoneMonitor::_alertsEnabledChanged);
+    (void) connect(GeoZoneSettings::instance()->alertsEnabled(), &Fact::rawValueChanged, this, &GeoZoneMonitor::_alertsEnabledChanged);
 
     MultiVehicleManager *const multiVehicleManager = MultiVehicleManager::instance();
     (void) connect(multiVehicleManager, &MultiVehicleManager::vehicleAdded, this, &GeoZoneMonitor::_vehicleAdded);
@@ -150,7 +149,7 @@ void GeoZoneMonitor::_alertsEnabledChanged()
 
 bool GeoZoneMonitor::monitoring() const
 {
-    return !_vehicles.isEmpty() && (_manager->zoneCount() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
+    return !_vehicles.isEmpty() && (_manager->zoneCount() > 0) && GeoZoneSettings::instance()->alertsEnabled()->rawValue().toBool();
 }
 
 void GeoZoneMonitor::_publishNearby()
@@ -330,7 +329,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         return;
     }
 
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     GeoZoneAlertTracker::Limits limits;
     limits.distance = settings->approachDistance()->rawValue().toDouble();
     limits.verticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
@@ -371,7 +370,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
 void GeoZoneMonitor::_speak(const QString &message)
 {
     // MainWindow shows the message without blocking the user
-    if (SettingsManager::instance()->geoZoneSettings()->audioAlerts()->rawValue().toBool()) {
+    if (GeoZoneSettings::instance()->audioAlerts()->rawValue().toBool()) {
         AudioOutput::instance()->say(message);
     }
 }

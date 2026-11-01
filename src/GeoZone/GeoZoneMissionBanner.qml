@@ -38,8 +38,8 @@ Rectangle {
     readonly property var   crossedZones:   check.crossedZones
 
     // Outdated data, like an old list of temporary restrictions, can miss zones the mission enters
-    readonly property string _outdatedText: QGroundControl.geoZoneManager.validityWarning !== "" ?
-                                                qsTr("Geozone data may be outdated: %1").arg(QGroundControl.geoZoneManager.validityWarning.replace(/\n/g, "; ")) : ""
+    readonly property string _outdatedText: GeoZoneManager.validityWarning !== "" ?
+                                                qsTr("Geozone data may be outdated: %1").arg(GeoZoneManager.validityWarning.replace(/\n/g, "; ")) : ""
 
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth
     readonly property real _availableWidth: Math.max(rightLimit - leftLimit, ScreenTools.defaultFontPixelWidth * 20)
@@ -129,8 +129,8 @@ Rectangle {
             wrapMode:               Text.WordWrap
             horizontalAlignment:    Text.AlignHCenter
             font.pointSize:         ScreenTools.smallFontPointSize
-            text:                   qsTr("Checked for a flight starting %1 (local time)").arg(Qt.formatDateTime(QGroundControl.geoZoneManager.plannedStart, "yyyy-MM-dd HH:mm"))
-            visible:                !isNaN(QGroundControl.geoZoneManager.plannedStart.getTime())
+            text:                   qsTr("Checked for a flight starting %1 (local time)").arg(Qt.formatDateTime(GeoZoneManager.plannedStart, "yyyy-MM-dd HH:mm"))
+            visible:                !isNaN(GeoZoneManager.plannedStart.getTime())
         }
 
         QGCLabel {
@@ -173,7 +173,7 @@ Rectangle {
         anchors.fill:   parent
         z:              -1
         onClicked: {
-            QGroundControl.geoZoneManager.visible = true
+            GeoZoneManager.visible = true
             if (check.crossedZonesBoundingBox.isValid) {
                 map.fitViewportToGeoShape(check.crossedZonesBoundingBox, ScreenTools.defaultFontPixelHeight * 2)
             }

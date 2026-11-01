@@ -32,7 +32,7 @@ QGCPopupDialog {
 
     readonly property real _labelWidth: ScreenTools.defaultFontPixelWidth * 14
     readonly property real _valueWidth: ScreenTools.defaultFontPixelWidth * 45
-    readonly property var  _authorisations: QGroundControl.geoZoneManager.authorisations
+    readonly property var  _authorisations: GeoZoneManager.authorisations
 
     property int _authorisationRevision: 0  ///< Re-reads the authorisation when the authorisations change
     readonly property var _authorisation: (_authorisationRevision, geoZone ? _authorisations.authorisationOf(geoZone) : ({}))
@@ -52,7 +52,7 @@ QGCPopupDialog {
     }
 
     Connections {
-        target: QGroundControl.geoZoneManager
+        target: GeoZoneManager
         function onZonesAboutToChange(source) {
             if ([ root.geoZone ].concat(root.zones).some(zone => !zone || !zone.valid || zone.sourceKey === source.key)) {
                 root.close()

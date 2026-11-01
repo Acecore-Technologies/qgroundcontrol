@@ -11,6 +11,7 @@ import QtQml.Models
 
 import QGroundControl
 import QGroundControl.ScreenTools
+import QGroundControl.GeoZone
 
 ListModel {
     ListElement {
@@ -38,7 +39,7 @@ ListModel {
         name: qsTr("Geozones")
         url: "qrc:/qml/QGroundControl/GeoZone/GeoZoneSettingsPage.qml"
         iconUrl: "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
-        pageVisible: function() { return QGroundControl.settingsManager.geoZoneSettings.visible }
+        pageVisible: function() { return GeoZoneManager.settings.visible }
     }
 
     ListElement {

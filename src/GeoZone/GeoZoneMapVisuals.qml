@@ -30,7 +30,7 @@ Item {
 
     readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
 
-    readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
+    readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property bool  _showZones:         showZones && _geoZoneManager.visible && map.visible // Items are not kept for maps in hidden views
     readonly property bool  _showLabels:        _showZones && map.zoomLevel >= labelMinZoomLevel
 

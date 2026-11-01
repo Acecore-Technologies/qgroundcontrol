@@ -11,12 +11,15 @@
 
 #include "SettingsGroup.h"
 
+/// Settings of the geozone module, kept by the module rather than SettingsManager
 class GeoZoneSettings : public SettingsGroup
 {
     Q_OBJECT
 public:
     GeoZoneSettings(QObject* parent = nullptr);
     DEFINE_SETTING_NAME_GROUP()
+
+    static GeoZoneSettings *instance();
 
     DEFINE_SETTINGFACT(showZones)
     DEFINE_SETTINGFACT(hiddenRestrictions)

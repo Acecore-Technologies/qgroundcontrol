@@ -29,7 +29,7 @@ ColumnLayout {
     signal manageRequested
     signal zoneSelected     ///< A zone picked in the search is shown on the map
 
-    readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
+    readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 32
     readonly property bool  _planned:           !isNaN(_geoZoneManager.plannedStart.getTime())
     readonly property string _timeFormat:       "yyyy-MM-dd HH:mm"

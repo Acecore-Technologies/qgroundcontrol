@@ -8,23 +8,14 @@
  ****************************************************************************/
 
 #include "GeoZoneManager.h"
-#include "GeoZoneFenceImporter.h"
 #include "GeoZoneInfo.h"
-#include "GeoZoneMapModel.h"
-#include "GeoZoneMissionCheck.h"
-#include "GeoZoneGuidedCheck.h"
-#include "GeoZoneMonitor.h"
-#include "GeoZoneProfile.h"
-#include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneAuthorisations.h"
-#include "GeoZoneMapLayer.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
-#include "SettingsManager.h"
 
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QDir>
@@ -32,7 +23,6 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
-#include <QtQml/QQmlEngine>
 
 #include <algorithm>
 
@@ -55,7 +45,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     , _authorisations(new GeoZoneAuthorisations(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
     , _activeTimer(new QTimer(this))
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     (void) connect(settings->showZones(), &Fact::rawValueChanged, this, [this]() { emit visibleChanged(visible()); });
     (void) connect(settings->hiddenRestrictions(), &Fact::rawValueChanged, this, &GeoZoneManager::hiddenRestrictionsChanged);
 
@@ -84,20 +74,6 @@ GeoZoneManager *GeoZoneManager::instance()
     return _geoZoneManager();
 }
 
-void GeoZoneManager::registerQmlTypes()
-{
-    (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, "QGroundControl.GeoZone", 1, 0, "GeoZone", "Enums only");
-    (void) qmlRegisterUncreatableType<GeoZoneMonitor>("QGroundControl.GeoZone", 1, 0, "GeoZoneMonitor", "Reference only");
-    (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneGuidedCheck", "Reference only");
-    (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>("QGroundControl.GeoZone", 1, 0, "GeoZoneAuthorisations", "Reference only");
-    (void) qmlRegisterType<GeoZoneMapModel>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapModel");
-    (void) qmlRegisterType<GeoZoneMapLayer>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapLayer");
-    (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
-    (void) qmlRegisterType<GeoZoneFenceImporter>("QGroundControl.GeoZone", 1, 0, "GeoZoneFenceImporter");
-    (void) qmlRegisterType<GeoZoneProfile>("QGroundControl.GeoZone", 1, 0, "GeoZoneProfile");
-    (void) qmlRegisterType<GeoZoneRoutePlanner>("QGroundControl.GeoZone", 1, 0, "GeoZoneRoutePlanner");
-}
-
 void GeoZoneManager::init()
 {
     _repository->init();
@@ -121,7 +97,7 @@ bool GeoZoneManager::addArea(const QString &provider, const QGeoRectangle &area)
 
 bool GeoZoneManager::visible() const
 {
-    return SettingsManager::instance()->geoZoneSettings()->showZones()->rawValue().toBool();
+    return GeoZoneSettings::instance()->showZones()->rawValue().toBool();
 }
 
 void GeoZoneManager::setPlannedStart(const QDateTime &plannedStart)
@@ -135,19 +111,19 @@ void GeoZoneManager::setPlannedStart(const QDateTime &plannedStart)
 
 void GeoZoneManager::setVisible(bool visible)
 {
-    SettingsManager::instance()->geoZoneSettings()->showZones()->setRawValue(visible);
+    GeoZoneSettings::instance()->showZones()->setRawValue(visible);
 }
 
 int GeoZoneManager::hiddenRestrictions() const
 {
-    return SettingsManager::instance()->geoZoneSettings()->hiddenRestrictions()->rawValue().toInt();
+    return GeoZoneSettings::instance()->hiddenRestrictions()->rawValue().toInt();
 }
 
 void GeoZoneManager::setRestrictionVisible(int restriction, bool visible)
 {
     const int bit = 1 << restriction;
     const int hidden = visible ? (hiddenRestrictions() & ~bit) : (hiddenRestrictions() | bit);
-    SettingsManager::instance()->geoZoneSettings()->hiddenRestrictions()->setRawValue(hidden);
+    GeoZoneSettings::instance()->hiddenRestrictions()->setRawValue(hidden);
 }
 
 int GeoZoneManager::disabledSourceCount() const

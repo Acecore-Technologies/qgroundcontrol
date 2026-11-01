@@ -763,8 +763,8 @@ FlightMap {
                             geoZoneMapVisuals.showZonesAt(mapClickCoord)
                         }
 
-                        readonly property int _zoneCount: geoZoneMapVisuals.showZones && QGroundControl.geoZoneManager.visible ?
-                                                              QGroundControl.geoZoneManager.zonesAt(mapClickCoord).length : 0
+                        readonly property int _zoneCount: geoZoneMapVisuals.showZones && GeoZoneManager.visible ?
+                                                              GeoZoneManager.zonesAt(mapClickCoord).length : 0
                     }
 
                     ColumnLayout {

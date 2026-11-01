@@ -406,44 +406,19 @@ Item {
         guidedValueSlider.visible = false
     }
 
-    // Called when an action is about to be executed in order to confirm
-    // Mission on the vehicle checked against the geozones for starting it now
-    GeoZoneMissionCheck {
-        id:                 _vehicleMissionCheck
+    GeoZoneGuidedActionCheck {
+        id:                 _geoZoneCheck
+        guidedController:   _root
         missionController:  _root.missionController
         geoFenceController: _root.geoFenceController
-        flightNow:          true
-    }
-
-    /// @return Warning about the geozones the action would enter, empty when there are none. Updated with the slider value.
-    function _geoZoneWarning(actionCode, actionData) {
-        const monitor = QGroundControl.geoZoneMonitor.guidedCheck
-        if (!_activeVehicle || !QGroundControl.geoZoneManager.zoneCount) {
-            return ""
-        }
-        const sliderMeters = _unitsConversion.appSettingsVerticalDistanceUnitsToMeters(guidedValueSlider.value)
-        switch (actionCode) {
-        case actionGoto:
-            return monitor.gotoWarning(_activeVehicle, actionData)
-        case actionOrbit:
-            return monitor.orbitWarning(_activeVehicle, orbitMapCircle.center, orbitMapCircle.radius(), _activeVehicle.homePosition.altitude + sliderMeters)
-        case actionChangeAlt:
-            return monitor.altitudeWarning(_activeVehicle, sliderMeters)
-        case actionTakeoff:
-            return _activeVehicle.guidedTakeoffSupported ? monitor.altitudeWarning(_activeVehicle, sliderMeters) : ""
-        case actionStartMission:
-        case actionContinueMission:
-            return [ _vehicleMissionCheck.warningText, _vehicleMissionCheck.fenceText ].filter(text => text !== "").join("\n")
-        default:
-            return ""
-        }
     }
 
     /// @return true if a go to location would enter geozones, so it must be confirmed
     function gotoEntersGeoZones(coordinate) {
-        return _geoZoneWarning(actionGoto, coordinate) !== ""
+        return _geoZoneCheck.gotoEntersZones(coordinate)
     }
 
+    // Called when an action is about to be executed in order to confirm
     function confirmAction(actionCode, actionData, mapIndicator) {
         var showImmediate = true
         closeAll()
@@ -455,7 +430,7 @@ Item {
         _actionData = actionData
 
         setupSlider(actionCode)
-        confirmDialog.geoZoneWarning = Qt.binding(function() { return _geoZoneWarning(actionCode, actionData) })
+        confirmDialog.geoZoneWarning = Qt.binding(function() { return _geoZoneCheck.warning(actionCode, actionData) })
 
         switch (actionCode) {
         case actionArm:

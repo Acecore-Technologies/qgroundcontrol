@@ -33,6 +33,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneMapModel.cc
         GeoZoneMapModel.h
         GeoZoneMissionCheck.cc
+        GeoZoneModule.cc
+        GeoZoneModule.h
         GeoZoneMissionCheck.h
         GeoZoneMonitor.cc
         GeoZoneMonitor.h
@@ -54,6 +56,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneRoutePlanner.h
         GeoZoneSchedule.cc
         GeoZoneSchedule.h
+        GeoZoneSettings.cc
+        GeoZoneSettings.h
         GeoZoneShape.cc
         GeoZoneShape.h
         GeoZoneSource.cc
@@ -74,6 +78,17 @@ target_sources(${CMAKE_PROJECT_NAME}
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Settings metadata and the EGM96 geoid for heights above the WGS84 ellipsoid
+qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_resources"
+    PREFIX "/json"
+    FILES GeoZone.SettingsGroup.json
+)
+qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_geoid"
+    PREFIX "/geoid"
+    BASE Geoid
+    FILES Geoid/egm96_1deg.bin
+)
+
 # GeoZoneMapLayer triangulates the zone polygons with the triangulator of Qt Quick
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::GuiPrivate)
 
@@ -92,6 +107,7 @@ qt_add_qml_module(GeoZoneModule
         GeoZoneAltitudeStrip.qml
         GeoZoneAuthorisationsPanel.qml
         GeoZoneFenceImportDialog.qml
+        GeoZoneGuidedActionCheck.qml
         GeoZoneIndicator.qml
         GeoZoneInfoDialog.qml
         GeoZoneLegend.qml

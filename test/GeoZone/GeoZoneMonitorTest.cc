@@ -159,7 +159,7 @@ void GeoZoneMonitorTest::_testMonitorAlertOrder()
 
 void GeoZoneMonitorTest::_testMonitorTimeToEntry()
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restoreDefault = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
     settings->approachTime()->setRawValue(30);
 
@@ -247,7 +247,7 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
 
 void GeoZoneMonitorTest::_testTerrainAhead()
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restore = qScopeGuard([settings]() {
         settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue());
         GeoZoneTerrain::setLookup({});
@@ -350,7 +350,7 @@ void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
 
 void GeoZoneMonitorTest::_testAlertLog()
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
 
     const QGeoCoordinate center(47, 8);

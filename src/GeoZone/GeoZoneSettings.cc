@@ -9,13 +9,20 @@
 
 #include "GeoZoneSettings.h"
 
+#include <QtCore/qapplicationstatic.h>
 #include <QtCore/QSettings>
 #include <QtQml/QQmlEngine>
+
+Q_APPLICATION_STATIC(GeoZoneSettings, _geoZoneSettings);
+
+GeoZoneSettings *GeoZoneSettings::instance()
+{
+    return _geoZoneSettings();
+}
 
 // Same group as earlier versions, which kept the map visibility and the name of a single stored file
 DECLARE_SETTINGGROUP(GeoZone, "GeoZoneManager")
 {
-    qmlRegisterUncreatableType<GeoZoneSettings>("QGroundControl.SettingsManager", 1, 0, "GeoZoneSettings", "Reference only");
 
     QSettings settings;
     settings.beginGroup(settingsGroup);

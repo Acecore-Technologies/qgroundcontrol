@@ -150,7 +150,7 @@ QGCFlickable {
                     QGCButton {
                         Layout.fillWidth:   true
                         text:               qsTr("From Geozones...")
-                        visible:            QGroundControl.geoZoneManager.zoneCount > 0
+                        visible:            GeoZoneManager.zoneCount > 0
 
                         onClicked: geoZoneFenceImportDialogComponent.createObject(mainWindow, { geoFenceController: myGeoFenceController, flightMap: root.flightMap }).open()
                     }

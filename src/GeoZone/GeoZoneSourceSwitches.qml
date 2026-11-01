@@ -13,6 +13,7 @@ import QtQuick.Layouts
 import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.ScreenTools
+import QGroundControl.GeoZone
 
 /// Turns geozone sources on or off. The zones of sources turned off are left out of the maps, checks and alerts.
 /// Shown with several sources, or when one is off.
@@ -21,7 +22,7 @@ ColumnLayout {
     spacing:    ScreenTools.defaultFontPixelHeight / 4
     visible:    _geoZoneManager.sources.count > 1 || _geoZoneManager.disabledSourceCount > 0
 
-    readonly property var _geoZoneManager: QGroundControl.geoZoneManager
+    readonly property var _geoZoneManager: GeoZoneManager
 
     QGCLabel { text: qsTr("Sources") }
 

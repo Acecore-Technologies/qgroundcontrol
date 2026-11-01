@@ -11,7 +11,6 @@
 #include "GeoZone.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
-#include "SettingsManager.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QUrl>
@@ -236,7 +235,7 @@ void GeoZoneSource::setErrorString(const QString &errorString)
 
 void GeoZoneSource::updateValidity(const QDateTime &now)
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     QString text;
     if (loaded()) {
         const QDateTime date = dataDate();
@@ -259,7 +258,7 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
 
 int GeoZoneSource::refreshIntervalSecs() const
 {
-    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
     return isLive() ? (settings->liveFeedRefreshMinutes()->rawValue().toInt() * 60) : (settings->feedRefreshHours()->rawValue().toInt() * 3600);
 }
 

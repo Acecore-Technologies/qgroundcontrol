@@ -14,13 +14,14 @@ import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
+import QGroundControl.GeoZone
 
 /// Zones the operator is authorised to fly in, see GeoZoneAuthorisations
 ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
 
-    readonly property var _authorisations: QGroundControl.geoZoneManager.authorisations
+    readonly property var _authorisations: GeoZoneManager.authorisations
 
     QGCLabel {
         Layout.fillWidth:   true

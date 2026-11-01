@@ -27,7 +27,7 @@ ColumnLayout {
 
     signal zoneSelected     ///< A result was picked, the zone is shown on the map
 
-    readonly property var _geoZoneManager: QGroundControl.geoZoneManager
+    readonly property var _geoZoneManager: GeoZoneManager
 
     property var _results: []
 

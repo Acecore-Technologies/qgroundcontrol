@@ -14,13 +14,14 @@ import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
+import QGroundControl.GeoZone
 
 /// Geozone files and feeds: lists the loaded sources and adds, refreshes and removes them
 ColumnLayout {
     spacing:    _margin
 
-    readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
-    readonly property var   _geoZoneSettings:   QGroundControl.settingsManager.geoZoneSettings
+    readonly property var   _geoZoneManager:    GeoZoneManager
+    readonly property var   _geoZoneSettings:   GeoZoneManager.settings
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }

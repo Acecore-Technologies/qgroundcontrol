@@ -20,8 +20,6 @@ Q_DECLARE_LOGGING_CATEGORY(GuidedActionsControllerLog)
 
 class ADSBVehicleManager;
 class FactGroup;
-class GeoZoneManager;
-class GeoZoneMonitor;
 class LinkManager;
 class MissionCommandTree;
 class MultiVehicleManager;
@@ -37,8 +35,6 @@ class NTRIP;
 
 Q_MOC_INCLUDE("ADSBVehicleManager.h")
 Q_MOC_INCLUDE("FactGroup.h")
-Q_MOC_INCLUDE("GeoZoneManager.h")
-Q_MOC_INCLUDE("GeoZoneMonitor.h")
 Q_MOC_INCLUDE("LinkManager.h")
 Q_MOC_INCLUDE("MissionCommandTree.h")
 Q_MOC_INCLUDE("MultiVehicleManager.h")
@@ -84,8 +80,6 @@ public:
     Q_PROPERTY(VideoManager*        videoManager            READ    videoManager            CONSTANT)
     Q_PROPERTY(SettingsManager*     settingsManager         READ    settingsManager         CONSTANT)
     Q_PROPERTY(ADSBVehicleManager*  adsbVehicleManager      READ    adsbVehicleManager      CONSTANT)
-    Q_PROPERTY(GeoZoneManager*      geoZoneManager          READ    geoZoneManager          CONSTANT FINAL)
-    Q_PROPERTY(GeoZoneMonitor*      geoZoneMonitor          READ    geoZoneMonitor          CONSTANT FINAL)
     Q_PROPERTY(NTRIP*               ntrip                   READ    ntrip                   CONSTANT)
     Q_PROPERTY(QGCCorePlugin*       corePlugin              READ    corePlugin              CONSTANT)
     Q_PROPERTY(MissionCommandTree*  missionCommandTree      READ    missionCommandTree      CONSTANT)
@@ -182,8 +176,6 @@ public:
     FactGroup*              gpsRtkFactGroup     ()  { return _gpsRtkFactGroup; }
 #endif
     ADSBVehicleManager*     adsbVehicleManager  ()  { return _adsbVehicleManager; }
-    GeoZoneManager*         geoZoneManager      () const { return _geoZoneManager; }
-    GeoZoneMonitor*         geoZoneMonitor      () const { return _geoZoneMonitor; }
     NTRIP*                  ntrip               ()  { return _ntrip; }
     QmlUnitsConversion*     unitsConversion     ()  { return &_unitsConversion; }
     static QGeoCoordinate   flightMapPosition   ()  { return _coord; }
@@ -249,8 +241,6 @@ signals:
 private:
     QGCMapEngineManager*    _mapEngineManager       = nullptr;
     ADSBVehicleManager*     _adsbVehicleManager     = nullptr;
-    GeoZoneManager*         _geoZoneManager         = nullptr;
-    GeoZoneMonitor*         _geoZoneMonitor         = nullptr;
     NTRIP*                  _ntrip                  = nullptr;
     QGCPositionManager*     _qgcPositionManager     = nullptr;
     MissionCommandTree*     _missionCommandTree     = nullptr;

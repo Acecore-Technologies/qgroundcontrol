@@ -29,7 +29,7 @@ QGCPopupDialog {
     required property var geoFenceController
     required property var flightMap
 
-    readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
+    readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _margin:            ScreenTools.defaultFontPixelHeight / 2
     readonly property real  _contentWidth:      ScreenTools.defaultFontPixelWidth * 50
 

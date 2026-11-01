@@ -79,7 +79,7 @@ QString GeoZoneAlertLog::line(const GeoZoneMonitor::AlertEvent &event)
 
 void GeoZoneAlertLog::append(const GeoZoneMonitor::AlertEvent &event)
 {
-    if (!SettingsManager::instance()->geoZoneSettings()->logAlerts()->rawValue().toBool()) {
+    if (!GeoZoneSettings::instance()->logAlerts()->rawValue().toBool()) {
         return;
     }
 

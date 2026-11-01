@@ -14,6 +14,7 @@ import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
+import QGroundControl.GeoZone
 
 /// Number of loaded geozones, zones left out of the map and outdated data warning
 ColumnLayout {
@@ -22,7 +23,7 @@ ColumnLayout {
 
     property int hiddenZoneCount: 0 ///< Smallest zones in the map view left out to limit the number of map items
 
-    readonly property var _geoZoneManager:      QGroundControl.geoZoneManager
+    readonly property var _geoZoneManager:      GeoZoneManager
     readonly property int _activeSourceCount:   _geoZoneManager.sources.count - _geoZoneManager.disabledSourceCount
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
