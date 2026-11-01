@@ -83,6 +83,7 @@ public:
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
     static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see alertActions()
     static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
+    static constexpr int maxMuteSecs = 24 * 60 * 60;        ///< Longest mute, see muteAlerts()
     static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
 
     /// An alert of a vehicle about a zone
@@ -194,8 +195,8 @@ public:
 
     /// Acknowledges an alert in the history and stops repeating it
     Q_INVOKABLE void acknowledgeAlert(int alertId);
-    /// Mutes the alerts for the seconds, defaultMuteSecs when 0: they are shown but neither spoken nor repeated, except
-    /// new entries into prohibited zones
+    /// Mutes the alerts for the seconds, defaultMuteSecs when 0 and at most maxMuteSecs: they are shown but neither
+    /// spoken nor repeated, except new entries into prohibited zones
     Q_INVOKABLE void muteAlerts(int seconds = 0);
     Q_INVOKABLE void unmuteAlerts();
 

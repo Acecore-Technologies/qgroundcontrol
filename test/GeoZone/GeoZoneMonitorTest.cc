@@ -467,7 +467,7 @@ void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
 void GeoZoneMonitorTest::_testAlertLog()
 {
     // The alerts are logged on the same day whenever the test runs
-    const ScopedEnvironment environment;
+    ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
 
@@ -492,7 +492,10 @@ void GeoZoneMonitorTest::_testAlertLog()
     const QDate logDate = environment.now().date();
     QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().time, environment.now());
 
+    // The alerts are buffered and written to the open file a little later
     QFile file(log.filePath(logDate));
+    QVERIFY(!file.exists());
+    QTRY_VERIFY_WITH_TIMEOUT(file.exists() && (file.size() > 0), GeoZoneAlertLog::flushIntervalMSecs * 3);
     QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
     const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     file.close();
@@ -517,8 +520,36 @@ void GeoZoneMonitorTest::_testAlertLog()
     settings->logAlerts()->setRawValue(false);
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
+    log.flush();
     QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
     QCOMPARE(QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 3);
+    file.close();
+
+    // The files of the days past the retention are deleted when a file is started, others are kept
+    const QDir logDir(dir.filePath(QStringLiteral("logs")));
+    const QDate today = logDate.addDays(1);
+    const QStringList kept = { log.filePath(today.addDays(-29)), log.filePath(logDate), dir.filePath(QStringLiteral("logs/GeoZoneAlerts-notes.csv")) };
+    const QStringList old = { log.filePath(today.addDays(-30)), log.filePath(today.addDays(-400)) };
+    for (const QString &path : kept + old) {
+        QFile touched(path);
+        QVERIFY(touched.open(QIODevice::Append));
+    }
+    QCOMPARE(settings->alertLogRetentionDays()->rawValue().toInt(), 30);
+    settings->logAlerts()->setRawValue(true);
+    environment.addSecs(24 * 60 * 60);
+    monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
+    monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
+    log.flush();
+    QVERIFY(QFile::exists(log.filePath(today)));
+    for (const QString &path : kept) {
+        QVERIFY2(QFile::exists(path), qPrintable(path));
+    }
+    for (const QString &path : old) {
+        QVERIFY2(!QFile::exists(path), qPrintable(path));
+    }
+    QCOMPARE(log.removeOldFiles(today, 0), 0);
+    QCOMPARE(log.removeOldFiles(today.addDays(30), 30), 3);
+    QCOMPARE(logDir.entryList({ QStringLiteral("*.csv") }, QDir::Files).count(), 1);
 
     // Feed text starting like a spreadsheet formula stays text
     GeoZoneMonitor::AlertEvent event;
@@ -576,6 +607,7 @@ void GeoZoneMonitorTest::_testAlertHistory()
     for (const QList<QVariant> &arguments : std::as_const(eventSpy)) {
         log.append(arguments.first().value<GeoZoneMonitor::AlertEvent>());
     }
+    log.flush();
     GeoZoneMonitor::AlertEvent formula;
     formula.time = environment.now();
     formula.zoneIdentifier = QStringLiteral("F1");
@@ -584,6 +616,7 @@ void GeoZoneMonitorTest::_testAlertHistory()
     formula.distance = 50;
     formula.timeToEntry = 12;
     log.append(formula);
+    log.flush();
     const QDate logDate = formula.time.date();
     GeoZoneAlertHistory later(&manager);
     later.append(formula);
@@ -976,6 +1009,12 @@ void GeoZoneMonitorTest::_testSpokenAlerts()
     QVERIFY(!monitor.alertsMuted());
     QCOMPARE(mutedSpy.count(), 2);
     QCOMPARE(sink->spoken.last(), QStringLiteral("Still inside geozone P (Prohibited)"));
+
+    // Mutes are limited to a day
+    monitor.muteAlerts(std::numeric_limits<int>::max());
+    QCOMPARE(monitor.arbiter().mutedUntil(), now + (qint64{ GeoZoneMonitor::maxMuteSecs } * 1000));
+    monitor.unmuteAlerts();
+    QVERIFY(!monitor.alertsMuted());
 
     // Removing the vehicle ends its repeats
     monitor.removePositionMonitor(GeoZoneMonitor::noVehicle);

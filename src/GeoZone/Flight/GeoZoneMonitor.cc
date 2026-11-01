@@ -498,10 +498,11 @@ void GeoZoneMonitor::acknowledgeAlert(int alertId)
 
 void GeoZoneMonitor::muteAlerts(int seconds)
 {
-    const qint64 msecs = (seconds > 0) ? (qint64{ seconds } * 1000) : qint64{ GeoZoneAlertArbiter::defaultMuteMSecs };
+    // Clamped so that the timer's milliseconds fit an int
+    const int msecs = (seconds > 0) ? ((std::min)(seconds, maxMuteSecs) * 1000) : GeoZoneAlertArbiter::defaultMuteMSecs;
     _arbiter.mute(msecs);
     // Notified after the arbiter's clock passed the end
-    _muteTimer.start(static_cast<int>(msecs) + 100);
+    _muteTimer.start(msecs + 100);
     _updateMuted();
 }
 

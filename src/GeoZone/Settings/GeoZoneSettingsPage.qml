@@ -84,6 +84,14 @@ SettingsPage {
         LabelledFactTextField {
             Layout.fillWidth:   true
             label:              fact.shortDescription
+            fact:               _geoZoneSettings.alertLogRetentionDays
+            visible:            fact.visible
+            enabled:            _geoZoneSettings.alertsEnabled.rawValue && _geoZoneSettings.logAlerts.rawValue
+        }
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
             fact:               _geoZoneSettings.approachDistance
             visible:            fact.visible
             enabled:            _geoZoneSettings.alertsEnabled.rawValue

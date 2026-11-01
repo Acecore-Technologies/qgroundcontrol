@@ -13,8 +13,9 @@
 #include "SettingsManager.h"
 
 #include <QtCore/QDir>
-#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMetaEnum>
+#include <QtCore/QRegularExpression>
 
 namespace {
 
@@ -56,6 +57,21 @@ QString eventText(GeoZoneMonitor::AlertEvent::Kind kind)
 GeoZoneAlertLog::GeoZoneAlertLog(QObject *parent)
     : QObject(parent)
 {
+    _flushTimer.setSingleShot(true);
+    _flushTimer.setInterval(flushIntervalMSecs);
+    (void) connect(&_flushTimer, &QTimer::timeout, this, &GeoZoneAlertLog::flush);
+}
+
+GeoZoneAlertLog::~GeoZoneAlertLog()
+{
+    flush();
+}
+
+void GeoZoneAlertLog::setDirectory(const QString &directory)
+{
+    flush();
+    _file.close();
+    _directory = directory;
 }
 
 QString GeoZoneAlertLog::filePath(const QDate &date) const
@@ -99,24 +115,80 @@ void GeoZoneAlertLog::append(const GeoZoneMonitor::AlertEvent &event)
         return;
     }
 
-    const QString path = filePath(event.time.toUTC().date());
+    const QDate date = event.time.toUTC().date();
+    const QString path = filePath(date);
     if (path.isEmpty()) {
         return;
     }
-    (void) QDir().mkpath(QFileInfo(path).absolutePath());
+    if (path != _bufferPath) {
+        flush();
+        _bufferPath = path;
+        _bufferDate = date;
+    }
+    _buffer += (line(event) + QLatin1Char('\n')).toUtf8();
+    if (!_flushTimer.isActive()) {
+        _flushTimer.start();
+    }
+}
 
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << path << file.errorString();
+void GeoZoneAlertLog::flush()
+{
+    _flushTimer.stop();
+    if (_buffer.isEmpty()) {
         return;
     }
-    QString text;
-    if (file.size() == 0) {
-        text = header() + QLatin1Char('\n');
+    if (((_file.fileName() != _bufferPath) || !_file.isOpen()) && !_open()) {
+        _buffer.clear();
+        return;
     }
-    text += line(event) + QLatin1Char('\n');
-    const QByteArray bytes = text.toUtf8();
-    if ((file.write(bytes) != bytes.size()) || !file.flush()) {
-        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << path << file.errorString();
+    if ((_file.write(_buffer) != _buffer.size()) || !_file.flush()) {
+        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << _file.fileName() << _file.errorString();
+        _file.close();
     }
+    _buffer.clear();
+}
+
+bool GeoZoneAlertLog::_open()
+{
+    _file.close();
+    (void) QDir().mkpath(QFileInfo(_bufferPath).absolutePath());
+    _file.setFileName(_bufferPath);
+    if (!_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << _bufferPath << _file.errorString();
+        return false;
+    }
+    if (_file.size() == 0) {
+        (void) _file.write((header() + QLatin1Char('\n')).toUtf8());
+    }
+
+    // A file is started each day, a good time to delete those past the retention
+    const int retentionDays = GeoZoneSettings::instance()->alertLogRetentionDays()->rawValue().toInt();
+    if (retentionDays > 0) {
+        (void) removeOldFiles(_bufferDate, retentionDays);
+    }
+    return true;
+}
+
+int GeoZoneAlertLog::removeOldFiles(const QDate &today, int days)
+{
+    const QString path = filePath(today);
+    if (path.isEmpty() || (days <= 0)) {
+        return 0;
+    }
+    const QString directory = QFileInfo(path).absolutePath();
+    static const QRegularExpression namePattern(QStringLiteral("^GeoZoneAlerts-(\\d{4}-\\d{2}-\\d{2})\\.csv$"));
+    const QDate oldest = today.addDays(1 - days);
+    int removed = 0;
+    QDir dir(directory);
+    for (const QString &name : dir.entryList({ QStringLiteral("GeoZoneAlerts-*.csv") }, QDir::Files)) {
+        const QRegularExpressionMatch match = namePattern.match(name);
+        const QDate date = match.hasMatch() ? QDate::fromString(match.captured(1), Qt::ISODate) : QDate();
+        if (date.isValid() && (date < oldest) && dir.remove(name)) {
+            removed++;
+        }
+    }
+    if (removed > 0) {
+        qCDebug(GeoZoneMonitorLog) << "Removed" << removed << "geozone alert logs before" << oldest;
+    }
+    return removed;
 }

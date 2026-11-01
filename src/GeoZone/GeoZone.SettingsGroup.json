@@ -37,6 +37,16 @@
     "default":      true
 },
 {
+    "name":         "alertLogRetentionDays",
+    "shortDesc":    "Keep alert logs",
+    "longDesc":     "Days for which the CSV files of the flight alerts are kept. Older files are deleted when a new one is started. 0 keeps them all.",
+    "type":         "uint32",
+    "units":        "days",
+    "min":          0,
+    "max":          3650,
+    "default":      30
+},
+{
     "name":         "approachDistance",
     "shortDesc":    "Approach alert distance",
     "longDesc":     "Horizontal distance from a geozone at which the vehicle is alerted that it approaches the zone.",

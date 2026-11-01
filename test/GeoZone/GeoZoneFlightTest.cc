@@ -303,6 +303,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));
 
     // The alerts are logged with the vehicle, in a file per day
+    monitor.alertLog()->flush();
     QFile log(monitor.alertLog()->filePath(environment.now().date()));
     QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
     QStringList logLines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
