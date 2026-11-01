@@ -140,16 +140,7 @@ Column {
     }
 
     function _deleteFences(imported) {
-        for (var i = _polygons.count - 1; i >= 0; i--) {
-            if (imported === undefined || _polygons.get(i).geoZone === imported) {
-                geoFenceController.deletePolygon(i)
-            }
-        }
-        for (var j = _circles.count - 1; j >= 0; j--) {
-            if (imported === undefined || _circles.get(j).geoZone === imported) {
-                geoFenceController.deleteCircle(j)
-            }
-        }
+        geoFenceController.deleteFences(imported === true)
     }
 
     function _confirmDelete(title, text, imported) {

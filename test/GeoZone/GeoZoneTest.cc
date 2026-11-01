@@ -1148,6 +1148,20 @@ void GeoZoneTest::_testGeoFenceImport()
     QCOMPARE(importer.addExclusions(zones), 0);
     QCOMPARE(geoFenceController->polygons()->count(), 3);
     QCOMPARE(geoFenceController->circles()->count(), 1);
+
+    // Deleting the fences from geozones keeps the drawn ones, in one reset per list
+    geoFenceController->setDirty(false);
+    geoFenceController->addInclusionCircle(QGeoCoordinate(47.1, 7.9), QGeoCoordinate(46.9, 8.1));
+    QCOMPARE(geoFenceController->circles()->count(), 2);
+    QSignalSpy resetSpy(geoFenceController->polygons(), &QAbstractItemModel::modelReset);
+    geoFenceController->deleteFences(true);
+    QCOMPARE(resetSpy.count(), 1);
+    QCOMPARE(geoFenceController->polygons()->count(), 0);
+    QCOMPARE(geoFenceController->circles()->count(), 1);
+    QVERIFY(!geoFenceController->circles()->value<QGCFenceCircle*>(0)->geoZone());
+    QVERIFY(geoFenceController->dirty());
+    geoFenceController->deleteFences(false);
+    QCOMPARE(geoFenceController->circles()->count(), 0);
 }
 
 void GeoZoneTest::_testGeoFenceImportPreview()
