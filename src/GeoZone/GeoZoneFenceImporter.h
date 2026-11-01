@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QStringList>
@@ -19,6 +20,8 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoFenceController.h"
+
+#include <optional>
 
 class GeoZone;
 
@@ -71,8 +74,27 @@ private:
         QStringList circleNames;
     };
 
+    /// Arguments of a preview, whose fences an import with the same arguments reuses
+    struct PreviewKey {
+        QVariantList restrictions;
+        QGeoRectangle area;
+        int activeWithinHours = 0;
+        double simplifyTolerance = 0;
+        qsizetype polygonCount = 0;     ///< Existing fences, which new ones are compared with
+        qsizetype circleCount = 0;
+
+        friend bool operator==(const PreviewKey &, const PreviewKey &) = default;
+    };
+
     Fences _newFences(const QList<GeoZone*> &zones, double simplifyTolerance) const;
+    Fences _fencesFor(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double simplifyTolerance) const;
+    QVariantMap _preview(const Fences &fences) const;
+    int _addFences(const Fences &fences);
     static QList<GeoZone*> _zonesToImport(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours);
 
     QPointer<GeoFenceController> _geoFenceController;
+    mutable std::optional<std::pair<PreviewKey, Fences>> _previewFences;
+    mutable QElapsedTimer _previewAge;
+
+    static constexpr qint64 _previewReuseMSecs = 60 * 1000;    ///< Zone schedules make older previews inexact
 };

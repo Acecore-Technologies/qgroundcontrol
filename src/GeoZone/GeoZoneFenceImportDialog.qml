@@ -35,10 +35,16 @@ QGCPopupDialog {
 
     property var _preview: ({ fenceCount: 0, pointCount: 0, totalPointCount: 0, limitWarning: "" })
 
-    Component.onCompleted: _updatePreview()
+    // The dialog shows before the first preview is computed
+    Component.onCompleted: previewTimer.start()
 
     onAccepted: {
-        const preview = importer.preview(_restrictions(), _area(), _activeWithinHours(), _tolerance())
+        // The importer reuses the fences of a preview with the same choices
+        if (previewTimer.running) {
+            previewTimer.stop()
+            _updatePreview()
+        }
+        const preview = _preview
         if (preview.limitWarning === "") {
             _import()
             return

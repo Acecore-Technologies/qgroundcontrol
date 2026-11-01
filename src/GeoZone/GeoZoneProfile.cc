@@ -91,7 +91,8 @@ void GeoZoneProfile::setMissionController(MissionController *missionController)
 void GeoZoneProfile::_clear()
 {
     _updateTimer.stop();
-    if (!_bands.isEmpty()) {
+    if (!_bandList.isEmpty()) {
+        _bandList.clear();
         _bands.clear();
         emit bandsChanged();
     }
@@ -117,9 +118,10 @@ void GeoZoneProfile::update()
     if (!_active) {
         return;
     }
-    const QVariantList bands = bandsForSegments(_missionSegments(), _manager);
-    if (bands != _bands) {
-        _bands = bands;
+    const QList<Band> bands = computeBands(_missionSegments(), _manager);
+    if (bands != _bandList) {
+        _bandList = bands;
+        _bands = toVariantList(_bandList);
         emit bandsChanged();
     }
 }
@@ -165,22 +167,41 @@ QList<GeoZoneProfile::Segment> GeoZoneProfile::_missionSegments() const
     return segments;
 }
 
-QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, const GeoZoneManager *manager)
+QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
+{
+    QVariantList list;
+    list.reserve(bands.count());
+    for (const Band &band : bands) {
+        QVariantList points;
+        points.reserve(band.points.count());
+        for (const BandPoint &point : band.points) {
+            points.append(QVariantMap{
+                { QStringLiteral("distance"), point.distance },
+                { QStringLiteral("floor"), point.floor },
+                { QStringLiteral("ceiling"), point.ceiling },
+            });
+        }
+        list.append(QVariantMap{
+            { QStringLiteral("restriction"), static_cast<int>(band.restriction) },
+            { QStringLiteral("name"), band.name },
+            { QStringLiteral("points"), points },
+        });
+    }
+    return list;
+}
+
+QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &segments, const GeoZoneManager *manager)
 {
     static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
 
     struct Run {
         const GeoZone *zone = nullptr;
-        QVariantList points;
+        QList<BandPoint> points;
     };
-    QHash<QPair<const GeoZone*, int>, Run> runs;   ///< Stretches being followed by zone volume
-    QVariantList bands;
+    QHash<std::pair<const GeoZone*, int>, Run> runs;   ///< Stretches being followed by zone volume
+    QList<Band> bands;
     const auto closeRun = [&bands](const Run &run) {
-        bands.append(QVariantMap{
-            { QStringLiteral("restriction"), static_cast<int>(run.zone->restriction()) },
-            { QStringLiteral("name"), run.zone->displayName() },
-            { QStringLiteral("points"), run.points },
-        });
+        bands.append(Band{ run.zone->restriction(), run.zone->displayName(), run.points });
     };
     const auto closeAll = [&runs, &closeRun]() {
         for (const Run &run : std::as_const(runs)) {
@@ -199,7 +220,7 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
             totalLength += segment.from.distanceTo(segment.to);
         }
     }
-    const double spacing = std::max(minSampleSpacing, totalLength / maxSamples);
+    const double spacing = (std::max)(minSampleSpacing, totalLength / maxSamples);
 
     // Zone volume near a segment with its bounds, and its rings projected around the current stretch of the segment
     struct Candidate {
@@ -210,6 +231,7 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
         double minLongitude = 0;
         double maxLongitude = 0;
         QList<QList<QPointF>> rings;
+        int projectedStretch = -1;  ///< Stretch the rings are projected for, they are projected when a sample needs them
     };
 
     double offset = 0;
@@ -222,10 +244,10 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
 
         const double length = segment.from.distanceTo(segment.to);
         const double azimuth = segment.from.azimuthTo(segment.to);
-        const double segmentMinLatitude = std::min(segment.from.latitude(), segment.to.latitude());
-        const double segmentMaxLatitude = std::max(segment.from.latitude(), segment.to.latitude());
-        const double segmentMinLongitude = std::min(segment.from.longitude(), segment.to.longitude());
-        const double segmentMaxLongitude = std::max(segment.from.longitude(), segment.to.longitude());
+        const double segmentMinLatitude = (std::min)(segment.from.latitude(), segment.to.latitude());
+        const double segmentMaxLatitude = (std::max)(segment.from.latitude(), segment.to.latitude());
+        const double segmentMinLongitude = (std::min)(segment.from.longitude(), segment.to.longitude());
+        const double segmentMaxLongitude = (std::max)(segment.from.longitude(), segment.to.longitude());
 
         QList<Candidate> candidates;
         for (const GeoZone *zone : manager->zonesInArea(restrictions, QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }))) {
@@ -249,8 +271,9 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
             }
         }
 
-        const int sampleCount = std::max(1, static_cast<int>(std::ceil(length / spacing)));
+        const int sampleCount = (std::max)(1, static_cast<int>(std::ceil(length / spacing)));
         std::optional<GeoZoneGeometry::LocalProjection> projection;
+        int stretch = -1;
         double projectionEnd = -1;
         for (int i = 0; i <= sampleCount; i++) {
             const double fraction = static_cast<double>(i) / sampleCount;
@@ -262,21 +285,15 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
 
             // The flat projection is accurate near its center, so it moves along long segments
             if (!projection || (along > projectionEnd)) {
-                const double center = std::min(along + (projectionStretch / 2), length);
+                const double center = (std::min)(along + (projectionStretch / 2), length);
                 projection.emplace(segment.from.atDistanceAndAzimuth(center, azimuth));
                 projectionEnd = along + projectionStretch;
-                for (Candidate &candidate : candidates) {
-                    candidate.rings.clear();
-                    const GeoZone::Volume &volume = candidate.zone->data().volumes[candidate.volumeIndex];
-                    for (const QList<QGeoCoordinate> &ring : volume.rings) {
-                        candidate.rings.append(projection->toLocal(ring));
-                    }
-                }
+                stretch++;
             }
             const QPointF point = projection->toLocal(position.coordinate);
 
-            QSet<QPair<const GeoZone*, int>> inside;
-            for (const Candidate &candidate : std::as_const(candidates)) {
+            QSet<std::pair<const GeoZone*, int>> inside;
+            for (Candidate &candidate : candidates) {
                 const double latitude = position.coordinate.latitude();
                 const double longitude = position.coordinate.longitude();
                 if ((latitude < candidate.minLatitude) || (latitude > candidate.maxLatitude) ||
@@ -288,21 +305,24 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
                 if (volume.isCircle) {
                     contained = volume.center.isValid() && (volume.center.distanceTo(position.coordinate) <= volume.radius);
                 } else {
+                    if (candidate.projectedStretch != stretch) {
+                        candidate.projectedStretch = stretch;
+                        candidate.rings.clear();
+                        for (const QList<QGeoCoordinate> &ring : volume.rings) {
+                            candidate.rings.append(projection->toLocal(ring));
+                        }
+                    }
                     contained = GeoZoneGeometry::polygonContains(candidate.rings, point);
                 }
                 if (!contained) {
                     continue;
                 }
 
-                const QPair<const GeoZone*, int> key(candidate.zone, candidate.volumeIndex);
+                const std::pair<const GeoZone*, int> key(candidate.zone, candidate.volumeIndex);
                 inside.insert(key);
                 Run &run = runs[key];
                 run.zone = candidate.zone;
-                run.points.append(QVariantMap{
-                    { QStringLiteral("distance"), distance },
-                    { QStringLiteral("floor"), GeoZone::limitAMSL(volume, false, position) },
-                    { QStringLiteral("ceiling"), GeoZone::limitAMSL(volume, true, position) },
-                });
+                run.points.append(BandPoint{ distance, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) });
             }
 
             for (auto it = runs.begin(); it != runs.end();) {
@@ -319,22 +339,16 @@ QVariantList GeoZoneProfile::bandsForSegments(const QList<Segment> &segments, co
     closeAll();
 
     // Along the path, the most restrictive drawn last, on top
-    const auto severity = [](const QVariantMap &band) {
-        return GeoZone::restrictionSeverity(static_cast<GeoZone::Restriction>(band.value(QStringLiteral("restriction")).toInt()));
-    };
-    const auto start = [](const QVariantMap &band) {
-        return band.value(QStringLiteral("points")).toList().constFirst().toMap().value(QStringLiteral("distance")).toDouble();
-    };
-    std::stable_sort(bands.begin(), bands.end(), [&severity, &start](const QVariant &a, const QVariant &b) {
-        const QVariantMap bandA = a.toMap();
-        const QVariantMap bandB = b.toMap();
-        if (severity(bandA) != severity(bandB)) {
-            return severity(bandA) > severity(bandB);
+    std::stable_sort(bands.begin(), bands.end(), [](const Band &a, const Band &b) {
+        const int severityA = GeoZone::restrictionSeverity(a.restriction);
+        const int severityB = GeoZone::restrictionSeverity(b.restriction);
+        if (severityA != severityB) {
+            return severityA > severityB;
         }
-        if (start(bandA) != start(bandB)) {
-            return start(bandA) < start(bandB);
+        if (a.points.constFirst().distance != b.points.constFirst().distance) {
+            return a.points.constFirst().distance < b.points.constFirst().distance;
         }
-        return bandA.value(QStringLiteral("name")).toString() < bandB.value(QStringLiteral("name")).toString();
+        return a.name < b.name;
     });
     return bands;
 }

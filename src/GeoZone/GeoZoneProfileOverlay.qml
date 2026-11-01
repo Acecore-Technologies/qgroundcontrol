@@ -30,16 +30,13 @@ Canvas {
         active:             control.visible && QGroundControl.geoZoneManager.zones.count > 0
     }
 
+    // Changes only when the scale does, the profile signals each value as it updates
+    readonly property string _scaleKey: [ terrainProfile.pixelsPerMeter, terrainProfile.minAMSLAlt, terrainProfile.maxAMSLAlt ].join("/")
+
     on_BandsChanged:    requestPaint()
+    on_ScaleKeyChanged: requestPaint()
     onWidthChanged:     requestPaint()
     onHeightChanged:    requestPaint()
-
-    Connections {
-        target:                             terrainProfile
-        function onPixelsPerMeterChanged()  { control.requestPaint() }
-        function onMinAMSLAltChanged()      { control.requestPaint() }
-        function onMaxAMSLAltChanged()      { control.requestPaint() }
-    }
 
     function _color(restriction) {
         switch (restriction) {

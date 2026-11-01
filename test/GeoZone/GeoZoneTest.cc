@@ -2082,6 +2082,8 @@ void GeoZoneTest::_testProfileBands()
     beyond.distance = 300;
 
     const QVariantList bands = GeoZoneProfile::bandsForSegments({ west, east, gap, beyond }, &manager);
+    // Bands with unbounded limits compare equal, so recomputing unchanged bands doesn't repaint
+    QCOMPARE(GeoZoneProfile::computeBands({ west, east, gap, beyond }, &manager), GeoZoneProfile::computeBands({ west, east, gap, beyond }, &manager));
     QStringList names;
     for (const QVariant &band : bands) {
         names.append(band.toMap()[QStringLiteral("name")].toString());

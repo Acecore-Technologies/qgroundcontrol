@@ -17,6 +17,8 @@
 
 #include "GeoZone.h"
 
+#include <cmath>
+
 class GeoZoneManager;
 class MissionController;
 
@@ -60,9 +62,33 @@ public:
         double terrainSpacing = 0;
     };
 
+    struct BandPoint {
+        double distance = 0;
+        double floor = qQNaN();
+        double ceiling = qQNaN();
+
+        /// NaN limits compare equal, so unchanged bands are recognized
+        friend bool operator==(const BandPoint &a, const BandPoint &b)
+        {
+            const auto same = [](double x, double y) { return (x == y) || (std::isnan(x) && std::isnan(y)); };
+            return (a.distance == b.distance) && same(a.floor, b.floor) && same(a.ceiling, b.ceiling);
+        }
+    };
+
+    struct Band {
+        GeoZone::Restriction restriction = GeoZone::Unknown;
+        QString name;
+        QList<BandPoint> points;
+
+        friend bool operator==(const Band &, const Band &) = default;
+    };
+
     /// @return Bands of the zones along consecutive segments, see the bands property. Segments with a zero distance
     ///         and invalid coordinates only advance the distance.
-    static QVariantList bandsForSegments(const QList<Segment> &segments, const GeoZoneManager *manager);
+    static QList<Band> computeBands(const QList<Segment> &segments, const GeoZoneManager *manager);
+    /// @return The bands in the form of the bands property
+    static QVariantList toVariantList(const QList<Band> &bands);
+    static QVariantList bandsForSegments(const QList<Segment> &segments, const GeoZoneManager *manager) { return toVariantList(computeBands(segments, manager)); }
 
     /// Re-evaluates immediately instead of after changes settle
     Q_INVOKABLE void update();
@@ -78,6 +104,7 @@ private:
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
+    QList<Band> _bandList;
     QVariantList _bands;
     bool _active = true;
     QTimer _updateTimer;
