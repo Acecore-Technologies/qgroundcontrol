@@ -110,6 +110,24 @@
     "default":      28
 },
 {
+    "name":         "followAreaOfInterest",
+    "shortDesc":    "Download services around the mission and vehicle",
+    "longDesc":     "Download the zones of geozone services taking an area again when the planned mission or the active vehicle leaves the area downloaded.",
+    "type":         "bool",
+    "default":      true
+},
+{
+    "name":         "areaOfInterestMargin",
+    "shortDesc":    "Service download margin",
+    "longDesc":     "Distance around the planned mission and the active vehicle for which geozone services taking an area are downloaded.",
+    "type":         "double",
+    "units":        "m",
+    "min":          500,
+    "max":          50000,
+    "decimalPlaces": 0,
+    "default":      5000
+},
+{
     "name":         "liveStaleHours",
     "shortDesc":    "Outdated live restrictions warning",
     "longDesc":     "Age in hours after which the data of a temporary flight restriction feed is reported as outdated.",

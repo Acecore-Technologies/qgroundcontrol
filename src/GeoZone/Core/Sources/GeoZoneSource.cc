@@ -91,6 +91,14 @@ void GeoZoneSource::setCredentialsMissing(bool missing)
     }
 }
 
+void GeoZoneSource::setArea(const QGeoRectangle &area)
+{
+    if (area != _area) {
+        _area = area;
+        emit changed();
+    }
+}
+
 QString GeoZoneSource::name() const
 {
     if (!_service.name.isEmpty()) {

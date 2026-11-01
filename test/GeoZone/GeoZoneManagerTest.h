@@ -34,6 +34,7 @@ private slots:
     void _testServiceApiKeys();
     void _testServiceOAuth2();
     void _testEd318Service();
+    void _testServiceAreaOfInterest();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();

@@ -34,4 +34,6 @@ public:
     DEFINE_SETTINGFACT(liveFeedRefreshMinutes)
     DEFINE_SETTINGFACT(staleDays)
     DEFINE_SETTINGFACT(liveStaleHours)
+    DEFINE_SETTINGFACT(followAreaOfInterest)
+    DEFINE_SETTINGFACT(areaOfInterestMargin)
 };

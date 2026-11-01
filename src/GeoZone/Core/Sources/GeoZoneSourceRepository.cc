@@ -20,6 +20,10 @@
 #include <QtCore/QLocale>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QUrl>
+#include <QtCore/QtMath>
+
+#include <algorithm>
+#include <cmath>
 
 GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObject *parent)
     : QObject(parent)
@@ -163,6 +167,110 @@ void GeoZoneSourceRepository::_setService(const QString &key, const GeoZoneServi
     }
 }
 
+void GeoZoneSourceRepository::setMissionArea(quintptr owner, const QGeoRectangle &area)
+{
+    if (!area.isValid()) {
+        (void) _missionAreas.remove(owner);
+        return;
+    }
+    if (_missionAreas.value(owner) != area) {
+        _missionAreas.insert(owner, area);
+        _checkAreas();
+    }
+}
+
+void GeoZoneSourceRepository::setVehiclePosition(const QGeoCoordinate &position)
+{
+    if (position.isValid() && (std::abs(position.latitude()) <= 90) && (std::abs(position.longitude()) <= 180) &&
+        !((position.latitude() == 0) && (position.longitude() == 0))) {
+        _vehiclePosition = QGeoCoordinate(position.latitude(), position.longitude());
+        _checkAreas();
+    } else {
+        _vehiclePosition = QGeoCoordinate();
+    }
+}
+
+QGeoRectangle GeoZoneSourceRepository::areaOfInterest() const
+{
+    QList<QGeoCoordinate> coordinates;
+    for (const QGeoRectangle &area : _missionAreas) {
+        coordinates << area.topLeft() << area.bottomRight();
+    }
+    if (_vehiclePosition.isValid()) {
+        coordinates.append(_vehiclePosition);
+    }
+    return coordinates.isEmpty() ? QGeoRectangle() : QGeoRectangle(coordinates);
+}
+
+void GeoZoneSourceRepository::setAreaMargin(double meters)
+{
+    _areaMargin = std::clamp(meters, 0.0, 100000.0);
+}
+
+void GeoZoneSourceRepository::setFollowArea(bool follow)
+{
+    if (follow != _followArea) {
+        _followArea = follow;
+        _checkAreas();
+    }
+}
+
+QGeoRectangle GeoZoneSourceRepository::expanded(const QGeoRectangle &area, double margin)
+{
+    if (!area.isValid()) {
+        return QGeoRectangle();
+    }
+    constexpr double metersPerDegree = 111320.0;
+    const double latitudeMargin = margin / metersPerDegree;
+    const double maxLatitude = (std::max)(std::abs(area.topLeft().latitude()), std::abs(area.bottomRight().latitude()));
+    const double longitudeMargin = margin / (metersPerDegree * (std::max)(0.01, std::cos(qDegreesToRadians((std::min)(maxLatitude + latitudeMargin, 89.0)))));
+    const double north = (std::min)(90.0, area.topLeft().latitude() + latitudeMargin);
+    const double south = (std::max)(-90.0, area.bottomRight().latitude() - latitudeMargin);
+    double west = area.topLeft().longitude() - longitudeMargin;
+    double east = area.bottomRight().longitude() + longitudeMargin;
+    if ((area.width() + (2 * longitudeMargin)) >= 360) {
+        west = -180;
+        east = 180;
+    } else {
+        // Areas reaching across the antimeridian continue on the other side
+        west = (west < -180) ? (west + 360) : west;
+        east = (east > 180) ? (east - 360) : east;
+    }
+    return QGeoRectangle(QGeoCoordinate(north, west), QGeoCoordinate(south, east));
+}
+
+QGeoRectangle GeoZoneSourceRepository::_requestArea(const QString &key) const
+{
+    const GeoZoneSource *const existing = source(key);
+    const QGeoRectangle downloaded = existing ? existing->area() : QGeoRectangle();
+    const QGeoRectangle interest = areaOfInterest();
+    if (interest.isValid() && (!downloaded.isValid() || (_followArea && !downloaded.contains(interest)))) {
+        return expanded(interest, _areaMargin);
+    }
+    return downloaded;
+}
+
+void GeoZoneSourceRepository::_checkAreas()
+{
+    const QGeoRectangle interest = areaOfInterest();
+    if (!_followArea || !interest.isValid()) {
+        return;
+    }
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    for (GeoZoneSource *const source : std::as_const(_sources)) {
+        if (!source->isFeed() || !source->service().areaOfInterest || !source->enabled() || source->busy() || source->credentialsMissing() ||
+            (source->area().isValid() && source->area().contains(interest))) {
+            continue;
+        }
+        // Services which failed aren't asked again before their retry
+        if (const QDateTime retryAt = _scheduler->retryAt(source->key()); retryAt.isValid() && (retryAt > now)) {
+            continue;
+        }
+        qCDebug(GeoZoneSourceLog) << "The area of interest left the area of" << source->key();
+        _download(source->key(), GeoZoneLoader::Request::Automatic);
+    }
+}
+
 void GeoZoneSourceRepository::_forgetService(const QString &key)
 {
     if (_services.remove(key) > 0) {
@@ -209,9 +317,15 @@ void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Reque
     if (const auto token = _tokens.constFind(url); (token != _tokens.cend()) && (token->expiresAt > fetchRequest.time)) {
         fetchRequest.accessToken = token->value;
     }
+    if (fetchRequest.service.areaOfInterest) {
+        fetchRequest.area = _requestArea(url);
+    }
     if (existing && existing->loaded()) {
-        fetchRequest.etag = existing->etag();
-        fetchRequest.lastModified = existing->lastModified();
+        // The validators are those of the area downloaded
+        if (!fetchRequest.service.areaOfInterest || (existing->area() == fetchRequest.area)) {
+            fetchRequest.etag = existing->etag();
+            fetchRequest.lastModified = existing->lastModified();
+        }
         fetchRequest.datasetUrl = existing->datasetUrl();
         fetchRequest.formatHint = existing->format();
     }
@@ -254,6 +368,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     if (result.status == GeoZoneFeedFetch::Result::Status::Ready) {
         GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
         job.responseMember = fetch->request().service.effectiveResponseMember();
+        job.area = fetch->request().area;
         job.sourcePath = result.filePath;
         job.pagePaths = result.pagePaths;
         job.downloaded = true;
@@ -421,6 +536,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     if (source->isFeed() && job.downloaded) {
         source->setValidators(job.etag, job.lastModified);
         source->setDatasetUrl(job.datasetUrl);
+        source->setArea(job.area);
     }
 
     _updateStoredEntry(job, loadResult);
@@ -429,6 +545,11 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         source->setEnabled(true);
     }
     updateValidity();
+
+    // The area of interest may have moved while the feed was downloaded
+    if (source->service().areaOfInterest && job.downloaded) {
+        _checkAreas();
+    }
 
     if (unchanged) {
         return;
@@ -471,6 +592,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
         entry.lastModified = job.lastModified;
         entry.datasetUrl = job.datasetUrl;
         entry.maxAgeSecs = job.maxAgeSecs;
+        entry.area = job.area;
     }
     _index.replace(entry);
     _saveIndex();
@@ -619,6 +741,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         placeholder->setStoredDates(job.loadedAt, job.fileDate, job.checkedAt);
         placeholder->setValidators(job.etag, job.lastModified);
         placeholder->setDatasetUrl(job.datasetUrl);
+        placeholder->setArea(entry.area);
         if (!entry.service.isEmpty()) {
             const GeoZoneService service = GeoZoneService::fromJson(entry.service);
             _services.insert(entry.key, service);

@@ -63,6 +63,10 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
             _scheduleUpdate();
         }
     });
+    // The mission no longer makes the area of interest
+    (void) connect(this, &QObject::destroyed, _manager, [manager = _manager, owner = static_cast<const QObject*>(this)]() {
+        manager->setMissionArea(owner, QGeoRectangle());
+    });
 }
 
 MissionController *GeoZoneMissionCheck::missionController() const
@@ -374,7 +378,27 @@ void GeoZoneMissionCheck::update()
     _updateTimer.stop();
     _evaluation++;
     const auto [start, end] = _flightTimes();
-    _apply(evaluate(_manager->catalog(), GeoZoneMissionPath::fromMission(_missionController, true), start, end));
+    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController, true);
+    _manager->setMissionArea(this, missionArea(path));
+    _apply(evaluate(_manager->catalog(), path, start, end));
+}
+
+QGeoRectangle GeoZoneMissionCheck::missionArea(const GeoZoneMissionPath &path)
+{
+    QList<QGeoCoordinate> coordinates;
+    for (const QList<GeoZone::Position> &positions : path.positionLists()) {
+        for (const GeoZone::Position &position : positions) {
+            if (position.coordinate.isValid()) {
+                coordinates.append(position.coordinate);
+            }
+        }
+    }
+    for (const GeoZone::Area &area : path.areas()) {
+        for (const QGeoCoordinate &vertex : area.polygon) {
+            coordinates.append(vertex);
+        }
+    }
+    return coordinates.isEmpty() ? QGeoRectangle() : QGeoRectangle(coordinates);
 }
 
 void GeoZoneMissionCheck::_updateConcurrently()
@@ -382,6 +406,8 @@ void GeoZoneMissionCheck::_updateConcurrently()
     const quint64 evaluation = ++_evaluation;
     const GeoZoneCatalog catalog = _manager->catalog();
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController, true);
+    // The services taking the area of interest download the zones around the mission
+    _manager->setMissionArea(this, missionArea(path));
     const auto [start, end] = _flightTimes();
     auto *const watcher = new QFutureWatcher<Evaluation>(this);
     (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {

@@ -17,8 +17,10 @@
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
+#include "MultiVehicleManager.h"
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
+#include "Vehicle.h"
 
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QDir>
@@ -59,6 +61,10 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(settings->liveStaleHours(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
     // Limits published as flight levels are converted with the QNH, so checks and texts using them are updated
     (void) connect(settings->qnhHPa(), &Fact::rawValueChanged, this, [this]() { emit zonesChanged(nullptr); });
+    _repository->setAreaMargin(settings->areaOfInterestMargin()->rawValue().toDouble());
+    _repository->setFollowArea(settings->followAreaOfInterest()->rawValue().toBool());
+    (void) connect(settings->areaOfInterestMargin(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setAreaMargin(value.toDouble()); });
+    (void) connect(settings->followAreaOfInterest(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowArea(value.toBool()); });
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);
@@ -88,6 +94,22 @@ GeoZoneManager *GeoZoneManager::instance()
 void GeoZoneManager::init()
 {
     _repository->init();
+
+    // The services taking the area of interest download the zones around the active vehicle
+    MultiVehicleManager *const vehicles = MultiVehicleManager::instance();
+    (void) connect(vehicles, &MultiVehicleManager::activeVehicleChanged, this, &GeoZoneManager::_activeVehicleChanged);
+    _activeVehicleChanged(vehicles->activeVehicle());
+}
+
+void GeoZoneManager::_activeVehicleChanged(Vehicle *vehicle)
+{
+    (void) disconnect(_vehicleConnection);
+    if (!vehicle) {
+        _repository->setVehiclePosition(QGeoCoordinate());
+        return;
+    }
+    _vehicleConnection = connect(vehicle, &Vehicle::coordinateChanged, _repository, &GeoZoneSourceRepository::setVehiclePosition);
+    _repository->setVehiclePosition(vehicle->coordinate());
 }
 
 QStringList GeoZoneManager::fileDialogFilters() const

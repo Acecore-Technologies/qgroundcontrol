@@ -52,6 +52,8 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QString      changesText     READ changesText    NOTIFY changed FINAL)               ///< Zones added, removed and changed by the last reload which changed them, empty without
     Q_PROPERTY(bool         needsCredentials    READ needsCredentials   NOTIFY serviceChanged FINAL)    ///< The service of the feed requires a secret, see GeoZoneCredentials
     Q_PROPERTY(bool         credentialsMissing  READ credentialsMissing NOTIFY serviceChanged FINAL)    ///< The secret the service requires isn't known, like after importing a pack
+    Q_PROPERTY(bool         followsArea     READ followsArea    NOTIFY serviceChanged FINAL)        ///< The service downloads the zones around the mission and the vehicle
+    Q_PROPERTY(QGeoRectangle area           READ area           NOTIFY changed FINAL)               ///< Area the zones were downloaded for, invalid unless followsArea
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
@@ -136,6 +138,10 @@ public:
     bool needsCredentials() const { return _service.needsSecret(); }
     bool credentialsMissing() const { return _service.needsSecret() && _credentialsMissing; }
     void setCredentialsMissing(bool missing);
+    bool followsArea() const { return _service.areaOfInterest; }
+    /// Area of interest the feed was downloaded for, invalid when its service takes none
+    QGeoRectangle area() const { return _area; }
+    void setArea(const QGeoRectangle &area);
 
 signals:
     void changed();
@@ -181,6 +187,7 @@ private:
     QString _datasetUrl;
     GeoZoneService _service;
     bool _credentialsMissing = false;
+    QGeoRectangle _area;
 
     QList<GeoZone*> _zones;
     QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones

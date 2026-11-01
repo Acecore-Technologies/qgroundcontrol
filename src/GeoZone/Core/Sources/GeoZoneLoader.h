@@ -13,6 +13,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QString>
+#include <QtPositioning/QGeoRectangle>
 
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
@@ -51,6 +52,7 @@ public:
         qint64 maxAgeSecs = -1;     ///< How long the server said a downloaded feed stays current, negative when it didn't
         QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
         QString responseMember;     ///< Member of a downloaded JSON response holding the zones, see GeoZoneService::responseMember
+        QGeoRectangle area;         ///< Area of interest the feed was downloaded for, invalid when it doesn't take one
         Request request = Request::Automatic;
         GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops parsing or before storing
     };

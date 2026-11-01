@@ -1415,6 +1415,125 @@ void GeoZoneManagerTest::_testEd318Service()
     QCOMPARE(GeoZoneService::fromVariantMap(nms->service.toVariantMap()), nms->service);
 }
 
+void GeoZoneManagerTest::_testServiceAreaOfInterest()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    QJsonObject query;
+    server.handler = [&](const QByteArray &request, QByteArray &, QByteArray &content, QByteArray &) {
+        if (!request.startsWith("POST /uas-zones ")) {
+            return false;
+        }
+        query = QJsonDocument::fromJson(TestFeedServer::requestBody(request)).object();
+        content = QJsonDocument(QJsonObject{ { "uasZones", QJsonDocument::fromJson(server.body).object() } }).toJson();
+        return true;
+    };
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString url = server.url(QStringLiteral("/zones?bbox={bbox}&lat={lat}&radius={radiusKm}"));
+    const auto requestedUrl = [&server]() { return server.url(QString::fromUtf8(server.requestedPaths.last())); };
+    {
+        GeoZoneManager manager(storageDir.path());
+        GeoZoneSourceRepository *const repository = manager.repository();
+        repository->setAreaMargin(1000);
+        repository->setFollowArea(true);
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+
+        // Without a mission or a vehicle, there is no area to download
+        manager.addService(url, GeoZoneService().toVariantMap(), QString());
+        QTRY_COMPARE(failedSpy.count(), 1);
+        QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("Plan a mission or connect a vehicle")), qPrintable(failedSpy.last()[1].toString()));
+        QCOMPARE(manager.sources()->count(), 0);
+
+        // The zones around the vehicle, the URL template filled with the area
+        repository->setVehiclePosition(QGeoCoordinate(47.0, 8.0));
+        manager.addService(url, GeoZoneService().toVariantMap(), QString());
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        GeoZoneSource *const feed = manager.source(url);
+        QVERIFY(feed);
+        QVERIFY(feed->followsArea());
+        const QGeoRectangle area = GeoZoneSourceRepository::expanded(QGeoRectangle(QGeoCoordinate(47.0, 8.0), QGeoCoordinate(47.0, 8.0)), 1000);
+        QCOMPARE(feed->area(), area);
+        QVERIFY(std::abs(area.height() - (2000.0 / 111320)) < 1e-6);
+        QCOMPARE(requestedUrl(), GeoZoneService::resolve(url, area, QDateTime(), QDateTime()));
+        QVERIFY2(requestedUrl().contains(QStringLiteral("&lat=47.00000&radius=1.5")), qPrintable(requestedUrl()));
+
+        // Moving within the area downloads nothing, leaving it downloads the new area
+        const int requests = server.requestCount;
+        repository->setVehiclePosition(QGeoCoordinate(47.005, 8.005));
+        QVERIFY(!manager.busy());
+        repository->setVehiclePosition(QGeoCoordinate(47.1, 8.0));
+        QVERIFY(manager.busy());
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(server.requestCount, requests + 1);
+        QVERIFY(feed->area().contains(QGeoCoordinate(47.1, 8.0)));
+        QVERIFY(!feed->area().contains(QGeoCoordinate(47.0, 8.0)));
+
+        // The area of interest covers the missions and the vehicle
+        const QObject mission;
+        const QGeoRectangle missionArea(QGeoCoordinate(47.3, 7.9), QGeoCoordinate(47.2, 8.1));
+        manager.setMissionArea(&mission, missionArea);
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(repository->areaOfInterest(), QGeoRectangle(QGeoCoordinate(47.3, 7.9), QGeoCoordinate(47.1, 8.1)));
+        QVERIFY(feed->area().contains(repository->areaOfInterest()));
+        QCOMPARE(server.requestCount, requests + 2);
+
+        // Feeds keep their area while they don't follow it, also when refreshed
+        repository->setFollowArea(false);
+        const QGeoRectangle kept = feed->area();
+        repository->setVehiclePosition(QGeoCoordinate(48.0, 9.0));
+        QVERIFY(!manager.busy());
+        manager.refreshFeeds();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(feed->area(), kept);
+        repository->setFollowArea(true);
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(feed->area().contains(QGeoCoordinate(48.0, 9.0)));
+        manager.setMissionArea(&mission, QGeoRectangle());
+
+        // ED-318 services get the area as a polygon
+        GeoZoneService ed318;
+        ed318.method = GeoZoneService::Method::Ed318Post;
+        ed318.areaOfInterest = true;
+        manager.addService(server.url(QStringLiteral("/uas-zones")), ed318.toVariantMap(), QString());
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        const QGeoRectangle ed318Area = manager.source(server.url(QStringLiteral("/uas-zones")))->area();
+        QVERIFY(ed318Area.contains(QGeoCoordinate(48.0, 9.0)));
+        const QJsonObject geometry = query.value("geometry").toObject();
+        QCOMPARE(geometry.value("type").toString(), QStringLiteral("Polygon"));
+        const QJsonArray ring = geometry.value("coordinates").toArray().first().toArray();
+        QCOMPARE(ring.count(), 5);
+        QCOMPARE(ring[0].toArray(), (QJsonArray{ ed318Area.topLeft().longitude(), ed318Area.bottomRight().latitude() }));
+        QCOMPARE(ring[2].toArray(), (QJsonArray{ ed318Area.bottomRight().longitude(), ed318Area.topLeft().latitude() }));
+    }
+
+    // The area is kept with the source and refreshed without a mission or vehicle
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    GeoZoneSource *const feed = restarted.source(url);
+    QVERIFY(feed);
+    const QGeoRectangle stored = feed->area();
+    QVERIFY(stored.contains(QGeoCoordinate(48.0, 9.0)));
+    restarted.refreshFeeds();
+    QTRY_VERIFY(!restarted.busy());
+    QVERIFY(feed->errorString().isEmpty());
+    const QString storedUrl = GeoZoneService::resolve(url, stored, QDateTime(), QDateTime());
+    QVERIFY(std::any_of(server.requestedPaths.cbegin(), server.requestedPaths.cend(), [&](const QByteArray &path) { return server.url(QString::fromUtf8(path)) == storedUrl; }));
+    QCOMPARE(feed->area(), stored);
+
+    // Across the antimeridian
+    const QGeoRectangle crossing = GeoZoneSourceRepository::expanded(QGeoRectangle(QGeoCoordinate(-17.0, 179.99), QGeoCoordinate(-17.0, 179.99)), 5000);
+    QVERIFY(crossing.topLeft().longitude() > 179.9);
+    QVERIFY(crossing.bottomRight().longitude() < -179.9);
+    QVERIFY(crossing.contains(QGeoCoordinate(-17.0, -179.99)));
+}
+
 void GeoZoneManagerTest::_testManagerStartup()
 {
     const ScopedEnvironment environment;

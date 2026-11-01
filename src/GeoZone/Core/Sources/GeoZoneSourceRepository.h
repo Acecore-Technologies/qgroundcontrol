@@ -12,6 +12,8 @@
 #include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtPositioning/QGeoCoordinate>
+#include <QtPositioning/QGeoRectangle>
 
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneCredentials.h"
@@ -58,6 +60,27 @@ public:
     void setSecret(const QString &key, const QString &secret);
     /// Keeps the secrets of the services, in the application settings by default
     GeoZoneCredentials &credentials() { return _credentials; }
+
+    /// Sets the area of a planned mission, part of the area of interest of the services taking it, see
+    /// GeoZoneService::areaOfInterest. Feeds whose downloaded area doesn't cover the area of interest are downloaded
+    /// again for it, with areaMargin() around.
+    /// @param owner Identifies the mission, like the mission check following it
+    /// @param area Invalid when the mission has no flight path
+    void setMissionArea(quintptr owner, const QGeoRectangle &area);
+    /// Sets the position of the active vehicle, part of the area of interest, invalid without vehicle
+    void setVehiclePosition(const QGeoCoordinate &position);
+    /// @return Bounds of the planned missions and the vehicle, invalid without either
+    QGeoRectangle areaOfInterest() const;
+    /// Meters downloaded around the area of interest
+    double areaMargin() const { return _areaMargin; }
+    void setAreaMargin(double meters);
+    /// When false, the feeds keep the area they were downloaded for
+    bool followArea() const { return _followArea; }
+    void setFollowArea(bool follow);
+    /// @return The area with a margin in meters around it
+    static QGeoRectangle expanded(const QGeoRectangle &area, double margin);
+
+    static constexpr double defaultAreaMargin = 5000;
     /// Downloads all feeds again. Failures keep the previous data.
     void refreshFeeds();
     /// Removes a source, its stored copy, and cancels its downloads
@@ -127,6 +150,11 @@ private:
     /// Forgets the service of a source with its secret and token
     void _forgetService(const QString &key);
     void _setService(const QString &key, const GeoZoneService &service);
+    /// @return Area to download a feed taking the area of interest for: the area it was downloaded for while it
+    ///         covers the area of interest, otherwise the area of interest with the margin
+    QGeoRectangle _requestArea(const QString &key) const;
+    /// Downloads the feeds taking the area of interest again whose area doesn't cover it
+    void _checkAreas();
 
     struct Token {
         QString value;
@@ -145,6 +173,10 @@ private:
     GeoZoneCredentials _credentials;
     QHash<QString, GeoZoneService> _services;   ///< Of the feeds requested from a service, by source key
     QHash<QString, Token> _tokens;              ///< OAuth2 tokens of the services by source key, kept for the session
+    QHash<quintptr, QGeoRectangle> _missionAreas;
+    QGeoCoordinate _vehiclePosition;
+    double _areaMargin = defaultAreaMargin;
+    bool _followArea = true;
     bool _storageErrorReported = false;
     QString _validityWarning;
     bool _startupRefreshPending = false;

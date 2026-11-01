@@ -32,6 +32,7 @@ class GeoZoneShape;
 class GeoZoneSource;
 class QmlObjectListModel;
 class QTimer;
+class Vehicle;
 
 /// UAS geographical zones of the sources of GeoZoneSourceRepository, for display on the maps, mission checks, flight
 /// alerts and conversion to GeoFence exclusion areas, with the queries they use.
@@ -162,6 +163,11 @@ public:
 
     QString storageDir() const { return _repository->storageDir(); }
 
+    /// Sets the area of a mission, which with the active vehicle makes the area of interest of the services taking it,
+    /// see GeoZoneSourceRepository::setMissionArea
+    /// @param mission Identifies the mission, like the mission check following it
+    void setMissionArea(const QObject *mission, const QGeoRectangle &area) { _repository->setMissionArea(reinterpret_cast<quintptr>(mission), area); }
+
 signals:
     /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
     void zonesAboutToChange(GeoZoneSource *source);
@@ -186,6 +192,7 @@ private slots:
 
 private:
     void _endZonesChange(GeoZoneSource *source);
+    void _activeVehicleChanged(Vehicle *vehicle);
 
     QmlObjectListModel *_sources = nullptr;     ///< The sources of the repository for QML, deleted before them
     GeoZoneSourceRepository *_repository = nullptr;
@@ -193,6 +200,7 @@ private:
     GeoZonePlanning *_planning = nullptr;
     GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
+    QMetaObject::Connection _vehicleConnection;
 
     static constexpr int _activeUpdateIntervalMSecs = 60 * 1000;
 };

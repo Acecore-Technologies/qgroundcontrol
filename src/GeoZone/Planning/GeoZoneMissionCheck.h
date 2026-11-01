@@ -151,6 +151,8 @@ public:
     /// @return The labels of the contingency paths the evaluator result has entering zones while active, grouped by
     ///         label with the items they start from, like "a return to launch from items 3–7", by zone
     static QHash<const GeoZone*, QStringList> groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result);
+    /// @return Bounds of the flight path and pattern areas of the mission, invalid without, see GeoZoneManager::setMissionArea
+    static QGeoRectangle missionArea(const GeoZoneMissionPath &path);
 
     /// @return Labels of the paths besides the drawn flight path entering the zone, when only those do
     QStringList pathLabels(const GeoZone *zone) const { return _pathLabels.value(zone); }
