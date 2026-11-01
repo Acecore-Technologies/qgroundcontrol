@@ -9,103 +9,140 @@
 
 #include "GeoZoneRoutePlanner.h"
 #include "FactMetaData.h"
-#include "GeoZoneGeometry.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneManager.h"
-#include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
-#include "GeoZonePathEvaluator.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneTerrain.h"
 #include "MissionController.h"
 #include "QGroundControlQmlGlobal.h"
 #include "QmlObjectListModel.h"
 #include "SimpleMissionItem.h"
 
-#include <QtCore/QtMath>
-#include <QtGui/QPolygonF>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QFutureWatcher>
+#include <QtCore/QHash>
+#include <QtCore/QLocale>
+#include <QtCore/QMutex>
+#include <QtCore/QPromise>
+#include <QtCore/QSet>
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <numeric>
+#include <tuple>
 
 namespace {
 
-double _cross(const QPointF &o, const QPointF &a, const QPointF &b)
-{
-    return ((a.x() - o.x()) * (b.y() - o.y())) - ((a.y() - o.y()) * (b.x() - o.x()));
-}
+constexpr double kLegTerrainSpacing = 50;   ///< Meters between the positions of a leg whose terrain is looked up for its search
+constexpr int kMaxLegTerrainSteps = 2000;
+constexpr int kMaxListedZones = 3;
 
-/// @return Counterclockwise convex hull without collinear vertices
-QList<QPointF> _convexHull(QList<QPointF> points)
+QString _zoneList(const QStringList &names)
 {
-    std::sort(points.begin(), points.end(), [](const QPointF &a, const QPointF &b) { return (a.x() != b.x()) ? (a.x() < b.x()) : (a.y() < b.y()); });
-    if (points.count() < 3) {
-        return points;
+    if (names.count() <= kMaxListedZones) {
+        return names.join(QStringLiteral(", "));
     }
-    QList<QPointF> hull(points.count() * 2);
-    qsizetype k = 0;
-    for (const QPointF &point : std::as_const(points)) {
-        while ((k >= 2) && (_cross(hull[k - 2], hull[k - 1], point) <= 0)) {
-            k--;
-        }
-        hull[k++] = point;
-    }
-    for (qsizetype i = points.count() - 2, lower = k + 1; i >= 0; i--) {
-        while ((k >= lower) && (_cross(hull[k - 2], hull[k - 1], points[i]) <= 0)) {
-            k--;
-        }
-        hull[k++] = points[i];
-    }
-    hull.resize(k - 1);
-    return hull;
-}
-
-/// @return Hull enclosing the convex polygon grown by the distance, its corners rounded with a few vertices
-QList<QPointF> _grow(const QList<QPointF> &hull, double distance)
-{
-    constexpr int directions = 8;
-    // Vertices of the polygons around the corners are outside the circle of the distance
-    const double radius = distance / std::cos(M_PI / directions);
-    QList<QPointF> points;
-    for (const QPointF &vertex : hull) {
-        for (int i = 0; i < directions; i++) {
-            const double angle = (2 * M_PI * i) / directions;
-            points.append(vertex + QPointF(radius * std::cos(angle), radius * std::sin(angle)));
-        }
-    }
-    return _convexHull(points);
-}
-
-bool _properlyIntersect(const QPointF &a, const QPointF &b, const QPointF &c, const QPointF &d)
-{
-    constexpr double epsilon = 1e-9;
-    const double o1 = _cross(a, b, c);
-    const double o2 = _cross(a, b, d);
-    const double o3 = _cross(c, d, a);
-    const double o4 = _cross(c, d, b);
-    return (((o1 > epsilon) && (o2 < -epsilon)) || ((o1 < -epsilon) && (o2 > epsilon))) &&
-           (((o3 > epsilon) && (o4 < -epsilon)) || ((o3 < -epsilon) && (o4 > epsilon)));
-}
-
-/// @return true if the segment passes through the inside of the convex polygon, not only along its edges
-bool _crossesInterior(const QPointF &p, const QPointF &q, const QList<QPointF> &polygon)
-{
-    for (qsizetype i = 0; i < polygon.count(); i++) {
-        if (_properlyIntersect(p, q, polygon[i], polygon[(i + 1) % polygon.count()])) {
-            return true;
-        }
-    }
-    const QPointF middle = (p + q) / 2;
-    return GeoZoneGeometry::ringContains(polygon, middle) && (GeoZoneGeometry::distanceToRing(middle, polygon) > 0.01);
-}
-
-double _length(const QPointF &a, const QPointF &b)
-{
-    return std::hypot(b.x() - a.x(), b.y() - a.y());
+    return GeoZoneRoutePlanner::tr("%1 and %n more", nullptr, static_cast<int>(names.count() - kMaxListedZones))
+        .arg(names.first(kMaxListedZones).join(QStringLiteral(", ")));
 }
 
 } // namespace
+
+/// Ground elevations for the searches on worker threads, by cells of about 100 m. The searches use the cells known
+/// when they start, which the GUI thread looked up in the terrain tiles, and note those they miss for the next search.
+class GeoZoneRoutePlanner::Terrain
+{
+public:
+    static constexpr double cellDegrees = 0.001;
+
+    /// @return Elevation of the cell of the coordinate, NaN when unknown
+    /// @param missing Set when the cell wasn't looked up
+    double elevation(const QGeoCoordinate &coordinate, bool &missing) const
+    {
+        const quint64 key = _key(coordinate);
+        const QMutexLocker locker(&_mutex);
+        const auto it = _cells.constFind(key);
+        if (it == _cells.constEnd()) {
+            _missing.insert(key);
+            missing = true;
+            return qQNaN();
+        }
+        return *it;
+    }
+
+    /// Sets the elevation of the cell of the coordinate when it isn't known
+    void set(const QGeoCoordinate &coordinate, double elevation)
+    {
+        const quint64 key = _key(coordinate);
+        const QMutexLocker locker(&_mutex);
+        if (!_cells.contains(key)) {
+            _cells.insert(key, elevation);
+        }
+    }
+
+    /// Looks up the elevation of the cell of the coordinate in the terrain tiles when it isn't known, on the GUI thread
+    void lookUp(const QGeoCoordinate &coordinate)
+    {
+        const quint64 key = _key(coordinate);
+        {
+            const QMutexLocker locker(&_mutex);
+            if (_cells.contains(key)) {
+                return;
+            }
+        }
+        const double elevation = GeoZoneTerrain::elevationAt(_center(key));
+        const QMutexLocker locker(&_mutex);
+        _cells.insert(key, elevation);
+    }
+
+    /// Looks up the cells the searches missed in the terrain tiles, on the GUI thread
+    /// @return true if the elevation of one of them is known
+    bool fill()
+    {
+        QSet<quint64> missing;
+        {
+            const QMutexLocker locker(&_mutex);
+            missing.swap(_missing);
+        }
+        bool known = false;
+        for (const quint64 key : std::as_const(missing)) {
+            const double elevation = GeoZoneTerrain::elevationAt(_center(key));
+            known = known || !qIsNaN(elevation);
+            const QMutexLocker locker(&_mutex);
+            _cells.insert(key, elevation);
+        }
+        return known;
+    }
+
+    /// Forgets the cells whose elevation wasn't known, so that they are looked up again when their tiles are loaded
+    void forgetUnknown()
+    {
+        const QMutexLocker locker(&_mutex);
+        (void) _cells.removeIf([](const QHash<quint64, double>::iterator &it) { return qIsNaN(it.value()); });
+        _missing.clear();
+    }
+
+private:
+    static quint64 _key(const QGeoCoordinate &coordinate)
+    {
+        const auto row = static_cast<qint32>(std::floor(coordinate.latitude() / cellDegrees));
+        const auto column = static_cast<qint32>(std::floor(coordinate.longitude() / cellDegrees));
+        return (static_cast<quint64>(static_cast<quint32>(row)) << 32) | static_cast<quint32>(column);
+    }
+
+    static QGeoCoordinate _center(quint64 key)
+    {
+        const auto row = static_cast<qint32>(static_cast<quint32>(key >> 32));
+        const auto column = static_cast<qint32>(static_cast<quint32>(key & 0xffffffffu));
+        return QGeoCoordinate((row + 0.5) * cellDegrees, (column + 0.5) * cellDegrees);
+    }
+
+    mutable QMutex _mutex;
+    QHash<quint64, double> _cells;
+    mutable QSet<quint64> _missing;
+};
 
 GeoZoneRoutePlanner::GeoZoneRoutePlanner(QObject *parent)
     : GeoZoneRoutePlanner(GeoZoneManager::instance(), parent)
@@ -115,23 +152,28 @@ GeoZoneRoutePlanner::GeoZoneRoutePlanner(QObject *parent)
 GeoZoneRoutePlanner::GeoZoneRoutePlanner(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _terrain(std::make_shared<Terrain>())
 {
     _updateTimer.setSingleShot(true);
     _updateTimer.setInterval(500);
-    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneRoutePlanner::update);
+    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneRoutePlanner::startUpdate);
 
     // Suggestions refer to zones and mission items, so they are dropped when either changes and computed again
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, [this]() {
-        if (!_suggestions.isEmpty()) {
-            _suggestions.clear();
-            emit suggestionsChanged();
-        }
+        _stop();
+        _clearSuggestions();
     });
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, [this]() {
         if (_active) {
             _updateTimer.start();
         }
     });
+}
+
+GeoZoneRoutePlanner::~GeoZoneRoutePlanner()
+{
+    // The computation in progress ends on its own, its results are dropped with the watcher
+    _cancel.cancel();
 }
 
 void GeoZoneRoutePlanner::setActive(bool active)
@@ -142,9 +184,22 @@ void GeoZoneRoutePlanner::setActive(bool active)
     _active = active;
     emit activeChanged();
     if (_active) {
-        update();
+        startUpdate();
     } else {
         _updateTimer.stop();
+        _stop();
+    }
+}
+
+void GeoZoneRoutePlanner::setMaxAltitude(double maxAltitude)
+{
+    if (qFuzzyCompare(maxAltitude, _maxAltitude) || !(maxAltitude > 0)) {
+        return;
+    }
+    _maxAltitude = maxAltitude;
+    emit maxAltitudeChanged();
+    if (_active) {
+        _updateTimer.start();
     }
 }
 
@@ -171,9 +226,9 @@ void GeoZoneRoutePlanner::setMissionController(MissionController *missionControl
         (void) connect(_missionController, &MissionController::visualItemsChanged, this, missionChanged);
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, missionChanged);
     }
-    _suggestions.clear();
+    _stop();
     emit missionControllerChanged();
-    emit suggestionsChanged();
+    _clearSuggestions();
     if (_active) {
         _updateTimer.start();
     }
@@ -185,6 +240,11 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
     for (const Suggestion &suggestion : _suggestions) {
         suggestions.append(QVariantMap{
             { QStringLiteral("text"), suggestion.text },
+            { QStringLiteral("kind"), suggestion.kind },
+            { QStringLiteral("legText"), suggestion.legText },
+            { QStringLiteral("notes"), suggestion.notes },
+            { QStringLiteral("recommended"), suggestion.recommended },
+            { QStringLiteral("first"), suggestion.first },
             { QStringLiteral("canApply"), (suggestion.insertIndex >= 0) || !suggestion.altitudes.isEmpty() },
             { QStringLiteral("applyText"), suggestion.altitudes.isEmpty() ? tr("Insert") : tr("Apply") },
         });
@@ -192,363 +252,476 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
     return suggestions;
 }
 
+GeoZoneRouteSearch::Settings GeoZoneRoutePlanner::settings() const
+{
+    GeoZoneRouteSearch::Settings settings;
+    settings.margin = detourMargin;
+    settings.verticalMargin = floorMargin;
+    settings.minGroundClearance = minGroundClearance;
+    settings.maxAltitudeAGL = _maxAltitude;
+    return settings;
+}
+
 std::optional<QList<QGeoCoordinate>> GeoZoneRoutePlanner::detourAround(const QGeoCoordinate &from, const QGeoCoordinate &to, const QList<const GeoZone*> &zones,
                                                                        double margin)
 {
-    // One convex obstacle per zone polygon and circle grown by the margin, so that the path can pass between zones
-    const GeoZoneGeometry::LocalProjection projection(from);
-    struct Obstacle {
-        QList<QPointF> boundary;    ///< Grown by the margin
-        QList<QPointF> clearance;   ///< Grown by half the margin, which straightened paths keep
-        QRectF bounds;              ///< Of the boundary
-    };
-    QList<Obstacle> obstacles;
-    const auto addShape = [&obstacles, margin](const QList<QPointF> &points) {
-        const QList<QPointF> hull = _convexHull(points);
-        if (hull.count() < 3) {
-            return;
-        }
-        Obstacle obstacle{ _grow(hull, margin), _grow(hull, margin / 2), QRectF() };
-        obstacle.bounds = QPolygonF(obstacle.boundary).boundingRect();
-        obstacles.append(obstacle);
-    };
-    for (const GeoZone *zone : zones) {
-        // Simplified outwards, a quarter of the margin is enough detail for the path around
-        for (const QList<QGeoCoordinate> &polygon : zone->exclusionPolygons(margin / 4)) {
-            addShape(projection.toLocal(polygon));
-        }
-        for (const QGeoCircle &circle : zone->exclusionCircles()) {
-            constexpr int circlePoints = 24;
-            const QPointF center = projection.toLocal(circle.center());
-            const double radius = circle.radius() / std::cos(M_PI / circlePoints);
-            QList<QPointF> points;
-            for (int i = 0; i < circlePoints; i++) {
-                const double angle = (2 * M_PI * i) / circlePoints;
-                points.append(center + QPointF(radius * std::cos(angle), radius * std::sin(angle)));
-            }
-            addShape(points);
-        }
-    }
-    if (obstacles.isEmpty()) {
+    GeoZoneRouteSearch::Settings settings;
+    settings.margin = margin;
+    const GeoZoneRouteSearch::Route route = GeoZoneRouteSearch::detourAround(from, to, zones, settings);
+    if (!route.isValid()) {
         return std::nullopt;
     }
-
-    const QPointF start = projection.toLocal(from);
-    const QPointF end = projection.toLocal(to);
-    const auto inside = [&obstacles](const QPointF &point, qsizetype except = -1) {
-        for (qsizetype i = 0; i < obstacles.count(); i++) {
-            if ((i != except) && obstacles[i].bounds.contains(point) && GeoZoneGeometry::ringContains(obstacles[i].boundary, point) &&
-                (GeoZoneGeometry::distanceToRing(point, obstacles[i].boundary) > 0.01)) {
-                return true;
-            }
-        }
-        return false;
-    };
-    const auto crosses = [&obstacles](const QPointF &a, const QPointF &b, bool clearance) {
-        const QRectF segmentBounds = QRectF(a, b).normalized();
-        return std::any_of(obstacles.cbegin(), obstacles.cend(), [&](const Obstacle &obstacle) {
-            return obstacle.bounds.intersects(segmentBounds.adjusted(-0.01, -0.01, 0.01, 0.01)) &&
-                   _crossesInterior(a, b, clearance ? obstacle.clearance : obstacle.boundary);
-        });
-    };
-    if (inside(start) || inside(end)) {
-        return std::nullopt;
-    }
-    if (!crosses(start, end, false)) {
-        return QList<QGeoCoordinate>();
-    }
-
-    // Shortest path from start (0) to end (1) through the obstacle vertices outside the other obstacles, by A*
-    QList<QPointF> nodes = { start, end };
-    for (qsizetype i = 0; i < obstacles.count(); i++) {
-        for (const QPointF &vertex : std::as_const(obstacles[i].boundary)) {
-            if (!inside(vertex, i)) {
-                nodes.append(vertex);
-            }
-        }
-    }
-    QList<double> distances(nodes.count(), std::numeric_limits<double>::infinity());
-    QList<qsizetype> previous(nodes.count(), -1);
-    QList<bool> done(nodes.count(), false);
-    distances[0] = 0;
-    for (qsizetype round = 0; round < nodes.count(); round++) {
-        qsizetype current = -1;
-        double currentEstimate = std::numeric_limits<double>::infinity();
-        for (qsizetype i = 0; i < nodes.count(); i++) {
-            const double estimate = distances[i] + _length(nodes[i], end);
-            if (!done[i] && (estimate < currentEstimate)) {
-                current = i;
-                currentEstimate = estimate;
-            }
-        }
-        if ((current < 0) || (current == 1)) {
-            break;
-        }
-        done[current] = true;
-        for (qsizetype next = 0; next < nodes.count(); next++) {
-            const double distance = distances[current] + _length(nodes[current], nodes[next]);
-            if (done[next] || (distance >= distances[next]) || crosses(nodes[current], nodes[next], false)) {
-                continue;
-            }
-            distances[next] = distance;
-            previous[next] = current;
-        }
-    }
-    if (previous[1] < 0) {
-        return std::nullopt;
-    }
-
-    QList<QPointF> path;
-    for (qsizetype node = 1; node >= 0; node = previous[node]) {
-        path.prepend(nodes[node]);
-    }
-
-    // Fewer waypoints: skip vertices while the straight line keeps half the margin
-    QList<QPointF> straightened = { path.constFirst() };
-    for (qsizetype i = 0; i < (path.count() - 1);) {
-        qsizetype farthest = i + 1;
-        for (qsizetype j = path.count() - 1; j > (i + 1); j--) {
-            if (!crosses(path[i], path[j], true)) {
-                farthest = j;
-                break;
-            }
-        }
-        straightened.append(path[farthest]);
-        i = farthest;
-    }
-
-    QList<QGeoCoordinate> waypoints;
-    for (qsizetype i = 1; i < (straightened.count() - 1); i++) {
-        waypoints.append(projection.toGeo(straightened[i]));
-    }
-    return waypoints;
+    return route.waypoints;
 }
 
-QList<std::pair<int, double>> GeoZoneRoutePlanner::_altitudesBelowFloor(const GeoZoneMissionPath::Leg &leg, const GeoZone *zone) const
+GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
 {
-    const GeoZoneMissionPath::Segment &segment = leg.segment;
-    if (!_missionController || qIsNaN(segment.fromAltitudeAMSL) || qIsNaN(segment.toAltitudeAMSL)) {
-        return {};
+    Job job;
+    job.catalog = _manager->catalog();
+    const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
+    job.time = start;
+    // A copy of the authorisations for the worker thread, since they change on the GUI thread
+    const std::shared_ptr<GeoZoneAuthorisations> authorisations(new GeoZoneAuthorisations(QString()), [](GeoZoneAuthorisations *copy) { copy->deleteLater(); });
+    authorisations->merge(_manager->planning()->authorisations()->authorisations());
+    job.authorisations = authorisations;
+    job.policy = GeoZonePolicy::routing(start, end).excludingAuthorised(authorisations.get());
+    job.settings = settings();
+    job.terrain = _terrain;
+    _terrain->forgetUnknown();
+    if (!_missionController) {
+        return job;
     }
 
-    // The terrain along the leg, from its terrain samples or the terrain tiles
-    const double length = segment.from.distanceTo(segment.to);
-    const int sampleCount = std::clamp(static_cast<int>(std::ceil(length / floorSampleSpacing)), 1, maxFloorSamples);
-    QList<GeoZone::Position> samples;
-    samples.reserve(sampleCount + 1);
-    for (int i = 0; i <= sampleCount; i++) {
-        GeoZone::Position position = segment.positionAt((length * i) / sampleCount);
-        if (qIsNaN(position.terrainAMSL)) {
-            position.terrainAMSL = GeoZoneTerrain::elevationAt(position.coordinate);
+    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(_missionController);
+    for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
+        const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
+        const double length = segment.isValid() ? segment.from.distanceTo(segment.to) : 0;
+        if (length < 1) {
+            continue;
         }
-        samples.append(position);
-    }
 
-    // Lowest floor where the leg is inside the zone. Floors above ground follow the terrain, which is linear between
-    // the samples.
-    const GeoZonePathEvaluator evaluator(_manager->catalog(), GeoZonePolicy());
-    double floor = std::numeric_limits<double>::infinity();
-    for (const GeoZonePathEvaluator::Stretch &stretch : evaluator.evaluateZone(zone, { GeoZonePathEvaluator::Path::fromPositions(samples) }).stretches) {
-        QList<GeoZone::Position> positions = { stretch.entry.position, stretch.exit.position };
-        for (qsizetype i = stretch.entry.segment + 1; i <= stretch.exit.segment; i++) {
-            positions.append(samples[i]);
+        LegJob legJob;
+        legJob.fromItemIndex = missionLeg.fromItemIndex;
+        legJob.toItemIndex = missionLeg.toItemIndex;
+        legJob.toSequenceNumber = missionLeg.toSequenceNumber;
+        if (const VisualMissionItem *const fromItem = _missionController->visualItems()->value<const VisualMissionItem*>(missionLeg.fromItemIndex)) {
+            legJob.fromSequenceNumber = fromItem->sequenceNumber();
         }
-        for (const GeoZone::Position &position : std::as_const(positions)) {
-            const double volumeFloor = GeoZone::limitAMSL(zone->data().volumes[stretch.volume], false, position);
-            if (qIsNaN(volumeFloor)) {
-                return {};
+        legJob.leg.from = GeoZone::Position{ segment.from, segment.fromAltitudeAMSL, segment.terrainAt(0) };
+        legJob.leg.to = GeoZone::Position{ segment.to, segment.toAltitudeAMSL, segment.terrainAt(length) };
+        // When the vehicle flies the leg, like for the mission check, which detours take too
+        const double legEndDistance = missionPath.itemDistance(missionLeg.toItemIndex);
+        const double legStartDistance = legEndDistance - ((segment.distance > 0) ? segment.distance : length);
+        legJob.leg.start = GeoZoneMissionPath::timeAt(legStartDistance, missionPath.totalDistance(), start, end);
+        legJob.leg.end = GeoZoneMissionPath::timeAt(legEndDistance, missionPath.totalDistance(), start, end);
+
+        // The terrain along the leg from its samples or the terrain tiles, which climbs and descents need
+        const int steps = std::clamp(static_cast<int>(std::ceil(length / kLegTerrainSpacing)), 1, kMaxLegTerrainSteps);
+        for (int i = 0; i <= steps; i++) {
+            const GeoZone::Position position = segment.positionAt((length * i) / steps);
+            if (qIsNaN(position.terrainAMSL)) {
+                _terrain->lookUp(position.coordinate);
+            } else {
+                _terrain->set(position.coordinate, position.terrainAMSL);
             }
-            floor = (std::min)(floor, volumeFloor);
+        }
+        job.legs.append(legJob);
+    }
+    return job;
+}
+
+QList<GeoZoneRoutePlanner::LegResult> GeoZoneRoutePlanner::_run(const Job &job, const QList<int> &legs, const GeoZoneCancelToken &cancel,
+                                                                const std::function<void(int done)> &progress)
+{
+    GeoZoneRouteSearch search(job.catalog, job.policy, job.time);
+    search.setSettings(job.settings);
+    search.setCancelToken(cancel);
+    bool terrainMissing = false;
+    search.setTerrainLookup([terrain = job.terrain, &terrainMissing](const QGeoCoordinate &coordinate) { return terrain->elevation(coordinate, terrainMissing); });
+    QList<LegResult> results;
+    for (const int leg : legs) {
+        if (cancel.isCancelled()) {
+            break;
+        }
+        terrainMissing = false;
+        results.append(LegResult{ leg, search.plan(job.legs[leg].leg), terrainMissing });
+        if (progress) {
+            progress(static_cast<int>(results.count()));
         }
     }
-    if (std::isinf(floor)) {
+    return results;
+}
+
+QList<int> GeoZoneRoutePlanner::_legsToRetry(const Job &job, const QList<LegResult> &results, int round)
+{
+    if (round >= maxTerrainRounds) {
         return {};
     }
+    QList<int> legs;
+    for (const LegResult &result : results) {
+        if (result.terrainMissing && !result.result.cancelled) {
+            legs.append(result.leg);
+        }
+    }
+    if (legs.isEmpty() || !job.terrain->fill()) {
+        return {};
+    }
+    return legs;
+}
 
-    // Waypoints above the target are lowered to it, in their altitude mode
-    const double target = floor - floorMargin;
+void GeoZoneRoutePlanner::_merge(QList<LegResult> &results, const QList<LegResult> &update)
+{
+    for (const LegResult &result : update) {
+        const auto it = std::find_if(results.begin(), results.end(), [&result](const LegResult &other) { return other.leg == result.leg; });
+        if (it == results.end()) {
+            results.append(result);
+        } else {
+            *it = result;
+        }
+    }
+    std::sort(results.begin(), results.end(), [](const LegResult &a, const LegResult &b) { return a.leg < b.leg; });
+}
+
+void GeoZoneRoutePlanner::update()
+{
+    _updateTimer.stop();
+    _stop();
+    _setStatusText(QString());
+    const Job job = _makeJob();
+    QList<int> legs(job.legs.count());
+    std::iota(legs.begin(), legs.end(), 0);
+    QList<LegResult> results;
+    for (int round = 0; !legs.isEmpty(); round++) {
+        _merge(results, _run(job, legs, _cancel, nullptr));
+        legs = _legsToRetry(job, results, round);
+    }
+    _apply(job, results);
+}
+
+void GeoZoneRoutePlanner::startUpdate()
+{
+    _updateTimer.stop();
+    _stop();
+    _setStatusText(QString());
+    _clearSuggestions();
+    const auto job = std::make_shared<const Job>(_makeJob());
+    if (job->legs.isEmpty()) {
+        _apply(*job, {});
+        return;
+    }
+    QList<int> legs(job->legs.count());
+    std::iota(legs.begin(), legs.end(), 0);
+    _setProgress(0);
+    _setBusy(true);
+    _launch(job, legs, {}, 0);
+}
+
+void GeoZoneRoutePlanner::_launch(const std::shared_ptr<const Job> &job, const QList<int> &legs, const QList<LegResult> &results, int round)
+{
+    const quint64 generation = _generation;
+    auto *const watcher = new QFutureWatcher<QList<LegResult>>(this);
+    // The searches again with more terrain are usually quick, the progress stays at the end of the first ones
+    if (round == 0) {
+        (void) connect(watcher, &QFutureWatcherBase::progressValueChanged, this, [this, generation, count = legs.count()](int done) {
+            if (generation == _generation) {
+                _setProgress(static_cast<double>(done) / count);
+            }
+        });
+    }
+    (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, job, results, round, generation]() {
+        watcher->deleteLater();
+        // Replaced or cancelled
+        if ((generation != _generation) || (watcher->future().resultCount() == 0)) {
+            return;
+        }
+        QList<LegResult> merged = results;
+        _merge(merged, watcher->result());
+        const QList<int> retry = _legsToRetry(*job, merged, round);
+        if (!retry.isEmpty()) {
+            _launch(job, retry, merged, round + 1);
+            return;
+        }
+        _apply(*job, merged);
+    });
+    watcher->setFuture(QtConcurrent::run([job, legs, cancel = _cancel](QPromise<QList<LegResult>> &promise) {
+        promise.setProgressRange(0, static_cast<int>(legs.count()));
+        promise.addResult(_run(*job, legs, cancel, [&promise](int done) { promise.setProgressValue(done); }));
+    }));
+}
+
+void GeoZoneRoutePlanner::cancel()
+{
+    if (!_busy) {
+        return;
+    }
+    _stop();
+    _clearSuggestions();
+    _setStatusText(tr("The search for routes was cancelled."));
+}
+
+void GeoZoneRoutePlanner::_stop()
+{
+    _cancel.cancel();
+    _cancel = GeoZoneCancelToken();
+    _generation++;
+    _setBusy(false);
+}
+
+void GeoZoneRoutePlanner::_clearSuggestions()
+{
+    if (!_suggestions.isEmpty()) {
+        _suggestions.clear();
+        emit suggestionsChanged();
+    }
+}
+
+void GeoZoneRoutePlanner::_setBusy(bool busy)
+{
+    if (busy != _busy) {
+        _busy = busy;
+        emit busyChanged();
+    }
+}
+
+void GeoZoneRoutePlanner::_setProgress(double progress)
+{
+    if (progress != _progress) {
+        _progress = progress;
+        emit progressChanged();
+    }
+}
+
+void GeoZoneRoutePlanner::_setStatusText(const QString &statusText)
+{
+    if (statusText != _statusText) {
+        _statusText = statusText;
+        emit statusTextChanged();
+    }
+}
+
+void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results)
+{
+    _setBusy(false);
+    QList<Suggestion> suggestions;
+    for (const LegResult &legResult : results) {
+        const GeoZoneRouteSearch::Result &result = legResult.result;
+        if (result.cancelled) {
+            _setStatusText(tr("The search for routes was cancelled."));
+            suggestions.clear();
+            break;
+        }
+        if (result.crossedZones.isEmpty()) {
+            continue;
+        }
+        const LegJob &legJob = job.legs[legResult.leg];
+        const QString legText = tr("Leg to item %1").arg(legJob.toSequenceNumber);
+        QStringList notes;
+        QList<Suggestion> legSuggestions;
+        for (const GeoZoneRouteSearch::Route &route : result.routes) {
+            if (!route.isValid()) {
+                notes.append(_failureText(legJob, route));
+                continue;
+            }
+            Suggestion suggestion;
+            suggestion.legText = legText;
+            suggestion.text = _routeText(legText, legJob, route);
+            suggestion.recommended = legSuggestions.isEmpty();
+            switch (route.kind) {
+            case GeoZoneRouteSearch::Kind::Detour: {
+                suggestion.kind = QStringLiteral("detour");
+                if (!route.waypoints.isEmpty()) {
+                    suggestion.insertIndex = legJob.toItemIndex;
+                    suggestion.waypoints = route.waypoints;
+                    // Like the detour was checked, the altitude changes evenly from the start to the end
+                    double along = legJob.leg.from.coordinate.distanceTo(route.waypoints.constFirst());
+                    for (qsizetype i = 0; i < route.waypoints.count(); i++) {
+                        if (i > 0) {
+                            along += route.waypoints[i - 1].distanceTo(route.waypoints[i]);
+                        }
+                        const double fraction = (route.length > 0) ? (std::min)(along / route.length, 1.0) : 0;
+                        suggestion.waypointAltitudes.append(legJob.leg.from.altitudeAMSL + ((legJob.leg.to.altitudeAMSL - legJob.leg.from.altitudeAMSL) * fraction));
+                    }
+                }
+                break;
+            }
+            case GeoZoneRouteSearch::Kind::Climb:
+            case GeoZoneRouteSearch::Kind::Descent:
+                suggestion.kind = (route.kind == GeoZoneRouteSearch::Kind::Climb) ? QStringLiteral("climb") : QStringLiteral("descent");
+                suggestion.altitudes = _itemAltitudes(legJob, route);
+                if (suggestion.altitudes.isEmpty()) {
+                    suggestion.text += QStringLiteral(" ") + tr("Change the altitudes of the waypoints in the mission, they can't be changed here.");
+                }
+                break;
+            }
+            legSuggestions.append(suggestion);
+        }
+        if (legSuggestions.isEmpty()) {
+            Suggestion suggestion;
+            suggestion.legText = legText;
+            suggestion.kind = QStringLiteral("none");
+            suggestion.text = tr("%1: no route avoids %2.").arg(legText, _zoneList(result.crossedZones));
+            legSuggestions.append(suggestion);
+        }
+        legSuggestions.first().first = true;
+        legSuggestions.last().notes = notes;
+        suggestions.append(legSuggestions);
+    }
+    _suggestions = suggestions;
+    emit suggestionsChanged();
+}
+
+QList<std::pair<int, double>> GeoZoneRoutePlanner::_itemAltitudes(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const
+{
+    if (!_missionController) {
+        return {};
+    }
+    const bool climb = (route.kind == GeoZoneRouteSearch::Kind::Climb);
     const double homeAltitude = _missionController->plannedHomePosition().altitude();
     QList<std::pair<int, double>> altitudes;
-    double fromAltitude = segment.fromAltitudeAMSL;
-    double toAltitude = segment.toAltitudeAMSL;
-    for (const auto &[itemIndex, altitude] : { std::make_pair(leg.fromItemIndex, &fromAltitude), std::make_pair(leg.toItemIndex, &toAltitude) }) {
-        if (*altitude <= target) {
+    for (const auto &[itemIndex, current, target] : { std::make_tuple(legJob.fromItemIndex, legJob.leg.from.altitudeAMSL, route.fromAltitude),
+                                                      std::make_tuple(legJob.toItemIndex, legJob.leg.to.altitudeAMSL, route.toAltitude) }) {
+        if (qIsNaN(target) || (std::abs(target - current) < 0.01)) {
             continue;
         }
         const SimpleMissionItem *const item = _missionController->visualItems()->value<const SimpleMissionItem*>(itemIndex);
         if (!item) {
             return {};
         }
+        double altitude = qQNaN();
         switch (item->altitudeMode()) {
         case QGroundControlQmlGlobal::AltitudeModeRelative:
-            if (qIsNaN(homeAltitude)) {
-                return {};
-            }
-            altitudes.append({ itemIndex, target - homeAltitude });
+            altitude = target - homeAltitude;
             break;
         case QGroundControlQmlGlobal::AltitudeModeAbsolute:
-            altitudes.append({ itemIndex, target });
+            altitude = target;
             break;
         default:
+            break;
+        }
+        if (qIsNaN(altitude)) {
             return {};
         }
-        *altitude = target;
-    }
-
-    // The lowered leg must stay clear of the terrain
-    for (int i = 0; i <= sampleCount; i++) {
-        const double altitude = fromAltitude + (((toAltitude - fromAltitude) * i) / sampleCount);
-        if (qIsNaN(samples[i].terrainAMSL) || ((altitude - samples[i].terrainAMSL) < minGroundClearance)) {
-            return {};
-        }
+        // Whole meters, still clear of the zones
+        altitudes.append({ itemIndex, climb ? std::ceil(altitude - 1e-6) : std::floor(altitude + 1e-6) });
     }
     return altitudes;
 }
 
-QList<const GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path, const QDateTime &pathStart, const QDateTime &pathEnd) const
+QString GeoZoneRoutePlanner::_routeText(const QString &legText, const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const
 {
-    const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    const GeoZonePathEvaluator evaluator(_manager->catalog(), GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->planning()->authorisations()), start);
-    GeoZonePathEvaluator::Path evaluatorPath = GeoZonePathEvaluator::Path::fromPositions(path);
-    evaluatorPath.setTimes(pathStart, pathEnd);
-    return evaluator.evaluate({ evaluatorPath }).activeEnteredZones();
+    const QString zones = _zoneList(route.zones);
+    switch (route.kind) {
+    case GeoZoneRouteSearch::Kind::Detour:
+        return tr("%1: detour around %2, %n waypoint(s) adding %3.", nullptr, static_cast<int>(route.waypoints.count()))
+            .arg(legText, zones, _distanceText(route.cost));
+    case GeoZoneRouteSearch::Kind::Climb:
+    case GeoZoneRouteSearch::Kind::Descent: {
+        const double fromChange = std::abs(route.fromAltitude - legJob.leg.from.altitudeAMSL);
+        const double toChange = std::abs(route.toAltitude - legJob.leg.to.altitudeAMSL);
+        const int changed = ((fromChange >= 0.01) ? 1 : 0) + ((toChange >= 0.01) ? 1 : 0);
+        const QString altitude = _altitudeText(legJob, route.altitude, route.kind == GeoZoneRouteSearch::Kind::Climb);
+        const QString change = _heightText((std::max)(fromChange, toChange));
+        if (route.kind == GeoZoneRouteSearch::Kind::Climb) {
+            return tr("%1: climb to %2 over %3, raising %n waypoint(s) by up to %4.", nullptr, changed).arg(legText, altitude, zones, change);
+        }
+        return tr("%1: descend to %2 under %3, lowering %n waypoint(s) by up to %4.", nullptr, changed).arg(legText, altitude, zones, change);
+    }
+    }
+    return QString();
 }
 
-void GeoZoneRoutePlanner::update()
+QString GeoZoneRoutePlanner::_failureText(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const
 {
-    _updateTimer.stop();
-    QList<Suggestion> suggestions;
-    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(_missionController);
-    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
-        const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
-        const QGeoCoordinate &from = segment.from;
-        const QGeoCoordinate &to = segment.to;
-        if (!segment.isValid() || (from.distanceTo(to) < 1)) {
-            continue;
-        }
-
-        // When the vehicle flies the leg, like for the mission check, which detours take too
-        const double legEndDistance = missionPath.itemDistance(missionLeg.toItemIndex);
-        const double legStartDistance = legEndDistance - ((segment.distance > 0) ? segment.distance : from.distanceTo(to));
-        const QDateTime legStart = GeoZoneMissionPath::timeAt(legStartDistance, missionPath.totalDistance(), plannedStart, plannedEnd);
-        const QDateTime legEnd = GeoZoneMissionPath::timeAt(legEndDistance, missionPath.totalDistance(), plannedStart, plannedEnd);
-
-        // The leg's average terrain stands in for the terrain along detours where it isn't loaded
-        double legTerrain = qQNaN();
-        if (!segment.terrainAMSL.isEmpty()) {
-            legTerrain = std::accumulate(segment.terrainAMSL.cbegin(), segment.terrainAMSL.cend(), 0.0) / segment.terrainAMSL.count();
-        }
-        QList<const GeoZone*> crossed;
-        for (const GeoZoneMissionPath::Path &path : GeoZoneMissionPath::pathsFromSegments({ segment })) {
-            // Like detours, with the terrain of the loaded tiles where the leg has no terrain samples
-            for (const GeoZone *zone : _zonesOnPath(GeoZoneTerrain::withTerrain(path.positions), legStart, legEnd)) {
-                if (!crossed.contains(zone)) {
-                    crossed.append(zone);
-                }
-            }
-        }
-        if (crossed.isEmpty()) {
-            continue;
-        }
-
-        const QString leg = tr("Leg to item %1").arg(missionLeg.toSequenceNumber);
-
-        // Zones which don't reach the ground can be flown under
-        for (const GeoZone *zone : std::as_const(crossed)) {
-            const QList<GeoZone::Volume> &volumes = zone->data().volumes;
-            const bool raised = std::all_of(volumes.cbegin(), volumes.cend(), [](const GeoZone::Volume &volume) {
-                return !std::isnan(volume.lowerLimit) && (volume.lowerLimit > 0) && (volume.lowerReference != GeoZone::VerticalReference::Unknown);
-            });
-            if (raised) {
-                Suggestion suggestion{ tr("%1: fly below the floor of %2 (%3).").arg(leg, zone->displayName(), zone->verticalLimitsText()) };
-                suggestion.altitudes = _altitudesBelowFloor(missionLeg, zone);
-                if (!suggestion.altitudes.isEmpty()) {
-                    const QString marginText = QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsVerticalDistanceUnits(floorMargin).toDouble()))
-                                                                     .arg(FactMetaData::appSettingsVerticalDistanceUnitsString());
-                    suggestion.text += QStringLiteral(" ") + tr("Apply lowers %n waypoint(s) to %1 below it.", nullptr, static_cast<int>(suggestion.altitudes.count())).arg(marginText);
-                }
-                suggestions.append(suggestion);
-            }
-        }
-
-        // Detours entering other zones avoid those too
-        QList<const GeoZone*> avoided = crossed;
-        QList<QGeoCoordinate> waypoints;
-        bool found = false;
-        for (int round = 0; round < maxDetourRounds; round++) {
-            const std::optional<QList<QGeoCoordinate>> detour = detourAround(from, to, avoided);
-            if (!detour) {
-                break;
-            }
-
-            QList<QGeoCoordinate> points = { from };
-            points.append(*detour);
-            points.append(to);
-            double totalLength = 0;
-            for (qsizetype i = 1; i < points.count(); i++) {
-                totalLength += points[i - 1].distanceTo(points[i]);
-            }
-            QList<GeoZoneMissionPath::Segment> detourSegments;
-            double along = 0;
-            const auto altitudeAt = [&segment, totalLength](double distance) {
-                return segment.fromAltitudeAMSL + ((segment.toAltitudeAMSL - segment.fromAltitudeAMSL) * (distance / totalLength));
-            };
-            for (qsizetype i = 1; i < points.count(); i++) {
-                GeoZoneMissionPath::Segment detourSegment;
-                detourSegment.from = points[i - 1];
-                detourSegment.to = points[i];
-                detourSegment.fromAltitudeAMSL = altitudeAt(along);
-                along += points[i - 1].distanceTo(points[i]);
-                detourSegment.toAltitudeAMSL = altitudeAt(along);
-                detourSegments.append(detourSegment);
-            }
-            QList<const GeoZone*> entered;
-            for (const GeoZoneMissionPath::Path &detourPath : GeoZoneMissionPath::pathsFromSegments(detourSegments)) {
-                // The terrain tiles give the terrain along the detour where they are loaded, the leg's is close elsewhere
-                QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain(detourPath.positions);
-                for (GeoZone::Position &position : path) {
-                    if (std::isnan(position.terrainAMSL)) {
-                        position.terrainAMSL = legTerrain;
-                    }
-                }
-                for (const GeoZone *zone : _zonesOnPath(path, legStart, legEnd)) {
-                    if (!avoided.contains(zone) && !entered.contains(zone)) {
-                        entered.append(zone);
-                    }
-                }
-            }
-            if (entered.isEmpty()) {
-                waypoints = *detour;
-                found = true;
-                break;
-            }
-            avoided.append(entered);
-        }
-
-        QStringList names;
-        for (const GeoZone *zone : std::as_const(crossed)) {
-            names.append(zone->displayName());
-        }
-        if (found && !waypoints.isEmpty()) {
-            double detourLength = from.distanceTo(waypoints.constFirst()) + waypoints.constLast().distanceTo(to);
-            for (qsizetype i = 1; i < waypoints.count(); i++) {
-                detourLength += waypoints[i - 1].distanceTo(waypoints[i]);
-            }
-            const double added = detourLength - from.distanceTo(to);
-            const QString addedText = QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsHorizontalDistanceUnits(added).toDouble()))
-                                                         .arg(FactMetaData::appSettingsHorizontalDistanceUnitsString());
-            suggestions.append(Suggestion{ tr("%1: detour around %2, %n waypoint(s) adding %3.", nullptr, static_cast<int>(waypoints.count()))
-                                               .arg(leg, names.join(QStringLiteral(", ")), addedText),
-                                           missionLeg.toItemIndex, waypoints });
-        } else {
-            suggestions.append(Suggestion{ tr("%1: no detour around %2 was found, a waypoint is within %3 m of a zone or the zones surround it.")
-                                               .arg(leg, names.join(QStringLiteral(", "))).arg(detourMargin) });
-        }
+    using Failure = GeoZoneRouteSearch::Failure;
+    const QString zones = _zoneList(route.zones);
+    QString reason;
+    switch (route.failure) {
+    case Failure::None:
+        break;
+    case Failure::Cancelled:
+        reason = tr("the search was cancelled.");
+        break;
+    case Failure::StartInside:
+        reason = tr("item %1 is inside %2.").arg(legJob.fromSequenceNumber).arg(zones);
+        break;
+    case Failure::EndInside:
+        reason = tr("item %1 is inside %2.").arg(legJob.toSequenceNumber).arg(zones);
+        break;
+    case Failure::Enclosed:
+        reason = tr("%1 surround the leg.").arg(zones);
+        break;
+    case Failure::TooLong: {
+        const double direct = legJob.leg.from.coordinate.distanceTo(legJob.leg.to.coordinate);
+        reason = tr("going around %1 adds at least %2, more than the limit of %3.").arg(zones, _distanceText(route.length - direct), _distanceText(route.limit - direct));
+        break;
     }
+    case Failure::NotFound:
+        reason = tr("no way around %1 was found.").arg(zones);
+        break;
+    case Failure::AltitudeUnknown:
+        reason = tr("the altitudes of the leg aren't known.");
+        break;
+    case Failure::NoCeiling:
+        reason = tr("%1 has no ceiling in meters.").arg(zones);
+        break;
+    case Failure::ReachesGround:
+        reason = tr("%1 extends to the ground.").arg(zones);
+        break;
+    case Failure::NoFloor:
+        reason = tr("the floor of %1 isn't in meters.").arg(zones);
+        break;
+    case Failure::AboveMaxAltitude:
+        reason = tr("climbing over %1 needs %2 above the terrain, more than the maximum of %3.").arg(zones, _heightText(route.limit), _heightText(_maxAltitude));
+        break;
+    case Failure::BelowMinClearance:
+        reason = tr("flying under %1 leaves %2 above the terrain, less than %3.").arg(zones, _heightText(route.limit), _heightText(minGroundClearance));
+        break;
+    case Failure::TerrainUnknown:
+        reason = tr("the terrain along the leg isn't known.");
+        break;
+    case Failure::EntersZone:
+        reason = tr("it would enter %1.").arg(zones);
+        break;
+    }
+    switch (route.kind) {
+    case GeoZoneRouteSearch::Kind::Detour:
+        return tr("No detour: %1").arg(reason);
+    case GeoZoneRouteSearch::Kind::Climb:
+        return tr("No climb: %1").arg(reason);
+    case GeoZoneRouteSearch::Kind::Descent:
+        return tr("No descent: %1").arg(reason);
+    }
+    return reason;
+}
 
-    _suggestions = suggestions;
-    emit suggestionsChanged();
+QString GeoZoneRoutePlanner::_altitudeText(const LegJob &legJob, double altitudeAMSL, bool roundUp) const
+{
+    // In the altitude mode of the waypoints, rounded like their new altitudes
+    const auto rounded = [roundUp](double meters) {
+        const double value = FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble();
+        return QStringLiteral("%1 %2").arg(roundUp ? std::ceil(value - 1e-6) : std::floor(value + 1e-6)).arg(FactMetaData::appSettingsVerticalDistanceUnitsString());
+    };
+    const SimpleMissionItem *const item = _missionController ? _missionController->visualItems()->value<const SimpleMissionItem*>(legJob.toItemIndex) : nullptr;
+    const double homeAltitude = _missionController ? _missionController->plannedHomePosition().altitude() : qQNaN();
+    if (item && (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeRelative) && !qIsNaN(homeAltitude)) {
+        return tr("%1 above home").arg(rounded(altitudeAMSL - homeAltitude));
+    }
+    return tr("%1 AMSL").arg(rounded(altitudeAMSL));
+}
+
+QString GeoZoneRoutePlanner::_distanceText(double meters)
+{
+    const QString units = FactMetaData::appSettingsHorizontalDistanceUnitsString();
+    if ((units == QStringLiteral("m")) && (meters >= 1000)) {
+        return tr("%1 km").arg(QLocale().toString(meters / 1000, 'f', 1));
+    }
+    return QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsHorizontalDistanceUnits(meters).toDouble())).arg(units);
+}
+
+QString GeoZoneRoutePlanner::_heightText(double meters)
+{
+    return QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble()))
+        .arg(FactMetaData::appSettingsVerticalDistanceUnitsString());
 }
 
 bool GeoZoneRoutePlanner::applySuggestion(int index)
@@ -563,16 +736,24 @@ bool GeoZoneRoutePlanner::applySuggestion(int index)
                 item->altitude()->setRawValue(altitude);
             }
         }
-        update();
-        return true;
-    }
-    if (suggestion.insertIndex < 0) {
+    } else if ((suggestion.insertIndex >= 0) && !suggestion.waypoints.isEmpty()) {
+        // The new waypoints take the altitude mode of the previous item, and the altitudes the detour was checked at
+        const double homeAltitude = _missionController->plannedHomePosition().altitude();
+        for (qsizetype i = 0; i < suggestion.waypoints.count(); i++) {
+            auto *const item = qobject_cast<SimpleMissionItem*>(_missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i)));
+            const double altitude = suggestion.waypointAltitudes.value(i, qQNaN());
+            if (!item || qIsNaN(altitude)) {
+                continue;
+            }
+            if (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeAbsolute) {
+                item->altitude()->setRawValue(altitude);
+            } else if ((item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeRelative) && !qIsNaN(homeAltitude)) {
+                item->altitude()->setRawValue(altitude - homeAltitude);
+            }
+        }
+    } else {
         return false;
     }
-    // The new waypoints take the altitude of the previous item
-    for (qsizetype i = 0; i < suggestion.waypoints.count(); i++) {
-        (void) _missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i));
-    }
-    update();
+    startUpdate();
     return true;
 }
