@@ -27,6 +27,7 @@ private slots:
     void _testFenceCapacity();
     void _testFenceSelection();
     void _testContainsAndPaths();
+    void _testRingContainment();
     void _testAltitudeLimits();
     void _testVerticalOverlap_data();
     void _testVerticalOverlap();

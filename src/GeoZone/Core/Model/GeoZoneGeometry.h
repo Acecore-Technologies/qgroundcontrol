@@ -11,6 +11,7 @@
 
 #include <QtCore/QList>
 #include <QtCore/QPointF>
+#include <QtCore/qnamespace.h>
 #include <QtPositioning/QGeoCoordinate>
 
 #include <optional>
@@ -51,11 +52,19 @@ private:
     double _metersPerDegreeLongitude = 0;
 };
 
-/// @param ring Unclosed polygon ring
-bool ringContains(const QList<QPointF> &ring, const QPointF &point);
+/// Points closer than this to an edge of a ring, in the units of the points, are on its boundary
+inline constexpr double kBoundaryTolerance = 1e-6;
 
-/// @return true if the point is inside the outer ring, rings[0], and outside the holes
-bool polygonContains(const QList<QList<QPointF>> &rings, const QPointF &point);
+/// @return true if the point is inside the ring or on its boundary
+/// @param ring     Unclosed polygon ring
+/// @param fillRule Qt::WindingFill counts every area the ring winds around as inside, also those a ring crossing itself
+///                 encloses twice, Qt::OddEvenFill only those it encloses an odd number of times
+bool ringContains(const QList<QPointF> &ring, const QPointF &point, Qt::FillRule fillRule = Qt::WindingFill);
+
+/// @return true if the point is inside the outer ring, rings[0], with the fill rule, and not inside a hole, or on a
+///         boundary. Holes only exclude what they enclose an odd number of times, so that what a ring crossing itself
+///         encloses is conservatively inside the polygon.
+bool polygonContains(const QList<QList<QPointF>> &rings, const QPointF &point, Qt::FillRule fillRule = Qt::WindingFill);
 
 /// @return Area of the unclosed ring, positive when counterclockwise
 double signedArea(const QList<QPointF> &ring);
@@ -76,9 +85,9 @@ bool segmentIntersectsRing(const QPointF &a, const QPointF &b, const QList<QPoin
 /// Range of fractions along a segment, 0 at its start and 1 at its end
 using Interval = std::pair<double, double>;
 
-/// @return Fractions of the segment from a to b inside the polygon, rings[0] less the holes, ordered by their start.
-///         The boundary is inside, so a segment touching it has an empty interval there.
-QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, const QList<QList<QPointF>> &rings);
+/// @return Fractions of the segment from a to b inside the polygon, rings[0] less the holes, ordered by their start,
+///         see polygonContains. The boundary is inside, so a segment touching it has an empty interval there.
+QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, const QList<QList<QPointF>> &rings, Qt::FillRule fillRule = Qt::WindingFill);
 
 /// @return Fractions of the segment from a to b within the radius of the origin, nothing when it stays outside
 std::optional<Interval> segmentCircleInterval(const QPointF &a, const QPointF &b, double radius);

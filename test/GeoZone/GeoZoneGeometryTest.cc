@@ -805,6 +805,64 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
 #endif
 }
 
+void GeoZoneGeometryTest::_testRingContainment()
+{
+    // A figure-8 whose edges cross at its center, and a pentagram whose boundary winds twice around its center
+    const QList<QPointF> figure8 = { { 0, 0 }, { 100, 100 }, { 100, 0 }, { 0, 100 } };
+    QVERIFY(GeoZoneGeometry::ringContains(figure8, QPointF(50, 50)));
+    QVERIFY(GeoZoneGeometry::ringContains(figure8, QPointF(10, 50)));
+    QVERIFY(GeoZoneGeometry::ringContains(figure8, QPointF(90, 50)));
+    QVERIFY(!GeoZoneGeometry::ringContains(figure8, QPointF(50, 10)));
+    QList<QPointF> pentagram;
+    for (int i = 0; i < 5; i++) {
+        const double angle = qDegreesToRadians(90.0 + (i * 144.0));
+        pentagram.append(QPointF(100 * std::cos(angle), 100 * std::sin(angle)));
+    }
+    QVERIFY(GeoZoneGeometry::ringContains(pentagram, QPointF(0, 0)));
+    QVERIFY(GeoZoneGeometry::polygonContains({ pentagram }, QPointF(0, 0)));
+    QVERIFY(!GeoZoneGeometry::ringContains(pentagram, QPointF(0, 0), Qt::OddEvenFill));
+    QVERIFY(GeoZoneGeometry::ringContains(pentagram, QPointF(0, 90), Qt::OddEvenFill));
+    QVERIFY(!GeoZoneGeometry::ringContains(pentagram, QPointF(0, -90)));
+    // A segment across the center is inside from the top tip to the inner vertex at the bottom, also in between
+    const auto coveredLength = [](const QList<GeoZoneGeometry::Interval> &intervals, double length) {
+        double covered = 0;
+        for (const GeoZoneGeometry::Interval &interval : intervals) {
+            covered += interval.second - interval.first;
+        }
+        return covered * length;
+    };
+    const double innerRadius = 100 * std::cos(qDegreesToRadians(72.0)) / std::cos(qDegreesToRadians(36.0));
+    QVERIFY(qAbs(coveredLength(GeoZoneGeometry::segmentPolygonIntervals(QPointF(0, 150), QPointF(0, -150), { pentagram }), 300) - (100 + innerRadius)) < 0.01);
+
+    // Boundaries are inside for points as for segments: vertices, edges, and the edges of holes
+    const QList<QPointF> square = { { 0, 0 }, { 100, 0 }, { 100, 100 }, { 0, 100 } };
+    const QList<QPointF> hole = { { 40, 40 }, { 40, 60 }, { 60, 60 }, { 60, 40 } };
+    for (const QPointF &point : { QPointF(0, 0), QPointF(100, 100), QPointF(50, 0), QPointF(100, 50), QPointF(50, 100), QPointF(0, 50) }) {
+        QVERIFY(GeoZoneGeometry::ringContains(square, point));
+        QVERIFY(GeoZoneGeometry::polygonContains({ square, hole }, point));
+        QCOMPARE(GeoZoneGeometry::segmentPolygonIntervals(point, point, { square }), QList<GeoZoneGeometry::Interval>({ { 0, 1 } }));
+    }
+    QVERIFY(!GeoZoneGeometry::ringContains(square, QPointF(100.001, 50)));
+    QVERIFY(GeoZoneGeometry::polygonContains({ square, hole }, QPointF(40, 50)));
+    QVERIFY(GeoZoneGeometry::polygonContains({ square, hole }, QPointF(60, 60)));
+    QVERIFY(!GeoZoneGeometry::polygonContains({ square, hole }, QPointF(50, 50)));
+    // Along an edge, which is inside
+    QVERIFY(qAbs(coveredLength(GeoZoneGeometry::segmentPolygonIntervals(QPointF(100, -50), QPointF(100, 150), { square }), 200) - 100) < 1e-6);
+
+    // Zones read from rings crossing themselves cover what they enclose
+    GeoZone::Data data;
+    const QGeoCoordinate center(47, 8);
+    QList<QGeoCoordinate> star;
+    for (int i = 0; i < 5; i++) {
+        star.append(center.atDistanceAndAzimuth(1000, i * 144.0));
+    }
+    data.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(star) } });
+    const GeoZone zone(data);
+    QVERIFY(zone.contains(center));
+    QVERIFY(zone.intersectsPath({ center.atDistanceAndAzimuth(50, 270), center.atDistanceAndAzimuth(50, 90) }));
+    QVERIFY(zone.contains(star[1]));
+}
+
 void GeoZoneGeometryTest::_testAltitudeLimits()
 {
     const QGeoCoordinate center(47, 8);

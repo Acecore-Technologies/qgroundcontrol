@@ -851,7 +851,7 @@ void GeoZoneParserTest::_testRingValidation_data()
     const QString fewPoints = QStringLiteral("Polygon with fewer than 3 distinct points ignored");
     const QString noArea = QStringLiteral("Polygon without area ignored");
     const QString pole = QStringLiteral("Polygon touching or enclosing a pole ignored");
-    const QString crossing = QStringLiteral("Polygon boundary crossing itself, areas it encloses twice are outside the zone");
+    const QString crossing = QStringLiteral("Polygon boundary crossing itself, the zone covers all areas it encloses");
 
     // Rings are stored unclosed, without consecutive duplicates closer than 1 cm, the outer one counterclockwise
     QTest::newRow("closed") << polygon({ square + QList<QPointF>{ square.first() } }) << 4 << 0 << QString() << QGeoCoordinate(47.005, 8.005) << none;
@@ -874,8 +874,8 @@ void GeoZoneParserTest::_testRingValidation_data()
     QTest::newRow("pole vertex") << polygon({ { { 0, 80 }, { 90, 90 }, { 180, 80 } } }) << 0 << 0 << pole << none << none;
     QTest::newRow("around pole") << polygon({ { { -180, 85 }, { -90, 85 }, { 0, 85 }, { 90, 85 } } }) << 0 << 0 << pole << none << none;
     QTest::newRow("south polar") << polygon({ { { 0, -89.95 }, { 1, -89.95 }, { 1, -89 } } }) << 0 << 0 << pole << none << none;
-    // Crossing rings are kept with the even-odd rule: both lobes of a bow tie are inside, the center of a pentagram
-    // which its boundary winds around twice is outside
+    // Crossing rings are kept and filled with the non-zero winding rule: both lobes of a bow tie are inside, and so is
+    // the center of a pentagram which its boundary winds around twice
     QTest::newRow("bow tie") << polygon({ { { 8, 47 }, { 8.01, 47.01 }, { 8.01, 47 }, { 8, 47.01 } } }) << 4 << 0 << crossing
                              << QGeoCoordinate(47.005, 8.009) << QGeoCoordinate(47.002, 8.005);
     QList<QPointF> pentagram;
@@ -883,7 +883,7 @@ void GeoZoneParserTest::_testRingValidation_data()
         const double angle = qDegreesToRadians(90.0 + (i * 144.0));
         pentagram.append(QPointF(8 + (0.01 * std::cos(angle)), 47 + (0.01 * std::sin(angle))));
     }
-    QTest::newRow("pentagram") << polygon({ pentagram }) << 5 << 0 << crossing << QGeoCoordinate(47.0085, 8) << QGeoCoordinate(47, 8);
+    QTest::newRow("pentagram") << polygon({ pentagram }) << 5 << 0 << crossing << QGeoCoordinate(47, 8) << QGeoCoordinate(47.005663, 8.004114);
     // Circles need a positive radius
     QTest::newRow("circle") << circle(100) << 0 << 0 << QString() << QGeoCoordinate(47, 8) << none;
     QTest::newRow("zero radius") << circle(0) << 0 << 0 << QStringLiteral("Circle without a valid radius ignored") << none << none;
@@ -923,7 +923,7 @@ void GeoZoneParserTest::_testRingValidation()
         QCOMPARE(volume.rings.first().count(), vertices);
         QCOMPARE(volume.rings.count(), holes + 1);
         QVERIFY(volume.rings.first().first() != volume.rings.first().last());
-        if (issue != QStringLiteral("Polygon boundary crossing itself, areas it encloses twice are outside the zone")) {
+        if (issue != QStringLiteral("Polygon boundary crossing itself, the zone covers all areas it encloses")) {
             QVERIFY(GeoZoneGeometry::signedArea(volume.rings.first()) > 0);
         }
         for (qsizetype i = 1; i < volume.rings.count(); i++) {

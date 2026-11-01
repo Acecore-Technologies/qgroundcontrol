@@ -554,7 +554,7 @@ bool _normalizeVolumes(GeoZone::Data &zone)
             }
         }
         if (selfIntersecting) {
-            zone.issues.append(GeoZoneParser::tr("Polygon boundary crossing itself, areas it encloses twice are outside the zone"));
+            zone.issues.append(GeoZoneParser::tr("Polygon boundary crossing itself, the zone covers all areas it encloses"));
         }
         volumes.append(volume);
     }

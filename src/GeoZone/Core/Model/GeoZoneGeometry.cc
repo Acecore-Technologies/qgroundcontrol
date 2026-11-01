@@ -18,6 +18,7 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <utility>
 
 namespace GeoZoneGeometry {
@@ -388,6 +389,39 @@ void _densifyEdge(const QPointF &from, const QPointF &to, double tolerance, int 
     _densifyEdge(middle, to, tolerance, depth - 1, maxVertices, ring);
 }
 
+/// @return Winding number of the unclosed ring around the point, positive counterclockwise, nothing when the point is on
+///         the boundary within kBoundaryTolerance
+std::optional<int> _winding(const QList<QPointF> &ring, const QPointF &point)
+{
+    int winding = 0;
+    for (qsizetype i = 0, j = ring.count() - 1; i < ring.count(); j = i++) {
+        const QPointF &a = ring[j];
+        const QPointF &b = ring[i];
+        const QPointF edge = b - a;
+        const double side = GeoZoneVector::cross(edge, point - a);
+        if ((point.x() >= ((std::min)(a.x(), b.x()) - kBoundaryTolerance)) && (point.x() <= ((std::max)(a.x(), b.x()) + kBoundaryTolerance)) &&
+            (point.y() >= ((std::min)(a.y(), b.y()) - kBoundaryTolerance)) && (point.y() <= ((std::max)(a.y(), b.y()) + kBoundaryTolerance)) &&
+            (std::abs(side) <= (kBoundaryTolerance * GeoZoneVector::length(edge)))) {
+            return std::nullopt;
+        }
+        // Edges crossing the horizontal line through the point upwards with the point on their left, or downwards with
+        // the point on their right
+        if (a.y() <= point.y()) {
+            if ((b.y() > point.y()) && (side > 0)) {
+                winding++;
+            }
+        } else if ((b.y() <= point.y()) && (side < 0)) {
+            winding--;
+        }
+    }
+    return winding;
+}
+
+bool _filled(int winding, Qt::FillRule fillRule)
+{
+    return (fillRule == Qt::WindingFill) ? (winding != 0) : ((winding % 2) != 0);
+}
+
 /// Adds the fractions between first and last, exclusive, of the great circle from one point to another, halving it
 /// until the straight edges are within the tolerance
 void _greatCircleFractions(const QPointF &from, const QPointF &to, double first, double last, double tolerance, int depth, QList<double> &fractions,
@@ -485,24 +519,35 @@ QGeoCoordinate LocalProjection::toGeo(const QPointF &point) const
     return QGeoCoordinate(_originLatitude + (point.y() / _metersPerDegreeLatitude), longitude);
 }
 
-bool ringContains(const QList<QPointF> &ring, const QPointF &point)
+bool ringContains(const QList<QPointF> &ring, const QPointF &point, Qt::FillRule fillRule)
 {
-    bool inside = false;
-    for (qsizetype i = 0, j = ring.count() - 1; i < ring.count(); j = i++) {
-        const QPointF &a = ring[i];
-        const QPointF &b = ring[j];
-        if (((a.y() > point.y()) != (b.y() > point.y())) &&
-            (point.x() < (((b.x() - a.x()) * (point.y() - a.y())) / (b.y() - a.y())) + a.x())) {
-            inside = !inside;
-        }
-    }
-    return inside;
+    const std::optional<int> winding = _winding(ring, point);
+    return !winding || _filled(*winding, fillRule);
 }
 
-bool polygonContains(const QList<QList<QPointF>> &rings, const QPointF &point)
+bool polygonContains(const QList<QList<QPointF>> &rings, const QPointF &point, Qt::FillRule fillRule)
 {
-    return !rings.isEmpty() && ringContains(rings.first(), point) &&
-           std::none_of(rings.cbegin() + 1, rings.cend(), [&point](const QList<QPointF> &hole) { return ringContains(hole, point); });
+    if (rings.isEmpty()) {
+        return false;
+    }
+    const std::optional<int> outer = _winding(rings.first(), point);
+    if (!outer) {
+        return true;
+    }
+    if (!_filled(*outer, fillRule)) {
+        return false;
+    }
+    for (qsizetype i = 1; i < rings.count(); i++) {
+        const std::optional<int> hole = _winding(rings[i], point);
+        // The boundary of a hole is that of the polygon
+        if (!hole) {
+            return true;
+        }
+        if (_filled(*hole, Qt::OddEvenFill)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 double signedArea(const QList<QPointF> &ring)
@@ -569,7 +614,7 @@ bool segmentIntersectsRing(const QPointF &a, const QPointF &b, const QList<QPoin
     return false;
 }
 
-QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, const QList<QList<QPointF>> &rings)
+QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, const QList<QList<QPointF>> &rings, Qt::FillRule fillRule)
 {
     if (rings.isEmpty()) {
         return {};
@@ -577,7 +622,7 @@ QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, cons
     const QPointF direction = b - a;
     const double lengthSquared = QPointF::dotProduct(direction, direction);
     if (lengthSquared < 1e-12) {
-        return polygonContains(rings, a) ? QList<Interval>{ { 0, 1 } } : QList<Interval>{};
+        return polygonContains(rings, a, fillRule) ? QList<Interval>{ { 0, 1 } } : QList<Interval>{};
     }
     const double length = std::sqrt(lengthSquared);
 
@@ -620,10 +665,10 @@ QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, cons
     for (qsizetype i = 0; i < cuts.count(); i++) {
         const double t = cuts[i].first;
         const bool boundary = cuts[i].second || ((i + 1 < cuts.count()) && (cuts[i + 1].first == t) && cuts[i + 1].second);
-        if (boundary || polygonContains(rings, pointAt(t))) {
+        if (boundary || polygonContains(rings, pointAt(t), fillRule)) {
             intervals.append({ t, t });
         }
-        if ((i + 1 < cuts.count()) && (cuts[i + 1].first > t) && polygonContains(rings, pointAt((t + cuts[i + 1].first) / 2))) {
+        if ((i + 1 < cuts.count()) && (cuts[i + 1].first > t) && polygonContains(rings, pointAt((t + cuts[i + 1].first) / 2), fillRule)) {
             intervals.append({ t, cuts[i + 1].first });
         }
     }
