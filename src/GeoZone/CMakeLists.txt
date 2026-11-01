@@ -52,6 +52,7 @@ qt_add_qml_module(GeoZoneModule
     RESOURCE_PREFIX /qml
     QML_FILES
         GeoZoneAlertPopup.qml
+        GeoZoneAltitudeStrip.qml
         GeoZoneFenceImportDialog.qml
         GeoZoneIndicator.qml
         GeoZoneInfoDialog.qml

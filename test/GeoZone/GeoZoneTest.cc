@@ -2031,6 +2031,22 @@ void GeoZoneTest::_testMonitorTimeToEntry()
     QCOMPARE(climbSpy.count(), 1);
     QVERIFY(climbSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone HIGH (Prohibited), entry in about 2")));
 
+    // Zones above and below, with their limits at the position
+    QSignalSpy bandsSpy(&climbMonitor, &GeoZoneMonitor::verticalBandsChanged);
+    climbMonitor.evaluate({ above, 400, 300 });
+    QCOMPARE(climbMonitor.altitudeAMSL(), 400.0);
+    QCOMPARE(climbMonitor.terrainAMSL(), 300.0);
+    QCOMPARE(climbMonitor.verticalBands().count(), 1);
+    const QVariantMap band = climbMonitor.verticalBands().first().toMap();
+    QCOMPARE(band[QStringLiteral("name")].toString(), QStringLiteral("HIGH"));
+    QCOMPARE(band[QStringLiteral("floor")].toDouble(), 500.0);
+    QVERIFY(std::isnan(band[QStringLiteral("ceiling")].toDouble()));
+    const qsizetype bandSignals = bandsSpy.count();
+    climbMonitor.evaluate({ above, 400.2, 300 });
+    QCOMPARE(bandsSpy.count(), bandSignals);
+    climbMonitor.evaluate({ center.atDistanceAndAzimuth(5000, 270), 400, 300 });
+    QVERIFY(climbMonitor.verticalBands().isEmpty());
+
     // Turned off
     settings->approachTime()->setRawValue(0);
     GeoZoneMonitor offMonitor(&manager);

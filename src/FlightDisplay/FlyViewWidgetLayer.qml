@@ -24,6 +24,7 @@ import QGroundControl.Controls
 import QGroundControl.FactSystem
 import QGroundControl.FlightDisplay
 import QGroundControl.FlightMap
+import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.Vehicle
@@ -371,6 +372,14 @@ Item {
         property real topEdgeLeftInset:     visible ? y + height : 0
         property real leftEdgeTopInset:     visible ? x + width : 0
         property real leftEdgeCenterInset:  leftEdgeTopInset
+    }
+
+    GeoZoneAltitudeStrip {
+        anchors.left:           parent.left
+        anchors.leftMargin:     toolStrip.leftEdgeTopInset + _toolsMargin
+        anchors.verticalCenter: parent.verticalCenter
+        height:                 Math.min(parent.height * 0.45, ScreenTools.defaultFontPixelHeight * 20)
+        z:                      QGroundControl.zOrderWidgets
     }
 
     GripperMenu {

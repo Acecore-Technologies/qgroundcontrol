@@ -86,6 +86,11 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyZonesChanged FINAL)      ///< Most restrictive GeoZone::Restriction nearby, -1 without
     Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged FINAL)      ///< The vehicle is inside one of the nearby zones
     Q_PROPERTY(GeoZoneNearbyModel *nearbyModel  READ nearbyModel        CONSTANT FINAL)                       ///< nearbyZones as a list model
+    /// Volumes of the active zones above and below the active vehicle, as maps with restriction, name, limitsText, floor and
+    /// ceiling (meters AMSL, NaN when the zone extends to the ground or has no ceiling, or the limit is unknown)
+    Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
+    Q_PROPERTY(double       altitudeAMSL        READ altitudeAMSL       NOTIFY verticalBandsChanged FINAL)    ///< Of the active vehicle, NaN when unknown
+    Q_PROPERTY(double       terrainAMSL         READ terrainAMSL        NOTIFY verticalBandsChanged FINAL)    ///< Below the active vehicle, NaN when unknown
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
@@ -158,6 +163,9 @@ public:
     int alertRestriction() const;
     bool inside() const;
     GeoZoneNearbyModel *nearbyModel() const { return _nearbyModel; }
+    QVariantList verticalBands() const;
+    double altitudeAMSL() const;
+    double terrainAMSL() const;
 
     /// Vehicle whose nearby zones are published, noVehicle by default
     int activeVehicleId() const { return _activeVehicleId; }
@@ -177,6 +185,7 @@ signals:
     void alertEvent(const GeoZoneMonitor::AlertEvent &event);
     void monitoringChanged();
     void nearbyZonesChanged();
+    void verticalBandsChanged();
 
 private slots:
     void _vehicleAdded(Vehicle *vehicle);
@@ -203,11 +212,29 @@ private:
         GeoZone::Position position;
     };
 
+    /// Volume of a zone above or below a vehicle
+    struct VerticalBand {
+        GeoZone *zone = nullptr;
+        double floor = qQNaN();
+        double ceiling = qQNaN();
+
+        friend bool operator==(const VerticalBand &a, const VerticalBand &b)
+        {
+            const auto same = [](double x, double y) { return (x == y) || (std::isnan(x) && std::isnan(y)); };
+            return (a.zone == b.zone) && same(a.floor, b.floor) && same(a.ceiling, b.ceiling);
+        }
+    };
+
     struct Tracker {
         QHash<QString, State> states;   ///< Zones which are not Away by GeoZone::key, which stays the same when a source reloads
         QList<Nearby> nearby;
         QList<Sample> samples;          ///< Recent positions of a vehicle, oldest first
+        QList<VerticalBand> bands;
+        GeoZone::Position position;     ///< Last evaluated position
     };
+
+    QList<VerticalBand> _verticalBands(const GeoZone::Position &position) const;
+    const Tracker *_activeTracker() const;
 
     /// @return Velocity from the positions of the last velocityWindowMSecs, after adding the position
     static Velocity _estimateVelocity(QList<Sample> &samples, qint64 msecs, const GeoZone::Position &position);

@@ -216,6 +216,7 @@ void GeoZoneMonitor::_publishNearby()
 {
     _nearbyModel->setItems(_activeNearby());
     emit nearbyZonesChanged();
+    emit verticalBandsChanged();
 }
 
 const QList<GeoZoneMonitor::Nearby> &GeoZoneMonitor::_activeNearby() const
@@ -271,6 +272,61 @@ GeoZone::Position GeoZoneMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCo
         position.terrainAMSL = altitudeAMSL - heightAboveTerrain;
     }
     return position;
+}
+
+const GeoZoneMonitor::Tracker *GeoZoneMonitor::_activeTracker() const
+{
+    const auto it = _trackers.constFind(_activeVehicleId);
+    return (it != _trackers.constEnd()) ? &it.value() : nullptr;
+}
+
+QVariantList GeoZoneMonitor::verticalBands() const
+{
+    QVariantList bands;
+    const Tracker *const tracker = _activeTracker();
+    if (!tracker) {
+        return bands;
+    }
+    for (const VerticalBand &band : tracker->bands) {
+        bands.append(QVariantMap{
+            { QStringLiteral("restriction"), static_cast<int>(band.zone->restriction()) },
+            { QStringLiteral("name"), band.zone->displayName() },
+            { QStringLiteral("limitsText"), band.zone->verticalLimitsText() },
+            { QStringLiteral("floor"), band.floor },
+            { QStringLiteral("ceiling"), band.ceiling },
+        });
+    }
+    return bands;
+}
+
+double GeoZoneMonitor::altitudeAMSL() const
+{
+    const Tracker *const tracker = _activeTracker();
+    return tracker ? tracker->position.altitudeAMSL : qQNaN();
+}
+
+double GeoZoneMonitor::terrainAMSL() const
+{
+    const Tracker *const tracker = _activeTracker();
+    return tracker ? tracker->position.terrainAMSL : qQNaN();
+}
+
+QList<GeoZoneMonitor::VerticalBand> GeoZoneMonitor::_verticalBands(const GeoZone::Position &position) const
+{
+    static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
+    QList<VerticalBand> bands;
+    for (QObject *object : _manager->zonesAt(position.coordinate)) {
+        GeoZone *const zone = qobject_cast<GeoZone*>(object);
+        if (!zone->active() || !restrictions.contains(zone->restriction())) {
+            continue;
+        }
+        for (const GeoZone::Volume &volume : zone->data().volumes) {
+            if (GeoZone::volumeContains(volume, position.coordinate)) {
+                bands.append(VerticalBand{ zone, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) });
+            }
+        }
+    }
+    return bands;
 }
 
 QString GeoZoneMonitor::pathWarning(const QList<GeoZone::Position> &path) const
@@ -366,7 +422,8 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
 {
     bool activeChanged = false;
     for (auto it = _trackers.begin(); it != _trackers.end(); ++it) {
-        if (it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->parent() == source; }) > 0) {
+        const qsizetype removedBands = it->bands.removeIf([source](const VerticalBand &band) { return band.zone->parent() == source; });
+        if ((it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->parent() == source; }) + removedBands) > 0) {
             activeChanged = activeChanged || (it.key() == _activeVehicleId);
         }
     }
@@ -563,6 +620,20 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         tracker.nearby = nearby;
         if (vehicleId == _activeVehicleId) {
             _publishNearby();
+        }
+    }
+
+    // Zones above and below are only shown for the active vehicle
+    if (vehicleId == _activeVehicleId) {
+        const QList<VerticalBand> bands = _verticalBands(position);
+        const bool altitudeChanged = (std::isnan(position.altitudeAMSL) != std::isnan(tracker.position.altitudeAMSL)) ||
+                                     (std::abs(position.altitudeAMSL - tracker.position.altitudeAMSL) >= 0.5) ||
+                                     (std::isnan(position.terrainAMSL) != std::isnan(tracker.position.terrainAMSL)) ||
+                                     (std::abs(position.terrainAMSL - tracker.position.terrainAMSL) >= 0.5);
+        if ((bands != tracker.bands) || altitudeChanged) {
+            tracker.bands = bands;
+            tracker.position = position;
+            emit verticalBandsChanged();
         }
     }
 
