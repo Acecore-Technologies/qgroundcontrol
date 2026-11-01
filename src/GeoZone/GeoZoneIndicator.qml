@@ -52,7 +52,7 @@ Item {
         source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
-        color:              control._restrictionColor(control._monitor.monitoring ? control._monitor.alertRestriction : -1)
+        color:              control._monitor.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._monitor.alertRestriction : -1)
         opacity:            (control._monitor.monitoring && !control._monitor.positionUnavailable) ? 1 : 0.5
     }
 
@@ -98,6 +98,15 @@ Item {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
                                       (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
                             visible: (!control._monitor.monitoring || control._monitor.nearbyModel.count === 0) && !_pausedLabel.visible
+                        }
+
+                        QGCLabel {
+                            Layout.fillWidth:   true
+                            wrapMode:           Text.WordWrap
+                            color:              qgcPal.colorRed
+                            font.bold:          true
+                            text:               qsTr("Vehicle: %1").arg(control._monitor.fenceBreachText)
+                            visible:            control._monitor.fenceBreached
                         }
 
                         QGCLabel {

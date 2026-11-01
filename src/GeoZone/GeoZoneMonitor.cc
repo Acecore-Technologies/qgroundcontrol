@@ -121,14 +121,18 @@ void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
         _activeVehicleId = vehicleId;
         _publishNearby();
         emit positionUnavailableChanged();
+        emit fenceStatusChanged();
     }
 }
 
 void GeoZoneMonitor::removeVehicle(int vehicleId)
 {
-    const bool wasUnavailable = _telemetry.take(vehicleId).unavailable;
-    if (wasUnavailable && (vehicleId == _activeVehicleId)) {
+    const Telemetry removed = _telemetry.take(vehicleId);
+    if (removed.unavailable && (vehicleId == _activeVehicleId)) {
         emit positionUnavailableChanged();
+    }
+    if (removed.fenceStatusKnown && (vehicleId == _activeVehicleId)) {
+        emit fenceStatusChanged();
     }
     const auto it = _trackers.find(vehicleId);
     if (it == _trackers.end()) {
@@ -201,9 +205,62 @@ void GeoZoneMonitor::handleVehicleMessage(int vehicleId, const mavlink_message_t
     case MAVLINK_MSG_ID_HIGH_LATENCY2:
         positionReceived();
         break;
+    case MAVLINK_MSG_ID_FENCE_STATUS: {
+        mavlink_fence_status_t fenceStatus{};
+        mavlink_msg_fence_status_decode(&message, &fenceStatus);
+        const bool breached = (fenceStatus.breach_status != 0);
+        const bool changed = !telemetry.fenceStatusKnown || (breached != telemetry.fenceBreached) ||
+                             (fenceStatus.breach_type != telemetry.fenceBreachType) || (fenceStatus.breach_count != telemetry.fenceBreachCount);
+        const bool started = breached && !telemetry.fenceBreached;
+        telemetry.fenceStatusKnown = true;
+        telemetry.fenceBreached = breached;
+        telemetry.fenceBreachType = fenceStatus.breach_type;
+        telemetry.fenceBreachCount = fenceStatus.breach_count;
+        if (started) {
+            QString breachMessage = fenceBreachText(fenceStatus.breach_type, fenceStatus.breach_count);
+            const QString vehicleLabel = _vehicleLabel(vehicleId);
+            if (!vehicleLabel.isEmpty()) {
+                breachMessage = QStringLiteral("%1: %2").arg(vehicleLabel, breachMessage);
+            }
+            emit fenceBreach(breachMessage);
+        }
+        if (changed && (vehicleId == _activeVehicleId)) {
+            emit fenceStatusChanged();
+        }
+        break;
+    }
     default:
         break;
     }
+}
+
+QString GeoZoneMonitor::fenceBreachText() const
+{
+    const Telemetry telemetry = _telemetry.value(_activeVehicleId);
+    return telemetry.fenceBreached ? fenceBreachText(telemetry.fenceBreachType, telemetry.fenceBreachCount) : QString();
+}
+
+QString GeoZoneMonitor::fenceBreachText(int breachType, int breachCount)
+{
+    QString text;
+    switch (breachType) {
+    case FENCE_BREACH_MINALT:
+        text = tr("Minimum altitude fence breached");
+        break;
+    case FENCE_BREACH_MAXALT:
+        text = tr("Maximum altitude fence breached");
+        break;
+    case FENCE_BREACH_BOUNDARY:
+        text = tr("Boundary fence breached");
+        break;
+    default:
+        text = tr("Fence breached");
+        break;
+    }
+    if (breachCount > 1) {
+        text += QStringLiteral(" ") + tr("(%n time(s))", nullptr, breachCount);
+    }
+    return text;
 }
 
 bool GeoZoneMonitor::positionStale(int vehicleId, qint64 msecs) const

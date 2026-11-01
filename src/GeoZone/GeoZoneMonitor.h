@@ -63,7 +63,11 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(QVariantList     predictedPath       READ predictedPath      NOTIFY predictionChanged FINAL)
     Q_PROPERTY(QGeoCoordinate   predictedEntry      READ predictedEntry     NOTIFY predictionChanged FINAL)
     Q_PROPERTY(int              predictedEntryTime  READ predictedEntryTime NOTIFY predictionChanged FINAL)
-    Q_PROPERTY(QVariant         predictedEntryZone  READ predictedEntryZone NOTIFY predictionChanged FINAL)    ///< The active vehicle has no current position, its alerts are paused
+    Q_PROPERTY(QVariant         predictedEntryZone  READ predictedEntryZone NOTIFY predictionChanged FINAL)
+    /// The active vehicle reports a breach of its own fence (FENCE_STATUS), with the kind of breach and their count
+    Q_PROPERTY(bool             fenceBreached       READ fenceBreached      NOTIFY fenceStatusChanged FINAL)
+    Q_PROPERTY(QString          fenceBreachText     READ fenceBreachText    NOTIFY fenceStatusChanged FINAL)
+    Q_PROPERTY(bool             fenceStatusKnown    READ fenceStatusKnown   NOTIFY fenceStatusChanged FINAL)     ///< The active vehicle sends FENCE_STATUS    ///< The active vehicle has no current position, its alerts are paused
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
@@ -107,7 +111,7 @@ public:
     ///         altitude above terrain or GeoZoneTerrain, which is unknown without terrain data
     static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate);
 
-    /// Records when a vehicle sent its position, and the velocity sent with it
+    /// Records when a vehicle sent its position, the velocity sent with it, and the status of its fence
     /// @param msecs Time of the monitor's clock
     void handleVehicleMessage(int vehicleId, const mavlink_message_t &message, qint64 msecs);
 
@@ -145,6 +149,12 @@ public:
     QGeoCoordinate predictedEntry() const;
     int predictedEntryTime() const;
     QVariant predictedEntryZone() const;
+    bool fenceBreached() const { return _telemetry.value(_activeVehicleId).fenceBreached; }
+    bool fenceStatusKnown() const { return _telemetry.value(_activeVehicleId).fenceStatusKnown; }
+    QString fenceBreachText() const;
+
+    /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
+    static QString fenceBreachText(int breachType, int breachCount);
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
@@ -157,6 +167,9 @@ signals:
     void verticalBandsChanged();
     void positionUnavailableChanged();
     void predictionChanged();
+    void fenceStatusChanged();
+    /// The vehicle started breaching its fence. The vehicle announces it, so it isn't spoken.
+    void fenceBreach(const QString &message);
 
 private slots:
     void _vehicleAdded(Vehicle *vehicle);
@@ -179,6 +192,10 @@ private:
         Velocity reported;
         GeoZoneVelocityEstimator estimator;
         bool unavailable = false;           ///< Alerts are paused for lack of a current position
+        bool fenceStatusKnown = false;
+        bool fenceBreached = false;
+        int fenceBreachType = FENCE_BREACH_NONE;
+        int fenceBreachCount = 0;
     };
 
     struct Tracker {

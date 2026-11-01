@@ -543,3 +543,52 @@ void GeoZoneMonitorTest::_testAlertHistory()
     later.show(2);
     QCOMPARE(showSpy.count(), 2);
 }
+
+void GeoZoneMonitorTest::_testFenceStatus()
+{
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneMonitor monitor(&manager);
+    const int vehicleId = 1;
+    monitor.setActiveVehicleId(vehicleId);
+    const auto fenceStatus = [](uint8_t breachStatus, uint16_t breachCount, uint8_t breachType) {
+        mavlink_message_t message{};
+        (void) mavlink_msg_fence_status_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, breachStatus, breachCount, breachType, 0, FENCE_MITIGATE_NONE);
+        return message;
+    };
+    QSignalSpy breachSpy(&monitor, &GeoZoneMonitor::fenceBreach);
+    QSignalSpy statusSpy(&monitor, &GeoZoneMonitor::fenceStatusChanged);
+
+    // Not breached
+    QVERIFY(!monitor.fenceStatusKnown());
+    monitor.handleVehicleMessage(vehicleId, fenceStatus(0, 0, FENCE_BREACH_NONE), 0);
+    QVERIFY(monitor.fenceStatusKnown());
+    QVERIFY(!monitor.fenceBreached());
+    QCOMPARE(statusSpy.count(), 1);
+
+    // A breach is announced once while it lasts
+    monitor.handleVehicleMessage(vehicleId, fenceStatus(1, 1, FENCE_BREACH_BOUNDARY), 1000);
+    monitor.handleVehicleMessage(vehicleId, fenceStatus(1, 1, FENCE_BREACH_BOUNDARY), 2000);
+    QVERIFY(monitor.fenceBreached());
+    QCOMPARE(monitor.fenceBreachText(), QStringLiteral("Boundary fence breached"));
+    QCOMPARE(breachSpy.count(), 1);
+    QCOMPARE(breachSpy.first().first().toString(), QStringLiteral("Boundary fence breached"));
+    QCOMPARE(statusSpy.count(), 2);
+
+    // Cleared, then breached again at the maximum altitude
+    monitor.handleVehicleMessage(vehicleId, fenceStatus(0, 1, FENCE_BREACH_NONE), 3000);
+    QVERIFY(!monitor.fenceBreached());
+    QVERIFY(monitor.fenceBreachText().isEmpty());
+    monitor.handleVehicleMessage(vehicleId, fenceStatus(1, 2, FENCE_BREACH_MAXALT), 4000);
+    QCOMPARE(breachSpy.count(), 2);
+    QCOMPARE(monitor.fenceBreachText(), QStringLiteral("Maximum altitude fence breached (2 time(s))"));
+
+    // Other vehicles don't change the status shown
+    monitor.handleVehicleMessage(vehicleId + 1, fenceStatus(0, 0, FENCE_BREACH_NONE), 5000);
+    QVERIFY(monitor.fenceBreached());
+    monitor.setActiveVehicleId(vehicleId + 1);
+    QVERIFY(!monitor.fenceBreached());
+    monitor.removeVehicle(vehicleId + 1);
+    QVERIFY(!monitor.fenceStatusKnown());
+}

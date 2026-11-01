@@ -24,4 +24,5 @@ private slots:
     void _testMonitorMultipleVehicles();
     void _testAlertLog();
     void _testAlertHistory();
+    void _testFenceStatus();
 };

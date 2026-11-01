@@ -54,6 +54,8 @@ Popup {
     Connections {
         target:                     GeoZoneMonitor
         function onAlert(message, severity) { control.show(message, severity) }
+        // Fences stop or return the vehicle, shown above geozone alerts
+        function onFenceBreach(message)     { control.show(message, -1) }
     }
 
     Timer {
