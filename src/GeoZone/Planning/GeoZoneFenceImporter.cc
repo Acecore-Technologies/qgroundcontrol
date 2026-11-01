@@ -60,7 +60,11 @@ Vehicle *GeoZoneFenceImporter::_vehicle() const
 
 void GeoZoneFenceImporter::_connectVehicle()
 {
-    delete _vehicleConnections;
+    if (_vehicleConnections) {
+        // Possibly from one of its connections
+        (void) QObject::disconnect(nullptr, nullptr, _vehicleConnections, nullptr);
+        _vehicleConnections->deleteLater();
+    }
     _vehicleConnections = new QObject(this);
     if (!_geoFenceController || !_geoFenceController->masterController()) {
         return;
@@ -618,6 +622,7 @@ void GeoZoneFenceImporter::_setUploadState(UploadState state, const QString &mes
 {
     if ((state != Uploading) && (state != Verifying) && _uploadConnections) {
         // Possibly from one of its connections
+        (void) QObject::disconnect(nullptr, nullptr, _uploadConnections, nullptr);
         _uploadConnections->deleteLater();
         _uploadConnections = nullptr;
     }
