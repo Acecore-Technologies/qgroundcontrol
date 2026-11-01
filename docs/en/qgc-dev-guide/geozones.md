@@ -241,6 +241,18 @@ The tests are in `test/GeoZone`, whose `README.md` also describes the fixtures, 
 - **Time and terrain**: tests depending on the time, the terrain or the QNH set them with `GeoZoneTestHelpers::ScopedEnvironment`, whose clock stands still until the test advances it (`setNow()`, `addSecs()`) and whose terrain is unknown until set (`setTerrain()`).
 - **Downloads**: `GeoZoneTestHelpers::TestFeedServer` is a local HTTP server answering by path (`/ok` with the ED-318 fixture, `/missing`, `/broken`, `/empty`, `/hang`), with added files, handlers and delays, which records the requests for the feed, service and refresh tests.
 
+### Validating Files {#validating-files}
+
+`geozone-validate` (`test/GeoZone/tools`, built with the tests and linked with `GeoZoneCore` only) checks geozone files and zip packages the way _QGroundControl_ loads them, without the application or a network: it prints for each file its format and metadata, the number of zones by restriction, their geometry, a summary of their altitude limits by reference and of their schedules, and the warnings of the parsers with the first zones having each, like rings crossing themselves, polygons without area or unknown units. `--zones` lists each zone with its limits, schedule and warnings, `--format` gives the format expected of a feed, `--language` the language of localized texts and `--verbose` shows the log of the parsers. It exits with 1 when a file can't be read or parsed, with `--strict` also on warnings and skipped or missing features, and with 2 on usage errors. Directories are checked file by file, like the fuzz driver reads its corpus (`GeoZoneInputFiles.h`).
+
+```sh
+cmake --build build --target geozone-validate
+build/Debug/geozone-validate --zones national_zones.json
+build/Debug/geozone-validate --strict test/GeoZone/data
+```
+
+Its CTest tests, labeled `geozone` and `core`, check the fixtures and the failures.
+
 The `Geozone Sanitizers` workflow (`.github/workflows/geozone-sanitizers.yml`) runs the tests with AddressSanitizer and UndefinedBehaviorSanitizer, and the fuzzers for a minute each.
 
 ::: warning

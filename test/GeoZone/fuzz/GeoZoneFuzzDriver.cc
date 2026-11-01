@@ -8,10 +8,9 @@
  ****************************************************************************/
 
 #include "GeoZoneFuzz.h"
+#include "GeoZoneInputFiles.h"
 
-#include <QtCore/QDirIterator>
 #include <QtCore/QFile>
-#include <QtCore/QFileInfo>
 
 #include <cstdio>
 
@@ -21,22 +20,11 @@ int main(int argc, char *argv[])
 {
     (void) LLVMFuzzerInitialize(&argc, &argv);
 
-    QStringList files;
+    QStringList arguments;
     for (int i = 1; i < argc; i++) {
-        const QString path = QString::fromLocal8Bit(argv[i]);
-        if (path.startsWith(QLatin1Char('-'))) {
-            continue;
-        }
-        if (QFileInfo(path).isDir()) {
-            QDirIterator it(path, QDir::Files, QDirIterator::Subdirectories);
-            while (it.hasNext()) {
-                files.append(it.next());
-            }
-        } else {
-            files.append(path);
-        }
+        arguments.append(QString::fromLocal8Bit(argv[i]));
     }
-    files.sort();
+    const QStringList files = GeoZoneInputFiles::collect(arguments);
 
     for (const QString &fileName : std::as_const(files)) {
         QFile file(fileName);

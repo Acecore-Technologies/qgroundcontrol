@@ -89,6 +89,12 @@ In the QGroundControl build, `-DGEOZONE_FUZZ=ON` adds the targets too. With comp
 with a driver which runs each file of a corpus once instead of fuzzing. `ctest --test-dir build/test -L fuzz` runs the seed corpora
 through the targets in both cases.
 
+## Validator
+
+`tools/` has `geozone-validate`, which checks geozone files and zip packages like QGroundControl loads them and
+prints their format, zones, warnings, altitude limits and schedules, see the Testing section of the developer guide
+(`docs/en/qgc-dev-guide/geozones.md`). It shares the reading of files and directories with the fuzz driver.
+
 ## Benchmarks
 
 `GeoZoneBenchmark` measures the core with 10000 synthetic zones over central Europe, about the size of a large

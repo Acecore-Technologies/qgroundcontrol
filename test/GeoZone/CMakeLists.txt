@@ -88,6 +88,8 @@ set(GEOZONE_TEST_DATA
     data/uk_aixm_test.xml
 )
 
+add_subdirectory(tools)
+
 qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_test_resources"
     PREFIX "/unittest"
     BASE data
