@@ -11,6 +11,7 @@
 #include "FactMetaData.h"
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneBriefingExport.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneGuidedCheck.h"
@@ -90,6 +91,7 @@ void registerQmlTypes()
     (void) qmlRegisterType<GeoZoneMapModel>(kUri, 1, 0, "GeoZoneMapModel");
     (void) qmlRegisterType<GeoZoneMapLayer>(kUri, 1, 0, "GeoZoneMapLayer");
     (void) qmlRegisterType<GeoZoneMissionCheck>(kUri, 1, 0, "GeoZoneMissionCheck");
+    (void) qmlRegisterType<GeoZoneBriefingExport>(kUri, 1, 0, "GeoZoneBriefingExport");
     (void) qmlRegisterType<GeoZoneFenceImporter>(kUri, 1, 0, "GeoZoneFenceImporter");
     (void) qmlRegisterType<GeoZoneProfile>(kUri, 1, 0, "GeoZoneProfile");
     (void) qmlRegisterType<GeoZoneRoutePlanner>(kUri, 1, 0, "GeoZoneRoutePlanner");

@@ -28,6 +28,8 @@ private slots:
     void _testMissionContingencies();
     void _testMissionReturnParameters();
     void _testAuthorisations();
+    void _testBriefing();
+    void _testBriefingExport();
     void _testRoutePlanner();
     void _testProfileBands();
     void _testGeoFenceImport();

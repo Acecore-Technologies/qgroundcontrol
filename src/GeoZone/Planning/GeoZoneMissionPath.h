@@ -16,6 +16,7 @@
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
+#include "GeoZoneBox.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneReturnModel.h"
 
@@ -115,6 +116,10 @@ public:
     double flightDistance() const { return _flightDistance; }
     /// @return Meters flown along the mission when the vehicle first reaches the item, NaN for unknown items
     double itemFlightDistance(int itemIndex) const { return _itemFlightDistances.value(itemIndex, qQNaN()); }
+    /// @return Sequence number of the visual item, -1 for unknown items
+    int sequenceNumber(int itemIndex) const { return _sequenceNumbers.value(itemIndex, -1); }
+    /// @return Bounds of the paths, areas and contingency paths, invalid without them
+    GeoZoneBox box() const;
     /// @return End of a flight from start which ends at end without the repeats of DO_JUMP items, at the same pace
     QDateTime flightEnd(const QDateTime &start, const QDateTime &end) const;
     /// @return true if a DO_JUMP repeats without end, the paths include its loop once

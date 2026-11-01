@@ -25,9 +25,11 @@ ColumnLayout {
     property int    hiddenZoneCount:    0       ///< Smallest zones in the map view left out to limit the number of map items
     property var    map:                null    ///< Map whose visible area can be downloaded from providers serving zones by area
     property bool   showCrossedZones:   false   ///< See GeoZoneLegend
+    property bool   briefingEnabled:    false   ///< Offers to export the geozone briefing of the planned mission
 
     signal manageRequested
     signal zoneSelected     ///< A zone picked in the search is shown on the map
+    signal exportBriefingRequested
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 32
@@ -177,6 +179,13 @@ ColumnLayout {
             text:               areaColumn._areaTooLarge ? qsTr("Zoom in to an area up to about 100 km wide.") :
                                                        qsTr("Downloaded areas are kept for offline use and refreshed like feeds.")
         }
+    }
+
+    QGCButton {
+        Layout.fillWidth:   true
+        text:               qsTr("Export Briefing...")
+        visible:            root.briefingEnabled
+        onClicked:          root.exportBriefingRequested()
     }
 
     QGCButton {

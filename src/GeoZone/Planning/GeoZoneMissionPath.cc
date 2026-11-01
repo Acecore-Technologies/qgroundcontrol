@@ -862,6 +862,29 @@ double GeoZoneMissionPath::totalDistance() const
     return distance;
 }
 
+GeoZoneBox GeoZoneMissionPath::box() const
+{
+    GeoZoneBox box;
+    const auto unite = [&box](const QList<GeoZone::Position> &positions) {
+        QList<QGeoCoordinate> coordinates;
+        coordinates.reserve(positions.count());
+        for (const GeoZone::Position &position : positions) {
+            coordinates.append(position.coordinate);
+        }
+        box = box.united(GeoZoneBox::fromPath(coordinates));
+    };
+    for (const Path &path : _paths) {
+        unite(path.positions);
+    }
+    for (const ContingencyPath &contingency : _contingencyPaths) {
+        unite(contingency.path.positions);
+    }
+    for (const GeoZone::Area &area : _areas) {
+        box = box.united(GeoZoneBox::fromPath(area.polygon));
+    }
+    return box;
+}
+
 QDateTime GeoZoneMissionPath::timeAt(double distance, double totalDistance, const QDateTime &start, const QDateTime &end)
 {
     if (!start.isValid() || !end.isValid() || !(totalDistance > 0) || qIsNaN(distance)) {

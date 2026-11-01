@@ -16,11 +16,12 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Plan View banner warning when the mission enters restricted geozones, centered between leftLimit and rightLimit
+/// Plan View banner warning when the mission enters restricted geozones, centered between leftLimit and rightLimit.
+/// Exports the geozone briefing of the mission, see exportBriefing().
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, contingencyLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(warningLabel.implicitWidth, contingencyLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, buttonRow.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
@@ -68,7 +69,40 @@ Rectangle {
                                      uploadFunction)
     }
 
+    /// Asks for a file and exports the geozone briefing of the mission to it, as PDF, web page or JSON by its extension
+    function exportBriefing() {
+        briefingDialog.folder = briefingExport.defaultFolder()
+        briefingDialog.fileName = briefingExport.defaultFileName()
+        briefingDialog.openForSave()
+    }
+
+    /// Markup in names from the files is defused for the message dialog, which detects rich text
+    function _plainText(text) {
+        return text.replace(/</g, "\u2039").replace(/>/g, "\u203A")
+    }
+
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
+
+    GeoZoneBriefingExport {
+        id:                 briefingExport
+        missionController:  control.missionController
+    }
+
+    QGCFileDialog {
+        id:             briefingDialog
+        title:          qsTr("Export Geozone Briefing")
+        nameFilters:    briefingExport.nameFilters
+        defaultSuffix:  "pdf"
+
+        onAcceptedForSave: (file) => {
+            close()
+            if (briefingExport.exportBriefing(file)) {
+                mainWindow.showMessageDialog(qsTr("Export Geozone Briefing"), qsTr("Briefing saved to %1").arg(control._plainText(file)))
+            } else {
+                mainWindow.showMessageDialog(qsTr("Export Geozone Briefing"), control._plainText(briefingExport.errorString))
+            }
+        }
+    }
 
     GeoZoneMissionCheck {
         id:                 check
@@ -193,11 +227,21 @@ Rectangle {
             onClicked:                  fenceImporter.addZones(check.unfencedZones)
         }
 
-        QGCButton {
+        Row {
+            id:                         buttonRow
             anchors.horizontalCenter:   parent.horizontalCenter
-            text:                       qsTr("Route Around Zones...")
-            visible:                    check.warningText !== ""
-            onClicked:                  routeDialogComponent.createObject(mainWindow, { missionController: control.missionController }).open()
+            spacing:                    control._margin
+
+            QGCButton {
+                text:       qsTr("Route Around Zones...")
+                visible:    check.warningText !== ""
+                onClicked:  routeDialogComponent.createObject(mainWindow, { missionController: control.missionController }).open()
+            }
+
+            QGCButton {
+                text:       qsTr("Export Briefing...")
+                onClicked:  control.exportBriefing()
+            }
         }
 
         QGCLabel {

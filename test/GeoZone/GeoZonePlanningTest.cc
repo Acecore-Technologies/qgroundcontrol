@@ -8,6 +8,10 @@
  ****************************************************************************/
 
 #include "GeoZonePlanningTest.h"
+#include "GeoZoneBriefing.h"
+#include "GeoZoneBriefingExport.h"
+#include "GeoZoneSourceRepository.h"
+#include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestHelpers.h"
 #include "RallyPoint.h"
 #include "RallyPointController.h"
@@ -1095,6 +1099,226 @@ void GeoZonePlanningTest::_testAuthorisations()
     QCOMPARE(restarted.planning()->authorisations()->count(), 1);
     QVERIFY(restarted.planning()->authorisations()->find(restarted.zoneList().constFirst()));
     manager.planning()->clearPlannedStart();
+}
+
+void GeoZonePlanningTest::_testBriefing()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2027, 1, 1), QTime(8, 0)));
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+
+    // A control zone with its authority, message, schedule and limits, a prison, and zones near the path
+    QJsonObject controlZone = _circleFeature(QStringLiteral("CTR-1"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1000, 90), 200);
+    controlZone[QStringLiteral("name")] = QStringLiteral("CTR <script>alert(1)</script>");
+    controlZone[QStringLiteral("country")] = QStringLiteral("CHE");
+    controlZone[QStringLiteral("message")] = QStringLiteral("Call the tower");
+    controlZone[QStringLiteral("zoneAuthority")] = QJsonArray{ QJsonObject{ { "name", "Skyguide" }, { "email", "ops@example.org" }, { "phone", "+41 43 931 61 11" } } };
+    controlZone[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:45:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
+    QJsonObject geometry = controlZone[QStringLiteral("geometry")].toArray()[0].toObject();
+    geometry[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    geometry[QStringLiteral("lowerLimit")] = 0;
+    geometry[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
+    geometry[QStringLiteral("upperLimit")] = 500;
+    geometry[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
+    controlZone[QStringLiteral("geometry")] = QJsonArray{ geometry };
+    QJsonObject prison = _circleFeature(QStringLiteral("P-1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2500, 90), 200);
+    prison[QStringLiteral("name")] = QStringLiteral("Prison");
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        controlZone, prison,
+        _circleFeature(QStringLiteral("NEAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 0), 150),
+        _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 150),
+        _circleFeature(QStringLiteral("RET"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 90).atDistanceAndAzimuth(1000, 180), 200),
+        // Zones without restriction near the path aren't briefed
+        _circleFeature(QStringLiteral("INFO"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 180), 100),
+    }), errorString), qPrintable(errorString));
+    const GeoZone *const ctr = manager.zoneList().constFirst();
+
+    GeoZoneAuthorisations authorisations{ QString() };
+    authorisations.set(GeoZoneAuthorisation{ GeoZoneAuthorisations::zoneKey(ctr), ctr->name(), QStringLiteral("P-77"), QDateTime(), QDateTime() });
+
+    // Ten minutes east at 100 m, a return from halfway would enter RET
+    const QDateTime start = _utc(QDate(2027, 1, 1), QTime(10, 30));
+    GeoZonePathEvaluator::Path path = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center, 100 }, GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90), 100 } });
+    path.setTimes(start, start.addSecs(600));
+    GeoZonePathEvaluator::Path contingency = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center.atDistanceAndAzimuth(2000, 90), 100 },
+                                                                                         GeoZone::Position{ center.atDistanceAndAzimuth(2000, 90).atDistanceAndAzimuth(1000, 180), 100 } },
+                                                                                       QStringLiteral("a return to rally point 1"));
+    contingency.setTimes(start.addSecs(300), QDateTime());
+    GeoZoneBriefing::Input input;
+    input.mission.name = QStringLiteral("Survey");
+    input.mission.plannedStart = start;
+    input.mission.plannedEnd = start.addSecs(600);
+    input.paths = { path };
+    input.contingencyPaths = { contingency };
+    input.items = { { 1, 0 }, { 2, 4000 } };
+    input.start = start;
+    input.end = start.addSecs(600);
+    input.authorisations = &authorisations;
+    input.sources = GeoZoneSourceVersion::covering(manager.repository()->sourceList(), GeoZoneBox());
+    const GeoZoneBriefing briefing = GeoZoneBriefing::build(manager.catalog(), input);
+
+    // The zones entered in the order the path enters them, where, when and at which altitudes
+    const QList<const GeoZoneBriefing::Zone*> entered = briefing.zonesWith(GeoZoneBriefing::Involvement::Entered);
+    QCOMPARE(entered.count(), 2);
+    const GeoZoneBriefing::Zone &briefedCtr = *entered[0];
+    QCOMPARE(briefedCtr.identifier, QStringLiteral("CTR-1"));
+    QCOMPARE(briefedCtr.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(briefedCtr.country, QStringLiteral("CHE"));
+    QCOMPARE(briefedCtr.crossings.count(), 1);
+    const GeoZoneBriefing::Crossing &crossing = briefedCtr.crossings.constFirst();
+    QCOMPARE(crossing.entryItem, 1);
+    QVERIFY(qAbs(crossing.entryDistance - 800) < 2);
+    QVERIFY(qAbs(crossing.exitDistance - 1200) < 2);
+    QVERIFY(qAbs(crossing.entryTime.secsTo(start.addSecs(120))) <= 1);
+    QCOMPARE(crossing.pathAltitudeMin, 100.0);
+    QCOMPARE(crossing.pathAltitudeMax, 100.0);
+    QVERIFY(qIsNaN(crossing.zoneFloor));
+    QCOMPARE(crossing.zoneCeiling, 500.0);
+    QVERIFY(briefedCtr.authorities.join(QChar(u'\n')).contains(QStringLiteral("Skyguide")));
+    QVERIFY(briefedCtr.authorities.join(QChar(u'\n')).contains(QStringLiteral("ops@example.org")));
+    QCOMPARE(briefedCtr.message, QStringLiteral("Call the tower"));
+    QVERIFY(!briefedCtr.schedule.isEmpty());
+    // Active from 10:45 within the flight widened by the tolerance, 10:15 to 10:55
+    QVERIFY(briefedCtr.activeDuringFlight);
+    QCOMPARE(briefedCtr.activePeriods.count(), 1);
+    QCOMPARE(briefedCtr.activePeriods[0].start, _utc(QDate(2027, 1, 1), QTime(10, 45)));
+    QCOMPARE(briefedCtr.activePeriods[0].end, _utc(QDate(2027, 1, 1), QTime(10, 55)));
+    QVERIFY(briefedCtr.authorisation.has_value());
+    QCOMPARE(briefedCtr.authorisation->permit, QStringLiteral("P-77"));
+    QVERIFY(briefedCtr.authorisation->coversFlight);
+    QCOMPARE(briefedCtr.contentHash, ctr->data().contentHash);
+    QCOMPARE(entered[1]->displayName(), QStringLiteral("Prison"));
+    QCOMPARE(entered[1]->activePeriods, (QList<GeoZoneBriefing::Interval>{ { start.addSecs(-15 * 60), start.addSecs(25 * 60) } }));
+    QVERIFY(!entered[1]->authorisation);
+
+    // The zone only the return enters, and the restricted zone near the path
+    const QList<const GeoZoneBriefing::Zone*> contingencyZones = briefing.zonesWith(GeoZoneBriefing::Involvement::Contingency);
+    QCOMPARE(contingencyZones.count(), 1);
+    QCOMPARE(contingencyZones[0]->identifier, QStringLiteral("RET"));
+    QCOMPARE(contingencyZones[0]->contingencies, QStringList{ QStringLiteral("a return to rally point 1") });
+    const QList<const GeoZoneBriefing::Zone*> nearby = briefing.zonesWith(GeoZoneBriefing::Involvement::Nearby);
+    QCOMPARE(nearby.count(), 1);
+    QCOMPARE(nearby[0]->identifier, QStringLiteral("NEAR"));
+    QVERIFY(qAbs(nearby[0]->distance - 250) < 5);
+
+    // The version of the data
+    QCOMPARE(briefing.sources.count(), 1);
+    QVERIFY(!briefing.sources[0].contentHash.isEmpty());
+    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2026, 1, 22)), QStringLiteral("2601"));
+    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2026, 1, 21)), QStringLiteral("2513"));
+    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2020, 12, 31)), QStringLiteral("2014"));
+    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2021, 1, 28)), QStringLiteral("2101"));
+    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2019, 12, 31)), QStringLiteral("1913"));
+
+    // JSON with its schema and version
+    const QJsonObject json = GeoZoneBriefingExport::toJson(briefing);
+    QCOMPARE(json[QStringLiteral("schema")].toString(), QStringLiteral("qgc-geozone-briefing"));
+    QCOMPARE(json[QStringLiteral("version")].toInt(), 1);
+    QCOMPARE(json[QStringLiteral("mission")].toObject()[QStringLiteral("name")].toString(), QStringLiteral("Survey"));
+    QCOMPARE(json[QStringLiteral("mission")].toObject()[QStringLiteral("plannedStart")].toString(), QStringLiteral("2027-01-01T10:30:00Z"));
+    const QJsonArray zones = json[QStringLiteral("zones")].toArray();
+    QCOMPARE(zones.count(), 4);
+    const QJsonObject ctrJson = zones[0].toObject();
+    QCOMPARE(ctrJson[QStringLiteral("involvement")].toString(), QStringLiteral("entered"));
+    QCOMPARE(ctrJson[QStringLiteral("restriction")].toString(), QStringLiteral("req_authorisation"));
+    QCOMPARE(ctrJson[QStringLiteral("crossings")].toArray()[0].toObject()[QStringLiteral("entryItem")].toInt(), 1);
+    QVERIFY(ctrJson[QStringLiteral("crossings")].toArray()[0].toObject()[QStringLiteral("zoneFloor")].isNull());
+    QCOMPARE(ctrJson[QStringLiteral("activePeriods")].toArray()[0].toObject()[QStringLiteral("start")].toString(), QStringLiteral("2027-01-01T10:45:00Z"));
+    QCOMPARE(ctrJson[QStringLiteral("authorisation")].toObject()[QStringLiteral("permit")].toString(), QStringLiteral("P-77"));
+    QCOMPARE(ctrJson[QStringLiteral("contentHash")].toString(), QString::fromLatin1(ctr->data().contentHash.toHex()));
+    QVERIFY(ctrJson[QStringLiteral("distance")].isNull());
+    QCOMPARE(zones[2].toObject()[QStringLiteral("involvement")].toString(), QStringLiteral("contingency"));
+    QCOMPARE(zones[3].toObject()[QStringLiteral("involvement")].toString(), QStringLiteral("nearby"));
+    QVERIFY(zones[3].toObject()[QStringLiteral("distance")].isDouble());
+    const QJsonObject sourceJson = json[QStringLiteral("sources")].toArray()[0].toObject();
+    QCOMPARE(sourceJson[QStringLiteral("contentHash")].toString(), QString::fromLatin1(briefing.sources[0].contentHash.toHex()));
+    QVERIFY(sourceJson.contains(QStringLiteral("airacCycle")));
+
+    // The web page escapes the text of the zones
+    const QString html = GeoZoneBriefingExport::toHtml(briefing);
+    QVERIFY(html.startsWith(QStringLiteral("<!DOCTYPE html>")));
+    QVERIFY(html.contains(QStringLiteral("name=\"viewport\"")));
+    QVERIFY(!html.contains(QStringLiteral("<script")));
+    QVERIFY(html.contains(QStringLiteral("CTR &lt;script&gt;alert(1)&lt;/script&gt;")));
+    for (const QString &text : { QStringLiteral("Skyguide"), QStringLiteral("P-77"), QStringLiteral("Call the tower"), QStringLiteral("Prison"), QStringLiteral("NEAR"),
+                                 QStringLiteral("RET"), QString::fromLatin1(briefing.sources[0].contentHash.toHex()) }) {
+        QVERIFY2(html.contains(text), qPrintable(text));
+    }
+    QVERIFY(!html.contains(QStringLiteral("FAR")));
+
+    // A4 PDF
+    const QString pdfFile = dir.filePath(QStringLiteral("briefing.pdf"));
+    QVERIFY2(GeoZoneBriefingExport::write(briefing, pdfFile, GeoZoneBriefingExport::Format::Pdf, errorString), qPrintable(errorString));
+    QFile pdf(pdfFile);
+    QVERIFY(pdf.open(QIODevice::ReadOnly));
+    const QByteArray content = pdf.readAll();
+    QVERIFY(content.startsWith("%PDF-"));
+    QVERIFY(content.trimmed().endsWith("%%EOF"));
+    QVERIFY(content.contains("/Type /Page"));
+}
+
+void GeoZonePlanningTest::_testBriefingExport()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1000, 90), 200),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2500, 90), 200),
+    }), errorString), qPrintable(errorString));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(3500, 90), 2);
+
+    // The flight path is updated after the items
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    QTRY_COMPARE(check.crossedZones().count(), 2);
+
+    GeoZoneBriefingExport exporter(&manager);
+    exporter.setMissionController(missionController);
+    QCOMPARE(exporter.defaultFileName(), QStringLiteral("geozone-briefing.pdf"));
+    QVERIFY(!exporter.defaultFolder().isEmpty());
+
+    // The zones the mission enters after its first item
+    const QString jsonFile = dir.filePath(QStringLiteral("mission.json"));
+    QVERIFY2(exporter.exportBriefing(jsonFile), qPrintable(exporter.errorString()));
+    QFile file(jsonFile);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+    QCOMPARE(json[QStringLiteral("version")].toInt(), GeoZoneBriefingExport::jsonVersion);
+    const QJsonObject mission = json[QStringLiteral("mission")].toObject();
+    QCOMPARE(mission[QStringLiteral("itemCount")].toInt(), 2);
+    QVERIFY(mission[QStringLiteral("distanceMeters")].toDouble() > 3900);
+    QVERIFY(!mission[QStringLiteral("returnAssumptions")].toArray().isEmpty());
+    QVERIFY(mission[QStringLiteral("plannedStart")].isNull());
+    QStringList identifiers;
+    for (const QJsonValue &zone : json[QStringLiteral("zones")].toArray()) {
+        if (zone.toObject()[QStringLiteral("involvement")].toString() == QStringLiteral("entered")) {
+            identifiers.append(zone.toObject()[QStringLiteral("identifier")].toString());
+            QCOMPARE(zone.toObject()[QStringLiteral("crossings")].toArray()[0].toObject()[QStringLiteral("entryItem")].toInt(), 1);
+        }
+    }
+    QCOMPARE(identifiers, (QStringList{ QStringLiteral("A"), QStringLiteral("B") }));
+    QCOMPARE(json[QStringLiteral("sources")].toArray().count(), 1);
+
+    // PDF without an extension, errors reported
+    QVERIFY2(exporter.exportBriefing(dir.filePath(QStringLiteral("briefing"))), qPrintable(exporter.errorString()));
+    QVERIFY(QFileInfo(dir.filePath(QStringLiteral("briefing.pdf"))).size() > 0);
+    QVERIFY2(exporter.exportBriefing(dir.filePath(QStringLiteral("briefing.html"))), qPrintable(exporter.errorString()));
+    QVERIFY(!exporter.exportBriefing(dir.filePath(QStringLiteral("missing/briefing.json"))));
+    QVERIFY(!exporter.errorString().isEmpty());
 }
 
 void GeoZonePlanningTest::_testRoutePlanner()

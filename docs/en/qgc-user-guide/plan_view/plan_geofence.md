@@ -135,6 +135,28 @@ The indicator lists the **Recent Alerts** of the session, newest first, followed
 
 Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 geoid, within a few meters.
 
+### Pre-flight Briefing
+
+**Export Briefing...** in the Plan View **Geozones** panel or in the geozone banner above the map saves a briefing of the geozones of the planned mission. The file dialog proposes the folder and name of the open plan with `-briefing.pdf`; the extension of the file name chooses the format:
+
+- **PDF** (`.pdf`): an A4 document to print or take along, with the mission name, the date and page numbers on each page.
+- **Web page** (`.html`): a single file without external resources, which reads well on a phone and prints cleanly.
+- **JSON** (`.json`): the same content for other tools, see below.
+
+The briefing lists the mission (vehicle and firmware, planned start and estimated end, duration, distance, highest altitude, home and how the returns were modeled), then:
+
+- **Zones the flight path enters**, in the order the mission enters them: where (after which item, how far along the mission, the estimated times with a planned start), the altitudes flown inside against the zone floor and ceiling at the entry, when the zone is active during the flight (widened by 15 minutes like the mission check) and its published schedule, the vertical limits as published, the authority and its contacts, the message and conditions, U-space class, exemptions, your authorisation with whether it covers the flight, and the source and content hash of the zone.
+- **Zones only returns would enter**, with the returns and the items they would be flown from.
+- **Restricted zones within 500 m** of the flight path, or passed above or below it, with their distance.
+- **Data versions**: each source covering the mission with its format, file or feed, data (issue) date, the AIRAC cycle in effect at that date (not for live restrictions), its published validity, when it was last checked, and the hash of its content.
+
+The JSON file has `"schema": "qgc-geozone-briefing"` and `"version": 1`. The version increases when fields are removed or change meaning, not when fields are added. Times are ISO 8601 UTC, distances and altitudes meters (altitudes above mean sea level), unknown values `null`. The fields are:
+
+- `generated`, `generator`, `scheduleToleranceSeconds`, `nearbyDistanceMeters`.
+- `mission`: `name`, `planFile`, `vehicle`, `firmware`, `plannedStart`, `plannedEnd`, `durationSeconds`, `distanceMeters`, `maxAltitudeAMSL`, `maxAltitudeAboveHome`, `home` (`lat`, `lon`, `altitudeAMSL`), `itemCount`, `returnAssumptions` (texts).
+- `zones`: `involvement` (`entered`, `contingency` or `nearby`), `key`, `identifier`, `country`, `name`, `restriction` (`prohibited`, `req_authorisation`, `conditional`, `no_restriction`, `u_space` or `unknown`), `restrictionCode` (as published), `restrictionText`, `reasons`, `verticalLimits`, `schedule`, `activeDuringFlight`, `activePeriods` (`start`, `end`), `crossings` (`path`: empty for the flight path or what the vehicle does, like "the loiter at item 3", `entryItem` and `exitItem`: sequence number of the last item reached before, `entryDistance`, `exitDistance`, `entry` and `exit` (`lat`, `lon`), `entryTime`, `exitTime`, `pathAltitudeMin`, `pathAltitudeMax`, `zoneFloor`, `zoneCeiling`, `active`), `inArea`, `contingencies` (texts), `distance`, `passed` (`above`, `below` or `null`), `authorities` (texts), `message`, `conditions`, `otherReasonInfo`, `uSpaceClass`, `regulationExemption`, `authorisation` (`permit`, `validFrom`, `validTo`, `status`, `coversFlight`, or `null`), `source` and `contentHash` (hexadecimal).
+- `sources`: `key`, `name`, `format`, `provider`, `dataDate`, `loaded`, `checked`, `validFrom`, `validTo`, `airacCycle`, `contentHash` (hexadecimal).
+
 ### Geozone Settings
 
 Besides the sources, the **Geozones** page of the _Application Settings_ sets:

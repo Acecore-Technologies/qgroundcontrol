@@ -971,12 +971,17 @@ Item {
             map:                editorMap
             hiddenZoneCount:    geoZoneMapVisuals.hiddenZoneCount
             showCrossedZones:   geoZoneMissionBanner.crossedZones.length > 0
+            briefingEnabled:    true
 
             onManageRequested: {
                 dropPanel.hide()
                 mainWindow.showSettingsTool(qsTr("Geozones"))
             }
             onZoneSelected: dropPanel.hide()
+            onExportBriefingRequested: {
+                dropPanel.hide()
+                geoZoneMissionBanner.exportBriefing()
+            }
         }
     }
 

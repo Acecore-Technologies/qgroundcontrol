@@ -17,6 +17,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Map/GeoZoneMapModel.h
         Map/GeoZoneNearbyModel.cc
         Map/GeoZoneNearbyModel.h
+        Planning/GeoZoneBriefingExport.cc
+        Planning/GeoZoneBriefingExport.h
         Planning/GeoZoneFenceImporter.cc
         Planning/GeoZoneFenceImporter.h
         Planning/GeoZoneGuidedCheck.cc
