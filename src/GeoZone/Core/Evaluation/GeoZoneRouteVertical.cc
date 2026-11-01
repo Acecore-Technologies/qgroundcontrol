@@ -9,7 +9,7 @@
 
 #include "GeoZoneRouteVertical.h"
 #include "GeoZoneGeometry.h"
-#include "GeoZoneRouteVector.h"
+#include "GeoZoneVector.h"
 
 #include <algorithm>
 #include <cmath>

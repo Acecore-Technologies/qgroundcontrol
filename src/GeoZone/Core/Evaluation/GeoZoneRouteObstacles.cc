@@ -9,7 +9,7 @@
 
 #include "GeoZoneRouteObstacles.h"
 #include "GeoZoneBox.h"
-#include "GeoZoneRouteVector.h"
+#include "GeoZoneVector.h"
 
 #include <QtCore/QtMath>
 

@@ -105,7 +105,6 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneRouteObstacles.h
     Evaluation/GeoZoneRouteSearch.cc
     Evaluation/GeoZoneRouteSearch.h
-    Evaluation/GeoZoneRouteVector.h
     Evaluation/GeoZoneRouteVertical.cc
     Evaluation/GeoZoneRouteVertical.h
     Evaluation/GeoZoneSourceVersion.cc

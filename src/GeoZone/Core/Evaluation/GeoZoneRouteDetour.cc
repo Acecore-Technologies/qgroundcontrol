@@ -9,7 +9,7 @@
 
 #include "GeoZoneRouteDetour.h"
 #include "GeoZoneRouteGraph.h"
-#include "GeoZoneRouteVector.h"
+#include "GeoZoneVector.h"
 
 #include <QtCore/QSet>
 
