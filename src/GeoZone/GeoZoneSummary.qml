@@ -22,7 +22,8 @@ ColumnLayout {
 
     property int hiddenZoneCount: 0 ///< Smallest zones in the map view left out to limit the number of map items
 
-    readonly property var _geoZoneManager: QGroundControl.geoZoneManager
+    readonly property var _geoZoneManager:      QGroundControl.geoZoneManager
+    readonly property int _activeSourceCount:   _geoZoneManager.sources.count - _geoZoneManager.disabledSourceCount
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
@@ -30,8 +31,9 @@ ColumnLayout {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
         text:               _geoZoneManager.busy ? _geoZoneManager.progressText :
-                                (_geoZoneManager.sources.count === 1 ? qsTr("%1 zones from 1 source.").arg(_geoZoneManager.zoneCount) :
-                                                                      qsTr("%1 zones from %2 sources.").arg(_geoZoneManager.zoneCount).arg(_geoZoneManager.sources.count))
+                                (_activeSourceCount === 1 ? qsTr("%1 zones from 1 source.").arg(_geoZoneManager.zoneCount) :
+                                                            qsTr("%1 zones from %2 sources.").arg(_geoZoneManager.zoneCount).arg(_activeSourceCount)) +
+                                (_geoZoneManager.disabledSourceCount > 0 ? " " + qsTr("%n source(s) turned off.", "", _geoZoneManager.disabledSourceCount) : "")
     }
 
     QGCLabel {

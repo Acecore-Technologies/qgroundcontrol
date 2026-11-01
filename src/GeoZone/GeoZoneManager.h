@@ -42,6 +42,8 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
     Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
     Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged FINAL)
+    Q_PROPERTY(int                  hiddenRestrictions  READ hiddenRestrictions NOTIFY hiddenRestrictionsChanged FINAL)    ///< Bit mask of the restrictions not drawn on maps, 1 << GeoZone::Restriction
+    Q_PROPERTY(int                  disabledSourceCount READ disabledSourceCount NOTIFY zoneCountChanged FINAL)           ///< Sources whose zones are left out
     Q_PROPERTY(bool                 busy                READ busy               NOTIFY busyChanged FINAL)                 ///< Sources are being loaded or downloaded
     Q_PROPERTY(double               progress            READ progress           NOTIFY progressChanged FINAL)             ///< Fraction of the downloads received, negative when unknown
     Q_PROPERTY(QString              progressText        READ progressText       NOTIFY progressChanged FINAL)
@@ -98,8 +100,8 @@ public:
     ///         preferring the most restrictive
     Q_INVOKABLE QVariantList labelZones(const QGeoRectangle &region) const;
 
-    /// @return Zones whose horizontal projection contains the coordinate at any altitude, the most restrictive and
-    ///         active first
+    /// @return Zones shown on maps whose horizontal projection contains the coordinate at any altitude, the most
+    ///         restrictive and active first
     Q_INVOKABLE QVariantList zonesAt(const QGeoCoordinate &coordinate) const;
 
     /// @return Zones whose name or identifier contains the text, ignoring case, limited to maxResults. Names
@@ -124,6 +126,12 @@ public:
     QGeoRectangle boundingBox() const { return _catalog.boundingBox(); }
     bool visible() const;
     void setVisible(bool visible);
+    int hiddenRestrictions() const;
+    /// @return true if zones with the restriction are drawn on maps
+    Q_INVOKABLE bool restrictionVisible(int restriction) const { return (hiddenRestrictions() & (1 << restriction)) == 0; }
+    /// Shows or hides the zones with the restriction on maps. Checks and alerts still apply to them.
+    Q_INVOKABLE void setRestrictionVisible(int restriction, bool visible);
+    int disabledSourceCount() const;
     bool busy() const { return _repository->busy(); }
     double progress() const { return _repository->progress(); }
     QString progressText() const { return _repository->progressText(); }
@@ -156,6 +164,7 @@ signals:
     /// Zones became active or inactive with the time, see GeoZone::active
     void activeZonesChanged();
     void plannedStartChanged();
+    void hiddenRestrictionsChanged();
     void visibleChanged(bool visible);
     void busyChanged(bool busy);
     void progressChanged();

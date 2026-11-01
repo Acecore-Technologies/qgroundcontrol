@@ -32,6 +32,8 @@
 #include <QtCore/QUrl>
 #include <QtQml/QQmlEngine>
 
+#include <algorithm>
+
 QGC_LOGGING_CATEGORY(GeoZoneManagerLog, "qgc.geozone.geozonemanager")
 
 Q_APPLICATION_STATIC(GeoZoneManager, _geoZoneManager);
@@ -52,6 +54,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
 {
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
     (void) connect(settings->showZones(), &Fact::rawValueChanged, this, [this]() { emit visibleChanged(visible()); });
+    (void) connect(settings->hiddenRestrictions(), &Fact::rawValueChanged, this, &GeoZoneManager::hiddenRestrictionsChanged);
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);
@@ -129,10 +132,30 @@ void GeoZoneManager::setVisible(bool visible)
     SettingsManager::instance()->geoZoneSettings()->showZones()->setRawValue(visible);
 }
 
+int GeoZoneManager::hiddenRestrictions() const
+{
+    return SettingsManager::instance()->geoZoneSettings()->hiddenRestrictions()->rawValue().toInt();
+}
+
+void GeoZoneManager::setRestrictionVisible(int restriction, bool visible)
+{
+    const int bit = 1 << restriction;
+    const int hidden = visible ? (hiddenRestrictions() & ~bit) : (hiddenRestrictions() | bit);
+    SettingsManager::instance()->geoZoneSettings()->hiddenRestrictions()->setRawValue(hidden);
+}
+
+int GeoZoneManager::disabledSourceCount() const
+{
+    const QList<const GeoZoneSource*> sources = _repository->sourceList();
+    return static_cast<int>(std::count_if(sources.cbegin(), sources.cend(), [](const GeoZoneSource *source) { return !source->enabled(); }));
+}
+
 void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
 {
     const QGeoRectangle previousBoundingBox = _catalog.boundingBox();
-    _catalog.rebuild(_repository->sourceList());
+    QList<const GeoZoneSource*> sources = _repository->sourceList();
+    (void) sources.removeIf([](const GeoZoneSource *enabledSource) { return !enabledSource->enabled(); });
+    _catalog.rebuild(sources);
 
     const QList<GeoZone*> &zones = _catalog.zones();
     if (zones.isEmpty()) {
@@ -168,7 +191,10 @@ QVariantList GeoZoneManager::labelZones(const QGeoRectangle &region) const
 
 QVariantList GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
 {
-    return GeoZoneInfo::toVariantList(_catalog.zonesAt(coordinate));
+    QList<GeoZone*> zones = _catalog.zonesAt(coordinate);
+    const int hidden = hiddenRestrictions();
+    (void) zones.removeIf([hidden](const GeoZone *zone) { return (hidden & (1 << zone->restriction())) != 0; });
+    return GeoZoneInfo::toVariantList(zones);
 }
 
 QVariantList GeoZoneManager::searchZones(const QString &text, int maxResults) const

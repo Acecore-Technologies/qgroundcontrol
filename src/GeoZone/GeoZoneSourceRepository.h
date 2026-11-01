@@ -97,6 +97,9 @@ private:
     void _idle();
     void _setPending(int delta);
     void _saveIndex();
+    /// Appends a source to the list, enabled as stored
+    GeoZoneSource *_newSource(const QString &key, const QString &url, bool enabled = true);
+    void _sourceEnabledChanged(GeoZoneSource *source);
     void _reportStorageError(const QString &message);
 
     GeoZoneStore _store;

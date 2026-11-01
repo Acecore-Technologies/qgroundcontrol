@@ -65,6 +65,10 @@ ColumnLayout {
         showCrossedZones: root.showCrossedZones
     }
 
+    GeoZoneSourceSwitches {
+        Layout.preferredWidth: root._textWidth
+    }
+
     QGCLabel {
         Layout.preferredWidth:  root._textWidth
         text:                   qsTr("Click a zone on the map for its details, when not adding items.")

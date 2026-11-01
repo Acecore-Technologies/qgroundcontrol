@@ -29,6 +29,7 @@ constexpr const char *loadedAtKey = "loadedAt";
 constexpr const char *fileDateKey = "fileDate";
 constexpr const char *etagKey = "etag";
 constexpr const char *lastModifiedKey = "lastModified";
+constexpr const char *enabledKey = "enabled";
 constexpr const char *sourcesKey = "sources";
 constexpr const char *versionKey = "version";
 constexpr int indexVersion = 1;
@@ -99,6 +100,7 @@ GeoZoneStore::Index GeoZoneStore::readIndex() const
                 QDateTime::fromString(object.value(fileDateKey).toString(), Qt::ISODate),
                 object.value(etagKey).toString(),
                 object.value(lastModifiedKey).toString(),
+                object.value(enabledKey).toBool(true),
             });
         }
         index.status = IndexStatus::Ok;
@@ -154,6 +156,9 @@ bool GeoZoneStore::writeIndex(const QList<Entry> &entries, QString &errorString)
         }
         if (!entry.lastModified.isEmpty()) {
             object.insert(lastModifiedKey, entry.lastModified);
+        }
+        if (!entry.enabled) {
+            object.insert(enabledKey, false);
         }
         values.append(object);
     }

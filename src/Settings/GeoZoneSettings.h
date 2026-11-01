@@ -19,6 +19,7 @@ public:
     DEFINE_SETTING_NAME_GROUP()
 
     DEFINE_SETTINGFACT(showZones)
+    DEFINE_SETTINGFACT(hiddenRestrictions)
     DEFINE_SETTINGFACT(alertsEnabled)
     DEFINE_SETTINGFACT(audioAlerts)
     DEFINE_SETTINGFACT(logAlerts)

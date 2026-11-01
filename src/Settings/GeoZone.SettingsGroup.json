@@ -10,6 +10,13 @@
     "default":      true
 },
 {
+    "name":         "hiddenRestrictions",
+    "shortDesc":    "Restrictions hidden on maps",
+    "longDesc":     "Bit mask of the geozone restrictions which are not drawn on maps. Checks and alerts still apply to them.",
+    "type":         "uint32",
+    "default":      0
+},
+{
     "name":         "alertsEnabled",
     "shortDesc":    "Flight alerts",
     "longDesc":     "Alert when a connected vehicle approaches or enters an active restricted geozone or U-space airspace.",

@@ -29,6 +29,7 @@ DECLARE_SETTINGGROUP(GeoZone, "GeoZoneManager")
 }
 
 DECLARE_SETTINGSFACT(GeoZoneSettings, showZones)
+DECLARE_SETTINGSFACT(GeoZoneSettings, hiddenRestrictions)
 DECLARE_SETTINGSFACT(GeoZoneSettings, alertsEnabled)
 DECLARE_SETTINGSFACT(GeoZoneSettings, audioAlerts)
 DECLARE_SETTINGSFACT(GeoZoneSettings, logAlerts)

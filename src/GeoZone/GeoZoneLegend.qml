@@ -10,17 +10,20 @@
 import QtQuick
 import QtQuick.Layouts
 
+import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 
-/// Explains how the geozones are drawn on the maps
-GridLayout {
-    columns:        2
-    columnSpacing:  ScreenTools.defaultFontPixelWidth
-    rowSpacing:     ScreenTools.defaultFontPixelHeight / 4
+/// Explains how the geozones are drawn on the maps, with check boxes showing or hiding them by restriction. Hidden
+/// zones are still checked and alerted.
+ColumnLayout {
+    id:         root
+    spacing:    ScreenTools.defaultFontPixelHeight / 4
 
     property bool showCrossedZones: false   ///< Includes the outline of zones crossed by the mission
+
+    readonly property var _geoZoneManager: QGroundControl.geoZoneManager
 
     component Swatch: Rectangle {
         property int    restriction
@@ -33,37 +36,68 @@ GridLayout {
         border.width:           active ? 2 : 1
     }
 
-    Swatch { restriction: GeoZone.Prohibited }
-    QGCLabel { text: qsTr("Prohibited") }
+    component RestrictionRow: RowLayout {
+        id:         restrictionRow
+        spacing:    ScreenTools.defaultFontPixelWidth
 
-    Swatch { restriction: GeoZone.ReqAuthorisation }
-    QGCLabel { text: qsTr("Authorisation required") }
+        required property int       restriction
+        required property string    text
 
-    Swatch { restriction: GeoZone.Conditional }
-    QGCLabel { text: qsTr("Conditional") }
+        readonly property bool _shown: (root._geoZoneManager.hiddenRestrictions & (1 << restriction)) === 0
 
-    Swatch { restriction: GeoZone.USpace }
-    QGCLabel { text: qsTr("U-space") }
+        QGCCheckBox {
+            checked:    restrictionRow._shown
+            onClicked:  root._geoZoneManager.setRestrictionVisible(restrictionRow.restriction, checked)
+        }
 
-    Swatch { restriction: GeoZone.NoRestriction }
-    QGCLabel { text: qsTr("No restriction") }
+        Swatch {
+            restriction:    restrictionRow.restriction
+            opacity:        restrictionRow._shown ? 1 : 0.3
+        }
 
-    Swatch {
-        restriction:    GeoZone.Prohibited
-        active:         false
+        QGCLabel { text: restrictionRow.text }
     }
-    QGCLabel { text: qsTr("Faint: not active now") }
 
-    Rectangle {
-        Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight
-        Layout.preferredHeight: ScreenTools.defaultFontPixelHeight
-        color:                  "transparent"
-        border.color:           GeoZoneStyle.highlightColor
-        border.width:           3
-        visible:                showCrossedZones
+    RestrictionRow { restriction: GeoZone.Prohibited;       text: qsTr("Prohibited") }
+    RestrictionRow { restriction: GeoZone.ReqAuthorisation; text: qsTr("Authorisation required") }
+    RestrictionRow { restriction: GeoZone.Conditional;      text: qsTr("Conditional") }
+    RestrictionRow { restriction: GeoZone.USpace;           text: qsTr("U-space") }
+    RestrictionRow { restriction: GeoZone.NoRestriction;    text: qsTr("No restriction") }
+    RestrictionRow { restriction: GeoZone.Unknown;          text: qsTr("Unknown restriction") }
+
+    QGCCheckBox {
+        id:         checkBoxMetrics
+        visible:    false
     }
-    QGCLabel {
-        text:       qsTr("White outline: crossed by the mission")
-        visible:    showCrossedZones
+
+    // Aligned with the swatches of the restrictions
+    GridLayout {
+        columns:        3
+        columnSpacing:  ScreenTools.defaultFontPixelWidth
+        rowSpacing:     root.spacing
+
+        Item { Layout.preferredWidth: checkBoxMetrics.implicitWidth }
+        Swatch {
+            restriction:    GeoZone.Prohibited
+            active:         false
+        }
+        QGCLabel { text: qsTr("Faint: not active now") }
+
+        Item {
+            Layout.preferredWidth:  checkBoxMetrics.implicitWidth
+            visible:                root.showCrossedZones
+        }
+        Rectangle {
+            Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight
+            Layout.preferredHeight: ScreenTools.defaultFontPixelHeight
+            color:                  "transparent"
+            border.color:           GeoZoneStyle.highlightColor
+            border.width:           3
+            visible:                root.showCrossedZones
+        }
+        QGCLabel {
+            text:       qsTr("White outline: crossed by the mission")
+            visible:    root.showCrossedZones
+        }
     }
 }

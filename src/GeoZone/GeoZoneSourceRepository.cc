@@ -100,6 +100,9 @@ bool GeoZoneSourceRepository::loadFile(const QString &fileName, QString &errorSt
         return false;
     }
     errorString.clear();
+    if (GeoZoneSource *const loaded = source(job.key)) {
+        loaded->setEnabled(true);
+    }
     emit userLoaded();
     return true;
 }
@@ -315,8 +318,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         qCDebug(GeoZoneManagerLog) << "Zones unchanged" << job.key;
     } else {
         if (!source) {
-            source = new GeoZoneSource(job.key, job.url, this);
-            _sources->append(source);
+            source = _newSource(job.key, job.url);
         }
         emit sourceAboutToChange(source);
         source->setResult(loadResult.result, job.loadedAt, job.fileDate);
@@ -329,6 +331,10 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     }
 
     _updateStoredEntry(job, loadResult);
+    // Adding a disabled source again shows it
+    if (job.request == GeoZoneLoader::Request::Add) {
+        source->setEnabled(true);
+    }
     updateValidity();
 
     if (unchanged) {
@@ -363,6 +369,9 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     entry.fileName = job.storedFileName;
     entry.loadedAt = job.loadedAt;
     entry.fileDate = job.fileDate;
+    if (const GeoZoneSource *const source = this->source(job.key)) {
+        entry.enabled = source->enabled();
+    }
     if (job.downloaded) {
         entry.etag = job.etag;
         entry.lastModified = job.lastModified;
@@ -491,10 +500,9 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         job.generation = ++_generations[job.key];
 
         // Keep the order of the sources while they load
-        GeoZoneSource *const placeholder = new GeoZoneSource(job.key, job.url, this);
+        GeoZoneSource *const placeholder = _newSource(job.key, job.url, entry.enabled);
         placeholder->setStoredDates(job.loadedAt, job.fileDate);
         placeholder->setValidators(job.etag, job.lastModified);
-        _sources->append(placeholder);
         _storedEntries.insert(job.key, entry);
         jobs.append(job);
     }
@@ -509,6 +517,27 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
     for (const GeoZoneLoader::Job &job : std::as_const(jobs)) {
         _startLoad(job, mode);
     }
+}
+
+GeoZoneSource *GeoZoneSourceRepository::_newSource(const QString &key, const QString &url, bool enabled)
+{
+    GeoZoneSource *const source = new GeoZoneSource(key, url, this);
+    source->setEnabled(enabled);
+    (void) connect(source, &GeoZoneSource::enabledChanged, this, [this, source]() { _sourceEnabledChanged(source); });
+    _sources->append(source);
+    return source;
+}
+
+void GeoZoneSourceRepository::_sourceEnabledChanged(GeoZoneSource *source)
+{
+    // The zones of the source join or leave the maps and checks
+    emit sourceAboutToChange(source);
+    emit sourceChanged(source);
+    if (const auto it = _storedEntries.find(source->key()); (it != _storedEntries.end()) && !_storeReadOnly) {
+        it->enabled = source->enabled();
+        _saveIndex();
+    }
+    updateValidity();
 }
 
 void GeoZoneSourceRepository::_saveIndex()
@@ -538,7 +567,7 @@ void GeoZoneSourceRepository::updateValidity()
     for (int i = 0; i < _sources->count(); i++) {
         GeoZoneSource *const source = _sources->value<GeoZoneSource*>(i);
         source->updateValidity(now);
-        if (!source->validityText().isEmpty()) {
+        if (source->enabled() && !source->validityText().isEmpty()) {
             lines.append(QStringLiteral("%1: %2").arg(source->name(), source->validityText()));
         }
     }

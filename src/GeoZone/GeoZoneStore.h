@@ -28,6 +28,7 @@ public:
         QDateTime fileDate;
         QString etag;
         QString lastModified;
+        bool enabled = true;    ///< See GeoZoneSource::enabled
     };
 
     enum class IndexStatus : quint8 {

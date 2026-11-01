@@ -40,6 +40,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
+    Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
@@ -65,6 +66,8 @@ public:
     QString warningText() const;
     bool busy() const { return _busy; }
     QString errorString() const { return _errorString; }
+    bool enabled() const { return _enabled; }
+    void setEnabled(bool enabled);
 
     const QList<GeoZone*> &zones() const { return _zones; }
     /// Volumes sharing a footprint have one shape
@@ -108,6 +111,7 @@ signals:
     void validityChanged();
     void busyChanged(bool busy);
     void errorStringChanged();
+    void enabledChanged();
 
 private:
     void _clearZones();
@@ -129,6 +133,7 @@ private:
     QDateTime _validTo;
     QString _validityText;
     bool _busy = false;
+    bool _enabled = true;
     QString _errorString;
     QByteArray _contentHash;
     QString _etag;

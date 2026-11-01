@@ -92,6 +92,7 @@ qt_add_qml_module(GeoZoneModule
         GeoZoneRouteDialog.qml
         GeoZoneSearch.qml
         GeoZoneSettingsPage.qml
+        GeoZoneSourceSwitches.qml
         GeoZoneSourcesPanel.qml
         GeoZoneStyle.qml
         GeoZoneSummary.qml

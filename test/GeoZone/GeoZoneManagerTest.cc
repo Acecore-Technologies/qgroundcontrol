@@ -73,6 +73,18 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         QCOMPARE(manager.zoneCount(), 6);
         QVERIFY(manager.storedFileName(ed318Source->key()) != previousStoredFile);
         QCOMPARE(storedFiles().count(), 3);
+
+        // Zones of sources turned off are left out, loading the file again turns it on
+        GeoZoneSource *const ed269Source = manager.sources()->value<GeoZoneSource*>(1);
+        ed269Source->setEnabled(false);
+        QCOMPARE(manager.zoneCount(), 3);
+        QCOMPARE(manager.disabledSourceCount(), 1);
+        QVERIFY(std::none_of(manager.zoneList().cbegin(), manager.zoneList().cend(), [](const GeoZone *zone) { return zone->sourceKey() == QStringLiteral("other.json"); }));
+        QVERIFY2(manager.loadFile(ed269File, errorString), qPrintable(errorString));
+        QVERIFY(ed269Source->enabled());
+        QCOMPARE(manager.zoneCount(), 6);
+        ed269Source->setEnabled(false);
+        QCOMPARE(storedFiles().count(), 3);
     }
 
     // Unreferenced files are removed on startup
@@ -85,6 +97,10 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         GeoZoneManager manager(storageDir.path());
         manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
         QCOMPARE(manager.sources()->count(), 2);
+        // Still turned off
+        QVERIFY(!manager.sources()->value<GeoZoneSource*>(1)->enabled());
+        QCOMPARE(manager.zoneCount(), 3);
+        manager.sources()->value<GeoZoneSource*>(1)->setEnabled(true);
         QCOMPARE(manager.zoneCount(), 6);
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("zones.json"));
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-318"));
@@ -725,6 +741,11 @@ void GeoZoneManagerTest::_testZoneSearch()
     QCOMPARE(identifiers(manager.zonesAt(center.atDistanceAndAzimuth(500, 90))), QStringList({ QStringLiteral("GZW1"), QStringLiteral("LSZH") }));
     QCOMPARE(identifiers(manager.zonesAt(center)), QStringList({ QStringLiteral("LSZH") }));
     QVERIFY(manager.zonesAt(QGeoCoordinate(48, 9)).isEmpty());
+    // Zones hidden on maps aren't picked
+    const auto restoreRestrictions = qScopeGuard([&manager]() { manager.setRestrictionVisible(GeoZone::Prohibited, true); });
+    manager.setRestrictionVisible(GeoZone::Prohibited, false);
+    QCOMPARE(identifiers(manager.zonesAt(center.atDistanceAndAzimuth(500, 90))), QStringList({ QStringLiteral("LSZH") }));
+    manager.setRestrictionVisible(GeoZone::Prohibited, true);
 
     // Names or identifiers containing the text, those starting with it first, then the most restrictive
     QCOMPARE(identifiers(manager.searchZones(QStringLiteral("zurich"))), QStringList({ QStringLiteral("LSZH"), QStringLiteral("GZW1") }));

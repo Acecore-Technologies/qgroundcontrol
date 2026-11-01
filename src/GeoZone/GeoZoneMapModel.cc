@@ -78,6 +78,7 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_removeSource);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_refresh);
     (void) connect(_manager, &GeoZoneManager::activeZonesChanged, this, &GeoZoneMapModel::_updateActive);
+    (void) connect(_manager, &GeoZoneManager::hiddenRestrictionsChanged, this, &GeoZoneMapModel::_refresh);
 }
 
 GeoZoneMapModel::~GeoZoneMapModel()
@@ -113,6 +114,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     }
     const double marginX = viewWidth * viewMargin;
     const double marginY = views.first().height() * viewMargin;
+    const int hiddenRestrictions = _manager->hiddenRestrictions();
     QList<GeoZoneMercatorBounds> nearViews;
     QList<const GeoZoneShape*> nearShapes;
     QSet<const GeoZoneShape*> nearShapeSet;
@@ -126,7 +128,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         const double north = (nearView.minY <= 0) ? 90.0 : northWest.latitude();
         const double south = (nearView.maxY >= 1) ? -90.0 : southEast.latitude();
         for (const GeoZoneShape *shape : _manager->shapesInArea(south, northWest.longitude(), north, southEast.longitude())) {
-            if (!nearShapeSet.contains(shape)) {
+            if (!nearShapeSet.contains(shape) && !(hiddenRestrictions & (1 << shape->zone()->restriction()))) {
                 nearShapeSet.insert(shape);
                 nearShapes.append(shape);
             }

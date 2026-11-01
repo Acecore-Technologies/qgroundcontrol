@@ -43,6 +43,11 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 spacing:            _margin
 
+                QGCCheckBox {
+                    checked:    object.enabled
+                    onClicked:  object.enabled = checked
+                }
+
                 QGCLabel {
                     Layout.fillWidth:   true
                     elide:              Text.ElideRight
@@ -62,6 +67,15 @@ ColumnLayout {
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               object.detailsText !== "" ? object.detailsText : (object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
                 textFormat:         Text.PlainText
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                font.italic:        true
+                text:               qsTr("Turned off: its zones are not shown, checked or alerted.")
+                visible:            !object.enabled
             }
 
             QGCLabel {

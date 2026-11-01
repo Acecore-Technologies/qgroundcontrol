@@ -125,6 +125,10 @@ Item {
 
                         GeoZoneLegend { }
 
+                        GeoZoneSourceSwitches {
+                            Layout.fillWidth: true
+                        }
+
                         QGCLabel {
                             text:           qsTr("Click a zone on the map for its details.")
                             font.pointSize: ScreenTools.smallFontPointSize

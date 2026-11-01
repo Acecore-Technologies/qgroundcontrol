@@ -576,6 +576,16 @@ void GeoZonePlanningTest::_testMapModel()
     QCOMPARE(model.polygons()->count(), 0);
     QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
 
+    // Restrictions hidden on maps leave out their shapes and labels
+    const auto restoreRestrictions = qScopeGuard([&manager]() { manager.setRestrictionVisible(GeoZone::Conditional, true); });
+    QVERIFY(!model.labelZones().isEmpty());
+    manager.setRestrictionVisible(GeoZone::Conditional, false);
+    QVERIFY(!manager.restrictionVisible(GeoZone::Conditional));
+    QCOMPARE(model.circles()->count(), 0);
+    QVERIFY(model.labelZones().isEmpty());
+    manager.setRestrictionVisible(GeoZone::Conditional, true);
+    QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
+
     model.setView(QGeoRectangle(), 16, true);
     QCOMPARE(model.circles()->count(), 0);
     QCOMPARE(model.labelZones().count(), 0);

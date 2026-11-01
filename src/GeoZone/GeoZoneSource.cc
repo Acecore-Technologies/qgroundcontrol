@@ -55,6 +55,14 @@ GeoZoneSource::GeoZoneSource(const QString &key, const QString &url, QObject *pa
 {
 }
 
+void GeoZoneSource::setEnabled(bool enabled)
+{
+    if (enabled != _enabled) {
+        _enabled = enabled;
+        emit enabledChanged();
+    }
+}
+
 GeoZoneSource::~GeoZoneSource()
 {
     _clearZones();
