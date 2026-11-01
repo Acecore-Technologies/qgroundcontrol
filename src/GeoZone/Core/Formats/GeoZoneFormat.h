@@ -33,7 +33,8 @@ public:
     /// @return true for short-lived restrictions, refreshed and outdated after hours rather than days
     virtual bool isLive() const { return false; }
 
-    /// XML formats parse whole documents with parseXml(), JSON formats one feature at a time
+    /// XML formats parse whole documents with parseXml(), JSON formats one feature at a time. parseXml() stops
+    /// between features once GeoZoneParserUtils::cancelled().
     virtual bool isXml() const { return false; }
     /// @return true if an XML document with the root element is in this format
     virtual bool detectXml(QStringView rootElement, QStringView namespaceUri) const;

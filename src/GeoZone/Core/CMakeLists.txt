@@ -2,6 +2,7 @@
 # storage, and the evaluation of positions and paths. It only depends on Qt, QGroundControl connects it to the
 # application through GeoZoneEnvironment.
 qt_add_library(GeoZoneCore STATIC
+    GeoZoneCancelToken.h
     GeoZoneEnvironment.cc
     GeoZoneEnvironment.h
     Model/GeoZone.cc
@@ -36,7 +37,6 @@ qt_add_library(GeoZoneCore STATIC
     Formats/GeoZoneParserUtils.h
     Formats/GeoZoneZip.cc
     Formats/GeoZoneZip.h
-    Sources/GeoZoneCancelToken.h
     Sources/GeoZoneDownloader.cc
     Sources/GeoZoneDownloader.h
     Sources/GeoZoneFeedFetch.cc

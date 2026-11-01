@@ -38,6 +38,23 @@ LanguageScope::~LanguageScope()
     t_language.clear();
 }
 
+thread_local const GeoZoneCancelToken *t_cancelToken = nullptr;
+
+CancelScope::CancelScope(const GeoZoneCancelToken &cancelToken)
+{
+    t_cancelToken = &cancelToken;
+}
+
+CancelScope::~CancelScope()
+{
+    t_cancelToken = nullptr;
+}
+
+bool cancelled()
+{
+    return t_cancelToken && t_cancelToken->isCancelled();
+}
+
 /// Returns text from either a plain string or an ED-318 localized text array ([{ "text": "...", "lang": "en-GB" }])
 QString _text(const QJsonValue &value)
 {

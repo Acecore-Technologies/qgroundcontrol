@@ -44,7 +44,7 @@ bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &
     return parse(file.readAll(), result, errorString);
 }
 
-bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &errorString, Format formatHint)
+bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &errorString, const Options &options)
 {
     QXmlStreamReader reader(xml);
     while (!reader.atEnd() && !reader.isStartElement()) {
@@ -76,7 +76,7 @@ bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &er
     }
 
     // The format expected from the address first
-    const GeoZoneFormat *hinted = GeoZoneFormat::find(formatHint);
+    const GeoZoneFormat *hinted = GeoZoneFormat::find(options.formatHint);
     const GeoZoneFormat *format = (hinted && hinted->isXml() && hinted->detectXml(rootElement, namespaceUri)) ? hinted : nullptr;
     for (const GeoZoneFormat *candidate : GeoZoneFormat::formats()) {
         if (!format && candidate->isXml() && candidate->detectXml(rootElement, namespaceUri)) {
@@ -87,15 +87,43 @@ bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &er
         errorString = tr("Unsupported XML document (%1).").arg(rootElement);
         return false;
     }
-    return format->parseXml(xml, result, errorString);
+    if (!_acceptsFormat(format, options, errorString)) {
+        return false;
+    }
+    if (!format->parseXml(xml, result, errorString)) {
+        if (cancelled()) {
+            result = Result();
+            errorString = tr("The parse was canceled.");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool GeoZoneParser::_acceptsFormat(const GeoZoneFormat *format, const Options &options, QString &errorString)
+{
+    if ((options.onlyFormat == Format::Unknown) || (format->format() == options.onlyFormat)) {
+        return true;
+    }
+    errorString = tr("The file is in the %1 format instead of %2.").arg(format->name(), formatToString(options.onlyFormat));
+    return false;
 }
 
 bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint, const QString &language)
 {
+    Options options;
+    options.formatHint = formatHint;
+    options.language = language;
+    return parse(bytes, result, errorString, options);
+}
+
+bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString, const Options &options)
+{
     result = Result();
     errorString.clear();
 
-    const LanguageScope languageScope(language);
+    const LanguageScope languageScope(options.language);
+    const CancelScope cancelScope(options.cancelToken);
 
     // Several national feeds are published with a UTF-8 byte order mark which QJsonDocument rejects. The bytes of
     // large files are used in place, without copies.
@@ -103,7 +131,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     const QByteArray json = QByteArray::fromRawData(bytes.constData() + bomSize, bytes.size() - bomSize);
     const auto firstCharacter = std::find_if_not(json.cbegin(), json.cend(), [](char c) { return std::isspace(static_cast<unsigned char>(c)); });
     if ((firstCharacter != json.cend()) && (*firstCharacter == '<')) {
-        return _parseXml(json, result, errorString, formatHint);
+        return _parseXml(json, result, errorString, options);
     }
 
     QJsonParseError parseError;
@@ -130,27 +158,6 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     }
     const QJsonArray features = featuresValue.toArray();
 
-    // Features are hashed in their binary CBOR form, which is much faster to write than JSON text and like it doesn't
-    // depend on the order of the keys and the whitespace of the document. The hashes are only compared within a
-    // session and with parse caches of the same parser version, they aren't persisted otherwise.
-    QList<QByteArray> featureHashes;
-    featureHashes.reserve(features.count());
-    for (const QJsonValue &feature : features) {
-        featureHashes.append(QCryptographicHash::hash(QCborValue::fromJsonValue(feature).toCbor(), QCryptographicHash::Sha1));
-    }
-    QCryptographicHash contentHash(QCryptographicHash::Sha1);
-    for (const QByteArray &featureHash : std::as_const(featureHashes)) {
-        contentHash.addData(featureHash);
-    }
-    // In key order, the order of a hash differs between runs
-    QStringList companionKeys = result.companions.keys();
-    companionKeys.sort();
-    for (const QString &key : std::as_const(companionKeys)) {
-        contentHash.addData(key.toUtf8());
-        contentHash.addData(result.companions.value(key).version.toUtf8());
-    }
-    result.contentHash = contentHash.result();
-
     // A WFS response the server limited, which misses zones
     const double matched = _number(root.value(QStringLiteral("numberMatched")));
     const double returned = _number(root.value(QStringLiteral("numberReturned")));
@@ -158,9 +165,12 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         result.missingFeatures = static_cast<int>((std::min)(matched - returned, static_cast<double>(std::numeric_limits<int>::max())));
     }
 
-    const GeoZoneFormat *const format = GeoZoneFormat::detectJson(root, features, formatHint);
+    const GeoZoneFormat *const format = GeoZoneFormat::detectJson(root, features, options.formatHint);
     if (!format) {
         errorString = tr("The file is not in a supported geozone format. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces and the FAA, DiPUL and IGN GeoJSON are supported.");
+        return false;
+    }
+    if (!_acceptsFormat(format, options, errorString)) {
         return false;
     }
     result.format = format->format();
@@ -178,10 +188,19 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         result.validTo = _dateTime(metadata.value(QStringLiteral("validTo")));
     }
 
-    for (qsizetype i = 0; i < features.count(); i++) {
-        const QJsonValue featureValue = features[i];
+    // Features are hashed in their binary CBOR form, which is much faster to write than JSON text and like it doesn't
+    // depend on the order of the keys and the whitespace of the document. The hashes are only compared within a
+    // session and with parse caches of the same parser version, they aren't persisted otherwise.
+    QCryptographicHash contentHash(QCryptographicHash::Sha1);
+    for (const QJsonValue &featureValue : features) {
+        if (cancelled()) {
+            result = Result();
+            errorString = tr("The parse was canceled.");
+            return false;
+        }
         GeoZone::Data zone;
-        zone.contentHash = featureHashes[i];
+        zone.contentHash = QCryptographicHash::hash(QCborValue::fromJsonValue(featureValue).toCbor(), QCryptographicHash::Sha1);
+        contentHash.addData(zone.contentHash);
         if (format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone)) {
             zone.issues.removeDuplicates();
             for (const QString &issue : std::as_const(zone.issues)) {
@@ -193,6 +212,15 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
             result.skippedFeatures++;
         }
     }
+
+    // In key order, the order of a hash differs between runs
+    QStringList companionKeys = result.companions.keys();
+    companionKeys.sort();
+    for (const QString &key : std::as_const(companionKeys)) {
+        contentHash.addData(key.toUtf8());
+        contentHash.addData(result.companions.value(key).version.toUtf8());
+    }
+    result.contentHash = contentHash.result();
 
     // An empty list from a web service means no zones are in the area or in effect
     if (result.zones.isEmpty() && !format->acceptsEmpty()) {

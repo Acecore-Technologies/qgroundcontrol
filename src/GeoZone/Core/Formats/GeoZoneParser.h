@@ -18,8 +18,11 @@
 #include <QtCore/QLoggingCategory>
 
 #include "GeoZone.h"
+#include "GeoZoneCancelToken.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneParserLog)
+
+class GeoZoneFormat;
 
 /// Parses UAS geographical zone files in the EUROCAE ED-269 (JSON) and ED-318 (GeoJSON) formats, and the FAA
 /// temporary flight restrictions GeoJSON.
@@ -60,12 +63,20 @@ public:
         Companions companions;      ///< Of a composite document, see composite()
     };
 
+    /// How parse() reads a document
+    struct Options {
+        Format formatHint = Format::Unknown;    ///< WFS formats like FaaTfr accept an empty feature list from their server as a valid list
+        QString language;                       ///< Code of the preferred language of localized texts, English is used otherwise
+        Format onlyFormat = Format::Unknown;    ///< Documents in another format fail before their features are read, Unknown for any
+        GeoZoneCancelToken cancelToken;         ///< Checked between features, the parse fails once it is canceled
+    };
+
     /// @return A document with its companion documents, which parse() reads like the document with the companions
     static QByteArray composite(const QJsonObject &document, const Companions &companions);
 
     static bool parseFile(const QString &fileName, Result &result, QString &errorString);
-    /// @param formatHint WFS formats like FaaTfr accept an empty feature list from their server as a valid list
-    /// @param language Code of the preferred language of localized texts, English is used otherwise
+    static bool parse(const QByteArray &bytes, Result &result, QString &errorString, const Options &options);
+    /// See Options
     static bool parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint = Format::Unknown,
                       const QString &language = QString());
 
@@ -73,5 +84,7 @@ public:
 
 private:
     /// Parses with the XML format recognizing the root element, the hinted one first
-    static bool _parseXml(const QByteArray &xml, Result &result, QString &errorString, Format formatHint);
+    static bool _parseXml(const QByteArray &xml, Result &result, QString &errorString, const Options &options);
+    /// @return true if the options accept documents in the format
+    static bool _acceptsFormat(const GeoZoneFormat *format, const Options &options, QString &errorString);
 };

@@ -128,6 +128,9 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 titleRead = true;
             }
             if (name == QLatin1String("Airspace")) {
+                if (cancelled()) {
+                    return false;
+                }
                 inAirspace = true;
                 zone = GeoZone::Data();
                 type.clear();

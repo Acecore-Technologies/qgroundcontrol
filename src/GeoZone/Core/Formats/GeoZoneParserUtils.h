@@ -34,6 +34,15 @@ struct LanguageScope {
     ~LanguageScope();
 };
 
+/// Sets the cancel token of the parse running on this thread, which formats check between features
+struct CancelScope {
+    explicit CancelScope(const GeoZoneCancelToken &cancelToken);
+    ~CancelScope();
+};
+
+/// @return true if the parse running on this thread was canceled
+bool cancelled();
+
 /// Returns text from either a plain string or an ED-318 localized text array ([{ "text": "...", "lang": "en-GB" }])
 QString _text(const QJsonValue &value);
 

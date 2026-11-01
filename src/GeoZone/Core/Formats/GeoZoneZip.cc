@@ -211,32 +211,48 @@ QByteArray largestFile(const QByteArray &archive, const QStringList &suffixes, q
 
 QList<File> files(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString)
 {
-    errorString.clear();
-    const std::optional<QList<Entry>> entries = wantedEntries(archive, suffixes, errorString);
-    if (!entries) {
+    QList<File> result;
+    if (!forEachFile(archive, suffixes, maxBytes, errorString, [&result](const File &file) { result.append(file); return true; })) {
         return {};
     }
-    QList<File> result;
-    qint64 remaining = maxBytes;
-    for (const Entry &entry : *entries) {
-        if (!supported(entry, errorString)) {
-            return {};
-        }
-        // The declared sizes count against the limit before inflating, the inflated sizes are checked again
-        if (entry.size > remaining) {
-            errorString = tr("The files in the zip archive are too large.");
-            return {};
-        }
-        QByteArray data = entryData(archive, entry, remaining, errorString);
-        if (data.isEmpty() && !errorString.isEmpty()) {
-            return {};
-        }
-        remaining -= data.size();
-        result.append(File{ entry.name, std::move(data) });
-    }
-    // The largest first, usually the data and not metadata
-    std::stable_sort(result.begin(), result.end(), [](const File &a, const File &b) { return a.data.size() > b.data.size(); });
     return result;
+}
+
+bool forEachFile(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString,
+                 const std::function<bool(const File &file)> &callback)
+{
+    errorString.clear();
+    std::optional<QList<Entry>> entries = wantedEntries(archive, suffixes, errorString);
+    if (!entries) {
+        return false;
+    }
+    // The declared sizes count against the limit before inflating, the inflated sizes are checked again
+    qint64 declaredBytes = 0;
+    for (const Entry &entry : std::as_const(*entries)) {
+        if (!supported(entry, errorString)) {
+            return false;
+        }
+        declaredBytes += entry.size;
+    }
+    if (declaredBytes > maxBytes) {
+        errorString = tr("The files in the zip archive are too large.");
+        return false;
+    }
+
+    // The largest first, usually the data and not metadata
+    std::stable_sort(entries->begin(), entries->end(), [](const Entry &a, const Entry &b) { return a.size > b.size; });
+    qint64 remaining = maxBytes;
+    for (const Entry &entry : std::as_const(*entries)) {
+        File file{ entry.name, entryData(archive, entry, remaining, errorString) };
+        if (file.data.isEmpty() && !errorString.isEmpty()) {
+            return false;
+        }
+        remaining -= file.data.size();
+        if (!callback(file)) {
+            break;
+        }
+    }
+    return true;
 }
 
 } // namespace GeoZoneZip

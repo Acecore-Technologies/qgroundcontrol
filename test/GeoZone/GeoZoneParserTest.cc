@@ -18,6 +18,17 @@ using namespace GeoZoneTestHelpers;
 
 namespace {
 
+/// Canceled by cancelOnSkippedFeature
+const GeoZoneCancelToken *s_cancelOnSkip = nullptr;
+
+/// Cancels s_cancelOnSkip while the parser logs a feature it skips, which happens between features
+void cancelOnSkippedFeature(QtMsgType, const QMessageLogContext &, const QString &message)
+{
+    if (s_cancelOnSkip && message.contains(QStringLiteral("Skipping feature"))) {
+        s_cancelOnSkip->cancel();
+    }
+}
+
 
 /// Replaces a random value in the JSON tree with one of another type or an extreme value
 QJsonValue _mutateJson(const QJsonValue &value, QRandomGenerator &random, int depth = 0)
@@ -942,4 +953,56 @@ void GeoZoneParserTest::_testXmlAndPackages()
     QCOMPARE(files.count(), 3);
     QVERIFY(files.first().data.size() >= files.last().data.size());
 #endif
+}
+
+void GeoZoneParserTest::_testParseCancel()
+{
+    // The first feature has no geometry, the parser logs it before reading the others
+    QJsonArray features{ QJsonObject{ { "identifier", "NOGEOMETRY" }, { "restriction", "PROHIBITED" }, { "geometry", QJsonArray() } } };
+    for (int i = 0; i < 1000; i++) {
+        features.append(_circleFeature(QStringLiteral("Z%1").arg(i), QStringLiteral("PROHIBITED"), QGeoCoordinate(47 + ((i % 100) * 0.01), 8 + ((i / 100) * 0.01)), 500));
+    }
+    const QByteArray document = QJsonDocument(QJsonObject{ { "features", features } }).toJson(QJsonDocument::Compact);
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(document, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 1000);
+    QCOMPARE(result.skippedFeatures, 1);
+
+    QLoggingCategory &category = const_cast<QLoggingCategory&>(GeoZoneParserLog());
+    const bool debugEnabled = category.isDebugEnabled();
+    category.setEnabled(QtDebugMsg, true);
+    const QtMessageHandler previousHandler = qInstallMessageHandler(cancelOnSkippedFeature);
+    const auto restore = qScopeGuard([&category, debugEnabled, previousHandler]() {
+        (void) qInstallMessageHandler(previousHandler);
+        category.setEnabled(QtDebugMsg, debugEnabled);
+        s_cancelOnSkip = nullptr;
+    });
+
+    // Canceled while reading the features, the parse stops at the next one
+    GeoZoneParser::Options options;
+    s_cancelOnSkip = &options.cancelToken;
+    QVERIFY(!GeoZoneParser::parse(document, result, errorString, options));
+    QVERIFY(options.cancelToken.isCancelled());
+    QCOMPARE(errorString, QStringLiteral("The parse was canceled."));
+    QVERIFY(result.zones.isEmpty());
+
+    // Documents of all formats stop, the token is already canceled
+    QFile aixm(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(aixm.open(QIODevice::ReadOnly));
+    QVERIFY(!GeoZoneParser::parse(aixm.readAll(), result, errorString, options));
+    QCOMPARE(errorString, QStringLiteral("The parse was canceled."));
+    QVERIFY(result.zones.isEmpty());
+
+    // A load canceled while it parses, like when its source is removed, stops and stores nothing
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneLoader::Job job = GeoZoneLoader::fileJob(_writeFeatures(dir, QStringLiteral("zones.json"), features));
+    s_cancelOnSkip = &job.cancelToken;
+    const GeoZoneStore store(dir.filePath(QStringLiteral("store")));
+    const GeoZoneLoader::Result loadResult = GeoZoneLoader::run(job, store);
+    QVERIFY(loadResult.cancelled);
+    QVERIFY(!loadResult.stored);
+    QVERIFY(loadResult.result.zones.isEmpty());
+    QVERIFY(!QFile::exists(store.path(job.storedFileName)));
 }

@@ -49,7 +49,7 @@ public:
         qint64 maxAgeSecs = -1;     ///< How long the server said a downloaded feed stays current, negative when it didn't
         QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
         Request request = Request::Automatic;
-        GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops before parsing or storing
+        GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops parsing or before storing
     };
 
     struct Result {
@@ -78,6 +78,8 @@ public:
     /// Parses the content of a source: a geozone document, or a zip package whose XML and JSON files are parsed
     /// together, the files of the format of the largest one which parses
     /// @param maxBytes Limit of the total size of the files of a zip package
+    static bool parse(const QByteArray &content, GeoZoneParser::Result &result, QString &errorString, const GeoZoneParser::Options &options,
+                      qint64 maxBytes = GeoZoneDownloader::defaultMaxBytes);
     static bool parse(const QByteArray &content, GeoZoneParser::Result &result, QString &errorString,
                       GeoZoneParser::Format formatHint = GeoZoneParser::Format::Unknown, const QString &language = QString(),
                       qint64 maxBytes = GeoZoneDownloader::defaultMaxBytes);

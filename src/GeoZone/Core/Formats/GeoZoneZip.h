@@ -14,6 +14,8 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 
+#include <functional>
+
 /// Reads the files of a zip archive, like the dataset of a feed. Sizes are limited
 /// while inflating, whatever the archive declares, so a small archive can't expand to fill the memory.
 namespace GeoZoneZip {
@@ -31,5 +33,13 @@ struct File {
 /// @return The files of the archive with one of the suffixes, inflated, the largest first, none on errors
 /// @param maxBytes Limit of the total size of the files
 QList<File> files(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString);
+
+/// Inflates the files of the archive with one of the suffixes one at a time, the largest first, so that only one of
+/// them is in memory. The archive is checked before the first file is inflated, like files() does.
+/// @param maxBytes Limit of the total size of the files
+/// @param callback Called with each file, returns false to stop
+/// @return false on errors, true when the files were read or the callback stopped
+bool forEachFile(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString,
+                 const std::function<bool(const File &file)> &callback);
 
 } // namespace GeoZoneZip

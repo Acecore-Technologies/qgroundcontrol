@@ -12,7 +12,7 @@
 #include <atomic>
 #include <memory>
 
-/// Tells the stages of a fetch or load, on any thread, that their result is no longer wanted: the source was
+/// Tells the stages of a fetch, load or parse, on any thread, that their result is no longer wanted: the source was
 /// removed or loaded again, or the application is closing. Copies share the flag.
 class GeoZoneCancelToken
 {

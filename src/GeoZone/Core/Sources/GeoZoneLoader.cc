@@ -99,54 +99,6 @@ QByteArray GeoZoneLoader::extractZipFile(const QString &archivePath, QString &er
 
 namespace {
 
-/// Parses the files of a zip package into one result. The largest file which parses sets the format, files of other
-/// formats, like other renditions of the data or metadata, are left out, and zones published twice are kept once.
-bool parseFiles(const QList<GeoZoneZip::File> &files, GeoZoneParser::Result &result, QString &errorString, GeoZoneParser::Format formatHint,
-                const QString &language)
-{
-    bool parsed = false;
-    QCryptographicHash contentHash(QCryptographicHash::Sha256);
-    QSet<QByteArray> zoneHashes;
-    for (const GeoZoneZip::File &file : files) {
-        GeoZoneParser::Result fileResult;
-        QString fileError;
-        if (!GeoZoneParser::parse(file.data, fileResult, fileError, formatHint, language)) {
-            if (errorString.isEmpty()) {
-                errorString = (files.count() > 1) ? GeoZoneLoader::tr("%1: %2").arg(file.name, fileError) : fileError;
-            }
-            continue;
-        }
-        if (!parsed) {
-            QList<GeoZone::Data> zones = std::move(fileResult.zones);
-            result = fileResult;
-            result.zones.clear();
-            fileResult.zones = std::move(zones);
-        } else if (fileResult.format != result.format) {
-            continue;
-        } else {
-            result.skippedFeatures += fileResult.skippedFeatures;
-            result.missingFeatures += fileResult.missingFeatures;
-            for (auto it = fileResult.issues.cbegin(); it != fileResult.issues.cend(); ++it) {
-                result.issues[it.key()] += it.value();
-            }
-            result.companions.insert(fileResult.companions);
-        }
-        parsed = true;
-        contentHash.addData(fileResult.contentHash);
-        for (GeoZone::Data &zone : fileResult.zones) {
-            if (zone.contentHash.isEmpty() || !zoneHashes.contains(zone.contentHash)) {
-                zoneHashes.insert(zone.contentHash);
-                result.zones.append(std::move(zone));
-            }
-        }
-    }
-    if (parsed) {
-        errorString.clear();
-        result.contentHash = contentHash.result();
-    }
-    return parsed;
-}
-
 /// Appends the features of the further pages of a WFS response to its first page, so that the stored copy holds all
 /// of them, and removes the pages. Pages which can't be read are left out, the response then still misses zones.
 void mergePages(const QString &filePath, const QStringList &pagePaths)
@@ -187,18 +139,86 @@ void mergePages(const QString &filePath, const QStringList &pagePaths)
 bool GeoZoneLoader::parse(const QByteArray &content, GeoZoneParser::Result &result, QString &errorString, GeoZoneParser::Format formatHint,
                           const QString &language, qint64 maxBytes)
 {
+    GeoZoneParser::Options options;
+    options.formatHint = formatHint;
+    options.language = language;
+    return parse(content, result, errorString, options, maxBytes);
+}
+
+bool GeoZoneLoader::parse(const QByteArray &content, GeoZoneParser::Result &result, QString &errorString, const GeoZoneParser::Options &options,
+                          qint64 maxBytes)
+{
     if (!content.startsWith("PK\x03\x04")) {
-        return GeoZoneParser::parse(content, result, errorString, formatHint, language);
+        return GeoZoneParser::parse(content, result, errorString, options);
     }
 
-    // Packages split into several files are loaded together
+    // Packages split into several files are loaded together. The largest file which parses sets the format, files of
+    // other formats, like other renditions of the data or metadata, are left out before their features are read, and
+    // zones published twice are kept once. Files are inflated one at a time.
     result = GeoZoneParser::Result();
     errorString.clear();
-    const QList<GeoZoneZip::File> files = GeoZoneZip::files(content, kZipSuffixes, maxBytes, errorString);
-    if (files.isEmpty()) {
+    bool parsed = false;
+    int fileCount = 0;
+    QString failedFile;
+    QString parseError;
+    QCryptographicHash contentHash(QCryptographicHash::Sha256);
+    QSet<QByteArray> zoneHashes;
+    const bool read = GeoZoneZip::forEachFile(content, kZipSuffixes, maxBytes, errorString, [&](const GeoZoneZip::File &file) {
+        if (options.cancelToken.isCancelled()) {
+            return false;
+        }
+        fileCount++;
+        GeoZoneParser::Options fileOptions = options;
+        if (parsed) {
+            fileOptions.onlyFormat = result.format;
+        }
+        GeoZoneParser::Result fileResult;
+        QString fileError;
+        if (!GeoZoneParser::parse(file.data, fileResult, fileError, fileOptions)) {
+            if (failedFile.isEmpty()) {
+                failedFile = file.name;
+                parseError = fileError;
+            }
+            return true;
+        }
+        if (!parsed) {
+            QList<GeoZone::Data> zones = std::move(fileResult.zones);
+            result = fileResult;
+            result.zones.clear();
+            fileResult.zones = std::move(zones);
+        } else {
+            result.skippedFeatures += fileResult.skippedFeatures;
+            result.missingFeatures += fileResult.missingFeatures;
+            for (auto it = fileResult.issues.cbegin(); it != fileResult.issues.cend(); ++it) {
+                result.issues[it.key()] += it.value();
+            }
+            result.companions.insert(fileResult.companions);
+        }
+        parsed = true;
+        contentHash.addData(fileResult.contentHash);
+        for (GeoZone::Data &zone : fileResult.zones) {
+            if (zone.contentHash.isEmpty() || !zoneHashes.contains(zone.contentHash)) {
+                zoneHashes.insert(zone.contentHash);
+                result.zones.append(std::move(zone));
+            }
+        }
+        return true;
+    });
+    if (!read) {
+        result = GeoZoneParser::Result();
         return false;
     }
-    return parseFiles(files, result, errorString, formatHint, language);
+    if (options.cancelToken.isCancelled()) {
+        result = GeoZoneParser::Result();
+        errorString = GeoZoneParser::tr("The parse was canceled.");
+        return false;
+    }
+    if (!parsed) {
+        errorString = (fileCount > 1) ? tr("%1: %2").arg(failedFile, parseError) : parseError;
+        return false;
+    }
+    result.contentHash = contentHash.result();
+    return true;
 }
 
 GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &store)
@@ -240,20 +260,24 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     }
 
     // Zip archives are read from the mapped file
+    GeoZoneParser::Options options;
+    options.formatHint = job.formatHint;
+    options.language = job.language;
+    options.cancelToken = job.cancelToken;
     QString parseError;
-    const bool parsed = parse(content, loadResult.result, parseError, job.formatHint, job.language);
+    const bool parsed = parse(content, loadResult.result, parseError, options);
     content.clear();
     if (mapped) {
         (void) file.unmap(mapped);
     }
     file.close();
-    if (!parsed) {
-        loadResult.errorString = parseError;
+    if (job.cancelToken.isCancelled()) {
+        loadResult.result = GeoZoneParser::Result();
+        loadResult.cancelled = true;
         return loadResult;
     }
-
-    if (job.cancelToken.isCancelled()) {
-        loadResult.cancelled = true;
+    if (!parsed) {
+        loadResult.errorString = parseError;
         return loadResult;
     }
     if (!job.storedFileName.isEmpty()) {
