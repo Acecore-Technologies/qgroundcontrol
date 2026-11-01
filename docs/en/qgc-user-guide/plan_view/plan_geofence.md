@@ -187,19 +187,31 @@ These checks are advisory. Always check the official sources and obtain any requ
 
 ### Add Geozones to the GeoFence
 
-If the vehicle supports GeoFences, loaded zones can be converted into exclusion fences. Press **From Geozones...** below **Polygon Fence** and **Circular Fence** in the GeoFence panel, then in the dialog:
+If the vehicle supports GeoFences, loaded zones can be converted into exclusion fences which fit into the vehicle's fence storage. Press **From Geozones...** below **Polygon Fence** and **Circular Fence** in the GeoFence panel, then in the dialog:
 
-1. Check the zone types to add (**Prohibited**, **Authorisation required**, **Conditional**).
+1. Check the zone types to add (**Prohibited**, **Authorisation**, **Conditional**).
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
 1. Select when the zones must be **Active**: **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
-1. Select a **Simplify** tolerance to reduce the number of fence points. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
-1. Check the number of fences and points that will be added, then press **Ok**. Fences that already exist are not added again.
+1. Select how far fences may be simplified to fit (**Simplify up to**). Fences are only simplified as far as needed, the most important zones the least. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
+1. Check the zones selected and those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
 
-If the resulting fence likely exceeds what the vehicle can store (64 fence points in total on PX4, 255 vertices per polygon on ArduPilot), you are asked to confirm before the fences are added.
+The dialog shows how much of the vehicle's fence the selection uses, like _Vehicle fence: 52 of 64 points_:
+
+- **PX4** stores 64 fence items: one per polygon vertex, circle and breach return point.
+- **ArduPilot** (4.0 and later) stores the fence in a storage area of the flight controller: each polygon takes 2 bytes plus 8 bytes per vertex, each circle 13 bytes and the return point 9 bytes, and a polygon has at most 255 vertices. On flight controllers with 16 KB of storage, like the Pixhawk and Cube, Copter (and Heli) has 560 bytes (70 items) and Plane, Rover and Sub have 672 bytes (84 items). Flight controllers with less storage hold fewer points; a rejected upload is reported. When `BRD_SD_FENCE` stores the fence on the SD card, its size is used instead. `FENCE_TOTAL` only counts the points of the last upload and is not a limit.
+- Without a connected vehicle the fence is fitted to what both PX4 and ArduPilot copters store (64 points, 560 bytes) and circles are added as polygons enclosing them.
+
+The panel warns when the vehicle won't enforce exclusion fences: ArduPilot with `FENCE_TYPE` lacking polygon fences or `FENCE_ENABLE` at 0, PX4 with `GF_ACTION` set to None.
+
+Zones are selected in priority order until the fence is full: prohibited zones first, then other restricted zones (authorisation required, conditional and unknown), then the others. Within those, zones the planned flight enters (between their altitude limits) come first, then those within 1 km of the flight, then the farther ones by distance, then those with fewer fence points. Fences already added from geozones are replaced, while drawn fences and the breach return point are kept and take room. The left out zones are listed with the reason: no room left, too many points even simplified, the same area as another zone, or left out by you. Uncheck a zone to leave it out, which makes room for the next ones, or check a left out zone to include it.
+
+Zones the flight only passes above or below are left out unless you check them, since their exclusion fence would stop the vehicle there.
+
+**Upload to Vehicle** adds the selected fences to the plan and uploads the plan's fence (not the mission) like a plan upload, then reads the fence back from the vehicle and compares it with the plan: the number of polygons and circles, each vertex and circle center within 0.5 m, the circle radii and the breach return point. The dialog shows whether the vehicle stores the fence as planned, the differences, or why the vehicle rejected it, for example when it has no room for it.
 
 ::: warning
 GeoFences have no altitude limits, so a zone's vertical limits are not transferred and the whole zone is excluded at all altitudes.
-Holes in zone polygons are also dropped. ArduPilot fence storage depends on the flight controller and can be much smaller than the polygon limit, so only add the zones you need.
+Holes in zone polygons are also dropped. The ArduPilot fence storage is estimated, so verify the upload.
 :::
 
 ## Remaining tools
