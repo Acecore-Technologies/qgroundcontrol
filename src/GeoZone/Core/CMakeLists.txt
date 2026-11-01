@@ -83,8 +83,17 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneReturnDestinations.cc
     Evaluation/GeoZoneReturnDestinations.h
     Evaluation/GeoZoneReturnModel.h
+    Evaluation/GeoZoneRouteDetour.cc
+    Evaluation/GeoZoneRouteDetour.h
+    Evaluation/GeoZoneRouteGraph.cc
+    Evaluation/GeoZoneRouteGraph.h
+    Evaluation/GeoZoneRouteObstacles.cc
+    Evaluation/GeoZoneRouteObstacles.h
     Evaluation/GeoZoneRouteSearch.cc
     Evaluation/GeoZoneRouteSearch.h
+    Evaluation/GeoZoneRouteVector.h
+    Evaluation/GeoZoneRouteVertical.cc
+    Evaluation/GeoZoneRouteVertical.h
     Evaluation/GeoZoneSourceVersion.cc
     Evaluation/GeoZoneSourceVersion.h
     Evaluation/GeoZoneTerrain.cc
