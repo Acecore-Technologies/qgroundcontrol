@@ -59,10 +59,6 @@ public:
     ///     @param index: Index of circle to delete
     Q_INVOKABLE void deleteCircle(int index);
 
-    /// Deletes many polygons and circles at once
-    ///     @param geoZoneOnly: Only the fences added from geozones, otherwise all of them
-    Q_INVOKABLE void deleteFences(bool geoZoneOnly);
-
     /// Clears the interactive bit from all fence items
     Q_INVOKABLE void clearAllInteractive(void);
 

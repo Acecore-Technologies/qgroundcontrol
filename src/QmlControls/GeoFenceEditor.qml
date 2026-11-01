@@ -21,12 +21,6 @@ QGCFlickable {
     readonly property real  _editFieldWidth:    Math.min(width - _margin * 2, ScreenTools.defaultFontPixelWidth * 15)
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _radius:            ScreenTools.defaultFontPixelWidth / 2
-    readonly property real  _maxFenceListHeight: ScreenTools.defaultFontPixelHeight * 16
-
-    /// Selects a fence at the coordinate, see GeoFenceList.selectFenceAt
-    function selectFenceAt(coordinate) {
-        return fenceList.selectFenceAt(coordinate)
-    }
 
     Rectangle {
         id:     geoFenceEditorRect
@@ -147,29 +141,11 @@ QGCFlickable {
                         }
                     }
 
-                    QGCButton {
-                        Layout.fillWidth:   true
-                        text:               qsTr("From Geozones...")
-                        visible:            GeoZoneManager.zoneCount > 0
-
-                        onClicked: geoZoneFenceImportDialogComponent.createObject(mainWindow, { geoFenceController: myGeoFenceController, flightMap: root.flightMap }).open()
-                    }
-
-                    SectionHeader {
-                        id:             fenceListSection
-                        anchors.left:   parent.left
-                        anchors.right:  parent.right
-                        text:           fenceList.fenceCount > 0 ? qsTr("Fences (%1)").arg(fenceList.fenceCount) : qsTr("Fences")
-                    }
-
-                    GeoFenceList {
-                        id:                 fenceList
+                    GeoZoneFenceList {
                         anchors.left:       parent.left
                         anchors.right:      parent.right
-                        visible:            fenceListSection.checked
                         geoFenceController: myGeoFenceController
                         flightMap:          root.flightMap
-                        maxListHeight:      _maxFenceListHeight
                     }
 
                     SectionHeader {
@@ -216,10 +192,4 @@ QGCFlickable {
             }
         }
     } // Rectangle
-
-    Component {
-        id: geoZoneFenceImportDialogComponent
-
-        GeoZoneFenceImportDialog { }
-    }
 }

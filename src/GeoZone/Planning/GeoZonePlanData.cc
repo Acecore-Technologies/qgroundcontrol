@@ -9,6 +9,7 @@
 
 #include "GeoZonePlanData.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZonePlanning.h"
@@ -34,6 +35,10 @@ constexpr const char *auditKey = "audit";
 void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneManager *manager)
 {
     manager = manager ? manager : GeoZoneManager::instance();
+    if (planController) {
+        GeoZoneFenceTags::save(planController->geoFenceController(), planJson);
+    }
+
     QJsonObject json;
     if (manager->planning()->plannedStart().isValid()) {
         json.insert(plannedStartKey, manager->planning()->plannedStart().toUTC().toString(Qt::ISODate));
@@ -68,9 +73,13 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
     }
 }
 
-void load(const QJsonObject &planJson, GeoZoneManager *manager)
+void load(PlanMasterController *planController, const QJsonObject &planJson, GeoZoneManager *manager)
 {
     manager = manager ? manager : GeoZoneManager::instance();
+    if (planController) {
+        GeoZoneFenceTags::load(planController->geoFenceController(), planJson);
+    }
+
     const QJsonObject json = planJson.value(jsonKey).toObject();
     const QDateTime plannedStart = QDateTime::fromString(json.value(plannedStartKey).toString(), Qt::ISODate);
     if (plannedStart.isValid()) {

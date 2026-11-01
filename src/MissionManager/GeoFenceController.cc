@@ -477,30 +477,6 @@ void GeoFenceController::deleteCircle(int index)
     circle->deleteLater();
 }
 
-void GeoFenceController::deleteFences(bool geoZoneOnly)
-{
-    // One reset per list instead of a row removal per fence, which matters for many fences added from geozones
-    const auto deleteFrom = [geoZoneOnly](QmlObjectListModel &fences) {
-        QList<QObject*> kept;
-        QList<QObject*> deleted;
-        for (QObject *fence : std::as_const(*fences.objectList())) {
-            const bool fromGeoZone = fence->property("geoZone").toBool();
-            ((geoZoneOnly && !fromGeoZone) ? kept : deleted).append(fence);
-        }
-        if (deleted.isEmpty()) {
-            return;
-        }
-        for (QObject *fence : std::as_const(deleted)) {
-            (void) fence->disconnect(&fences);
-            fence->deleteLater();
-        }
-        (void) fences.swapObjectList(kept);
-        fences.setDirty(true);
-    };
-    deleteFrom(_polygons);
-    deleteFrom(_circles);
-}
-
 void GeoFenceController::clearAllInteractive(void)
 {
     for (int i=0; i<_polygons.count(); i++) {

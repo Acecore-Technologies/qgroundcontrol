@@ -15,8 +15,8 @@ class GeoZoneManager;
 class PlanMasterController;
 
 /// Geozone data kept in plan files: the planned flight start and the authorisations of the zones the mission enters,
-/// so that a plan opened elsewhere is checked the same way, and the audit record of the geozone data the plan was
-/// checked against, see GeoZonePlanAudit
+/// so that a plan opened elsewhere is checked the same way, the audit record of the geozone data the plan was checked
+/// against, see GeoZonePlanAudit, and the names and origins of the fences, see GeoZoneFenceTags
 namespace GeoZonePlanData {
 
 constexpr const char *jsonKey = "geoZones";
@@ -25,8 +25,10 @@ constexpr const char *jsonKey = "geoZones";
 /// @param manager GeoZoneManager::instance() when null
 void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneManager *manager = nullptr);
 
-/// Sets the planned start and offers the authorisations of a loaded plan, see GeoZoneAuthorisations::offer, and sets
-/// its audit record, see GeoZonePlanning::planAudit
-void load(const QJsonObject &planJson, GeoZoneManager *manager = nullptr);
+/// Sets the planned start and offers the authorisations of a loaded plan, see GeoZoneAuthorisations::offer, sets its
+/// audit record, see GeoZonePlanning::planAudit, and the tags of its fences
+/// @param planController Controller which loaded the plan, null to leave the fences
+/// @param manager GeoZoneManager::instance() when null
+void load(PlanMasterController *planController, const QJsonObject &planJson, GeoZoneManager *manager = nullptr);
 
 } // namespace GeoZonePlanData

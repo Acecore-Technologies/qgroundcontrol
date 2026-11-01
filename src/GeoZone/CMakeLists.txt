@@ -21,6 +21,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Planning/GeoZoneBriefingExport.h
         Planning/GeoZoneFenceImporter.cc
         Planning/GeoZoneFenceImporter.h
+        Planning/GeoZoneFenceTags.cc
+        Planning/GeoZoneFenceTags.h
         Planning/GeoZoneGuidedCheck.cc
         Planning/GeoZoneGuidedCheck.h
         Planning/GeoZoneMissionCheck.cc
@@ -84,6 +86,7 @@ qt_add_qml_module(GeoZoneModule
         Map/GeoZoneStyle.qml
         Map/GeoZoneSummary.qml
         Planning/GeoZoneFenceImportDialog.qml
+        Planning/GeoZoneFenceList.qml
         Planning/GeoZoneGuidedActionCheck.qml
         Planning/GeoZoneMissionBanner.qml
         Planning/GeoZonePlanViewOverlay.qml

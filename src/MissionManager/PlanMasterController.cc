@@ -394,7 +394,7 @@ void PlanMasterController::loadFromFile(const QString& filename)
                 !_rallyPointController.load(json[kJsonRallyPointsObjectKey].toObject(), errorString)) {
             qgcApp()->showAppMessage(errorMessage.arg(errorString));
         } else {
-            GeoZonePlanData::load(json);
+            GeoZonePlanData::load(this, json);
             //-- Allow plugins to post process the load
             QGCCorePlugin::instance()->postLoadFromJson(this, json);
             success = true;

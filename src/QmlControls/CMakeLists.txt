@@ -181,7 +181,6 @@ qt_add_qml_module(QGroundControlControlsModule
         FWLandingPatternEditor.qml
         FWLandingPatternMapVisual.qml
         GeoFenceEditor.qml
-        GeoFenceList.qml
         GeoFenceMapVisuals.qml
         MissionItemEditor.qml
         MissionItemMapVisual.qml

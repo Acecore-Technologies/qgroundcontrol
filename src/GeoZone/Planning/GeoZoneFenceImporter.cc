@@ -13,6 +13,7 @@
 #include "GeoFenceManager.h"
 #include "GeoZone.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
 #include "MissionController.h"
@@ -116,13 +117,13 @@ GeoZoneFences::Usage GeoZoneFenceImporter::keptUsage(GeoFenceController *geoFenc
     QmlObjectListModel *const polygons = geoFenceController->polygons();
     for (int i = 0; i < polygons->count(); i++) {
         const QGCFencePolygon *const polygon = polygons->value<QGCFencePolygon*>(i);
-        if (!polygon->geoZone()) {
+        if (!GeoZoneFenceTag::isGeoZone(polygon)) {
             usage.addPolygon(polygon->count());
         }
     }
     QmlObjectListModel *const circles = geoFenceController->circles();
     for (int i = 0; i < circles->count(); i++) {
-        if (!circles->value<QGCFenceCircle*>(i)->geoZone()) {
+        if (!GeoZoneFenceTag::isGeoZone(circles->get(i))) {
             usage.addCircle();
         }
     }
@@ -240,7 +241,7 @@ int GeoZoneFenceImporter::applySelection()
     if (!_geoFenceController) {
         return 0;
     }
-    _geoFenceController->deleteFences(true /* geoZoneOnly */);
+    GeoZoneFenceTags::deleteFences(_geoFenceController, true /* geoZoneOnly */);
 
     Fences fences;
     for (const GeoZoneFences::Choice &choice : std::as_const(_selection.choices)) {
@@ -505,15 +506,17 @@ int GeoZoneFenceImporter::_addFences(const Fences &fences)
     for (qsizetype i = 0; i < fences.polygons.count(); i++) {
         QGCFencePolygon *const polygon = new QGCFencePolygon(false /* inclusion */, _geoFenceController);
         polygon->appendVertices(fences.polygons[i]);
-        polygon->setName(fences.polygonNames[i]);
-        polygon->setGeoZone(true);
+        GeoZoneFenceTag *const tag = GeoZoneFenceTag::of(polygon);
+        tag->setName(fences.polygonNames[i]);
+        tag->setGeoZone(true);
         newPolygons.append(polygon);
     }
     QList<QObject*> newCircles;
     for (qsizetype i = 0; i < fences.circles.count(); i++) {
         QGCFenceCircle *const circle = new QGCFenceCircle(fences.circles[i].center(), fences.circles[i].radius(), false /* inclusion */, _geoFenceController);
-        circle->setName(fences.circleNames[i]);
-        circle->setGeoZone(true);
+        GeoZoneFenceTag *const tag = GeoZoneFenceTag::of(circle);
+        tag->setName(fences.circleNames[i]);
+        tag->setGeoZone(true);
         newCircles.append(circle);
     }
     if (!newPolygons.isEmpty()) {

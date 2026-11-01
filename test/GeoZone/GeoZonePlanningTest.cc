@@ -10,6 +10,7 @@
 #include "GeoZonePlanningTest.h"
 #include "GeoZoneBriefing.h"
 #include "GeoZoneBriefingExport.h"
+#include "GeoZoneFenceTags.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneSourceVersion.h"
@@ -409,7 +410,7 @@ void GeoZonePlanningTest::_testFenceExcludes()
         QVERIFY((tolerance > 0) == (fence.count() < 40));
         QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, round));
         QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, circle));
-        geoFenceController->deleteFences(false);
+        GeoZoneFenceTags::deleteFences(geoFenceController, false);
     }
 
     // Zones the importer has no fence for, like those without area, are not excluded whatever the fence
@@ -423,7 +424,7 @@ void GeoZonePlanningTest::_testFenceExcludes()
     // Nor are zones partly outside, like when one of their polygons isn't fenced
     const GeoZone *const twoParts = polygonZone({ _circleRing(center, 500, 40), _circleRing(local(0, 3000), 100, 8) });
     QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, twoParts));
-    geoFenceController->deleteFences(false);
+    GeoZoneFenceTags::deleteFences(geoFenceController, false);
 
     // A fence around all vertices of a square zone whose notch cuts its north edge doesn't exclude it
     const GeoZone *const square = polygonZone({ { local(-100, 100), local(100, 100), local(100, -100), local(-100, -100) } });
@@ -434,7 +435,7 @@ void GeoZonePlanningTest::_testFenceExcludes()
     notched->clear();
     notched->appendVertices({ local(-200, -200), local(200, -200), local(200, 200), local(-200, 200) });
     QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, square));
-    geoFenceController->deleteFences(false);
+    GeoZoneFenceTags::deleteFences(geoFenceController, false);
 }
 
 void GeoZonePlanningTest::_testAntimeridianQueries()
@@ -593,7 +594,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     QCOMPARE(importer.addZones(check.property("unfencedZones").toList()), 1);
     QTRY_VERIFY(check.unfencedZones().isEmpty());
     QVERIFY(check.fenceText().isEmpty());
-    geoFenceController->deleteFences(false);
+    GeoZoneFenceTags::deleteFences(geoFenceController, false);
     QTRY_COMPARE(check.unfencedZones().count(), 1);
     // A polygon zone excluded by a simplified polygon fence
     const QList<QGeoCoordinate> squareZone = { center.atDistanceAndAzimuth(300, 315), center.atDistanceAndAzimuth(300, 45),
@@ -607,7 +608,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, &square));
     QCOMPARE(importer.addExclusions({ &square }, 25), 1);
     QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, &square));
-    geoFenceController->deleteFences(false);
+    GeoZoneFenceTags::deleteFences(geoFenceController, false);
     check.setGeoFenceController(nullptr);
 
     // A temporary restriction on the path counts at any time, or when it is active during the planned flight
@@ -1082,7 +1083,7 @@ void GeoZonePlanningTest::_testAuthorisations()
     authorisations->revoke(QStringLiteral("CHE/CTR"));
     manager.planning()->clearPlannedStart();
     QCOMPARE(authorisations->count(), 0);
-    GeoZonePlanData::load(planJson, &manager);
+    GeoZonePlanData::load(nullptr, planJson, &manager);
     QCOMPARE(manager.planning()->plannedStart(), QDateTime(today.addDays(2), QTime(12, 0)).toUTC());
     QCOMPARE(authorisations->count(), 0);
     QCOMPARE(authorisations->pendingAuthorisations().count(), 1);
@@ -1090,12 +1091,12 @@ void GeoZonePlanningTest::_testAuthorisations()
     authorisations->dismissPending();
     QCOMPARE(authorisations->count(), 0);
     QVERIFY(authorisations->pendingAuthorisations().isEmpty());
-    GeoZonePlanData::load(planJson, &manager);
+    GeoZonePlanData::load(nullptr, planJson, &manager);
     authorisations->acceptPending();
     QCOMPARE(authorisations->count(), 1);
     QVERIFY(authorisations->pendingAuthorisations().isEmpty());
     // Authorisations already known aren't offered again
-    GeoZonePlanData::load(planJson, &manager);
+    GeoZonePlanData::load(nullptr, planJson, &manager);
     QVERIFY(authorisations->pendingAuthorisations().isEmpty());
 
     // Kept across restarts next to the stored sources
@@ -1375,7 +1376,7 @@ void GeoZonePlanningTest::_testPlanAudit()
 
     // Reopened with the same data
     manager.planning()->setPlanAudit(std::nullopt);
-    GeoZonePlanData::load(planJson, &manager);
+    GeoZonePlanData::load(nullptr, planJson, &manager);
     QVERIFY(manager.planning()->planAudit().has_value());
     check.update();
     QVERIFY(check.auditText().isEmpty());
@@ -1408,7 +1409,7 @@ void GeoZonePlanningTest::_testPlanAudit()
     check.acknowledgeAudit();
     check.update();
     QVERIFY(check.auditText().isEmpty());
-    GeoZonePlanData::load(planJson, &manager);
+    GeoZonePlanData::load(nullptr, planJson, &manager);
     check.update();
     QVERIFY(!check.auditText().isEmpty());
 
@@ -1417,7 +1418,7 @@ void GeoZonePlanningTest::_testPlanAudit()
     GeoZonePlanData::save(&masterController, resaved, &manager);
     check.update();
     QVERIFY(check.auditText().isEmpty());
-    GeoZonePlanData::load(resaved, &manager);
+    GeoZonePlanData::load(nullptr, resaved, &manager);
     check.update();
     QVERIFY(check.auditText().isEmpty());
 
@@ -1426,12 +1427,12 @@ void GeoZonePlanningTest::_testPlanAudit()
     QJsonObject legacyZones = legacy[QString(GeoZonePlanData::jsonKey)].toObject();
     legacyZones.remove(QStringLiteral("audit"));
     legacy[QString(GeoZonePlanData::jsonKey)] = legacyZones;
-    GeoZonePlanData::load(legacy, &manager);
+    GeoZonePlanData::load(nullptr, legacy, &manager);
     QVERIFY(!manager.planning()->planAudit().has_value());
     check.update();
     QVERIFY(check.auditText().isEmpty());
-    GeoZonePlanData::load(planJson, &manager);
-    GeoZonePlanData::load(QJsonObject(), &manager);
+    GeoZonePlanData::load(nullptr, planJson, &manager);
+    GeoZonePlanData::load(nullptr, QJsonObject(), &manager);
     QVERIFY(!manager.planning()->planAudit().has_value());
 }
 
@@ -1746,37 +1747,53 @@ void GeoZonePlanningTest::_testGeoFenceImport()
 
     // Fences are named after their zones and marked as added from geozones
     const auto zoneName = [](const GeoZone *zone) { return zone->name().isEmpty() ? zone->identifier() : zone->name(); };
-    QCOMPARE(polygon->name(), zoneName(zones[0]));
-    QVERIFY(polygon->geoZone());
-    QCOMPARE(circle->name(), zoneName(zones[1]));
-    QVERIFY(circle->geoZone());
+    QCOMPARE(GeoZoneFenceTag::find(polygon)->name(), zoneName(zones[0]));
+    QVERIFY(GeoZoneFenceTag::isGeoZone(polygon));
+    QCOMPARE(GeoZoneFenceTag::find(circle)->name(), zoneName(zones[1]));
+    QVERIFY(GeoZoneFenceTag::isGeoZone(circle));
 
-    // Which the plan file keeps, while fences of other plans load without them
+    // Which the plan file keeps in the entries of the fences, while drawn fences have no tags there
+    geoFenceController->addInclusionCircle(QGeoCoordinate(47.1, 7.9), QGeoCoordinate(46.9, 8.1));
+    (void) GeoZoneFenceTag::of(geoFenceController->circles()->get(1));
+    const QJsonObject planJson = masterController.saveToJson().object();
+    const QJsonObject fenceJson = planJson[PlanMasterController::kJsonGeoFenceObjectKey].toObject();
+    const QJsonObject polygonJson = fenceJson[QStringLiteral("polygons")].toArray()[0].toObject();
+    QCOMPARE(polygonJson[QStringLiteral("name")].toString(), zoneName(zones[0]));
+    QVERIFY(polygonJson[QStringLiteral("geoZone")].toBool());
+    const QJsonArray circlesJson = fenceJson[QStringLiteral("circles")].toArray();
+    QCOMPARE(circlesJson.count(), 2);
+    QCOMPARE(circlesJson[0].toObject()[QStringLiteral("name")].toString(), zoneName(zones[1]));
+    QVERIFY(circlesJson[0].toObject()[QStringLiteral("geoZone")].toBool());
+    QVERIFY(!circlesJson[1].toObject().contains(QStringLiteral("name")) && !circlesJson[1].toObject().contains(QStringLiteral("geoZone")));
+    geoFenceController->deleteCircle(1);
+
+    // Loading the plan restores the tags and leaves the fence clean, while fences without them load untagged
+    PlanMasterController loadedController;
+    loadedController.setFlyView(false);
+    loadedController.start();
+    GeoFenceController *const loadedFence = loadedController.geoFenceController();
     QString errorString;
-    QJsonObject polygonJson;
-    const_cast<QGCFencePolygon*>(polygon)->saveToJson(polygonJson);
-    QGCFencePolygon loadedPolygon(true);
-    QVERIFY2(loadedPolygon.loadFromJson(polygonJson, true, errorString), qPrintable(errorString));
-    QCOMPARE(loadedPolygon.name(), polygon->name());
-    QVERIFY(loadedPolygon.geoZone());
-    // Loading an unchanged exclusion polygon leaves it clean
-    QGCFencePolygon reloadedPolygon(false);
-    QVERIFY2(reloadedPolygon.loadFromJson(polygonJson, true, errorString), qPrintable(errorString));
-    QVERIFY(!reloadedPolygon.dirty());
-    QJsonObject circleJson;
-    circle->saveToJson(circleJson);
-    QGCFenceCircle loadedCircle;
-    QVERIFY2(loadedCircle.loadFromJson(circleJson, errorString), qPrintable(errorString));
-    QCOMPARE(loadedCircle.name(), circle->name());
-    QVERIFY(loadedCircle.geoZone());
-    polygonJson.remove(QStringLiteral("name"));
-    polygonJson.remove(QStringLiteral("geoZone"));
-    QVERIFY2(loadedPolygon.loadFromJson(polygonJson, true, errorString), qPrintable(errorString));
-    QVERIFY(loadedPolygon.name().isEmpty());
-    QVERIFY(!loadedPolygon.geoZone());
-    QJsonObject drawnJson;
-    loadedPolygon.saveToJson(drawnJson);
-    QVERIFY(!drawnJson.contains(QStringLiteral("name")) && !drawnJson.contains(QStringLiteral("geoZone")));
+    QVERIFY2(loadedFence->load(fenceJson, errorString), qPrintable(errorString));
+    loadedFence->setDirty(false);
+    GeoZonePlanData::load(&loadedController, planJson);
+    QCOMPARE(loadedFence->polygons()->count(), 3);
+    QCOMPARE(GeoZoneFenceTag::find(loadedFence->polygons()->get(0))->name(), zoneName(zones[0]));
+    QVERIFY(GeoZoneFenceTag::isGeoZone(loadedFence->circles()->get(0)));
+    QVERIFY(!GeoZoneFenceTag::find(loadedFence->circles()->get(1)));
+    QVERIFY(!loadedFence->dirty());
+    QJsonObject untaggedPolygon = polygonJson;
+    untaggedPolygon.remove(QStringLiteral("name"));
+    untaggedPolygon.remove(QStringLiteral("geoZone"));
+    QJsonArray untaggedPolygons = fenceJson[QStringLiteral("polygons")].toArray();
+    untaggedPolygons[0] = untaggedPolygon;
+    QJsonObject untaggedFence = fenceJson;
+    untaggedFence[QStringLiteral("polygons")] = untaggedPolygons;
+    QJsonObject untaggedPlan = planJson;
+    untaggedPlan[PlanMasterController::kJsonGeoFenceObjectKey] = untaggedFence;
+    QVERIFY2(loadedFence->load(untaggedFence, errorString), qPrintable(errorString));
+    GeoZonePlanData::load(&loadedController, untaggedPlan);
+    QVERIFY(!GeoZoneFenceTag::find(loadedFence->polygons()->get(0)));
+    QVERIFY(GeoZoneFenceTag::isGeoZone(loadedFence->polygons()->get(1)));
 
     // Importing the same zones again does not duplicate fences
     QCOMPARE(importer.addExclusions(zones), 0);
@@ -1788,13 +1805,13 @@ void GeoZonePlanningTest::_testGeoFenceImport()
     geoFenceController->addInclusionCircle(QGeoCoordinate(47.1, 7.9), QGeoCoordinate(46.9, 8.1));
     QCOMPARE(geoFenceController->circles()->count(), 2);
     QSignalSpy resetSpy(geoFenceController->polygons(), &QAbstractItemModel::modelReset);
-    geoFenceController->deleteFences(true);
+    GeoZoneFenceTags::deleteFences(geoFenceController, true);
     QCOMPARE(resetSpy.count(), 1);
     QCOMPARE(geoFenceController->polygons()->count(), 0);
     QCOMPARE(geoFenceController->circles()->count(), 1);
-    QVERIFY(!geoFenceController->circles()->value<QGCFenceCircle*>(0)->geoZone());
+    QVERIFY(!GeoZoneFenceTag::isGeoZone(geoFenceController->circles()->get(0)));
     QVERIFY(geoFenceController->dirty());
-    geoFenceController->deleteFences(false);
+    GeoZoneFenceTags::deleteFences(geoFenceController, false);
     QCOMPARE(geoFenceController->circles()->count(), 0);
 }
 
@@ -1866,7 +1883,7 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     QCOMPARE(geoFenceController->polygons()->count(), 3);
     int points = 2;
     for (int i = 0; i < geoFenceController->polygons()->count(); i++) {
-        QVERIFY(geoFenceController->polygons()->value<QGCFencePolygon*>(i)->geoZone());
+        QVERIFY(GeoZoneFenceTag::isGeoZone(geoFenceController->polygons()->get(i)));
         points += geoFenceController->polygons()->value<QGCFencePolygon*>(i)->count();
     }
     QCOMPARE(points, importer.selection().usage.items);
@@ -1952,7 +1969,7 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
         QCOMPARE(manager->polygons().first().count(), importer.selection().choices.first().fences.polygons.first().count());
         // The plan keeps its fences from geozones
         QCOMPARE(geoFenceController->polygons()->count(), 1);
-        QVERIFY(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->geoZone());
+        QVERIFY(GeoZoneFenceTag::isGeoZone(geoFenceController->polygons()->get(0)));
         QVERIFY(!geoFenceController->dirty());
 
         // A vehicle without room for the fence rejects it

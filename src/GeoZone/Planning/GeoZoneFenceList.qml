@@ -15,11 +15,14 @@ import QtPositioning
 import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.FactControls
+import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Polygon and circular fences of a GeoFence in one list. Fences added from geozones are grouped. Clicking a fence
-/// selects it for editing and shows it on the map, and the fence points are compared with the vehicle's storage.
+/// Fences section of GeoFenceEditor.qml, in place of its lists of polygon and of circular fences: the button adding
+/// fences from geozones and the polygon and circular fences of a GeoFence in one list. Fences added from geozones are
+/// grouped, see GeoZoneFenceTags. Clicking a fence selects it for editing and shows it on the map, and the fence points
+/// are compared with the vehicle's storage.
 Column {
     id:         control
     spacing:    _margin
@@ -63,10 +66,10 @@ Column {
     function _countImported() {
         var imported = 0
         for (var i = 0; i < _polygons.count; i++) {
-            imported += _polygons.get(i).geoZone ? 1 : 0
+            imported += GeoZoneFenceTags.tag(_polygons.get(i)).geoZone ? 1 : 0
         }
         for (var j = 0; j < _circles.count; j++) {
-            imported += _circles.get(j).geoZone ? 1 : 0
+            imported += GeoZoneFenceTags.tag(_circles.get(j)).geoZone ? 1 : 0
         }
         return imported
     }
@@ -106,41 +109,8 @@ Column {
         }
     }
 
-    /// Selects a fence at the coordinate. Clicking again selects the next of overlapping fences.
-    function selectFenceAt(coordinate) {
-        var fences = []
-        var selected = -1
-        for (var i = 0; i < _polygons.count; i++) {
-            var polygon = _polygons.get(i)
-            if (polygon.containsCoordinate(coordinate)) {
-                if (polygon.interactive) {
-                    selected = fences.length
-                }
-                fences.push(polygon)
-            }
-        }
-        for (var j = 0; j < _circles.count; j++) {
-            var circle = _circles.get(j)
-            if (circle.center.distanceTo(coordinate) <= circle.radius.rawValue) {
-                if (circle.interactive) {
-                    selected = fences.length
-                }
-                fences.push(circle)
-            }
-        }
-        if (fences.length === 0) {
-            return false
-        }
-        var next = fences[(selected + 1) % fences.length]
-        if (!next.interactive) {
-            geoFenceController.clearAllInteractive()
-            next.interactive = true
-        }
-        return true
-    }
-
     function _deleteFences(imported) {
-        geoFenceController.deleteFences(imported === true)
+        GeoZoneFenceTags.deleteFences(geoFenceController, imported === true)
     }
 
     function _confirmDelete(title, text, imported) {
@@ -157,9 +127,22 @@ Column {
         return (area >= 100 ? Math.round(area) : area.toPrecision(2)) + " " + QGroundControl.unitsConversion.appSettingsAreaUnitsString
     }
 
+    QGCButton {
+        text:       qsTr("From Geozones...")
+        visible:    GeoZoneManager.zoneCount > 0
+        onClicked:  fenceImportDialogComponent.createObject(mainWindow, { geoFenceController: control.geoFenceController, flightMap: control.flightMap }).open()
+    }
+
+    SectionHeader {
+        id:             fenceSection
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        text:           fenceCount > 0 ? qsTr("Fences (%1)").arg(fenceCount) : qsTr("Fences")
+    }
+
     QGCLabel {
         text:       qsTr("None")
-        visible:    fenceCount === 0
+        visible:    fenceSection.checked && fenceCount === 0
     }
 
     // Fence storage of the vehicle
@@ -167,7 +150,7 @@ Column {
         anchors.left:   parent.left
         anchors.right:  parent.right
         spacing:        _margin / 2
-        visible:        fenceCount > 0
+        visible:        fenceSection.checked && fenceCount > 0
 
         QGCLabel {
             anchors.left:   parent.left
@@ -214,7 +197,7 @@ Column {
         height:         Math.min(listColumn.implicitHeight, maxListHeight)
         contentWidth:   width
         contentHeight:  listColumn.implicitHeight
-        visible:        fenceCount > 0
+        visible:        fenceSection.checked && fenceCount > 0
 
         Column {
             id:         listColumn
@@ -232,7 +215,7 @@ Column {
                 model: _polygons
                 delegate: Loader {
                     width:              listColumn.width
-                    active:             !object.geoZone
+                    active:             !GeoZoneFenceTags.tag(object).geoZone
                     visible:            active
                     sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: false }
                 }
@@ -242,7 +225,7 @@ Column {
                 model: _circles
                 delegate: Loader {
                     width:              listColumn.width
-                    active:             !object.geoZone
+                    active:             !GeoZoneFenceTags.tag(object).geoZone
                     visible:            active
                     sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: true }
                 }
@@ -261,7 +244,7 @@ Column {
                 model: _polygons
                 delegate: Loader {
                     width:              listColumn.width
-                    active:             object.geoZone && importedSection.checked
+                    active:             GeoZoneFenceTags.tag(object).geoZone && importedSection.checked
                     visible:            active
                     sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: false }
                 }
@@ -271,7 +254,7 @@ Column {
                 model: _circles
                 delegate: Loader {
                     width:              listColumn.width
-                    active:             object.geoZone && importedSection.checked
+                    active:             GeoZoneFenceTags.tag(object).geoZone && importedSection.checked
                     visible:            active
                     sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: true }
                 }
@@ -283,7 +266,7 @@ Column {
         anchors.left:   parent.left
         anchors.right:  parent.right
         text:           qsTr("Delete Geozone Fences")
-        visible:        importedCount > 0 && drawnCount > 0
+        visible:        fenceSection.checked && importedCount > 0 && drawnCount > 0
         onClicked:      control._confirmDelete(text, qsTr("Delete the %1 fences added from geozones?").arg(importedCount), true)
     }
 
@@ -291,7 +274,7 @@ Column {
         anchors.left:   parent.left
         anchors.right:  parent.right
         text:           qsTr("Delete All Fences")
-        visible:        fenceCount > 1
+        visible:        fenceSection.checked && fenceCount > 1
         onClicked:      control._confirmDelete(text, qsTr("Delete all %1 fences?").arg(fenceCount), undefined)
     }
 
@@ -308,7 +291,8 @@ Column {
         property int    fenceIndex
         property bool   isCircle
 
-        readonly property real _rowMargin: ScreenTools.defaultFontPixelWidth / 2
+        readonly property var  _tag:        GeoZoneFenceTags.tag(fence)
+        readonly property real _rowMargin:  ScreenTools.defaultFontPixelWidth / 2
 
         QGCPalette { id: rowPalette; colorGroupEnabled: true }
 
@@ -388,7 +372,7 @@ Column {
                         Layout.fillWidth:   true
                         elide:              Text.ElideRight
                         color:              row._textColor
-                        text:               row.fence.name !== "" ? row.fence.name : row._numberText
+                        text:               row._tag.name !== "" ? row._tag.name : row._numberText
                         textFormat:         Text.PlainText
                     }
 
@@ -397,7 +381,7 @@ Column {
                         elide:              Text.ElideRight
                         font.pointSize:     ScreenTools.smallFontPointSize
                         color:              row._textColor
-                        text:               row.fence.name !== "" ? qsTr("%1, %2").arg(row._numberText).arg(row._sizeText) : row._sizeText
+                        text:               row._tag.name !== "" ? qsTr("%1, %2").arg(row._numberText).arg(row._sizeText) : row._sizeText
                         textFormat:         Text.PlainText
                     }
                 }
@@ -458,5 +442,11 @@ Column {
                 }
             }
         }
+    }
+
+    Component {
+        id: fenceImportDialogComponent
+
+        GeoZoneFenceImportDialog { }
     }
 }

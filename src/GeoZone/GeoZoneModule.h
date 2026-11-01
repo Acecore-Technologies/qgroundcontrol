@@ -23,12 +23,11 @@
 /// - FlyViewMap.qml: GeoZoneMapVisuals, map clicks showing zones and the go to confirmation
 /// - FlyViewWidgetLayer.qml: GeoZoneAltitudeStrip
 /// - GuidedActionsController.qml: GeoZoneGuidedActionCheck; GuidedActionConfirm.qml shows its warning
-/// - PlanMasterController: GeoZonePlanData in plan files
-/// - Fence names: QGCFencePolygon, QGCFenceCircle, GeoFenceController::deleteFences, GeoFenceEditor.qml, GeoFenceList.qml
+/// - PlanMasterController: GeoZonePlanData in plan files, with the fence names of GeoZoneFenceTags
+/// - GeoFenceEditor.qml: GeoZoneFenceList in place of the lists of polygon and of circular fences
 ///
-/// Changes outside the module which don't depend on it and could go upstream on their own: fence names with the
-/// fence list and deleting many fences at once, GuidedValueSlider::value, and Vehicle clearing altitudeAboveTerr when
-/// the terrain query fails.
+/// Changes outside the module which don't depend on it and could go upstream on their own: GuidedValueSlider::value,
+/// and Vehicle clearing altitudeAboveTerr when the terrain query fails.
 namespace GeoZoneModule {
 
 /// Connects the geozone core to the settings, units, terrain and downloads of QGroundControl, see GeoZoneEnvironment,
