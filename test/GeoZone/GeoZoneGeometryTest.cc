@@ -1,0 +1,580 @@
+/****************************************************************************
+ *
+ * (c) 2009-2024 QGROUNDCONTROL PROJECT <http://www.qgroundcontrol.org>
+ *
+ * QGroundControl is licensed according to the terms in the file
+ * COPYING.md in the root of the source code directory.
+ *
+ ****************************************************************************/
+
+#include "GeoZoneGeometryTest.h"
+#include "GeoZoneTestHelpers.h"
+
+using namespace GeoZoneTestHelpers;
+
+void GeoZoneGeometryTest::_testIsActiveAt()
+{
+    const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
+    const GeoZoneParser::Result ed318 = _parseResource(QStringLiteral("ed318_test.json"));
+    QCOMPARE(ed269.zones.count(), 3);
+    QCOMPARE(ed318.zones.count(), 3);
+
+    const GeoZone permanent(ed269.zones[0]);
+    QVERIFY(permanent.isActiveAt(_utc(QDate(2035, 1, 1), QTime(0, 0))));
+
+    // Mondays and Tuesdays 05:00-18:00 UTC between 2026-03-29 and 2026-10-25
+    const GeoZone scheduled(ed269.zones[2]);
+    const QDate monday(2026, 6, 1);
+    QVERIFY(scheduled.isActiveAt(_utc(monday, QTime(10, 0))));
+    QVERIFY(scheduled.isActiveAt(QDateTime(monday, QTime(12, 0), QTimeZone::fromSecondsAheadOfUtc(2 * 3600))));
+    QVERIFY(!scheduled.isActiveAt(_utc(monday, QTime(4, 59))));
+    QVERIFY(!scheduled.isActiveAt(_utc(monday, QTime(18, 1))));
+    QVERIFY(!scheduled.isActiveAt(_utc(monday.addDays(2), QTime(10, 0))));
+    QVERIFY(!scheduled.isActiveAt(_utc(QDate(2026, 11, 2), QTime(10, 0))));
+
+    // Sunrise to sunset at the zone in southern Sweden, within the date range
+    const GeoZone daylight(ed318.zones[0]);
+    QVERIFY(daylight.isActiveAt(_utc(QDate(2026, 6, 1), QTime(12, 0))));
+    QVERIFY(!daylight.isActiveAt(_utc(QDate(2026, 6, 1), QTime(23, 30))));
+    QVERIFY(!daylight.isActiveAt(_utc(QDate(2026, 12, 1), QTime(7, 0))));
+    QVERIFY(!daylight.isActiveAt(_utc(QDate(2027, 1, 2), QTime(12, 0))));
+    QVERIFY(daylight.isActiveDuring(_utc(QDate(2026, 6, 1), QTime(22, 0)), _utc(QDate(2026, 6, 2), QTime(3, 0))));
+    QVERIFY(!daylight.isActiveDuring(_utc(QDate(2026, 12, 1), QTime(16, 0)), _utc(QDate(2026, 12, 2), QTime(6, 0))));
+    QCOMPARE(daylight.applicabilityText(), QStringLiteral("From 2026-01-01 00:00 UTC to 2026-12-31 23:59 UTC\n  Every day sunrise-sunset"));
+
+    // Schedules wrapping past midnight continue into the morning after the listed day
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "N", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["FRI"], "startTime": "22:00Z", "endTime": "02:00Z" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8, 47], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone night(result.zones[0]);
+    const QDate friday(2026, 6, 5);
+    QVERIFY(night.isActiveAt(_utc(friday, QTime(23, 0))));
+    QVERIFY(night.isActiveAt(_utc(friday.addDays(1), QTime(1, 0))));
+    QVERIFY(!night.isActiveAt(_utc(friday, QTime(1, 0))));
+    QVERIFY(!night.isActiveAt(_utc(friday.addDays(1), QTime(23, 0))));
+
+    // Days and times with a UTC offset are evaluated in that offset: Monday 01:00-03:00 UTC+2 is Sunday 23:00 to Monday 01:00 UTC
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "O", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["MON"], "startTime": "01:00+02:00", "endTime": "01:00Z" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8, 47], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone::DailyPeriod &offsetPeriod = result.zones[0].applicability[0].schedule[0];
+    QCOMPARE(offsetPeriod.utcOffsetSecs, 2 * 3600);
+    QCOMPARE(offsetPeriod.startTime, QTime(1, 0));
+    QCOMPARE(offsetPeriod.endTime, QTime(3, 0));
+    const GeoZone offset(result.zones[0]);
+    QVERIFY(offset.isActiveAt(_utc(monday.addDays(-1), QTime(23, 30))));
+    QVERIFY(offset.isActiveAt(_utc(monday, QTime(0, 30))));
+    QVERIFY(!offset.isActiveAt(_utc(monday, QTime(1, 30))));
+    QVERIFY(!offset.isActiveAt(_utc(monday, QTime(23, 30))));
+    QCOMPARE(offset.applicabilityText(), QStringLiteral("  MON 01:00-03:00 UTC+02:00"));
+}
+
+void GeoZoneGeometryTest::_testDaylightEvents()
+{
+    const auto minutesFrom = [](const QDateTime &time, const QDateTime &expected) {
+        return qAbs(time.secsTo(expected)) / 60.0;
+    };
+
+    // Published times for Zurich at midsummer and London at midwinter
+    const QGeoCoordinate zurich(47.37, 8.54);
+    const QDate midsummer(2026, 6, 21);
+    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, zurich), _utc(midsummer, QTime(3, 30))) < 3);
+    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midsummer, zurich), _utc(midsummer, QTime(19, 26))) < 3);
+    QVERIFY(GeoZoneSchedule::daylightEventTime(QStringLiteral("BMCT"), midsummer, zurich) < GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, zurich));
+    QVERIFY(GeoZoneSchedule::daylightEventTime(QStringLiteral("EECT"), midsummer, zurich) > GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midsummer, zurich));
+    const QGeoCoordinate london(51.5, -0.13);
+    const QDate midwinter(2026, 12, 21);
+    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midwinter, london), _utc(midwinter, QTime(8, 4))) < 3);
+    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midwinter, london), _utc(midwinter, QTime(15, 54))) < 3);
+    QVERIFY(!GeoZoneSchedule::daylightEventTime(QStringLiteral("XX"), midwinter, london).isValid());
+
+    // North of the arctic circle the sun doesn't set at midsummer and doesn't rise at midwinter
+    const QGeoCoordinate tromso(69.65, 18.96);
+    QVERIFY(!GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, tromso).isValid());
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "D", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SR", "endEvent": "SS" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [18.96, 69.65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone arctic(result.zones[0]);
+    QVERIFY(arctic.isActiveAt(_utc(midsummer, QTime(23, 0))));
+    QVERIFY(!arctic.isActiveAt(_utc(midwinter, QTime(11, 0))));
+    QVERIFY(!arctic.isActiveDuring(_utc(midwinter, QTime(0, 0)), _utc(midwinter, QTime(23, 0))));
+
+    // Night periods cover the whole polar night and none of the polar day
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "N", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SS", "endEvent": "SR" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [18.96, 69.65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone arcticNight(result.zones[0]);
+    QVERIFY(arcticNight.isActiveAt(_utc(midwinter, QTime(11, 0))));
+    QVERIFY(!arcticNight.isActiveAt(_utc(midsummer, QTime(23, 0))));
+
+    // In Finland the midsummer sunrise is before midnight UTC
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "F", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SR", "endEvent": "SS" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [25, 65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone finland(result.zones[0]);
+    QVERIFY(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, QGeoCoordinate(65, 25)) < _utc(midsummer, QTime(0, 0)));
+    QVERIFY(finland.isActiveAt(_utc(midsummer.addDays(-1), QTime(23, 45))));
+    QVERIFY(finland.isActiveDuring(_utc(midsummer.addDays(-1), QTime(23, 40)), _utc(midsummer.addDays(-1), QTime(23, 50))));
+    QVERIFY(!finland.isActiveAt(_utc(midsummer.addDays(-1), QTime(22, 30))));
+
+    // Mixed time and event: 08:00 local time to sunset
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "M", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startTime": "08:00+02:00", "endEvent": "SS" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8.54, 47.37], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone mixed(result.zones[0]);
+    QVERIFY(!mixed.isActiveAt(_utc(midsummer, QTime(5, 30))));
+    QVERIFY(mixed.isActiveAt(_utc(midsummer, QTime(6, 30))));
+    QVERIFY(mixed.isActiveAt(_utc(midsummer, QTime(19, 0))));
+    QVERIFY(!mixed.isActiveAt(_utc(midsummer, QTime(20, 0))));
+    QCOMPARE(mixed.applicabilityText(), QStringLiteral("  Every day 08:00-sunset UTC+02:00"));
+}
+
+void GeoZoneGeometryTest::_testIsActiveDuring()
+{
+    const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
+    QCOMPARE(ed269.zones.count(), 3);
+
+    const GeoZone permanent(ed269.zones[0]);
+    QVERIFY(permanent.isActiveDuring(_utc(QDate(2035, 1, 1), QTime(0, 0)), _utc(QDate(2035, 1, 1), QTime(1, 0))));
+
+    // Mondays and Tuesdays 05:00-18:00 UTC between 2026-03-29 and 2026-10-25
+    const GeoZone scheduled(ed269.zones[2]);
+    const QDate monday(2026, 6, 1);
+    QVERIFY(!scheduled.isActiveDuring(_utc(monday, QTime(1, 0)), _utc(monday, QTime(4, 59))));
+    QVERIFY(scheduled.isActiveDuring(_utc(monday, QTime(4, 0)), _utc(monday, QTime(5, 30))));
+    QVERIFY(scheduled.isActiveDuring(_utc(monday, QTime(17, 30)), _utc(monday, QTime(20, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(monday.addDays(1), QTime(18, 1)), _utc(monday.addDays(5), QTime(23, 0))));
+    QVERIFY(scheduled.isActiveDuring(_utc(monday.addDays(2), QTime(0, 0)), _utc(monday.addDays(30), QTime(0, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(monday, QTime(20, 0)), _utc(monday, QTime(10, 0))));
+    // A window starting before the validity begins only overlaps the scheduled days inside it
+    QVERIFY(!scheduled.isActiveAt(_utc(QDate(2026, 3, 23), QTime(10, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 3, 23), QTime(0, 0)), _utc(QDate(2026, 3, 29), QTime(23, 0))));
+    QVERIFY(scheduled.isActiveDuring(_utc(QDate(2026, 3, 25), QTime(0, 0)), _utc(QDate(2026, 3, 30), QTime(6, 0))));
+    QVERIFY(!scheduled.isActiveDuring(_utc(QDate(2026, 10, 26), QTime(0, 0)), _utc(QDate(2026, 12, 1), QTime(0, 0))));
+
+    // Friday 22:00 to Saturday 02:00 UTC, and Monday 01:00-03:00 UTC+2 which is Sunday 23:00 to Monday 01:00 UTC
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "N", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["FRI"], "startTime": "22:00Z", "endTime": "02:00Z" },
+                                                               { "day": ["MON"], "startTime": "01:00+02:00", "endTime": "01:00Z" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8, 47], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone night(result.zones[0]);
+    const QDate friday(2026, 6, 5);
+    QVERIFY(!night.isActiveDuring(_utc(friday, QTime(19, 0)), _utc(friday, QTime(21, 59))));
+    QVERIFY(night.isActiveDuring(_utc(friday, QTime(21, 0)), _utc(friday, QTime(22, 30))));
+    QVERIFY(night.isActiveDuring(_utc(friday.addDays(1), QTime(1, 0)), _utc(friday.addDays(1), QTime(3, 0))));
+    QVERIFY(!night.isActiveDuring(_utc(friday.addDays(1), QTime(2, 1)), _utc(friday.addDays(2), QTime(22, 59))));
+    QVERIFY(night.isActiveDuring(_utc(friday.addDays(2), QTime(22, 30)), _utc(friday.addDays(2), QTime(23, 10))));
+    QVERIFY(!night.isActiveDuring(_utc(friday.addDays(3), QTime(1, 1)), _utc(friday.addDays(6), QTime(21, 0))));
+
+    // The manager filters zones by the activity window
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QVERIFY2(manager.loadFile(QStringLiteral(":/unittest/ed269_test.json"), errorString), qPrintable(errorString));
+    const QList<GeoZone::Restriction> all = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown };
+    QCOMPARE(manager.zonesInArea(all, QGeoRectangle()).count(), 3);
+    QCOMPARE(manager.zonesInArea(all, QGeoRectangle(), _utc(monday.addDays(2), QTime(10, 0))).count(), 2);
+    QCOMPARE(manager.zonesInArea(all, QGeoRectangle(), _utc(monday.addDays(2), QTime(10, 0)), _utc(monday.addDays(7), QTime(10, 0))).count(), 3);
+}
+
+void GeoZoneGeometryTest::_testOutwardSimplification()
+{
+    const auto verifyEncloses = [](const QList<QGeoCoordinate> &original, const QList<QGeoCoordinate> &simplified, double tolerance) {
+        const GeoZoneGeometry::LocalProjection projection(original.first());
+        const QList<QPointF> originalPoints = projection.toLocal(original);
+        const QList<QPointF> simplifiedPoints = projection.toLocal(simplified);
+        QVERIFY(GeoZoneGeometry::isSimple(simplifiedPoints));
+        for (qsizetype i = 0; i < originalPoints.count(); i++) {
+            QVERIFY(GeoZoneGeometry::ringContains(simplifiedPoints, originalPoints[i]));
+            QVERIFY(!GeoZoneGeometry::segmentIntersectsRing(originalPoints[i], originalPoints[(i + 1) % originalPoints.count()], simplifiedPoints));
+        }
+        // Expanded by no more than twice the tolerance
+        for (const QPointF &point : simplifiedPoints) {
+            QVERIFY(GeoZoneGeometry::distanceToRing(point, originalPoints) <= (2 * tolerance) + 1);
+        }
+    };
+
+    // Circle published as a polygon
+    const QList<QGeoCoordinate> circle = _circleRing(QGeoCoordinate(47, 8), 500, 64);
+    const QList<QGeoCoordinate> simplifiedCircle = GeoZoneGeometry::simplifyOutward(circle, 25);
+    QVERIFY(simplifiedCircle.count() < 20);
+    verifyEncloses(circle, simplifiedCircle, 25);
+
+    // Concave star with a jagged boundary
+    QList<QGeoCoordinate> star;
+    for (int i = 0; i < 200; i++) {
+        const double radius = ((i % 2) ? 400 : 395) + ((i % 40) < 20 ? 300 : 0);
+        star.append(QGeoCoordinate(47, 8).atDistanceAndAzimuth(radius, i * 360.0 / 200));
+    }
+    const QList<QGeoCoordinate> simplifiedStar = GeoZoneGeometry::simplifyOutward(star, 10);
+    QVERIFY(simplifiedStar.count() < star.count() / 2);
+    verifyEncloses(star, simplifiedStar, 10);
+
+    // U shape with a notch narrower than the tolerance and sharp corners
+    const QGeoCoordinate origin(47, 8);
+    QList<QGeoCoordinate> notch;
+    const QList<QPointF> notchPoints = { { 0, 0 }, { 1000, 0 }, { 1000, 1000 }, { 510, 1000 }, { 510, 100 }, { 500, 100 }, { 500, 1000 }, { 0, 1000 } };
+    const GeoZoneGeometry::LocalProjection projection(origin);
+    for (const QPointF &point : notchPoints) {
+        // Densify the edges so there is something to simplify
+        notch.append(projection.toGeo(point));
+    }
+    QList<QGeoCoordinate> denseNotch;
+    for (qsizetype i = 0; i < notch.count(); i++) {
+        const QPointF a = projection.toLocal(notch[i]);
+        const QPointF b = projection.toLocal(notch[(i + 1) % notch.count()]);
+        for (int step = 0; step < 10; step++) {
+            denseNotch.append(projection.toGeo(a + ((b - a) * (step / 10.0)) + QPointF((step % 2) * 2, 0)));
+        }
+    }
+    const QList<QGeoCoordinate> simplifiedNotch = GeoZoneGeometry::simplifyOutward(denseNotch, 25);
+    QVERIFY(simplifiedNotch.count() < denseNotch.count());
+    verifyEncloses(denseNotch, simplifiedNotch, 25);
+
+    // Nothing to do
+    QCOMPARE(GeoZoneGeometry::simplifyOutward(circle, 0), circle);
+    const QList<QGeoCoordinate> triangle = { QGeoCoordinate(47, 8), QGeoCoordinate(47.01, 8), QGeoCoordinate(47, 8.01) };
+    QCOMPARE(GeoZoneGeometry::simplifyOutward(triangle, 25), triangle);
+}
+
+void GeoZoneGeometryTest::_testSpatialIndex()
+{
+    // Random circles from a few meters to a hundred kilometers, and a box crossing many cells
+    QObject zoneParent;
+    QList<GeoZone*> zones;
+    quint32 seed = 12345;
+    const auto random = [&seed]() {
+        seed = (seed * 1103515245u) + 12345u;
+        return static_cast<double>((seed >> 8) & 0xFFFF) / 0xFFFF;
+    };
+    for (int i = 0; i < 3000; i++) {
+        GeoZone::Volume volume;
+        volume.isCircle = true;
+        volume.center = QGeoCoordinate(45 + (random() * 5), 5 + (random() * 8));
+        volume.radius = (i % 500 == 0) ? 100000 : (10 + (random() * 3000));
+        GeoZone::Data data;
+        data.identifier = QString::number(i);
+        data.restriction = (i % 2) ? GeoZone::Prohibited : GeoZone::Conditional;
+        data.volumes.append(volume);
+        zones.append(new GeoZone(data, &zoneParent));
+    }
+
+    GeoZoneIndex index;
+    index.build(zones);
+    for (int i = 0; i < 200; i++) {
+        const double south = 44 + (random() * 7);
+        const double west = 4 + (random() * 10);
+        const double size = (i % 20 == 0) ? 10 : (random() * 0.5);
+        const QGeoRectangle area(QGeoCoordinate(south + size, west), QGeoCoordinate(south, west + size));
+
+        QList<int> expected;
+        for (int j = 0; j < zones.count(); j++) {
+            const QGeoRectangle box = zones[j]->boundingBox();
+            if ((box.topLeft().longitude() <= area.bottomRight().longitude()) && (area.topLeft().longitude() <= box.bottomRight().longitude()) &&
+                (box.bottomRight().latitude() <= area.topLeft().latitude()) && (area.bottomRight().latitude() <= box.topLeft().latitude())) {
+                expected.append(j);
+            }
+        }
+        QCOMPARE(index.query(area), expected);
+    }
+
+    // A point query matches the zones containing it in their bounding box
+    const QGeoCoordinate point = zones[1]->data().volumes[0].center;
+    QVERIFY(index.query(point.latitude(), point.longitude(), point.latitude(), point.longitude()).contains(1));
+    QVERIFY(index.query(QGeoRectangle()).isEmpty());
+}
+
+void GeoZoneGeometryTest::_testExclusionShapes()
+{
+    const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
+    const GeoZoneParser::Result ed318 = _parseResource(QStringLiteral("ed318_test.json"));
+    QCOMPARE(ed269.zones.count(), 3);
+    QCOMPARE(ed318.zones.count(), 3);
+
+    // Both volumes share the footprint, and the counter-clockwise ring is reversed to clockwise
+    const GeoZone prohibited(ed269.zones[0]);
+    const QList<QList<QGeoCoordinate>> polygons = prohibited.exclusionPolygons();
+    QCOMPARE(polygons.count(), 1);
+    QList<QGeoCoordinate> expected = ed269.zones[0].volumes[0].rings[0];
+    std::reverse(expected.begin(), expected.end());
+    QCOMPARE(polygons[0], expected);
+    QVERIFY(prohibited.exclusionCircles().isEmpty());
+
+    const GeoZone circle(ed269.zones[1]);
+    QVERIFY(circle.exclusionPolygons().isEmpty());
+    QCOMPARE(circle.exclusionCircles().count(), 1);
+    QCOMPARE(circle.exclusionCircles()[0].radius(), 1000 * 0.3048);
+
+    // Holes are dropped so the whole outer boundary is excluded
+    const GeoZone multiPolygon(ed318.zones[1]);
+    const QList<QList<QGeoCoordinate>> multiPolygons = multiPolygon.exclusionPolygons();
+    QCOMPARE(multiPolygons.count(), 2);
+    QCOMPARE(multiPolygons[0].count(), 4);
+    QCOMPARE(multiPolygons[1].count(), 3);
+}
+
+void GeoZoneGeometryTest::_testContainsAndPaths()
+{
+    GeoZone::Volume polygonVolume;
+    // 1 km square with a 200 m hole in the middle
+    const QGeoCoordinate center(47, 8);
+    polygonVolume.rings.append({ center.atDistanceAndAzimuth(707.1, 45), center.atDistanceAndAzimuth(707.1, 135),
+                                 center.atDistanceAndAzimuth(707.1, 225), center.atDistanceAndAzimuth(707.1, 315) });
+    polygonVolume.rings.append({ center.atDistanceAndAzimuth(141.4, 45), center.atDistanceAndAzimuth(141.4, 135),
+                                 center.atDistanceAndAzimuth(141.4, 225), center.atDistanceAndAzimuth(141.4, 315) });
+    GeoZone::Data polygonData;
+    polygonData.volumes.append(polygonVolume);
+    const GeoZone polygon(polygonData);
+
+    QVERIFY(polygon.contains(center.atDistanceAndAzimuth(300, 0)));
+    QVERIFY(!polygon.contains(center));
+    QVERIFY(!polygon.contains(center.atDistanceAndAzimuth(600, 0)));
+    QCOMPARE(polygon.distanceTo(center.atDistanceAndAzimuth(300, 0)), 0.0);
+    QVERIFY(qAbs(polygon.distanceTo(center.atDistanceAndAzimuth(600, 0)) - 100) < 1);
+    QVERIFY(qAbs(polygon.distanceTo(center) - 100) < 1);
+
+    // Paths through the zone, inside the hole only, and passing by
+    QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }));
+    // Invalid positions are skipped
+    QVERIFY(polygon.intersectsPath({ QGeoCoordinate(), center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }));
+    QVERIFY(polygon.intersectsPath({ center.atDistanceAndAzimuth(300, 0) }));
+    QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(50, 270), center.atDistanceAndAzimuth(50, 90) }));
+    QVERIFY(!polygon.intersectsPath({ center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(2000, 90) }));
+
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = center;
+    circleVolume.radius = 500;
+    GeoZone::Data circleData;
+    circleData.volumes.append(circleVolume);
+    const GeoZone circle(circleData);
+    QVERIFY(qAbs(circle.distanceTo(center.atDistanceAndAzimuth(600, 30)) - 100) < 1);
+    QVERIFY(circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(400, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(400, 0) }));
+    QVERIFY(!circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(600, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(600, 0) }));
+
+    // Connected segments form one path, long legs get points along the great circle
+    const QGeoCoordinate a(47, 8);
+    const QGeoCoordinate b = a.atDistanceAndAzimuth(500, 0);
+    const QGeoCoordinate c = b.atDistanceAndAzimuth(500, 90);
+    const QGeoCoordinate d = a.atDistanceAndAzimuth(5000, 180);
+    const auto coordinates = [](const QList<GeoZone::Position> &path) {
+        QList<QGeoCoordinate> result;
+        for (const GeoZone::Position &position : path) {
+            result.append(position.coordinate);
+        }
+        return result;
+    };
+    QList<QList<GeoZone::Position>> paths = GeoZoneMissionCheck::pathsFromSegments({ { a, b }, { b, c }, { QGeoCoordinate(), d }, { d, a } });
+    QCOMPARE(paths.count(), 2);
+    QCOMPARE(coordinates(paths[0]), QList<QGeoCoordinate>({ a, b, c }));
+    QCOMPARE(paths[1].count(), 6);
+    QCOMPARE(paths[1].first().coordinate, d);
+    QCOMPARE(paths[1].last().coordinate, a);
+    QVERIFY(qAbs(paths[1][1].coordinate.distanceTo(d) - 1000) < 1);
+
+    // Positions at the terrain samples with interpolated altitudes, and a climb at a shared waypoint is kept.
+    // The climb starts at the launch position, whose coordinate has an altitude.
+    const QGeoCoordinate launch(a.latitude(), a.longitude(), 300);
+    GeoZoneMissionCheck::Segment climb{ launch, a, 400, 500 };
+    GeoZoneMissionCheck::Segment leg{ a, b, 500, 600, { 300, 350, 320 }, 300 };
+    paths = GeoZoneMissionCheck::pathsFromSegments({ climb, leg });
+    QCOMPARE(paths.count(), 1);
+    QCOMPARE(paths[0].count(), 4);
+    QCOMPARE(paths[0][0].altitudeAMSL, 400.0);
+    // The climb has no terrain samples, it is at the terrain of the leg start
+    QCOMPARE(paths[0][0].terrainAMSL, 300.0);
+    QCOMPARE(paths[0][1].altitudeAMSL, 500.0);
+    QCOMPARE(paths[0][1].terrainAMSL, 300.0);
+    QCOMPARE(paths[0][2].altitudeAMSL, 560.0);
+    QCOMPARE(paths[0][2].terrainAMSL, 350.0);
+    QVERIFY(qAbs(paths[0][2].coordinate.distanceTo(a) - 300) < 1);
+    QCOMPARE(paths[0][3].coordinate, b);
+    QCOMPARE(paths[0][3].terrainAMSL, 320.0);
+
+    // A PX4 takeoff at the launch position: a vertical segment whose terrain samples have no spacing
+    paths = GeoZoneMissionCheck::pathsFromSegments({ { launch, a, 500, 500, { 310, 310 }, 0 }, leg });
+    QCOMPARE(paths.count(), 1);
+    QCOMPARE(paths[0].first().terrainAMSL, 310.0);
+    QVERIFY(std::none_of(paths[0].cbegin(), paths[0].cend(), [](const GeoZone::Position &position) { return qIsNaN(position.terrainAMSL); }));
+}
+
+void GeoZoneGeometryTest::_testAltitudeLimits()
+{
+    const QGeoCoordinate center(47, 8);
+    const auto position = [](const QGeoCoordinate &coordinate, double altitudeAMSL, double terrainAMSL) {
+        return GeoZone::Position{ coordinate, altitudeAMSL, terrainAMSL };
+    };
+
+    // Ground to 120 m above ground
+    GeoZone::Volume low;
+    low.isCircle = true;
+    low.center = center;
+    low.radius = 500;
+    low.lowerLimit = 0;
+    low.upperLimit = 120;
+    low.setReferences(QStringLiteral("AGL"), QStringLiteral("AGL"));
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 450, 400), position(center, 450, 400)));
+    QVERIFY(!GeoZone::verticalOverlap(low, position(center, 600, 400), position(center, 600, 400)));
+    // Slightly below the ground is still inside a zone from the ground
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 399.9, 400), position(center, 399.9, 400)));
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 600, 400), position(center, 600, 400), 100));
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 450, 400), position(center, 700, 400)));
+    // Unknown terrain or altitude can't be excluded
+    QVERIFY(GeoZone::verticalOverlap(low, position(center, 600, qQNaN()), position(center, 600, qQNaN())));
+    QVERIFY(GeoZone::verticalOverlap(low, GeoZone::Position{ center }, GeoZone::Position{ center }));
+
+    // 1000 ft above mean sea level and higher, published in feet
+    GeoZone::Volume high = low;
+    high.feet = true;
+    high.lowerLimit = 1000;
+    high.upperLimit = 99999;
+    high.setReferences(QStringLiteral("AMSL"), QStringLiteral("AMSL"));
+    QVERIFY(!GeoZone::verticalOverlap(high, position(center, 300, 250), position(center, 300, 250)));
+    QVERIFY(GeoZone::verticalOverlap(high, position(center, 310, 250), position(center, 310, 250)));
+    QVERIFY(GeoZone::verticalOverlap(high, position(center, 9000, 250), position(center, 9000, 250)));
+
+    // Heights above the WGS84 ellipsoid are about 48 m higher than above mean sea level in Zurich
+    const QGeoCoordinate zurich(47.37, 8.54);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(zurich) - 47.3) < 2);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(42.39, -71.15)) + 28.6) < 2);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(5, 78)) + 104.7) < 2);
+    QVERIFY(qIsNaN(GeoZoneGeometry::geoidHeight(QGeoCoordinate())));
+    GeoZone::Volume ellipsoid = low;
+    ellipsoid.lowerLimit = 500;
+    ellipsoid.upperLimit = 1000;
+    ellipsoid.setReferences(QStringLiteral("WGS84"), QStringLiteral("WGS84"));
+    QVERIFY(GeoZone::verticalOverlap(ellipsoid, position(zurich, 460, 400), position(zurich, 460, 400)));
+    QVERIFY(!GeoZone::verticalOverlap(ellipsoid, position(zurich, 440, 400), position(zurich, 440, 400)));
+
+    // Flight levels can't be compared
+    GeoZone::Volume flightLevel = high;
+    flightLevel.setReferences(QStringLiteral("STD"), QStringLiteral("AMSL"));
+    QCOMPARE(flightLevel.lowerReference, GeoZone::VerticalReference::FlightLevel);
+    QVERIFY(GeoZone::verticalOverlap(flightLevel, position(center, 0, 0), position(center, 0, 0)));
+
+    // Published codes are case insensitive and have aliases, the ground is shown as GND either way
+    GeoZone::Volume surface = low;
+    surface.setReferences(QStringLiteral(" sfc"), QStringLiteral("msl "));
+    QCOMPARE(surface.lowerReference, GeoZone::VerticalReference::Ground);
+    QCOMPARE(surface.upperReference, GeoZone::VerticalReference::MeanSeaLevel);
+    QVERIFY(GeoZone::verticalOverlap(surface, position(center, 110, 400), position(center, 110, 400)));
+    QVERIFY(!GeoZone::verticalOverlap(surface, position(center, 130, 0), position(center, 130, 0)));
+    GeoZone::Data surfaceData;
+    surfaceData.volumes.append(surface);
+    QVERIFY(GeoZone(surfaceData).verticalLimitsText().startsWith(QStringLiteral("GND - ")));
+    QCOMPARE(GeoZone::verticalReferenceFromString(QStringLiteral("FL")), GeoZone::VerticalReference::Unknown);
+
+    GeoZone::Data data;
+    data.volumes.append(low);
+    const GeoZone zone(data);
+    QVERIFY(zone.contains(position(center, 450, 400)));
+    QVERIFY(!zone.contains(position(center, 600, 400)));
+    QCOMPARE(zone.distanceTo(position(center.atDistanceAndAzimuth(600, 0), 450, 400)), zone.distanceTo(center.atDistanceAndAzimuth(600, 0)));
+    QVERIFY(qIsInf(zone.distanceTo(position(center, 600, 400))));
+    QCOMPARE(zone.distanceTo(position(center, 600, 400), 100), 0.0);
+
+    // Paths above the ceiling pass, paths descending into the zone enter it
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(1000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(1000, 90);
+    QVERIFY(!zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(east, 600, 400) }));
+    QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, 400), position(east, 450, 400) }));
+    QVERIFY(zone.intersectsPath(QList<GeoZone::Position>{ position(west, 600, qQNaN()), position(east, 600, qQNaN()) }));
+}
+
+void GeoZoneGeometryTest::_testAreaIntersection()
+{
+    const QGeoCoordinate center(47, 8);
+    const auto square = [](const QGeoCoordinate &squareCenter, double halfSide) {
+        return QList<QGeoCoordinate>{ squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 45), squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 135),
+                                      squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 225), squareCenter.atDistanceAndAzimuth(halfSide * M_SQRT2, 315) };
+    };
+    const auto area = [](const QList<QGeoCoordinate> &polygon, double lowest, double highest, double maxTerrain = qQNaN(), double minTerrain = qQNaN()) {
+        return GeoZone::Area{ polygon, GeoZone::Position{ polygon.first(), lowest, maxTerrain }, GeoZone::Position{ polygon.first(), highest, minTerrain } };
+    };
+    const auto circleZone = [](const QGeoCoordinate &zoneCenter, double radius) {
+        GeoZone::Volume volume;
+        volume.isCircle = true;
+        volume.center = zoneCenter;
+        volume.radius = radius;
+        GeoZone::Data data;
+        data.volumes.append(volume);
+        return data;
+    };
+    const QList<QGeoCoordinate> survey = square(center, 500);
+
+    // A small zone between the flight lines of a survey
+    QVERIFY(GeoZone(circleZone(center, 20)).intersectsArea(area(survey, 100, 200)));
+    QVERIFY(GeoZone(circleZone(center.atDistanceAndAzimuth(540, 90), 50)).intersectsArea(area(survey, 100, 200)));
+    QVERIFY(!GeoZone(circleZone(center.atDistanceAndAzimuth(600, 90), 50)).intersectsArea(area(survey, 100, 200)));
+
+    // Polygon zones inside the area, around it, and with the area in a hole
+    GeoZone::Data small;
+    small.volumes.append(GeoZone::Volume{ false, { square(center.atDistanceAndAzimuth(200, 0), 10) } });
+    QVERIFY(GeoZone(small).intersectsArea(area(survey, 100, 200)));
+    GeoZone::Data large;
+    large.volumes.append(GeoZone::Volume{ false, { square(center, 2000) } });
+    QVERIFY(GeoZone(large).intersectsArea(area(survey, 100, 200)));
+    large.volumes[0].rings.append(square(center, 1000));
+    QVERIFY(!GeoZone(large).intersectsArea(area(survey, 100, 200)));
+    QVERIFY(!GeoZone(small).intersectsArea(area(square(center.atDistanceAndAzimuth(3000, 0), 500), 100, 200)));
+
+    // Vertical limits: 150 m above ground and higher, the area flown 80 to 150 m above the ground
+    GeoZone::Data elevated = circleZone(center, 100);
+    elevated.volumes[0].lowerLimit = 150;
+    elevated.volumes[0].lowerReference = GeoZone::VerticalReference::Ground;
+    QVERIFY(GeoZone(elevated).intersectsArea(area(survey, 400, 450, 320, 300)));
+    elevated.volumes[0].lowerLimit = 160;
+    QVERIFY(!GeoZone(elevated).intersectsArea(area(survey, 400, 450, 320, 300)));
+    // Unknown terrain can't exclude the zone
+    QVERIFY(GeoZone(elevated).intersectsArea(area(survey, 400, 450)));
+}
+
+void GeoZoneGeometryTest::_testShapeSimplification()
+{
+    // Dense 5 km circle with a 40 m hole
+    const QGeoCoordinate center(47.0, 8.0);
+    const QList<QGeoCoordinate> ring = _circleRing(center, 5000, 10000);
+    const GeoZoneShape shape(nullptr, { ring, _circleRing(center, 20, 8) });
+
+    const QGeoPolygon full = shape.polygon(GeoZoneShape::fullDetailZoomLevel);
+    QCOMPARE(full.perimeter().count(), ring.count());
+    QCOMPARE(full.holesCount(), 1);
+
+    const int zoomLevel = 10;
+    const QGeoPolygon simplified = shape.polygon(zoomLevel);
+    QVERIFY(simplified.perimeter().count() >= 3);
+    QVERIFY(simplified.perimeter().count() < 100);
+    QCOMPARE(simplified.holesCount(), 0); // The hole is under a pixel at this zoom level
+    QCOMPARE(shape.polygon(16).holesCount(), 1);
+
+    // Shapes under a pixel become a triangle spanning them instead of keeping every vertex
+    const QList<QGeoCoordinate> smallRing = _circleRing(center, 50, 200);
+    const GeoZoneShape smallShape(nullptr, { smallRing });
+    const QList<QGeoCoordinate> triangle = smallShape.polygon(5).perimeter();
+    QCOMPARE(triangle.count(), 3);
+    const QList<double> sides = { triangle[0].distanceTo(triangle[1]), triangle[1].distanceTo(triangle[2]), triangle[2].distanceTo(triangle[0]) };
+    QVERIFY(*std::max_element(sides.cbegin(), sides.cend()) > 95); // Spans the 100 m diameter
+    QVERIFY(*std::min_element(sides.cbegin(), sides.cend()) > 65);
+    QCOMPARE(smallShape.polygon(GeoZoneShape::fullDetailZoomLevel).perimeter().count(), smallRing.count());
+
+    // Simplified vertices are original vertices and every original vertex stays within half a pixel of the outline
+    const double tolerance = 0.5 / GeoZoneShape::mercatorPixels(zoomLevel);
+    for (const QGeoCoordinate &vertex : simplified.perimeter()) {
+        QVERIFY(ring.contains(vertex));
+    }
+    for (const QGeoCoordinate &vertex : ring) {
+        QVERIFY(_distanceToRing(GeoZoneShape::toMercator(vertex), simplified.perimeter()) <= tolerance * 1.0001);
+    }
+
+    // A 1 km circle is 2000 m / 104.26 m per pixel wide at zoom level 10 and 47 degrees latitude
+    const GeoZoneShape circle(nullptr, center, 1000);
+    const double widthPixels = circle.mercatorBounds().width() * GeoZoneShape::mercatorPixels(zoomLevel);
+    QVERIFY2(qAbs(widthPixels - 19.18) < 0.2, qPrintable(QString::number(widthPixels)));
+    QCOMPARE(circle.mercatorBounds().height(), circle.mercatorBounds().width());
+}

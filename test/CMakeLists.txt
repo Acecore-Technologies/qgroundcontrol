@@ -66,7 +66,11 @@ add_qgc_test(FollowMeTest)
 
 add_subdirectory(GeoZone)
 add_qgc_test(GeoZoneFlightTest)
-add_qgc_test(GeoZoneTest)
+add_qgc_test(GeoZoneGeometryTest)
+add_qgc_test(GeoZoneManagerTest)
+add_qgc_test(GeoZoneMonitorTest)
+add_qgc_test(GeoZoneParserTest)
+add_qgc_test(GeoZonePlanningTest)
 
 add_subdirectory(GPS)
 add_qgc_test(GpsTest)

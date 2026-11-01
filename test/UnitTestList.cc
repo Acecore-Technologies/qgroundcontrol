@@ -43,7 +43,11 @@
 
 // GeoZone
 #include "GeoZoneFlightTest.h"
-#include "GeoZoneTest.h"
+#include "GeoZoneGeometryTest.h"
+#include "GeoZoneManagerTest.h"
+#include "GeoZoneMonitorTest.h"
+#include "GeoZoneParserTest.h"
+#include "GeoZonePlanningTest.h"
 
 // GPS
 #include "GpsTest.h"
@@ -152,7 +156,11 @@ int runTests(bool stress, QStringView unitTestOptions)
 
     // GeoZone
     UT_REGISTER_TEST(GeoZoneFlightTest)
-    UT_REGISTER_TEST(GeoZoneTest)
+    UT_REGISTER_TEST(GeoZoneGeometryTest)
+    UT_REGISTER_TEST(GeoZoneManagerTest)
+    UT_REGISTER_TEST(GeoZoneMonitorTest)
+    UT_REGISTER_TEST(GeoZoneParserTest)
+    UT_REGISTER_TEST(GeoZonePlanningTest)
 
     // GPS
     // UT_REGISTER_TEST(GpsTest)
