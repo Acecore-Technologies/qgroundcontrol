@@ -24,6 +24,7 @@
     - [Corridor Scan](qgc-user-guide/plan_view/pattern_corridor_scan.md)
     - [Fixed Wing Landing Pattern](qgc-user-guide/plan_view/pattern_fixed_wing_landing.md)
     - [Pattern Presets](qgc-user-guide/plan_view/pattern_presets.md)
+- [Geozones](qgc-user-guide/geozones/geozones.md)
 - [Vehicle Configuration](qgc-user-guide/setup_view/setup_view.md)
   - [Firmware](qgc-user-guide/setup_view/firmware.md)
   - [Airframe](qgc-user-guide/setup_view/airframe.md)

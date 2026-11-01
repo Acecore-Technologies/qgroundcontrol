@@ -11,6 +11,9 @@ You can switch between the various settings options by clicking the buttons in t
 **[General](general.md)**
 <br>The main application configuration settings. These are used to specify: display units, autoconnection devices, video display and storage, RTK GPS, etc.
 
+**[Geozones](../geozones/geozones.md#settings-reference)**
+<br>The geozone sources, your authorisations, the display and flight alerts of the zones and how often their data is updated.
+
 **Comm Links**
 <br>Allows you to manually create communication links and connect to them. _Keep in mind that normally this is not needed since QGroundControl will automatically connect to the most common devices._
 
