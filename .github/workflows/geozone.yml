@@ -1,0 +1,245 @@
+name: Geozone
+
+# The geozone tests, which parse untrusted files and feeds, with AddressSanitizer and UndefinedBehaviorSanitizer, the
+# fuzzers of the parsers, and the headless core tests built with MSVC. The tests are those test/GeoZone/CMakeLists.txt
+# labels geozone, see the Testing section of docs/en/qgc-dev-guide/geozones.md.
+
+on:
+  push:
+    branches:
+      - master
+      - 'Stable*'
+    paths:
+      - '.github/workflows/geozone.yml'
+      - 'src/GeoZone/**'
+      - 'test/GeoZone/**'
+  pull_request:
+    paths:
+      - '.github/workflows/geozone.yml'
+      - 'src/GeoZone/**'
+      - 'test/GeoZone/**'
+  schedule:
+    # Weekly, the fuzzers run longer, from the corpus grown by the previous weekly runs
+    - cron: '23 2 * * 1'
+  workflow_dispatch:
+
+jobs:
+  sanitizers:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-22.04
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      QT_VERSION: 6.8.3
+      SANITIZER_FLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Initial Setup
+        uses: ./.github/actions/common
+
+      - name: Install Dependencies
+        run: |
+          chmod a+x ./tools/setup/install-dependencies-debian.sh
+          sudo ./tools/setup/install-dependencies-debian.sh
+
+      - name: Setup Caching
+        uses: ./.github/actions/cache
+        with:
+          host: linux
+          target: linux_gcc_64
+          build-type: Sanitizers
+          cpm-modules: ${{ runner.temp }}/shadow_build_dir/cpm_modules
+
+      - name: Install Qt for Linux (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          dir: ${{ runner.temp }}
+          modules: qtcharts qtlocation qtpositioning qtspeech qt5compat qtmultimedia qtserialport qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors
+          cache: true
+
+      - name: Configure
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: ${{ env.QT_ROOT_DIR }}/bin/qt-cmake -S ${{ github.workspace }} -B . -G Ninja
+              -DCMAKE_BUILD_TYPE=Debug
+              -DQGC_BUILD_TESTING=ON
+              "-DCMAKE_C_FLAGS=${{ env.SANITIZER_FLAGS }}"
+              "-DCMAKE_CXX_FLAGS=${{ env.SANITIZER_FLAGS }}"
+              "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+
+      - name: Build
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: cmake --build . --target all --config Debug
+
+      - name: Run geozone tests
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        env:
+          # Leaks of Qt and other subsystems at exit are not geozone errors
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -o pipefail
+          status=0
+          # All geozone tests but the benchmark and the fuzzers: the application tests, the headless core tests, the
+          # validator and the Qt Quick tests. A test fails on any failed test function, a crash or a sanitizer abort.
+          # GeoZoneFlightTest is left out: MockLink copies short strings into fixed size MAVLink fields, which
+          # AddressSanitizer reports as overflows.
+          ctest --test-dir test --no-tests=error -V -L geozone -LE "benchmark|fuzz" -E "^GeoZoneFlightTest$" 2>&1 | tee ctest.log || status=1
+          # Undefined behavior elsewhere in QGroundControl is reported but only fails the job in geozone code
+          if grep -h "src/GeoZone/.*runtime error" ctest.log; then
+            echo "::error::Undefined behavior in geozone code"
+            status=1
+          fi
+          exit $status
+
+  # Fuzzes the parsers with libFuzzer, building only the GeoZoneCore library and the fuzz targets: a minute each for
+  # pushes and pull requests, 20 minutes each in the weekly run, which keeps the corpus it grows for the next one
+  fuzz:
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      QT_VERSION: 6.8.3
+      FUZZ_SECONDS: ${{ github.event_name == 'schedule' && 1200 || 60 }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build zlib1g-dev
+
+      - name: Install Qt for Linux (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          dir: ${{ runner.temp }}
+          modules: qtpositioning
+          cache: true
+
+      - name: Restore the fuzz corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/fuzz/work
+          key: geozone-fuzz-corpus-${{ github.run_id }}
+          restore-keys: geozone-fuzz-corpus-
+
+      - name: Build
+        run: |
+          cmake -S test/GeoZone/fuzz -B ${{ runner.temp }}/fuzz -G Ninja -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+                -DCMAKE_PREFIX_PATH=${{ env.QT_ROOT_DIR }}
+          cmake --build ${{ runner.temp }}/fuzz
+
+      - name: Fuzz
+        working-directory: ${{ runner.temp }}/fuzz
+        run: |
+          status=0
+          for target in Json Xml Zip; do
+            corpus=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+            mkdir -p "work/$corpus" crashes
+            "./GeoZoneFuzz$target" -max_total_time="$FUZZ_SECONDS" -timeout=10 -rss_limit_mb=4096 -artifact_prefix="crashes/$corpus-" \
+                "work/$corpus" "corpus/$corpus" || status=1
+          done
+          exit $status
+
+      - name: Save the fuzz corpus
+        if: always() && github.event_name == 'schedule'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/fuzz/work
+          key: geozone-fuzz-corpus-${{ github.run_id }}
+
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geozone-fuzz-crashes
+          path: ${{ runner.temp }}/fuzz/crashes
+
+  # Builds the GeoZoneCore library, its headless tests and the validator with MSVC and runs them, which the Windows
+  # workflow doesn't: it builds releases, without tests
+  windows-core:
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: cmd
+
+    env:
+      QT_VERSION: 6.8.3
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Initial Setup
+        uses: ./.github/actions/common
+
+      - name: Setup Caching
+        uses: ./.github/actions/cache
+        with:
+          host: windows
+          target: win64_msvc2022_64
+          build-type: GeoZoneCore
+          cpm-modules: ${{ runner.temp }}\shadow_build_dir\cpm_modules
+
+      - name: Install Qt for Windows (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          dir: ${{ runner.temp }}
+          modules: qtcharts qtlocation qtpositioning qtspeech qt5compat qtmultimedia qtserialport qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors
+          cache: true
+
+      - name: Set up Visual Studio shell
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # QGroundControl only builds its tests in debug builds. Only the geozone targets are built, which don't need
+      # GStreamer.
+      - name: Configure
+        working-directory: ${{ runner.temp }}\shadow_build_dir
+        run: ${{ env.QT_ROOT_DIR }}/bin/qt-cmake -S ${{ github.workspace }} -B . -G Ninja
+              -DCMAKE_BUILD_TYPE=Debug
+              -DQGC_BUILD_TESTING=ON
+              -DQGC_ENABLE_GST_VIDEOSTREAMING=OFF
+
+      - name: Build
+        working-directory: ${{ runner.temp }}\shadow_build_dir
+        run: cmake --build . --target GeoZoneCoreTest geozone-validate --config Debug
+
+      - name: Run core tests
+        working-directory: ${{ runner.temp }}\shadow_build_dir
+        run: ctest --test-dir test --no-tests=error --output-on-failure -L core -C Debug

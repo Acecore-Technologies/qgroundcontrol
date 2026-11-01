@@ -116,6 +116,14 @@ jobs:
         working-directory: ${{ runner.temp }}/shadow_build_dir
         run: xvfb-run -a ./${{ env.ARTIFACT }} --unittest
 
+      # The geozone tests the step above doesn't run: the headless core tests, the validator and the Qt Quick tests.
+      # The application tests of the module, labeled app, ran with the other unit tests. The tests are defined in the
+      # test directory of the build.
+      - name: Run geozone tests
+        if: matrix.BuildType == 'Debug'
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: xvfb-run -a ctest --test-dir test --no-tests=error --output-on-failure -L geozone -LE "app|benchmark|fuzz"
+
       - name: Upload Build File
         if: matrix.BuildType == 'Release'
         uses: ./.github/actions/upload

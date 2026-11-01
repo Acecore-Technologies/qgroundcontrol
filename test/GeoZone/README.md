@@ -2,9 +2,9 @@
 
 The test classes are listed once, in `CMakeLists.txt`:
 
-- `GEOZONE_SHARED_TESTS` (GeoZoneParserTest, GeoZoneGeometryTest, GeoZoneReturnTest) run in QGroundControl and
-  headless in `GeoZoneCoreTest`, which only links the GeoZoneCore library and leaves out their parts needing the
-  application (`GEOZONE_CORE_TEST`, see `GeoZoneTestBase.h`).
+- `GEOZONE_SHARED_TESTS` (GeoZoneParserTest, GeoZoneGeometryTest, GeoZoneReturnTest, and GeoZoneIntentTest of the
+  operational intents) run in QGroundControl and headless in `GeoZoneCoreTest`, which only links the GeoZoneCore
+  library and leaves out their parts needing the application (`GEOZONE_CORE_TEST`, see `GeoZoneTestBase.h`).
 - `GEOZONE_CORE_TESTS` (GeoZoneEvaluatorTest, GeoZoneRouteTest, GeoZoneBriefingTest) test the path evaluator, the
   route search and the briefing of the core, and only run headless.
 - `GEOZONE_APP_TESTS` (GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest) need the

@@ -238,7 +238,8 @@ The tests are in `test/GeoZone`, whose `README.md` also describes the fixtures, 
 - **Benchmark**: `GeoZoneBenchmark` measures the core with 10000 synthetic zones: `ctest --test-dir build/test -L benchmark -V`.
 - **Fuzzers**: `test/GeoZone/fuzz` has libFuzzer targets for JSON, XML and zip input, built with `-DGEOZONE_FUZZ=ON` or as a project of their own with clang.
 - **QML**: `tst_geozone_qml` runs the Qt Quick tests of `test/GeoZone/qml` offscreen. Only `GeoZoneStyle` is tested there, since the other components need the singletons of the application.
-- **Time and terrain**: tests depending on the time, the terrain or the QNH set them with `GeoZoneTestHelpers::ScopedEnvironment`, whose clock stands still until the test advances it (`setNow()`, `addSecs()`) and whose terrain is unknown until set (`setTerrain()`).
+- **Time and terrain**: tests depending on the time, the terrain or the QNH set them with `GeoZoneTestHelpers::ScopedEnvironment`, whose clock stands still until the test advances it (`setNow()`, `addSecs()`) and whose terrain is unknown until set (`setTerrain()`). Tests don't read the wall clock, and they pass in other time zones and locales (checked with `TZ=Pacific/Auckland LANG=de_DE.UTF-8` and `LANG=en_US.UTF-8`) and on a single core (`taskset -c 0`). The default units of _QGroundControl_ follow the measurement system of the locale, feet for en_US, so application tests comparing texts with distances set them with `GeoZoneTestHelpers::ScopedMetricUnits` or `_setVerticalUnits()`.
+- **Waiting**: tests wait for what they expect, with `QTRY_*` or signal spies, rather than for fixed times. To check that nothing more happens, like an outdated result being dropped, they wait until it can't happen anymore: `_settleWorkers()` waits for the thread pool and delivers the results posted by the workers, `TestFeedServer::settled()` until each request was answered or abandoned by the client.
 - **Downloads**: `GeoZoneTestHelpers::TestFeedServer` is a local HTTP server answering by path (`/ok` with the ED-318 fixture, `/missing`, `/broken`, `/empty`, `/hang`), with added files, handlers and delays, which records the requests for the feed, service and refresh tests.
 
 ### Validating Files {#validating-files}
@@ -253,7 +254,15 @@ build/Debug/geozone-validate --strict test/GeoZone/data
 
 Its CTest tests, labeled `geozone` and `core`, check the fixtures and the failures.
 
-The `Geozone Sanitizers` workflow (`.github/workflows/geozone-sanitizers.yml`) runs the tests with AddressSanitizer and UndefinedBehaviorSanitizer, and the fuzzers for a minute each.
+### Continuous Integration {#ci}
+
+The jobs select the tests by their CTest labels, so a class added to the lists of `test/GeoZone/CMakeLists.txt` runs everywhere without changes to the workflows:
+
+- **Linux** (`.github/workflows/linux.yml`): the debug build runs all unit tests with `--unittest`, which includes the application tests of the module, then `ctest --test-dir test -L geozone -LE "app|benchmark|fuzz"` for the headless tests, the validator and the Qt Quick tests.
+- **Geozone** (`.github/workflows/geozone.yml`, for changes of `src/GeoZone`, `test/GeoZone` and the workflow):
+  - `sanitizers` builds with AddressSanitizer and UndefinedBehaviorSanitizer and runs `ctest -L geozone -LE "benchmark|fuzz"` but `GeoZoneFlightTest`, whose MockLink copies short strings into fixed size MAVLink fields, which AddressSanitizer reports as overflows. The job fails on any failed test function, crash or sanitizer abort, and on undefined behavior reported in `src/GeoZone`.
+  - `fuzz` builds the standalone fuzz project with clang and fuzzes each target for a minute; the weekly scheduled run fuzzes 20 minutes each and keeps the corpus it grows in the Actions cache for the next runs. Crashes are uploaded as an artifact.
+  - `windows-core` builds `GeoZoneCoreTest` and `geozone-validate` with MSVC in a debug build of _QGroundControl_ without GStreamer and runs `ctest -L core`, since the Windows workflow builds releases without tests.
 
 ::: warning
 QML errors are only found at runtime. A component of the module with a missing import or an unknown type still builds, but fails to load, and since the components are placed in views of _QGroundControl_ (like `PlanView.qml` and `FlyViewMap.qml`), the parent view breaks with it. After changing QML, run _QGroundControl_, open the Plan View, the Fly View and the Geozones settings with zones loaded, and check the console for QML warnings.
