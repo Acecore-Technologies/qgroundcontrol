@@ -1029,6 +1029,74 @@ void GeoZoneParserTest::_testEdgeInterpolation()
     QCOMPARE(zone.box().south(), 60.0);
 }
 
+void GeoZoneParserTest::_testTfrCircles()
+{
+    // A TFR of 1 NM around a point, published as the 36-sided polygon of its merged area like the FAA does, whose sides
+    // are 7 m inside the circle in their middle
+    const QGeoCoordinate center(26.07194444, -97.16361111);
+    QJsonArray positions;
+    QByteArray vertices;
+    for (int i = 0; i <= 36; i++) {
+        const QGeoCoordinate vertex = center.atDistanceAndAzimuth(1852, -(i % 36) * 10.0);
+        positions.append(QJsonArray{ vertex.longitude(), vertex.latitude() });
+        vertices += QStringLiteral("<Avx><codeDatum>WGE</codeDatum><codeType>GRC</codeType><geoLat>%1N</geoLat><geoLong>%2W</geoLong></Avx>")
+                        .arg(vertex.latitude(), 0, 'f', 8).arg(-vertex.longitude(), 0, 'f', 8).toUtf8();
+    }
+    const QJsonObject tfrRoot{ { "type", "FeatureCollection" }, { "totalFeatures", 1 }, { "timeStamp", "2026-10-31T12:00:00Z" }, { "features", QJsonArray{ QJsonObject{
+        { "type", "Feature" }, { "geometry", QJsonObject{ { "type", "Polygon" }, { "coordinates", QJsonArray{ positions } } } },
+        { "properties", QJsonObject{ { "NOTAM_KEY", "6/0002-1-FDC-F" }, { "TITLE", "CIRCLE" }, { "LAST_MODIFICATION_DATETIME", "202610311200" } } } } } } };
+    // The area is based on a shape which is the circle
+    const QByteArray detail = R"(<XNOTAM-Update><Group><Add><Not><TfrNot><TFRAreaGroup><aseTFRArea>
+        <AseUid><codeType>RAS</codeType><codeId>300</codeId></AseUid><txtName>Area A</txtName>
+        <codeDistVerUpper>ALT</codeDistVerUpper><valDistVerUpper>3000</valDistVerUpper><uomDistVerUpper>FT</uomDistVerUpper>
+        <codeDistVerLower>HEI</codeDistVerLower><valDistVerLower>0</valDistVerLower><uomDistVerLower>FT</uomDistVerLower></aseTFRArea>
+        <Aac><AacUid><AseUidChi><codeType>RAS</codeType><codeId>300</codeId></AseUidChi><AseUidPar><codeType>PART</codeType><codeId>301</codeId></AseUidPar></AacUid>
+        <codeType>BOM</codeType><codeOpr>BASE</codeOpr></Aac>
+        <abdMergedArea><AbdUid><AseUid><codeType>RAS</codeType><codeId>300</codeId></AseUid></AbdUid>)" + vertices + R"(</abdMergedArea>
+        <aseShapes><AseUid><codeType>PART</codeType><codeId>301</codeId></AseUid><Abd><AbdUid><AseUid><codeType>PART</codeType><codeId>301</codeId></AseUid></AbdUid>
+        <Avx><codeType>CIR</codeType><geoLat>26.07194444N</geoLat><geoLong>097.16361111W</geoLong><codeDatum>WGE</codeDatum>
+        <valRadiusArc>RADIUS</valRadiusArc><uomRadiusArc>NM</uomRadiusArc></Avx></Abd></aseShapes>
+        </TFRAreaGroup></TfrNot></Not></Add></Group></XNOTAM-Update>)";
+    const auto withDetail = [&tfrRoot, &detail](const QByteArray &radius) {
+        return GeoZoneParser::composite(tfrRoot, { { QStringLiteral("6/0002"), { QStringLiteral("202610311200"), QByteArray(detail).replace("RADIUS", radius) } } });
+    };
+    const auto parse = [](const QByteArray &document) {
+        GeoZoneParser::Result result;
+        QString errorString;
+        if (!GeoZoneParser::parse(document, result, errorString)) {
+            qWarning() << errorString;
+        }
+        return result;
+    };
+    // 3 m inside the circle in the middle of a side of the polygon
+    const QGeoCoordinate inside = center.atDistanceAndAzimuth(1849, 5);
+
+    // The circle of the NOTAM replaces the polygon, with the limits of its area
+    const GeoZoneParser::Result circular = parse(withDetail("1.0"));
+    QCOMPARE(circular.zones.count(), 1);
+    QCOMPARE(circular.zones.first().volumes.count(), 1);
+    const GeoZone::Volume &circle = circular.zones.first().volumes.first();
+    QVERIFY(circle.isCircle);
+    QVERIFY(circle.rings.isEmpty());
+    QCOMPARE(circle.center, center);
+    QCOMPARE(circle.radius, 1852.0);
+    QCOMPARE(circle.upperLimit, 3000.0);
+    const GeoZone circleZone(circular.zones.first());
+    QVERIFY(circleZone.contains(inside));
+    QVERIFY(!circleZone.contains(center.atDistanceAndAzimuth(1853, 5)));
+    QCOMPARE(circleZone.exclusionCircles().count(), 1);
+
+    // The polygon stays without the details, and when the circle of the NOTAM isn't the one it follows
+    for (const QByteArray &document : { QJsonDocument(tfrRoot).toJson(QJsonDocument::Compact), withDetail("1.5") }) {
+        const GeoZoneParser::Result polygonal = parse(document);
+        QCOMPARE(polygonal.zones.count(), 1);
+        const GeoZone::Volume &polygon = polygonal.zones.first().volumes.first();
+        QVERIFY(!polygon.isCircle);
+        QCOMPARE(polygon.rings.first().count(), 36);
+        QVERIFY(!GeoZone(polygonal.zones.first()).contains(inside));
+    }
+}
+
 void GeoZoneParserTest::_testAixmArcs()
 {
     // Arcs get points close enough that the chords stay within 1 m of them: a 20 NM arc every 0.84 degrees

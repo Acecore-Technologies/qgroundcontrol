@@ -37,6 +37,7 @@ private slots:
     void _testRingValidation();
     void _testEdgeInterpolation_data();
     void _testEdgeInterpolation();
+    void _testTfrCircles();
     void _testAixmArcs();
     void _testRejectedAixmGeometry();
     void _testParserFuzz();

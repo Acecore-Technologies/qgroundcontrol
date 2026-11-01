@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 using namespace GeoZoneParserUtils;
 
@@ -29,7 +30,71 @@ struct TfrDetail {
     bool valid = false;
     /// The merged areas, which the WFS polygons follow, give each of their vertices as a great circle point (GRC)
     bool greatCircleEdges = false;
+    QList<QGeoCircle> circles;              ///< Shapes of the areas which are circles (CIR), with their center and radius
 };
+
+/// @return Degrees of a latitude or longitude like 26.07194444N or 097.16361111W, NaN when invalid
+double _tfrDegrees(const QString &text)
+{
+    const QString value = text.trimmed().toUpper();
+    if (value.isEmpty()) {
+        return qQNaN();
+    }
+    const QChar hemisphere = value.back();
+    const double degrees = _number(QJsonValue(value.chopped(1)));
+    if ((hemisphere == QLatin1Char('N')) || (hemisphere == QLatin1Char('E'))) {
+        return degrees;
+    }
+    if ((hemisphere == QLatin1Char('S')) || (hemisphere == QLatin1Char('W'))) {
+        return -degrees;
+    }
+    return qQNaN();
+}
+
+/// @return Meters of a radius in the unit, NaN for unknown units
+double _tfrMeters(double value, const QString &unit)
+{
+    static const QHash<QString, double> metersPerUnit = {
+        { QStringLiteral("NM"), 1852 },
+        { QStringLiteral("KM"), 1000 },
+        { QStringLiteral("M"), 1 },
+        { QStringLiteral("FT"), 0.3048 },
+        { QStringLiteral("SM"), 1609.344 },
+    };
+    return value * metersPerUnit.value(unit.trimmed().toUpper(), qQNaN());
+}
+
+/// @return The circle of the NOTAM which the ring is a polygon of, with its vertices on the circle all around it,
+///         nothing when there is none
+std::optional<QGeoCircle> _tfrCircle(const GeoZone::Ring &ring, const QList<QGeoCircle> &circles)
+{
+    // Like the 36 sides of the published polygons, a chord cutting off part of the circle would leave a larger gap
+    constexpr double maxGapDegrees = 20;
+    for (const QGeoCircle &circle : circles) {
+        // The vertices are computed on the ellipsoid, a few meters from the spherical distances
+        const double tolerance = 1 + (0.01 * circle.radius());
+        QList<double> bearings;
+        for (const QPointF &vertex : ring) {
+            const QGeoCoordinate coordinate = GeoZone::toCoordinate(vertex);
+            if (std::abs(circle.center().distanceTo(coordinate) - circle.radius()) > tolerance) {
+                break;
+            }
+            bearings.append(circle.center().azimuthTo(coordinate));
+        }
+        if ((bearings.count() < 3) || (bearings.count() != ring.count())) {
+            continue;
+        }
+        std::sort(bearings.begin(), bearings.end());
+        double gap = 360 - bearings.last() + bearings.first();
+        for (qsizetype i = 1; i < bearings.count(); i++) {
+            gap = (std::max)(gap, bearings[i] - bearings[i - 1]);
+        }
+        if (gap <= maxGapDegrees) {
+            return circle;
+        }
+    }
+    return std::nullopt;
+}
 
 QDateTime _tfrTime(const QString &text)
 {
@@ -64,6 +129,15 @@ TfrDetail _tfrDetail(const QByteArray &xml)
     bool inVertex = false;
     int greatCircleVertices = 0;
     int otherVertices = 0;
+    // An Avx vertex, the first of each of its values
+    struct Vertex {
+        QString type;
+        double latitude = qQNaN();
+        double longitude = qQNaN();
+        double radius = qQNaN();
+        QString radiusUnit;
+    } vertex;
+    QList<QGeoCircle> circles;
 
     QXmlStreamReader reader(xml);
     while (!reader.atEnd()) {
@@ -75,11 +149,19 @@ TfrDetail _tfrDetail(const QByteArray &xml)
                 areas.append(Area());
             } else if (name == QLatin1String("abdMergedArea")) {
                 inMergedArea = true;
-            } else if (inMergedArea && (name == QLatin1String("Avx"))) {
+            } else if (name == QLatin1String("Avx")) {
                 inVertex = true;
-            } else if (inVertex && (name == QLatin1String("codeType"))) {
-                // Like in AIXM 4.5: GRC great circle, RHL rhumb line, CWA and CCA arcs, FNT border
-                ((reader.readElementText().trimmed() == QLatin1String("GRC")) ? greatCircleVertices : otherVertices)++;
+                vertex = Vertex();
+            } else if (inVertex && (name == QLatin1String("codeType")) && vertex.type.isEmpty()) {
+                vertex.type = reader.readElementText().trimmed();
+            } else if (inVertex && (name == QLatin1String("geoLat")) && std::isnan(vertex.latitude)) {
+                vertex.latitude = _tfrDegrees(reader.readElementText());
+            } else if (inVertex && (name == QLatin1String("geoLong")) && std::isnan(vertex.longitude)) {
+                vertex.longitude = _tfrDegrees(reader.readElementText());
+            } else if (inVertex && (name == QLatin1String("valRadiusArc")) && std::isnan(vertex.radius)) {
+                vertex.radius = _number(QJsonValue(reader.readElementText()));
+            } else if (inVertex && (name == QLatin1String("uomRadiusArc")) && vertex.radiusUnit.isEmpty()) {
+                vertex.radiusUnit = reader.readElementText();
             } else if (name == QLatin1String("ScheduleGroup")) {
                 inSchedule = true;
                 schedule = GeoZone::TimePeriod();
@@ -117,6 +199,16 @@ TfrDetail _tfrDetail(const QByteArray &xml)
                 inMergedArea = false;
             } else if (name == QLatin1String("Avx")) {
                 inVertex = false;
+                // Like in AIXM 4.5: GRC great circle, RHL rhumb line, CWA and CCA arcs, FNT border, CIR circle
+                if (inMergedArea) {
+                    ((vertex.type == QLatin1String("GRC")) ? greatCircleVertices : otherVertices)++;
+                } else if (vertex.type == QLatin1String("CIR")) {
+                    const QGeoCoordinate center(vertex.latitude, vertex.longitude);
+                    const double radius = _tfrMeters(vertex.radius, vertex.radiusUnit);
+                    if (center.isValid() && _validRadius(radius)) {
+                        circles.append(QGeoCircle(center, radius));
+                    }
+                }
             }
         }
     }
@@ -126,6 +218,7 @@ TfrDetail _tfrDetail(const QByteArray &xml)
 
     detail.valid = true;
     detail.greatCircleEdges = (greatCircleVertices >= 3) && (otherVertices == 0);
+    detail.circles = circles;
     if (!areaPeriods.isEmpty()) {
         detail.periods = areaPeriods;
     } else if (notamStart.isValid() || notamEnd.isValid()) {
@@ -216,6 +309,18 @@ bool _faaTfrFeature(const QJsonObject &feature, const GeoZoneParser::Companions 
     }
 
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    // Circular TFRs are published as polygons whose sides cut inside the circle, the NOTAM gives the circle itself
+    for (GeoZone::Volume &volume : zone.volumes) {
+        if (volume.isCircle || (volume.rings.count() != 1)) {
+            continue;
+        }
+        if (const std::optional<QGeoCircle> circle = _tfrCircle(volume.rings.first(), detail.circles)) {
+            volume.isCircle = true;
+            volume.center = circle->center();
+            volume.radius = circle->radius();
+            volume.rings.clear();
+        }
+    }
     // The GeoJSON edges are straight in latitude and longitude unless the NOTAM says they are great circles
     if (detail.greatCircleEdges) {
         _densifyGreatCircles(zone.volumes);
