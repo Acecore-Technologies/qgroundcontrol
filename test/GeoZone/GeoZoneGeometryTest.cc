@@ -453,7 +453,7 @@ void GeoZoneGeometryTest::_testAltitudeLimits()
         return GeoZone::Position{ coordinate, altitudeAMSL, terrainAMSL };
     };
 
-    // Ground to 120 m above ground
+    // Ground to 120 m above ground, and 1000 ft above mean sea level and higher, see _testVerticalOverlap
     GeoZone::Volume low;
     low.isCircle = true;
     low.center = center;
@@ -461,52 +461,27 @@ void GeoZoneGeometryTest::_testAltitudeLimits()
     low.lowerLimit = 0;
     low.upperLimit = 120;
     low.setReferences(QStringLiteral("AGL"), QStringLiteral("AGL"));
-    QVERIFY(GeoZone::verticalOverlap(low, position(center, 450, 400), position(center, 450, 400)));
-    QVERIFY(!GeoZone::verticalOverlap(low, position(center, 600, 400), position(center, 600, 400)));
-    // Slightly below the ground is still inside a zone from the ground
-    QVERIFY(GeoZone::verticalOverlap(low, position(center, 399.9, 400), position(center, 399.9, 400)));
-    QVERIFY(GeoZone::verticalOverlap(low, position(center, 600, 400), position(center, 600, 400), 100));
-    QVERIFY(GeoZone::verticalOverlap(low, position(center, 450, 400), position(center, 700, 400)));
-    // Unknown terrain or altitude can't be excluded
-    QVERIFY(GeoZone::verticalOverlap(low, position(center, 600, qQNaN()), position(center, 600, qQNaN())));
-    QVERIFY(GeoZone::verticalOverlap(low, GeoZone::Position{ center }, GeoZone::Position{ center }));
-
-    // 1000 ft above mean sea level and higher, published in feet
     GeoZone::Volume high = low;
     high.feet = true;
     high.lowerLimit = 1000;
     high.upperLimit = 99999;
     high.setReferences(QStringLiteral("AMSL"), QStringLiteral("AMSL"));
-    QVERIFY(!GeoZone::verticalOverlap(high, position(center, 300, 250), position(center, 300, 250)));
-    QVERIFY(GeoZone::verticalOverlap(high, position(center, 310, 250), position(center, 310, 250)));
-    QVERIFY(GeoZone::verticalOverlap(high, position(center, 9000, 250), position(center, 9000, 250)));
 
     // Heights above the WGS84 ellipsoid are about 48 m higher than above mean sea level in Zurich
-    const QGeoCoordinate zurich(47.37, 8.54);
-    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(zurich) - 47.3) < 2);
+    QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(47.37, 8.54)) - 47.3) < 2);
     QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(42.39, -71.15)) + 28.6) < 2);
     QVERIFY(qAbs(GeoZoneGeometry::geoidHeight(QGeoCoordinate(5, 78)) + 104.7) < 2);
     QVERIFY(qIsNaN(GeoZoneGeometry::geoidHeight(QGeoCoordinate())));
-    GeoZone::Volume ellipsoid = low;
-    ellipsoid.lowerLimit = 500;
-    ellipsoid.upperLimit = 1000;
-    ellipsoid.setReferences(QStringLiteral("WGS84"), QStringLiteral("WGS84"));
-    QVERIFY(GeoZone::verticalOverlap(ellipsoid, position(zurich, 460, 400), position(zurich, 460, 400)));
-    QVERIFY(!GeoZone::verticalOverlap(ellipsoid, position(zurich, 440, 400), position(zurich, 440, 400)));
-
-    // Flight levels can't be compared
-    GeoZone::Volume flightLevel = high;
-    flightLevel.setReferences(QStringLiteral("STD"), QStringLiteral("AMSL"));
-    QCOMPARE(flightLevel.lowerReference, GeoZone::VerticalReference::FlightLevel);
-    QVERIFY(GeoZone::verticalOverlap(flightLevel, position(center, 0, 0), position(center, 0, 0)));
 
     // Published codes are case insensitive and have aliases, the ground is shown as GND either way
     GeoZone::Volume surface = low;
     surface.setReferences(QStringLiteral(" sfc"), QStringLiteral("msl "));
     QCOMPARE(surface.lowerReference, GeoZone::VerticalReference::Ground);
     QCOMPARE(surface.upperReference, GeoZone::VerticalReference::MeanSeaLevel);
-    QVERIFY(GeoZone::verticalOverlap(surface, position(center, 110, 400), position(center, 110, 400)));
-    QVERIFY(!GeoZone::verticalOverlap(surface, position(center, 130, 0), position(center, 130, 0)));
+    surface.setReferences(QStringLiteral("STD"), QStringLiteral("WGS84"));
+    QCOMPARE(surface.lowerReference, GeoZone::VerticalReference::FlightLevel);
+    QCOMPARE(surface.upperReference, GeoZone::VerticalReference::Ellipsoid);
+    surface.setReferences(QStringLiteral(" sfc"), QStringLiteral("msl "));
     GeoZone::Data surfaceData;
     surfaceData.volumes.append(surface);
     QVERIFY(GeoZone(surfaceData).verticalLimitsText().startsWith(QStringLiteral("GND - ")));
@@ -541,6 +516,73 @@ void GeoZoneGeometryTest::_testAltitudeLimits()
     const std::optional<GeoZone::PathEntry> climb = GeoZone(highData).pathEntry({ position(center, 200, 150), position(center, 400, 150) });
     QVERIFY(climb.has_value());
     QVERIFY(qAbs(climb->position.altitudeAMSL - 304.8) < 0.01);
+}
+
+void GeoZoneGeometryTest::_testVerticalOverlap_data()
+{
+    QTest::addColumn<double>("lowerLimit");
+    QTest::addColumn<double>("upperLimit");
+    QTest::addColumn<QString>("lowerReference");
+    QTest::addColumn<QString>("upperReference");
+    QTest::addColumn<bool>("feet");
+    QTest::addColumn<QGeoCoordinate>("coordinate");
+    QTest::addColumn<double>("fromAltitude");
+    QTest::addColumn<double>("toAltitude");
+    QTest::addColumn<double>("terrain");
+    QTest::addColumn<double>("margin");
+    QTest::addColumn<bool>("overlap");
+
+    const QGeoCoordinate center(47, 8);
+    const double nan = qQNaN();
+    // Ground to 120 m above ground. Slightly below the ground is still inside a zone from the ground, and unknown
+    // terrain or altitudes can't be excluded.
+    QTest::newRow("AGL inside") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << 450.0 << 450.0 << 400.0 << 0.0 << true;
+    QTest::newRow("AGL above") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << 600.0 << 600.0 << 400.0 << 0.0 << false;
+    QTest::newRow("AGL below ground") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << 399.9 << 399.9 << 400.0 << 0.0 << true;
+    QTest::newRow("AGL within margin") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << 600.0 << 600.0 << 400.0 << 100.0 << true;
+    QTest::newRow("AGL climb through") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << 450.0 << 700.0 << 400.0 << 0.0 << true;
+    QTest::newRow("AGL unknown terrain") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << 600.0 << 600.0 << nan << 0.0 << true;
+    QTest::newRow("AGL unknown altitude") << 0.0 << 120.0 << "AGL" << "AGL" << false << center << nan << nan << nan << 0.0 << true;
+    // 1000 ft above mean sea level and higher, published in feet: 304.8 m
+    QTest::newRow("ft AMSL below") << 1000.0 << 99999.0 << "AMSL" << "AMSL" << true << center << 300.0 << 300.0 << 250.0 << 0.0 << false;
+    QTest::newRow("ft AMSL above floor") << 1000.0 << 99999.0 << "AMSL" << "AMSL" << true << center << 310.0 << 310.0 << 250.0 << 0.0 << true;
+    QTest::newRow("ft AMSL high") << 1000.0 << 99999.0 << "AMSL" << "AMSL" << true << center << 9000.0 << 9000.0 << 250.0 << 0.0 << true;
+    // Heights above the WGS84 ellipsoid are about 48 m higher than above mean sea level in Zurich
+    const QGeoCoordinate zurich(47.37, 8.54);
+    QTest::newRow("WGS84 above floor") << 500.0 << 1000.0 << "WGS84" << "WGS84" << false << zurich << 460.0 << 460.0 << 400.0 << 0.0 << true;
+    QTest::newRow("WGS84 below floor") << 500.0 << 1000.0 << "WGS84" << "WGS84" << false << zurich << 440.0 << 440.0 << 400.0 << 0.0 << false;
+    // Flight levels depend on the air pressure and unknown codes like FL can't be compared either
+    QTest::newRow("STD floor") << 1000.0 << 99999.0 << "STD" << "AMSL" << true << center << 0.0 << 0.0 << 0.0 << 0.0 << true;
+    QTest::newRow("FL unknown") << 95.0 << 195.0 << "FL" << "FL" << false << center << 0.0 << 0.0 << 0.0 << 0.0 << true;
+    // Aliases of the codes, ground to 120 m above mean sea level
+    QTest::newRow("SFC MSL inside") << 0.0 << 120.0 << " sfc" << "msl " << false << center << 110.0 << 110.0 << 400.0 << 0.0 << true;
+    QTest::newRow("SFC MSL above") << 0.0 << 120.0 << " sfc" << "msl " << false << center << 130.0 << 130.0 << 0.0 << 0.0 << false;
+}
+
+void GeoZoneGeometryTest::_testVerticalOverlap()
+{
+    QFETCH(double, lowerLimit);
+    QFETCH(double, upperLimit);
+    QFETCH(QString, lowerReference);
+    QFETCH(QString, upperReference);
+    QFETCH(bool, feet);
+    QFETCH(QGeoCoordinate, coordinate);
+    QFETCH(double, fromAltitude);
+    QFETCH(double, toAltitude);
+    QFETCH(double, terrain);
+    QFETCH(double, margin);
+    QFETCH(bool, overlap);
+
+    GeoZone::Volume volume;
+    volume.isCircle = true;
+    volume.center = coordinate;
+    volume.radius = 500;
+    volume.feet = feet;
+    volume.lowerLimit = lowerLimit;
+    volume.upperLimit = upperLimit;
+    volume.setReferences(lowerReference, upperReference);
+    QCOMPARE(GeoZone::verticalOverlap(volume, GeoZone::Position{ coordinate, fromAltitude, terrain }, GeoZone::Position{ coordinate, toAltitude, terrain }, margin),
+             overlap);
 }
 
 void GeoZoneGeometryTest::_testAreaIntersection()

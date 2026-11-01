@@ -24,6 +24,8 @@ private slots:
     void _testExclusionShapes();
     void _testContainsAndPaths();
     void _testAltitudeLimits();
+    void _testVerticalOverlap_data();
+    void _testVerticalOverlap();
     void _testAreaIntersection();
     void _testShapeSimplification();
 #ifndef GEOZONE_CORE_TEST

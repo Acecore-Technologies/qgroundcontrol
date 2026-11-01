@@ -16,6 +16,10 @@ class GeoZoneParserTest : public GeoZoneTestBase
     Q_OBJECT
 
 private slots:
+    void _testParseFixtures_data();
+    void _testParseFixtures();
+    void _testEmptyResponses_data();
+    void _testEmptyResponses();
     void _testParseED269();
     void _testParseED318();
     void _testParseFaaTfr();
@@ -28,5 +32,7 @@ private slots:
     void _testParserFuzz();
     void _testFuzzFindings();
     void _testDisplayText();
+    void _testLimitTexts_data();
+    void _testLimitTexts();
     void _testProviders();
 };

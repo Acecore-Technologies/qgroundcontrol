@@ -80,16 +80,116 @@ QJsonValue _mutateJson(const QJsonValue &value, QRandomGenerator &random, int de
 
 } // namespace
 
+void GeoZoneParserTest::_testParseFixtures_data()
+{
+    QTest::addColumn<QString>("fileName");
+    QTest::addColumn<int>("formatHint");
+    QTest::addColumn<int>("format");
+    QTest::addColumn<int>("zones");
+    QTest::addColumn<int>("skippedFeatures");
+    QTest::addColumn<int>("missingFeatures");
+
+    using Format = GeoZoneParser::Format;
+    const auto row = [](const char *fileName, Format formatHint, Format format, int zones, int skippedFeatures, int missingFeatures) {
+        QTest::newRow(fileName) << QString::fromLatin1(fileName) << static_cast<int>(formatHint) << static_cast<int>(format) << zones << skippedFeatures << missingFeatures;
+    };
+    // The ED-269 and ED-318 test files each have a feature without a supported geometry, the IGN response was limited
+    row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0);
+    row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0);
+    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0);
+    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0);
+    row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0);
+    row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8);
+    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0);
+}
+
+void GeoZoneParserTest::_testParseFixtures()
+{
+    QFETCH(QString, fileName);
+    QFETCH(int, formatHint);
+    QFETCH(int, format);
+    QFETCH(int, zones);
+    QFETCH(int, skippedFeatures);
+    QFETCH(int, missingFeatures);
+
+    QFile file(QStringLiteral(":/unittest/") + fileName);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray bytes = file.readAll();
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(bytes, result, errorString, static_cast<GeoZoneParser::Format>(formatHint)), qPrintable(errorString));
+    QCOMPARE(static_cast<int>(result.format), format);
+    QCOMPARE(result.zones.count(), zones);
+    QCOMPARE(result.skippedFeatures, skippedFeatures);
+    QCOMPARE(result.missingFeatures, missingFeatures);
+    QVERIFY(!result.contentHash.isEmpty());
+    for (const GeoZone::Data &zone : std::as_const(result.zones)) {
+        QVERIFY(!zone.volumes.isEmpty());
+    }
+
+    // The format hint of the detected format and the loader give the same result
+    GeoZoneParser::Result hinted;
+    QVERIFY2(GeoZoneParser::parse(bytes, hinted, errorString, result.format), qPrintable(errorString));
+    QCOMPARE(hinted.format, result.format);
+    QCOMPARE(hinted.contentHash, result.contentHash);
+    GeoZoneParser::Result loaded;
+    QVERIFY2(GeoZoneLoader::parse(bytes, loaded, errorString, static_cast<GeoZoneParser::Format>(formatHint)), qPrintable(errorString));
+    QCOMPARE(loaded.zones.count(), zones);
+    QCOMPARE(loaded.contentHash, result.contentHash);
+}
+
+void GeoZoneParserTest::_testEmptyResponses_data()
+{
+    QTest::addColumn<QByteArray>("document");
+    QTest::addColumn<int>("formatHint");
+    QTest::addColumn<int>("format");    ///< Unknown when the response is an error
+
+    using Format = GeoZoneParser::Format;
+    const QByteArray faaList = R"({ "type": "FeatureCollection", "features": [], "totalFeatures": 0, "timeStamp": "2026-10-31T12:20:00Z" })";
+    const QByteArray wfsArea = R"({ "type": "FeatureCollection", "features": [], "totalFeatures": 0, "numberMatched": 0, "numberReturned": 0 })";
+    const auto row = [](const char *name, const QByteArray &document, Format formatHint, Format format) {
+        QTest::newRow(name) << document << static_cast<int>(formatHint) << static_cast<int>(format);
+    };
+    // An empty list from a web feature service means that no restrictions apply. Files and other feeds must have
+    // zones, an empty one is an error which keeps their previous zones.
+    row("FAA list", faaList, Format::FaaTfr, Format::FaaTfr);
+    row("FAA list from DiPUL", faaList, Format::Dipul, Format::Dipul);
+    row("FAA list without hint", faaList, Format::Unknown, Format::Unknown);
+    row("FAA list from ED-269", faaList, Format::ED269, Format::Unknown);
+    row("DiPUL area", wfsArea, Format::Dipul, Format::Dipul);
+    row("IGN area", wfsArea, Format::FranceUas, Format::FranceUas);
+    row("area from FAA", wfsArea, Format::FaaTfr, Format::Unknown);
+    row("area from ED-318", wfsArea, Format::ED318, Format::Unknown);
+    row("area without hint", wfsArea, Format::Unknown, Format::Unknown);
+}
+
+void GeoZoneParserTest::_testEmptyResponses()
+{
+    QFETCH(QByteArray, document);
+    QFETCH(int, formatHint);
+    QFETCH(int, format);
+
+    GeoZoneParser::Result result;
+    QString errorString;
+    const bool parsed = GeoZoneParser::parse(document, result, errorString, static_cast<GeoZoneParser::Format>(formatHint));
+    if (format == static_cast<int>(GeoZoneParser::Format::Unknown)) {
+        QVERIFY(!parsed);
+        QVERIFY(!errorString.isEmpty());
+        return;
+    }
+    QVERIFY2(parsed, qPrintable(errorString));
+    QCOMPARE(static_cast<int>(result.format), format);
+    QVERIFY(result.zones.isEmpty());
+}
+
 void GeoZoneParserTest::_testParseED269()
 {
     GeoZoneParser::Result result;
     QString errorString;
     // File starts with a UTF-8 byte order mark like several national feeds
     QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/ed269_test.json"), result, errorString), qPrintable(errorString));
-    QCOMPARE(result.format, GeoZoneParser::Format::ED269);
     QCOMPARE(result.title, QStringLiteral("Test UASZoneVersion"));
     QCOMPARE(result.zones.count(), 3);
-    QCOMPARE(result.skippedFeatures, 1);
 
     const GeoZone::Data &prohibited = result.zones[0];
     QCOMPARE(prohibited.identifier, QStringLiteral("T-PROH"));
@@ -172,14 +272,12 @@ void GeoZoneParserTest::_testParseED318()
     QVERIFY2(GeoZoneParser::parse(file.readAll(), swedishResult, errorString, GeoZoneParser::Format::Unknown, QStringLiteral("sv-SE")), qPrintable(errorString));
     QCOMPARE(swedishResult.zones.count(), 3);
 
-    QCOMPARE(result.format, GeoZoneParser::Format::ED318);
     QCOMPARE(result.provider, QStringLiteral("Test Authority"));
     QCOMPARE(result.issued, _utc(QDate(2026, 8, 13), QTime(0, 0)));
     QCOMPARE(result.validFrom, _utc(QDate(2026, 8, 13), QTime(0, 0)));
     QCOMPARE(result.validTo, _utc(QDate(2099, 1, 1), QTime(0, 0)));
     QCOMPARE(result.title, QStringLiteral("Test GeoZones"));
     QCOMPARE(result.zones.count(), 3);
-    QCOMPARE(result.skippedFeatures, 1); // LineString
 
     // Point with circle extent, localized name
     const GeoZone::Data &circleZone = result.zones[0];
@@ -242,7 +340,6 @@ void GeoZoneParserTest::_testParseFaaTfr()
     GeoZoneParser::Result result;
     QString errorString;
     QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/faa_tfr_test.json"), result, errorString), qPrintable(errorString));
-    QCOMPARE(result.format, GeoZoneParser::Format::FaaTfr);
     QCOMPARE(result.zones.count(), 2);
     QCOMPARE(result.issued, _utc(QDate(2026, 10, 31), QTime(12, 20)));
 
@@ -255,14 +352,6 @@ void GeoZoneParserTest::_testParseFaaTfr()
     QCOMPARE(tfr.volumes.count(), 1);
     QVERIFY(qIsNaN(tfr.volumes[0].lowerLimit) && qIsNaN(tfr.volumes[0].upperLimit));
     QVERIFY(tfr.applicability.isEmpty());
-
-    // An empty list from the FAA is valid, all restrictions have ended. From other GeoServer feeds it's an error,
-    // which keeps their previous zones.
-    const QByteArray emptyList = R"({ "type": "FeatureCollection", "features": [], "totalFeatures": 0, "timeStamp": "2026-10-31T12:20:00Z" })";
-    QVERIFY2(GeoZoneParser::parse(emptyList, result, errorString, GeoZoneParser::Format::FaaTfr), qPrintable(errorString));
-    QCOMPARE(result.format, GeoZoneParser::Format::FaaTfr);
-    QVERIFY(result.zones.isEmpty());
-    QVERIFY(!GeoZoneParser::parse(emptyList, result, errorString));
 
     // Live restrictions are refreshed more often than other feeds
     GeoZoneSource source(QStringLiteral("https://tfr.faa.gov/x"), QStringLiteral("https://tfr.faa.gov/x"));
@@ -322,7 +411,6 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QFile dipulFile(QStringLiteral(":/unittest/dipul_test.json"));
     QVERIFY(dipulFile.open(QIODevice::ReadOnly));
     QVERIFY2(GeoZoneParser::parse(dipulFile.readAll(), dipul, errorString, GeoZoneParser::Format::Dipul, QStringLiteral("en")), qPrintable(errorString));
-    QCOMPARE(dipul.format, GeoZoneParser::Format::Dipul);
     QCOMPARE(dipul.zones.count(), 4);
     const GeoZone::Data &ctr = dipul.zones[0];
     QCOMPARE(ctr.name, QStringLiteral("Frankfurt Main (EDDF) zone 1"));
@@ -340,19 +428,12 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(qAbs(temporary.volumes[0].upperLimit - 701.0) < 0.1);
     QCOMPARE(dipul.zones[3].reasons, QStringList(QStringLiteral("EMERGENCY")));
     QVERIFY(dipul.zones[3].message.contains(QStringLiteral("LuftVO")));
-    // An empty area is valid
-    const QByteArray emptyArea = R"({ "type": "FeatureCollection", "features": [], "totalFeatures": 0, "numberMatched": 0, "numberReturned": 0 })";
-    QVERIFY2(GeoZoneParser::parse(emptyArea, dipul, errorString, GeoZoneParser::Format::Dipul), qPrintable(errorString));
-    QVERIFY(dipul.zones.isEmpty());
-    QVERIFY(!GeoZoneParser::parse(emptyArea, dipul, errorString));
 
     // French IGN restrictions, prohibited entirely or above their maximum height, from a limited WFS response
     GeoZoneParser::Result france;
     QFile franceFile(QStringLiteral(":/unittest/france_uas_test.json"));
     QVERIFY(franceFile.open(QIODevice::ReadOnly));
     QVERIFY2(GeoZoneParser::parse(franceFile.readAll(), france, errorString), qPrintable(errorString));
-    QCOMPARE(france.format, GeoZoneParser::Format::FranceUas);
-    QCOMPARE(france.missingFeatures, 8);
     QCOMPARE(france.zones.count(), 2);
     QCOMPARE(france.zones[0].name, QStringLiteral("Vol interdit"));
     QVERIFY(std::isnan(france.zones[0].volumes[0].lowerLimit));
@@ -376,7 +457,6 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(aixmFile.open(QIODevice::ReadOnly));
     const QByteArray aixmBytes = aixmFile.readAll();
     QVERIFY2(GeoZoneParser::parse(aixmBytes, aixm, errorString), qPrintable(errorString));
-    QCOMPARE(aixm.format, GeoZoneParser::Format::Aixm);
     QCOMPARE(aixm.zones.count(), 3);
     QMap<QString, GeoZone::Data> byName;
     for (const GeoZone::Data &data : std::as_const(aixm.zones)) {
@@ -676,24 +756,68 @@ void GeoZoneParserTest::_testDisplayText()
     const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
     QCOMPARE(ed269.zones.count(), 3);
 
+    // Each volume on a line, see _testLimitTexts for the units
     const auto meters = _setVerticalUnits(false);
-
     const GeoZone prohibited(ed269.zones[0]);
     QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 120 m AGL\n120 m AGL - Unlimited"));
     QCOMPARE(prohibited.applicabilityText(), QStringLiteral("Permanent"));
     QCOMPARE(prohibited.reasonText(), QStringLiteral("Air traffic, Sensitive area"));
-
-    // Limits are shown in the user's units with the published value when it differs
-    const GeoZone circle(ed269.zones[1]);
-    QCOMPARE(circle.verticalLimitsText(), QStringLiteral("GND - 122 m AGL (400 ft)"));
-
-    const auto feet = _setVerticalUnits(true);
-    QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 394 ft AGL (120 m)\n394 ft AGL (120 m) - Unlimited"));
-    QCOMPARE(circle.verticalLimitsText(), QStringLiteral("GND - 400 ft AGL"));
+    QCOMPARE(GeoZone(ed269.zones[1]).verticalLimitsText(), QStringLiteral("GND - 122 m AGL (400 ft)"));
 
     const GeoZone scheduled(ed269.zones[2]);
     QCOMPARE(scheduled.verticalLimitsText(), QStringLiteral("Not specified"));
     QCOMPARE(scheduled.applicabilityText(), QStringLiteral("From 2026-03-29 01:00 UTC to 2026-10-25 00:59 UTC\n  MON, TUE 05:00-18:00 UTC"));
+}
+
+void GeoZoneParserTest::_testLimitTexts_data()
+{
+    QTest::addColumn<double>("lowerLimit");
+    QTest::addColumn<double>("upperLimit");
+    QTest::addColumn<QString>("lowerReference");
+    QTest::addColumn<QString>("upperReference");
+    QTest::addColumn<bool>("publishedInFeet");
+    QTest::addColumn<bool>("shownInFeet");
+    QTest::addColumn<QString>("text");
+
+    // Limits are shown in the user's units, rounded, with the published value when it is in the other unit
+    QTest::newRow("m AGL in m") << 0.0 << 120.0 << "AGL" << "AGL" << false << false << "GND - 120 m AGL";
+    QTest::newRow("m AGL in ft") << 0.0 << 120.0 << "AGL" << "AGL" << false << true << "GND - 394 ft AGL (120 m)";
+    QTest::newRow("ft AGL in m") << 0.0 << 400.0 << "AGL" << "AGL" << true << false << "GND - 122 m AGL (400 ft)";
+    QTest::newRow("ft AGL in ft") << 0.0 << 400.0 << "AGL" << "AGL" << true << true << "GND - 400 ft AGL";
+    QTest::newRow("ft AMSL in m") << 1000.0 << 2500.0 << "AMSL" << "AMSL" << true << false << "305 m AMSL (1000 ft) - 762 m AMSL (2500 ft)";
+    QTest::newRow("m AMSL in ft") << 150.0 << 300.0 << "AMSL" << "AMSL" << false << true << "492 ft AMSL (150 m) - 984 ft AMSL (300 m)";
+    QTest::newRow("ft STD in m") << 9500.0 << 19500.0 << "STD" << "STD" << true << false << "2896 m STD (9500 ft) - 5944 m STD (19500 ft)";
+    QTest::newRow("m WGS84 in m") << 500.0 << 1000.0 << "WGS84" << "WGS84" << false << false << "500 m WGS84 - 1000 m WGS84";
+    // Only zones from the ground start at GND, the codes are shown as published
+    QTest::newRow("0 m AMSL") << 0.0 << 120.0 << "AMSL" << "AMSL" << false << false << "0 m AMSL - 120 m AMSL";
+    QTest::newRow("SFC MSL") << 0.0 << 120.0 << " sfc" << "msl " << false << false << "GND - 120 m MSL";
+    QTest::newRow("unlimited") << 120.0 << 99999.0 << "AGL" << "AMSL" << false << true << "394 ft AGL (120 m) - Unlimited";
+    QTest::newRow("no floor") << qQNaN() << 120.0 << "AGL" << "AGL" << false << false << "not specified - 120 m AGL";
+    QTest::newRow("not specified") << qQNaN() << qQNaN() << "AGL" << "AGL" << true << false << "Not specified";
+}
+
+void GeoZoneParserTest::_testLimitTexts()
+{
+    QFETCH(double, lowerLimit);
+    QFETCH(double, upperLimit);
+    QFETCH(QString, lowerReference);
+    QFETCH(QString, upperReference);
+    QFETCH(bool, publishedInFeet);
+    QFETCH(bool, shownInFeet);
+    QFETCH(QString, text);
+
+    GeoZone::Volume volume;
+    volume.isCircle = true;
+    volume.center = QGeoCoordinate(47, 8);
+    volume.radius = 500;
+    volume.feet = publishedInFeet;
+    volume.lowerLimit = lowerLimit;
+    volume.upperLimit = upperLimit;
+    volume.setReferences(lowerReference, upperReference);
+    GeoZone::Data data;
+    data.volumes.append(volume);
+    const auto units = _setVerticalUnits(shownInFeet);
+    QCOMPARE(GeoZone(data).verticalLimitsText(), text);
 }
 
 void GeoZoneParserTest::_testProviders()
