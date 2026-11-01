@@ -42,6 +42,7 @@ public:
         QString language;           ///< Preferred language of localized texts
         QString etag;               ///< HTTP validators of a downloaded feed
         QString lastModified;
+        QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
         Request request = Request::Automatic;
         int generation = 0;
     };

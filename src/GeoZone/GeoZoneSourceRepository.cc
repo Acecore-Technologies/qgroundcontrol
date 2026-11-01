@@ -161,9 +161,11 @@ void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Reque
         return;
     }
 
+    // The validators of a feed linking to its dataset are the dataset's, its page is read every time since the
+    // link depends on the date, like the current AIRAC cycle
     QString etag;
     QString lastModified;
-    if (existing && existing->loaded()) {
+    if (existing && existing->loaded() && existing->datasetUrl().isEmpty()) {
         etag = existing->etag();
         lastModified = existing->lastModified();
     }
@@ -189,7 +191,8 @@ QString GeoZoneSourceRepository::progressText() const
     return _downloader->progressText();
 }
 
-void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request)
+void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
+                                                  const QString &datasetUrl)
 {
     if (_generations.value(url) != generation) {
         // Removed or downloaded again in the meantime
@@ -230,25 +233,33 @@ void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result 
     }
 
     // Pages linking to the current dataset, like the AIRAC cycles of NATS, are followed. Pages are small, datasets aren't read here.
-    const QByteArray page = GeoZoneDownloader::readFile(download.filePath, _maxPageBytes);
-    if (const QString datasetUrl = GeoZoneProviders::datasetLink(url, page, QDateTime::currentDateTimeUtc().date()); !datasetUrl.isEmpty()) {
-        qCDebug(GeoZoneManagerLog) << "Downloading dataset" << datasetUrl << "linked from" << url;
+    const QByteArray page = datasetUrl.isEmpty() ? GeoZoneDownloader::readFile(download.filePath, _maxPageBytes) : QByteArray();
+    if (const QString linkedUrl = GeoZoneProviders::datasetLink(url, page, QDateTime::currentDateTimeUtc().date()); !linkedUrl.isEmpty()) {
+        qCDebug(GeoZoneManagerLog) << "Downloading dataset" << linkedUrl << "linked from" << url;
         (void) QFile::remove(download.filePath);
+        // The dataset already downloaded is confirmed by its validators
+        QString etag;
+        QString lastModified;
+        if (existing && existing->loaded() && (existing->datasetUrl() == linkedUrl)) {
+            etag = existing->etag();
+            lastModified = existing->lastModified();
+        }
         _setPending(1);
-        _downloader->get(datasetUrl, QString(), QString(), [this, url, generation, request](const GeoZoneDownloader::Result &dataset) {
-            _downloadComplete(dataset, url, generation, request);
+        _downloader->get(linkedUrl, etag, lastModified, [this, url, generation, request, linkedUrl](const GeoZoneDownloader::Result &dataset) {
+            _downloadComplete(dataset, url, generation, request, linkedUrl);
             _setPending(-1);
         }, url);
         return;
     }
 
-    if (_fetchCompanions(download, url, generation, request)) {
+    if (_fetchCompanions(download, url, generation, request, datasetUrl)) {
         return;
     }
-    _loadDownload(download, url, generation, request);
+    _loadDownload(download, url, generation, request, datasetUrl);
 }
 
-void GeoZoneSourceRepository::_loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request)
+void GeoZoneSourceRepository::_loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
+                                             const QString &datasetUrl)
 {
     const GeoZoneSource *const existing = source(url);
     GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
@@ -259,12 +270,14 @@ void GeoZoneSourceRepository::_loadDownload(const GeoZoneDownloader::Result &dow
     }
     job.etag = download.etag;
     job.lastModified = download.lastModified;
+    job.datasetUrl = datasetUrl;
     job.request = request;
     job.generation = generation;
     _startLoad(job, LoadMode::Background);
 }
 
-bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request)
+bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
+                                                const QString &datasetUrl)
 {
     // Feeds with companions, like the FAA TFR list, are small enough to read here
     const QJsonDocument document = QJsonDocument::fromJson(GeoZoneDownloader::readFile(download.filePath, _maxPageBytes));
@@ -309,7 +322,7 @@ bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &
     }
 
     // The document is stored with its companions, so they are available offline
-    const auto finish = [this, fetch, download, url, generation, request]() {
+    const auto finish = [this, fetch, download, url, generation, request, datasetUrl]() {
         if (_generations.value(url) != generation) {
             (void) QFile::remove(download.filePath);
             return;
@@ -319,7 +332,7 @@ bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &
             (void) file.write(GeoZoneParser::composite(fetch->root, fetch->companions));
             file.close();
         }
-        _loadDownload(download, url, generation, request);
+        _loadDownload(download, url, generation, request, datasetUrl);
     };
     if (missing.isEmpty()) {
         finish();
@@ -433,6 +446,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     }
     if (source->isFeed() && job.downloaded) {
         source->setValidators(job.etag, job.lastModified);
+        source->setDatasetUrl(job.datasetUrl);
     }
 
     _updateStoredEntry(job, loadResult);
@@ -480,6 +494,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     if (job.downloaded) {
         entry.etag = job.etag;
         entry.lastModified = job.lastModified;
+        entry.datasetUrl = job.datasetUrl;
     }
     if (previousFileName != entry.fileName) {
         _store.removeFile(previousFileName);
@@ -615,6 +630,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         job.formatHint = GeoZoneProviders::formatHint(job.url);
         job.etag = entry.etag;
         job.lastModified = entry.lastModified;
+        job.datasetUrl = entry.datasetUrl;
         if (job.key.isEmpty() || entry.fileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
             qCWarning(GeoZoneManagerLog) << "Skipping stored geozone source" << job.key << entry.fileName;
             continue;
@@ -625,6 +641,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         GeoZoneSource *const placeholder = _newSource(job.key, job.url, entry.enabled);
         placeholder->setStoredDates(job.loadedAt, job.fileDate);
         placeholder->setValidators(job.etag, job.lastModified);
+        placeholder->setDatasetUrl(job.datasetUrl);
         _storedEntries.insert(job.key, entry);
         jobs.append(job);
     }

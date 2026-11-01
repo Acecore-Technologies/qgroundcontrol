@@ -93,12 +93,13 @@ private:
     void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _updateStoredEntry(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _download(const QString &url, GeoZoneLoader::Request request);
-    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
+    /// @param datasetUrl Dataset linked from the feed's page which was downloaded, empty for the feed URL itself
+    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl = QString());
     /// Starts loading a downloaded feed
-    void _loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
+    void _loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
     /// Downloads the companion documents of a feed which has them, then loads it
     /// @return false when the feed has no companions
-    bool _fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
+    bool _fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
     void _idle();
     void _setPending(int delta);
     void _saveIndex();

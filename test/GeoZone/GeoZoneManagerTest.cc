@@ -931,3 +931,98 @@ void GeoZoneManagerTest::_testZoneSearch()
     QVERIFY(prisonZone.value<GeoZoneInfo>().valid());
     QCOMPARE(prisonZone.value<GeoZoneInfo>().identifier(), QStringLiteral("GZW1"));
 }
+
+void GeoZoneManagerTest::_testFeedDatasetLink()
+{
+    QFile fixture(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QByteArray dataset = fixture.readAll();
+
+    // A page linking the dataset of each cycle, which answers conditional requests with 304 Not Modified like a
+    // page which didn't change, and datasets with their own ETag
+    QByteArray page = "<html><body><a href=\"/d/UAS_AREA_1/EG_FULL_20200101_XML.zip\">XML</a></body></html>";
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QList<QByteArray> requests;
+    (void) connect(&server, &QTcpServer::newConnection, &server, [&]() {
+        while (QTcpSocket *const socket = server.nextPendingConnection()) {
+            (void) connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
+                const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", request);
+                if (!request.contains("\r\n\r\n")) {
+                    return;
+                }
+                const QByteArray lower = request.toLower();
+                requests.append(request);
+                const QByteArray path = request.split(' ').value(1);
+                const bool conditional = lower.contains("if-none-match") || lower.contains("if-modified-since");
+                QByteArray response;
+                if (path == "/page") {
+                    response = conditional ? QByteArray("HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\n") :
+                                             ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + QByteArray::number(page.size()) + "\r\n");
+                    response += "Connection: close\r\n\r\n" + (conditional ? QByteArray() : page);
+                } else {
+                    const QByteArray etag = "\"" + path.right(16) + "\"";
+                    if (lower.contains("if-none-match: " + etag.toLower())) {
+                        response = "HTTP/1.1 304 Not Modified\r\nETag: " + etag + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    } else {
+                        response = "HTTP/1.1 200 OK\r\nETag: " + etag + "\r\nLast-Modified: Sat, 31 Oct 2026 10:00:00 GMT\r\nContent-Type: application/xml\r\n"
+                                   "Connection: close\r\nContent-Length: " + QByteArray::number(dataset.size()) + "\r\n\r\n" + dataset;
+                    }
+                }
+                (void) socket->write(response);
+                socket->disconnectFromHost();
+            });
+            (void) connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+    const QString url = QStringLiteral("http://127.0.0.1:%1/page").arg(server.serverPort());
+    const auto lastRequest = [&requests](const QByteArray &path) {
+        for (qsizetype i = requests.count() - 1; i >= 0; i--) {
+            if (requests[i].split(' ').value(1) == path) {
+                return requests[i].toLower();
+            }
+        }
+        return QByteArray();
+    };
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        GeoZoneSource *const feed = manager.source(url);
+        QVERIFY(feed);
+        QVERIFY(feed->zoneCount() > 0);
+        QVERIFY(feed->datasetUrl().endsWith(QStringLiteral("EG_FULL_20200101_XML.zip")));
+
+        // The page is read again without validators, the unchanged dataset is confirmed by its own
+        const int zoneCount = manager.zoneCount();
+        manager.refreshFeeds();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(!lastRequest("/page").contains("if-none-match"));
+        QVERIFY(!lastRequest("/page").contains("if-modified-since"));
+        QVERIFY(lastRequest("/d/UAS_AREA_1/EG_FULL_20200101_XML.zip").contains("if-none-match"));
+        QCOMPARE(manager.zoneCount(), zoneCount);
+        QVERIFY(feed->errorString().isEmpty());
+
+        // A new cycle on the page is downloaded
+        page = "<html><body><a href=\"/d/UAS_AREA_1/EG_FULL_20200101_XML.zip\">XML</a>"
+               "<a href=\"/d/UAS_AREA_1/EG_FULL_20210101_XML.zip\">XML</a></body></html>";
+        manager.refreshFeeds();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(feed->datasetUrl().endsWith(QStringLiteral("EG_FULL_20210101_XML.zip")));
+        QVERIFY(!lastRequest("/d/UAS_AREA_1/EG_FULL_20210101_XML.zip").isEmpty());
+        QVERIFY(!lastRequest("/d/UAS_AREA_1/EG_FULL_20210101_XML.zip").contains("if-none-match"));
+    }
+
+    // The dataset is remembered with its validators
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QVERIFY(restarted.source(url));
+    QVERIFY(restarted.source(url)->datasetUrl().endsWith(QStringLiteral("EG_FULL_20210101_XML.zip")));
+    QCOMPARE(restarted.source(url)->etag(), QStringLiteral("\"20210101_XML.zip\""));
+}

@@ -30,6 +30,7 @@ constexpr const char *loadedAtKey = "loadedAt";
 constexpr const char *fileDateKey = "fileDate";
 constexpr const char *etagKey = "etag";
 constexpr const char *lastModifiedKey = "lastModified";
+constexpr const char *datasetUrlKey = "datasetUrl";
 constexpr const char *enabledKey = "enabled";
 constexpr const char *sourcesKey = "sources";
 constexpr const char *versionKey = "version";
@@ -102,6 +103,7 @@ GeoZoneStore::Index GeoZoneStore::readIndex() const
                 object.value(etagKey).toString(),
                 object.value(lastModifiedKey).toString(),
                 object.value(enabledKey).toBool(true),
+                object.value(datasetUrlKey).toString(),
             });
         }
         index.status = IndexStatus::Ok;
@@ -160,6 +162,9 @@ bool GeoZoneStore::writeIndex(const QList<Entry> &entries, QString &errorString)
         }
         if (!entry.enabled) {
             object.insert(enabledKey, false);
+        }
+        if (!entry.datasetUrl.isEmpty()) {
+            object.insert(datasetUrlKey, entry.datasetUrl);
         }
         values.append(object);
     }

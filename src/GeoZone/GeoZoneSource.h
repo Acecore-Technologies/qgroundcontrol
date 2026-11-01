@@ -94,6 +94,10 @@ public:
     QString etag() const { return _etag; }
     QString lastModified() const { return _lastModified; }
     void setValidators(const QString &etag, const QString &lastModified) { _etag = etag; _lastModified = lastModified; }
+    /// Dataset a feed's page linked to, like the current AIRAC cycle, empty when the feed URL is the dataset. The
+    /// validators are those of the dataset.
+    QString datasetUrl() const { return _datasetUrl; }
+    void setDatasetUrl(const QString &datasetUrl) { _datasetUrl = datasetUrl; }
 
     /// Replaces the zones. The previous zones are deleted.
     /// @param fileDate Date of the data when the file has no issue date: file modification or download time
@@ -157,6 +161,7 @@ private:
     QByteArray _contentHash;
     QString _etag;
     QString _lastModified;
+    QString _datasetUrl;
 
     QList<GeoZone*> _zones;
     QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones

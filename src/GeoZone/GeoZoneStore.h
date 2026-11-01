@@ -29,6 +29,7 @@ public:
         QString etag;
         QString lastModified;
         bool enabled = true;    ///< See GeoZoneSource::enabled
+        QString datasetUrl;     ///< Dataset the feed's page linked to, whose download the validators belong to
     };
 
     enum class IndexStatus : quint8 {
