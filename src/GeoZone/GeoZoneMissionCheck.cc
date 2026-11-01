@@ -410,7 +410,8 @@ QList<QList<GeoZone::Position>> GeoZoneMissionCheck::pathsFromSegments(const QLi
 
         const double distance = segment.from.distanceTo(segment.to);
         const double azimuth = segment.from.azimuthTo(segment.to);
-        const bool terrainKnown = (segment.terrainAMSL.count() >= 2) && (segment.terrainSpacing > 0);
+        // A vertical segment, such as a takeoff climb at the launch position, has its terrain samples at the same place
+        const bool terrainKnown = (segment.terrainAMSL.count() >= 2) && ((segment.terrainSpacing > 0) || (distance <= 0));
 
         // Distance along the segment, fraction of the segment and the terrain elevation there
         struct Sample {
@@ -436,9 +437,9 @@ QList<QList<GeoZone::Position>> GeoZoneMissionCheck::pathsFromSegments(const QLi
         QList<GeoZone::Position> positions;
         for (const auto &[along, fraction, terrain] : std::as_const(samples)) {
             GeoZone::Position position;
-            if (along <= 0) {
+            if (fraction <= 0) {
                 position.coordinate = segment.from;
-            } else if (along >= distance) {
+            } else if (fraction >= 1) {
                 position.coordinate = segment.to;
             } else {
                 position.coordinate = segment.from.atDistanceAndAzimuth(along, azimuth);
@@ -462,6 +463,20 @@ QList<QList<GeoZone::Position>> GeoZoneMissionCheck::pathsFromSegments(const QLi
             paths.last().append(positions);
         } else {
             paths.append(positions);
+        }
+    }
+
+    // Positions without terrain samples, such as a takeoff climb before its terrain is received, take the terrain known at the same place
+    for (QList<GeoZone::Position> &path : paths) {
+        for (qsizetype i = path.count() - 2; i >= 0; i--) {
+            if (qIsNaN(path[i].terrainAMSL) && (path[i].coordinate.distanceTo(path[i + 1].coordinate) < 0.01)) {
+                path[i].terrainAMSL = path[i + 1].terrainAMSL;
+            }
+        }
+        for (qsizetype i = 1; i < path.count(); i++) {
+            if (qIsNaN(path[i].terrainAMSL) && (path[i].coordinate.distanceTo(path[i - 1].coordinate) < 0.01)) {
+                path[i].terrainAMSL = path[i - 1].terrainAMSL;
+            }
         }
     }
     return paths;
