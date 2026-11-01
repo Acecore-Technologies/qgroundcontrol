@@ -12,18 +12,27 @@ qt_add_library(GeoZoneCore STATIC
     Model/GeoZoneCatalog.cc
     Model/GeoZoneCatalog.h
     Model/GeoZoneDataStream.h
-    Model/GeoZoneGeometry.cc
+    Model/GeoZoneGeoid.cc
+    Model/GeoZoneGeoid.h
     Model/GeoZoneGeometry.h
+    Model/GeoZoneGreatCircle.cc
+    Model/GeoZoneGreatCircle.h
     Model/GeoZoneIndex.cc
     Model/GeoZoneIndex.h
     Model/GeoZoneInfo.cc
     Model/GeoZoneInfo.h
     Model/GeoZonePolicy.cc
     Model/GeoZonePolicy.h
+    Model/GeoZonePredicates.cc
+    Model/GeoZonePredicates.h
+    Model/GeoZoneProjection.cc
+    Model/GeoZoneProjection.h
     Model/GeoZoneSchedule.cc
     Model/GeoZoneSchedule.h
     Model/GeoZoneShape.cc
     Model/GeoZoneShape.h
+    Model/GeoZoneSimplify.cc
+    Model/GeoZoneSimplify.h
     Model/GeoZoneText.cc
     Model/GeoZoneText.h
     Model/GeoZoneVector.h

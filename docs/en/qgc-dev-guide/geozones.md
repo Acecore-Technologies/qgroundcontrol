@@ -10,7 +10,7 @@ The module has two layers:
 | Directory | Contents |
 | --------- | -------- |
 | `src/GeoZone/Core` | `GeoZoneCore`, a static library which only depends on Qt (Core and Positioning, privately Concurrent, Network and zlib), so it can be tested and fuzzed without _QGroundControl_. |
-| `src/GeoZone/Core/Model` | The zones (`GeoZone`, its `Data`, `Volume` and schedule in `GeoZoneSchedule`), the vertical datums of their limits (`GeoZoneVertical`), their translated display texts in the units of the application (`GeoZoneText`, so that the model has no translations or units), their geometry (`GeoZoneGeometry`, `GeoZoneBox`, `GeoZoneShape` for the maps), the spatial index (`GeoZoneIndex`), the `GeoZoneCatalog` of all zones, `GeoZonePolicy` (which zones a check applies to) and `GeoZoneInfo`, the value QML gets. |
+| `src/GeoZone/Core/Model` | The zones (`GeoZone`, its `Data`, `Volume` and schedule in `GeoZoneSchedule`), the vertical datums of their limits (`GeoZoneVertical`), their translated display texts in the units of the application (`GeoZoneText`, so that the model has no translations or units), their geometry (`GeoZoneGeometry`, see [Geometry](#geometry), `GeoZoneBox`, `GeoZoneShape` for the maps), the spatial index (`GeoZoneIndex`), the `GeoZoneCatalog` of all zones, `GeoZonePolicy` (which zones a check applies to) and `GeoZoneInfo`, the value QML gets. |
 | `src/GeoZone/Core/Formats` | `GeoZoneParser`, the `GeoZoneFormat` interface with one class per format, the helpers shared by the formats (`GeoZoneParserUtils`) and the zip reader (`GeoZoneZip`). |
 | `src/GeoZone/Core/Sources` | The sources and how they are obtained: `GeoZoneSourceRepository`, `GeoZoneSource`, `GeoZoneFeedFetch`, `GeoZoneDownloader`, `GeoZoneRefreshScheduler`, `GeoZoneLoader`, `GeoZoneStore`, `GeoZoneSourceIndex`, `GeoZoneParseCache`, the known services (`GeoZoneProviders`, `GeoZoneService`), `GeoZoneCredentials`, `GeoZoneProvenance` and offline packs (`GeoZonePack`). |
 | `src/GeoZone/Core/Evaluation` | Checks of positions and paths: `GeoZonePathEvaluator`, the autopilot return paths (`GeoZoneReturnModel`) and the return destinations of missions (`GeoZoneReturnDestinations` on `GeoZoneMissionItem`), `GeoZoneRouteSearch`, `GeoZoneAlertTracker`, `GeoZoneBriefing`, `GeoZonePlanAudit`, `GeoZoneFences` (fence storage and priorities), `GeoZoneAuthorisations`, `GeoZoneSourceVersion` and `GeoZoneTerrain`. |
@@ -71,6 +71,20 @@ The Plan View checks see the mission as a `GeoZoneMissionPath`: the segments flo
 - `GeoZoneMissionJumps` walks the items like the vehicle with their **DO_JUMP** items, a pure computation on the items and the indexes and lengths of the drawn segments, tested without a mission controller (`GeoZonePlanningTest::_testMissionJumpWalk`).
 - `GeoZoneReturnDestinations::fromMission()` (core) finds where the vehicle can return to from the items and the plan's home, rally points and breach return point, given as plain positions: the first waypoint after the takeoff, the landing sequences and the return path, for `GeoZoneReturnModel`. `GeoZoneMissionReader::destinations()` calls it with the plan of a `MissionController`, other checks can call it with their own. `GeoZoneReturnTest` tests it headless.
 - `GeoZoneMissionPath` itself keeps the result and computes what doesn't need the application: the connected paths of the segments, the times along them, the contingency starts and paths with `GeoZoneReturnModel`, and the labels of the paths.
+
+## Geometry {#geometry}
+
+The planar geometry is in namespace `GeoZoneGeometry`, split into units which `GeoZoneGeometry.h` includes together:
+
+| Unit | Contents |
+| ---- | -------- |
+| `GeoZoneProjection` | `LocalProjection`, the equirectangular projection to meters around an origin which the other units work in. It is affine in latitude and longitude, so edges straight in latitude and longitude stay straight. |
+| `GeoZonePredicates` | Containment, intersection, distance and interval tests of rings and polygons. Rings are filled with the non-zero winding rule by default, so the areas a zone boundary crossing itself encloses twice are inside, holes only exclude what they enclose an odd number of times, and points on a boundary (within `kBoundaryTolerance`) are inside, like for the segment intervals. Fences pass `Qt::OddEvenFill`, the rule of the autopilots. |
+| `GeoZoneSimplify` | `simplifyOutward()`, which reduces polygons for fences and route obstacles while keeping the zone inside. |
+| `GeoZoneGreatCircle` | Great circles: densifying zone edges published as geodesics, and `greatCircleFractions()`, which splits the legs of paths into pieces within `kPathGreatCircleToleranceMeters` of the great circle the vehicle flies. The evaluator adds positions there, and `GeoZone::horizontalIntervals()` and `pathEntry()` check long segments in such pieces. |
+| `GeoZoneGeoid` | The EGM96 geoid heights. |
+
+`GeoZoneVector.h` has the inline planar vector helpers (`cross`, `dot`, `length`, `unit`, `orientation`) the units share.
 
 ## Vertical Limits {#vertical-limits}
 
