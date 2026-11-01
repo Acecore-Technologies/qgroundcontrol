@@ -40,7 +40,7 @@ QGCPopupDialog {
     Connections {
         target: QGroundControl.geoZoneManager
         function onZonesAboutToChange(source) {
-            if ([ root.geoZone ].concat(root.zones).some(zone => !zone || zone.sourceKey === source.key)) {
+            if ([ root.geoZone ].concat(root.zones).some(zone => !zone || !zone.valid || zone.sourceKey === source.key)) {
                 root.close()
             }
         }
@@ -77,7 +77,7 @@ QGCPopupDialog {
             Layout.fillWidth:   true
             visible:            root.zones.length > 1
             model:              root.zones.map(zone => qsTr("%1 (%2)").arg(zone.displayName).arg(zone.restrictionText))
-            currentIndex:       root.zones.indexOf(root.geoZone)
+            currentIndex:       root.zones.findIndex(zone => zone.key === root.geoZone.key)
             onActivated:        (index) => root.geoZone = root.zones[index]
         }
 

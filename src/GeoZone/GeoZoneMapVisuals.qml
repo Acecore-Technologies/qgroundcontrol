@@ -34,10 +34,6 @@ Item {
     readonly property bool  _showZones:         showZones && _geoZoneManager.visible && map.visible // Items are not kept for maps in hidden views
     readonly property bool  _showLabels:        _showZones && map.zoomLevel >= labelMinZoomLevel
 
-    function _fillColor(zone) {
-        return GeoZoneStyle.fillColor(zone.restriction, zone.active)
-    }
-
     // More restrictive zones are drawn on top
     function _restrictionZ(restriction) {
         switch (restriction) {
@@ -163,10 +159,10 @@ Item {
             required property var object
 
             geoShape:       object.geoShape
-            color:          _root._fillColor(object.zone)
-            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.zone.restriction)
-            border.width:   object.highlighted ? 3 : (object.zone.active ? 2 : 1)
-            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
+            color:          GeoZoneStyle.fillColor(object.restriction, object.active)
+            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.restriction)
+            border.width:   object.highlighted ? 3 : (object.active ? 2 : 1)
+            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.restriction)
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
@@ -181,10 +177,10 @@ Item {
 
             center:         object.center
             radius:         object.radius
-            color:          _root._fillColor(object.zone)
-            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.zone.restriction)
-            border.width:   object.highlighted ? 3 : (object.zone.active ? 2 : 1)
-            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
+            color:          GeoZoneStyle.fillColor(object.restriction, object.active)
+            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.restriction)
+            border.width:   object.highlighted ? 3 : (object.active ? 2 : 1)
+            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.restriction)
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
@@ -197,24 +193,24 @@ Item {
 
         delegate: MapQuickItem {
             id:             labelItem
-            coordinate:     object.center
+            coordinate:     modelData.center
             anchorPoint.x:  sourceItem.width / 2
             anchorPoint.y:  sourceItem.height / 2
             z:              QGroundControl.zOrderMapItems - 1
 
-            required property var object
+            required property var modelData
 
             sourceItem: Rectangle {
                 width:          zoneLabel.contentWidth + ScreenTools.defaultFontPixelWidth
                 height:         zoneLabel.contentHeight + ScreenTools.defaultFontPixelHeight / 4
                 radius:         height / 4
                 color:          Qt.rgba(0, 0, 0, 0.6)
-                border.color:   GeoZoneStyle.restrictionColor(labelItem.object.restriction)
+                border.color:   GeoZoneStyle.restrictionColor(labelItem.modelData.restriction)
 
                 QGCLabel {
                     id:                 zoneLabel
                     anchors.centerIn:   parent
-                    text:               labelItem.object.displayName
+                    text:               labelItem.modelData.displayName
                     textFormat:         Text.PlainText
                     color:              "white"
                     font.pointSize:     ScreenTools.smallFontPointSize
@@ -222,7 +218,7 @@ Item {
 
                 QGCMouseArea {
                     anchors.fill:   parent
-                    onClicked:      _root._showZoneInfo(labelItem.object)
+                    onClicked:      _root._showZoneInfo(labelItem.modelData)
                 }
             }
         }

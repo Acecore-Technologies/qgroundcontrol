@@ -135,6 +135,7 @@ private:
     QString _lastModified;
 
     QList<GeoZone*> _zones;
+    QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones
     QList<GeoZoneShape*> _shapes;
     QGeoRectangle _boundingBox;
 };

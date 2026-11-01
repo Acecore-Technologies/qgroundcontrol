@@ -80,8 +80,7 @@ void fly(GeoZoneMonitor &monitor, const Waypoint &from, const Waypoint &to)
 
 const GeoZone *findZone(const GeoZoneManager &manager, const QString &identifier)
 {
-    for (int i = 0; i < manager.zones()->count(); i++) {
-        const GeoZone *const zone = manager.zones()->value<const GeoZone*>(i);
+    for (const GeoZone *zone : manager.zoneList()) {
         if (zone->identifier() == identifier) {
             return zone;
         }
@@ -95,11 +94,11 @@ QString alertText(const GeoZoneManager &manager, const QString &event, const QSt
     return zone ? QStringLiteral("%1 geozone %2 (%3)").arg(event, zone->name(), zone->restrictionText()) : identifier;
 }
 
-QStringList identifiers(const QList<QObject*> &zones)
+QStringList identifiers(const QList<GeoZone*> &zones)
 {
     QStringList list;
-    for (const QObject *object : zones) {
-        list.append(qobject_cast<const GeoZone*>(object)->identifier());
+    for (const GeoZone *zone : zones) {
+        list.append(zone->identifier());
     }
     list.sort();
     return list;
@@ -107,9 +106,9 @@ QStringList identifiers(const QList<QObject*> &zones)
 
 QStringList nearbyIdentifiers(const GeoZoneMonitor &monitor)
 {
-    QList<QObject*> zones;
+    QList<GeoZone*> zones;
     for (const QVariant &nearby : monitor.nearbyZones()) {
-        zones.append(nearby.toMap().value(QStringLiteral("zone")).value<QObject*>());
+        zones.append(const_cast<GeoZone*>(GeoZoneInfo::fromVariant(nearby.toMap().value(QStringLiteral("zone")))));
     }
     return identifiers(zones);
 }
@@ -147,7 +146,7 @@ void GeoZoneFlightTest::_testFlightAlertSequence()
     GeoZoneManager manager(dir.path());
     QString errorString;
     QVERIFY2(manager.loadFile(kZonesFile, errorString), qPrintable(errorString));
-    QCOMPARE(manager.zones()->count(), 8);
+    QCOMPARE(manager.zoneCount(), 8);
 
     GeoZoneMonitor monitor(&manager);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);

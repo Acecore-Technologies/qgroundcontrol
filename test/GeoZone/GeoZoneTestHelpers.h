@@ -16,6 +16,7 @@
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneIndex.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneLoader.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneManager.h"
@@ -64,6 +65,17 @@
 
 /// Fixtures and helpers shared by the geozone tests
 namespace GeoZoneTestHelpers {
+
+/// Owns the zones a test creates, as sources do
+struct ZoneOwner {
+    QList<QSharedPointer<GeoZone>> zones;
+
+    GeoZone *add(const GeoZone::Data &data)
+    {
+        zones.append(QSharedPointer<GeoZone>::create(data));
+        return zones.last().data();
+    }
+};
 
 
 inline GeoZoneParser::Result _parseResource(const QString &name)

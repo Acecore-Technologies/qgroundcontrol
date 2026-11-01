@@ -17,6 +17,7 @@
 #include <QtPositioning/QGeoShape>
 
 #include "GeoZone.h"
+#include "GeoZoneInfo.h"
 
 class GeoZoneManager;
 class GeoZoneShape;
@@ -27,9 +28,10 @@ class QmlObjectListModel;
 class GeoZoneMapItem : public QObject
 {
     Q_OBJECT
-    Q_MOC_INCLUDE("GeoZone.h")
 
-    Q_PROPERTY(GeoZone*         zone        READ zone       CONSTANT FINAL)
+    Q_PROPERTY(GeoZoneInfo      zone        READ zoneInfo   CONSTANT FINAL)
+    Q_PROPERTY(int              restriction READ restriction CONSTANT FINAL)               ///< GeoZone::Restriction of the zone
+    Q_PROPERTY(bool             active      READ active     NOTIFY activeChanged FINAL)    ///< The zone is active now
     Q_PROPERTY(QGeoShape        geoShape    READ geoShape   NOTIFY geoShapeChanged FINAL) ///< Polygon including holes
     Q_PROPERTY(QGeoCoordinate   center      READ center     CONSTANT FINAL)               ///< Circle only
     Q_PROPERTY(double           radius      READ radius     CONSTANT FINAL)               ///< Circle only, meters
@@ -41,6 +43,11 @@ public:
     /// Identifies the item, only valid until the zones of its source change
     const GeoZoneShape *shape() const { return _shape; }
     GeoZone *zone() const { return _zone; }
+    GeoZoneInfo zoneInfo() const { return GeoZoneInfo(_zone); }
+    int restriction() const;
+    bool active() const { return _active; }
+    /// Re-reads whether the zone is active
+    void updateActive();
     QGeoShape geoShape() const { return _geoShape; }
     QGeoCoordinate center() const { return _center; }
     double radius() const { return _radius; }
@@ -52,10 +59,12 @@ public:
 signals:
     void geoShapeChanged();
     void highlightedChanged();
+    void activeChanged();
 
 private:
     const GeoZoneShape *_shape = nullptr;
-    QPointer<GeoZone> _zone;
+    GeoZone *_zone = nullptr;
+    bool _active = false;
     QGeoCoordinate _center;
     double _radius = 0;
     bool _isCircle = false;
@@ -74,9 +83,9 @@ class GeoZoneMapModel : public QObject
 
     Q_PROPERTY(QmlObjectListModel*  polygons        READ polygons           CONSTANT FINAL)                       ///< GeoZoneMapItem polygons
     Q_PROPERTY(QmlObjectListModel*  circles         READ circles            CONSTANT FINAL)                       ///< GeoZoneMapItem circles
-    Q_PROPERTY(QmlObjectListModel*  labelZones      READ labelZones         CONSTANT FINAL)                       ///< GeoZone objects to label
+    Q_PROPERTY(QVariantList         labelZones      READ labelZones         NOTIFY labelZonesChanged FINAL)       ///< GeoZoneInfo of the zones to label
     Q_PROPERTY(int                  hiddenZoneCount READ hiddenZoneCount    NOTIFY hiddenZoneCountChanged FINAL)  ///< Zones in view not shown because of the limit
-    Q_PROPERTY(QList<QObject*>      highlightedZones READ highlightedZones  WRITE setHighlightedZones NOTIFY highlightedZonesChanged FINAL)  ///< GeoZone objects drawn highlighted
+    Q_PROPERTY(QVariantList         highlightedZones READ highlightedZones  WRITE setHighlightedZones NOTIFY highlightedZonesChanged FINAL)  ///< GeoZoneInfo of the zones drawn highlighted
 
 public:
     static constexpr int maxShapeCount = 2000;
@@ -91,19 +100,21 @@ public:
 
     QmlObjectListModel *polygons() const { return _polygons; }
     QmlObjectListModel *circles() const { return _circles; }
-    QmlObjectListModel *labelZones() const { return _labelZones; }
+    QVariantList labelZones() const { return _labelZones; }
     int hiddenZoneCount() const { return _hiddenZoneCount; }
-    QList<QObject*> highlightedZones() const { return _highlightedZones; }
-    void setHighlightedZones(const QList<QObject*> &zones);
+    QVariantList highlightedZones() const { return _highlightedZones; }
+    void setHighlightedZones(const QVariantList &zones);
 
 signals:
     void hiddenZoneCountChanged(int hiddenZoneCount);
     void highlightedZonesChanged();
+    void labelZonesChanged();
 
 private slots:
     void _clear();
     void _removeSource(GeoZoneSource *source);
     void _refresh();
+    void _updateActive();
 
 private:
     void _syncItems(QmlObjectListModel *model, const QList<const GeoZoneShape*> &shapes, int zoomLevel);
@@ -112,10 +123,11 @@ private:
     GeoZoneManager *_manager = nullptr;
     QmlObjectListModel *_polygons = nullptr;
     QmlObjectListModel *_circles = nullptr;
-    QmlObjectListModel *_labelZones = nullptr;
+    QVariantList _labelZones;
     QHash<const GeoZoneShape*, GeoZoneMapItem*> _items;
     int _hiddenZoneCount = 0;
-    QList<QObject*> _highlightedZones;
+    QVariantList _highlightedZones;
+    QSet<const GeoZone*> _highlightedZoneSet;
 
     QGeoRectangle _visibleRegion;
     double _zoomLevel = 0;

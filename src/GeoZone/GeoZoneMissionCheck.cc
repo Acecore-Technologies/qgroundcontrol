@@ -79,11 +79,6 @@ void GeoZoneMissionCheck::setFlightNow(bool flightNow)
     }
 }
 
-QList<QObject*> GeoZoneMissionCheck::crossedZones() const
-{
-    return QList<QObject*>(_crossedZones.cbegin(), _crossedZones.cend());
-}
-
 namespace {
 
 enum class NameStyle : quint8 {
@@ -247,7 +242,7 @@ void GeoZoneMissionCheck::_scheduleUpdate()
 void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 {
     // The other zones stay listed until the check runs again
-    const auto fromSource = [source](const GeoZone *zone) { return zone->parent() == source; };
+    const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
                               _unfencedZones.removeIf(fromSource);
     if (removed > 0) {

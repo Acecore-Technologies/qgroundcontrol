@@ -418,7 +418,7 @@ Item {
     /// @return Warning about the geozones the action would enter, empty when there are none. Updated with the slider value.
     function _geoZoneWarning(actionCode, actionData) {
         const monitor = QGroundControl.geoZoneMonitor
-        if (!_activeVehicle || !QGroundControl.geoZoneManager.zones.count) {
+        if (!_activeVehicle || !QGroundControl.geoZoneManager.zoneCount) {
             return ""
         }
         const sliderMeters = _unitsConversion.appSettingsVerticalDistanceUnitsToMeters(guidedValueSlider.value)

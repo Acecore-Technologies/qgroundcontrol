@@ -37,9 +37,8 @@ QGeoRectangle GeoZone::Volume::boundingBox() const
     return QGeoRectangle(rings.first());
 }
 
-GeoZone::GeoZone(const Data &data, QObject *parent)
-    : QObject(parent)
-    , _data(data)
+GeoZone::GeoZone(const Data &data)
+    : _data(data)
 {
     _volumeBoxes.reserve(_data.volumes.count());
     for (const Volume &volume : _data.volumes) {
@@ -75,10 +74,7 @@ void GeoZone::setSourceKey(const QString &sourceKey)
 
 void GeoZone::setSourceText(const QString &sourceText)
 {
-    if (sourceText != _sourceText) {
-        _sourceText = sourceText;
-        emit sourceTextChanged();
-    }
+    _sourceText = sourceText;
 }
 
 bool GeoZone::isActiveAt(const QDateTime &dateTime) const
@@ -91,13 +87,14 @@ bool GeoZone::isActiveDuring(const QDateTime &start, const QDateTime &end) const
     return GeoZoneSchedule::isActiveDuring(_data.applicability, start, end, _boundingBox.center());
 }
 
-void GeoZone::updateActive(const QDateTime &now)
+bool GeoZone::updateActive(const QDateTime &now)
 {
     const bool active = isActiveAt(now);
-    if (active != _active) {
-        _active = active;
-        emit activeChanged(_active);
+    if (active == _active) {
+        return false;
     }
+    _active = active;
+    return true;
 }
 
 QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance) const

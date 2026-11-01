@@ -40,7 +40,7 @@ ColumnLayout {
         id:                 searchField
         Layout.fillWidth:   true
         placeholderText:    qsTr("Find a geozone by name or identifier")
-        enabled:            root._geoZoneManager.zones.count > 0
+        enabled:            root._geoZoneManager.zoneCount > 0
         onTextChanged:      searchTimer.restart()
     }
 

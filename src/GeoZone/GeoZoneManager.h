@@ -38,7 +38,7 @@ class GeoZoneManager : public QObject
     Q_MOC_INCLUDE("QmlObjectListModel.h")
     Q_MOC_INCLUDE("GeoZoneSource.h")
 
-    Q_PROPERTY(QmlObjectListModel*  zones               READ zones              CONSTANT FINAL)                           ///< GeoZone objects of all sources
+    Q_PROPERTY(int                  zoneCount           READ zoneCount          NOTIFY zoneCountChanged FINAL)            ///< Zones of all sources
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
     Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
     Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged FINAL)
@@ -96,18 +96,18 @@ public:
 
     /// @return Zones to label in the map region: those centered in it, limited to maxLabelCount
     ///         preferring the most restrictive
-    Q_INVOKABLE QList<QObject*> labelZones(const QGeoRectangle &region) const;
+    Q_INVOKABLE QVariantList labelZones(const QGeoRectangle &region) const;
 
     /// @return Zones whose horizontal projection contains the coordinate at any altitude, the most restrictive and
     ///         active first
-    Q_INVOKABLE QList<QObject*> zonesAt(const QGeoCoordinate &coordinate) const;
+    Q_INVOKABLE QVariantList zonesAt(const QGeoCoordinate &coordinate) const;
 
     /// @return Zones whose name or identifier contains the text, ignoring case, limited to maxResults. Names
     ///         starting with the text come first, then the most restrictive.
-    Q_INVOKABLE QList<QObject*> searchZones(const QString &text, int maxResults = 50) const;
+    Q_INVOKABLE QVariantList searchZones(const QString &text, int maxResults = 50) const;
 
     /// Asks the visible map to show the zone and its details
-    Q_INVOKABLE void showZone(QObject *zone) { if (qobject_cast<GeoZone*>(zone)) { emit showZoneRequested(zone); } }
+    Q_INVOKABLE void showZone(const QVariant &zone);
 
     /// @return Zones matching one of the restrictions which intersect the area. An invalid area matches all zones.
     /// @param activeFrom When valid, only zones active at this time or, with a valid activeTo, at any time until activeTo
@@ -129,7 +129,11 @@ public:
         return _catalog.zonesIntersectingAreas(restrictions, areas);
     }
 
-    QmlObjectListModel *zones() const { return _zones; }
+    int zoneCount() const { return static_cast<int>(_catalog.zones().count()); }
+    /// Zones of all sources, in the order of the sources
+    const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }
+    /// Zones of all sources with their spatial index
+    const GeoZoneCatalog &catalog() const { return _catalog; }
     QmlObjectListModel *sources() const { return _repository->sources(); }
     GeoZoneSource *source(const QString &key) const { return _repository->source(key); }
     GeoZoneSourceRepository *repository() const { return _repository; }
@@ -167,7 +171,10 @@ signals:
     /// The zones of the source changed, zones() and the queries include them unless it was removed
     void zonesChanged(GeoZoneSource *source);
     void boundingBoxChanged();
-    void showZoneRequested(QObject *zone);
+    void showZoneRequested(const QVariant &zone);   ///< GeoZoneInfo
+    void zoneCountChanged();
+    /// Zones became active or inactive with the time, see GeoZone::active
+    void activeZonesChanged();
     void plannedStartChanged();
     void visibleChanged(bool visible);
     void busyChanged(bool busy);
@@ -185,8 +192,7 @@ private:
     void _endZonesChange(GeoZoneSource *source);
 
     GeoZoneSourceRepository *_repository = nullptr;
-    QmlObjectListModel *_zones = nullptr;
-    GeoZoneCatalog _catalog;            ///< Same zones as _zones, for queries
+    GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
     QDateTime _plannedStart;
 

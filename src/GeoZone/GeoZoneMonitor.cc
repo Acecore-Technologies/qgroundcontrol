@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneMonitor.h"
+#include "GeoZoneInfo.h"
 #include "AudioOutput.h"
 #include "GeoZone.h"
 #include "GeoZoneAlertLog.h"
@@ -73,7 +74,7 @@ QVariant GeoZoneNearbyModel::data(const QModelIndex &index, int role) const
     const Item &item = _items[index.row()];
     switch (role) {
     case ZoneRole:
-        return QVariant::fromValue(static_cast<QObject*>(item.zone));
+        return QVariant::fromValue(GeoZoneInfo(item.zone));
     case InsideRole:
         return item.inside;
     case DistanceRole:
@@ -209,7 +210,7 @@ void GeoZoneMonitor::_alertsEnabledChanged()
 
 bool GeoZoneMonitor::monitoring() const
 {
-    return !_vehicles.isEmpty() && (_manager->zones()->count() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
+    return !_vehicles.isEmpty() && (_manager->zoneCount() > 0) && SettingsManager::instance()->geoZoneSettings()->alertsEnabled()->rawValue().toBool();
 }
 
 void GeoZoneMonitor::_publishNearby()
@@ -231,7 +232,7 @@ QVariantList GeoZoneMonitor::nearbyZones() const
     QVariantList zones;
     for (const Nearby &nearby : _activeNearby()) {
         zones.append(QVariantMap{
-            { QStringLiteral("zone"), QVariant::fromValue(static_cast<QObject*>(nearby.zone)) },
+            { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(nearby.zone)) },
             { QStringLiteral("inside"), nearby.inside },
             { QStringLiteral("distance"), nearby.distance },
             { QStringLiteral("timeToEntry"), nearby.timeToEntry },
@@ -317,8 +318,7 @@ QList<GeoZoneMonitor::VerticalBand> GeoZoneMonitor::_verticalBands(const GeoZone
 {
     static const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::USpace };
     QList<VerticalBand> bands;
-    for (QObject *object : _manager->zonesAt(position.coordinate)) {
-        GeoZone *const zone = qobject_cast<GeoZone*>(object);
+    for (GeoZone *zone : _manager->catalog().zonesAt(position.coordinate)) {
         if (!zone->active() || !restrictions.contains(zone->restriction())) {
             continue;
         }
@@ -424,8 +424,8 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
 {
     bool activeChanged = false;
     for (auto it = _trackers.begin(); it != _trackers.end(); ++it) {
-        const qsizetype removedBands = it->bands.removeIf([source](const VerticalBand &band) { return band.zone->parent() == source; });
-        if ((it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->parent() == source; }) + removedBands) > 0) {
+        const qsizetype removedBands = it->bands.removeIf([source](const VerticalBand &band) { return band.zone->sourceKey() == source->key(); });
+        if ((it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->sourceKey() == source->key(); }) + removedBands) > 0) {
             activeChanged = activeChanged || (it.key() == _activeVehicleId);
         }
     }

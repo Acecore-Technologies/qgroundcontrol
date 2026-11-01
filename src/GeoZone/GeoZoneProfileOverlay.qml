@@ -27,7 +27,7 @@ Canvas {
     GeoZoneProfile {
         id:                 _profile
         missionController:  control.missionController
-        active:             control.visible && QGroundControl.geoZoneManager.zones.count > 0
+        active:             control.visible && QGroundControl.geoZoneManager.zoneCount > 0
     }
 
     // Changes only when the scale does, the profile signals each value as it updates

@@ -17,6 +17,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZone.h"
+#include "GeoZoneInfo.h"
 
 class GeoFenceController;
 class GeoZoneManager;
@@ -34,16 +35,16 @@ class GeoZoneMissionCheck : public QObject
     Q_MOC_INCLUDE("GeoFenceController.h")
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
-    Q_PROPERTY(QList<QObject*>      crossedZones        READ crossedZones                                   NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QVariantList         crossedZones        READ crossedZonesInfo                               NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged FINAL)
-    Q_PROPERTY(QList<QObject*>      uSpaceZones         READ uSpaceZones                                    NOTIFY crossedZonesChanged FINAL)     ///< U-space airspaces the mission enters
-    Q_PROPERTY(QList<QObject*>      permittedZones      READ permittedZones                                 NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
+    Q_PROPERTY(QVariantList         uSpaceZones         READ uSpaceZonesInfo                                NOTIFY crossedZonesChanged FINAL)     ///< U-space airspaces the mission enters
+    Q_PROPERTY(QVariantList         permittedZones      READ permittedZonesInfo                             NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(int                  inactiveZoneCount   READ inactiveZoneCount                              NOTIFY crossedZonesChanged FINAL)     ///< Zones entered which aren't active during the planned flight
     Q_PROPERTY(bool                 flightNow           READ flightNow          WRITE setFlightNow          NOTIFY flightNowChanged FINAL)        ///< Checks a flight starting now instead of at the planned start, like a mission on the vehicle
     Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)   ///< Fence expected to exclude the prohibited zones
-    Q_PROPERTY(QList<QObject*>      unfencedZones       READ unfencedZones                                  NOTIFY crossedZonesChanged FINAL)     ///< Prohibited zones entered which the fence doesn't exclude
+    Q_PROPERTY(QVariantList         unfencedZones       READ unfencedZonesInfo                              NOTIFY crossedZonesChanged FINAL)     ///< Prohibited zones entered which the fence doesn't exclude
     Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY crossedZonesChanged FINAL)
 
 public:
@@ -58,10 +59,14 @@ public:
     MissionController *missionController() const;
     void setMissionController(MissionController *missionController);
 
-    QList<QObject*> crossedZones() const;
+    /// Restricted zones the mission enters, most restrictive first
+    const QList<GeoZone*> &crossedZones() const { return _crossedZones; }
+    QVariantList crossedZonesInfo() const { return GeoZoneInfo::toVariantList(_crossedZones); }
     QString warningText() const;
-    QList<QObject*> uSpaceZones() const { return QList<QObject*>(_uSpaceZones.cbegin(), _uSpaceZones.cend()); }
-    QList<QObject*> permittedZones() const { return QList<QObject*>(_permittedZones.cbegin(), _permittedZones.cend()); }
+    const QList<GeoZone*> &uSpaceZones() const { return _uSpaceZones; }
+    QVariantList uSpaceZonesInfo() const { return GeoZoneInfo::toVariantList(_uSpaceZones); }
+    const QList<GeoZone*> &permittedZones() const { return _permittedZones; }
+    QVariantList permittedZonesInfo() const { return GeoZoneInfo::toVariantList(_permittedZones); }
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
@@ -70,7 +75,8 @@ public:
     void setFlightNow(bool flightNow);
     GeoFenceController *geoFenceController() const;
     void setGeoFenceController(GeoFenceController *geoFenceController);
-    QList<QObject*> unfencedZones() const { return QList<QObject*>(_unfencedZones.cbegin(), _unfencedZones.cend()); }
+    const QList<GeoZone*> &unfencedZones() const { return _unfencedZones; }
+    QVariantList unfencedZonesInfo() const { return GeoZoneInfo::toVariantList(_unfencedZones); }
     QString fenceText() const;
 
     /// @return true if exclusion fences of the controller cover the whole zone, using the outer boundaries of its polygons

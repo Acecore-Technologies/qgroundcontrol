@@ -26,7 +26,7 @@ Item {
     anchors.top:    parent.top
     anchors.bottom: parent.bottom
 
-    property bool showIndicator: QGroundControl.geoZoneManager.zones.count > 0
+    property bool showIndicator: QGroundControl.geoZoneManager.zoneCount > 0
 
     readonly property var _monitor:         QGroundControl.geoZoneMonitor
     readonly property var _geoZoneSettings: QGroundControl.settingsManager.geoZoneSettings

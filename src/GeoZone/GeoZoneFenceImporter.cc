@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneFenceImporter.h"
+#include "GeoZoneInfo.h"
 #include "GeoFenceController.h"
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
@@ -200,13 +201,11 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<GeoZon
     return fences;
 }
 
-int GeoZoneFenceImporter::addZones(const QList<QObject*> &zones, double simplifyTolerance)
+int GeoZoneFenceImporter::addZones(const QVariantList &zones, double simplifyTolerance)
 {
     QList<GeoZone*> geoZones;
-    for (QObject *object : zones) {
-        if (GeoZone *const zone = qobject_cast<GeoZone*>(object)) {
-            geoZones.append(zone);
-        }
+    for (const GeoZone *zone : GeoZoneInfo::fromVariantList(zones)) {
+        geoZones.append(const_cast<GeoZone*>(zone));
     }
     return addExclusions(geoZones, simplifyTolerance);
 }

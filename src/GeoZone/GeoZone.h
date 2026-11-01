@@ -9,10 +9,11 @@
 
 #pragma once
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QList>
-#include <QtCore/QObject>
+#include <QtCore/QSharedPointer>
 #include <QtCore/QRectF>
 #include <QtCore/QStringList>
 #include <QtCore/QTime>
@@ -26,28 +27,13 @@ namespace GeoZoneGeometry {
 class LocalProjection;
 }
 
-/// A UAS geographical zone loaded from an EUROCAE ED-269 or ED-318 data file.
-class GeoZone : public QObject
+/// A UAS geographical zone loaded from a geozone source. Zones are plain objects owned by their source through
+/// shared pointers, QML gets GeoZoneInfo values describing them. The class is a gadget for its enums.
+class GeoZone : public QEnableSharedFromThis<GeoZone>
 {
-    Q_OBJECT
-
-    Q_PROPERTY(QString          identifier              READ identifier             CONSTANT FINAL)
-    Q_PROPERTY(QString          name                    READ name                   CONSTANT FINAL)
-    Q_PROPERTY(QString          displayName             READ displayName            CONSTANT FINAL)   ///< Name, or the identifier of unnamed zones
-    Q_PROPERTY(QString          country                 READ country                CONSTANT FINAL)
-    Q_PROPERTY(Restriction      restriction             READ restriction            CONSTANT FINAL)
-    Q_PROPERTY(QString          restrictionText         READ restrictionText        CONSTANT FINAL)
-    Q_PROPERTY(QString          restrictionConditions   READ restrictionConditions  CONSTANT FINAL)
-    Q_PROPERTY(QString          reasonText              READ reasonText             CONSTANT FINAL)
-    Q_PROPERTY(QString          message                 READ message                CONSTANT FINAL)
-    Q_PROPERTY(QString          authorityText           READ authorityText          CONSTANT FINAL)
-    Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
-    Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT FINAL)
-    Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT FINAL)
-    Q_PROPERTY(QGeoRectangle    boundingBox             READ boundingBox            CONSTANT FINAL)
-    Q_PROPERTY(bool             active                  READ active                 NOTIFY activeChanged FINAL)
-    Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT FINAL)   ///< Key of the GeoZoneSource
-    Q_PROPERTY(QString          sourceText              READ sourceText             NOTIFY sourceTextChanged FINAL)   ///< File or feed the zone was loaded from, with its date
+    Q_GADGET
+    Q_DECLARE_TR_FUNCTIONS(GeoZone)
+    Q_DISABLE_COPY_MOVE(GeoZone)
 
 public:
     enum Restriction {
@@ -114,7 +100,7 @@ public:
         QList<Volume> volumes;
     };
 
-    explicit GeoZone(const Data &data, QObject *parent = nullptr);
+    explicit GeoZone(const Data &data);
 
     const Data &data() const { return _data; }
 
@@ -143,7 +129,8 @@ public:
     const QString &key() const { return _key; }
 
     /// Re-evaluates the active state against the specified UTC time
-    void updateActive(const QDateTime &now);
+    /// @return true if the state changed
+    bool updateActive(const QDateTime &now);
 
     /// @return true if the zone applies at the specified time. Daylight events are computed at the zone center.
     bool isActiveAt(const QDateTime &dateTime) const;
@@ -203,10 +190,6 @@ public:
 
     /// @return 0 for the most restrictive zones, increasing for less restrictive ones
     static int restrictionSeverity(Restriction restriction);
-
-signals:
-    void activeChanged(bool active);
-    void sourceTextChanged();
 
 private:
     static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet);

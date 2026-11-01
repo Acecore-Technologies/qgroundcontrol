@@ -16,7 +16,6 @@
 #include <QtCore/QHash>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
-#include <QtQml/QQmlEngine>
 
 namespace {
 
@@ -128,11 +127,9 @@ void GeoZoneSource::_clearZones()
 {
     qDeleteAll(_shapes);
     _shapes.clear();
-    // QML may still hold references until the next event loop iteration
-    for (GeoZone *zone : std::as_const(_zones)) {
-        zone->deleteLater();
-    }
+    // Zones are deleted when GeoZoneInfo values in QML no longer share them
     _zones.clear();
+    _sharedZones.clear();
     _boundingBox = QGeoRectangle();
 }
 
@@ -182,8 +179,9 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
 
     const QString sourceText = _sourceText();
     for (const GeoZone::Data &zoneData : result.zones) {
-        GeoZone *const zone = new GeoZone(zoneData, this);
-        QQmlEngine::setObjectOwnership(zone, QQmlEngine::CppOwnership);
+        const QSharedPointer<GeoZone> sharedZone = QSharedPointer<GeoZone>::create(zoneData);
+        GeoZone *const zone = sharedZone.data();
+        _sharedZones.append(sharedZone);
         zone->setSourceKey(_key);
         zone->setSourceText(sourceText);
         _zones.append(zone);

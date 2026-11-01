@@ -246,7 +246,7 @@ void GeoZoneGeometryTest::_testOutwardSimplification()
 void GeoZoneGeometryTest::_testSpatialIndex()
 {
     // Random circles from a few meters to a hundred kilometers, and a box crossing many cells
-    QObject zoneParent;
+    ZoneOwner zoneParent;
     QList<GeoZone*> zones;
     quint32 seed = 12345;
     const auto random = [&seed]() {
@@ -262,7 +262,7 @@ void GeoZoneGeometryTest::_testSpatialIndex()
         data.identifier = QString::number(i);
         data.restriction = (i % 2) ? GeoZone::Prohibited : GeoZone::Conditional;
         data.volumes.append(volume);
-        zones.append(new GeoZone(data, &zoneParent));
+        zones.append(zoneParent.add(data));
     }
 
     GeoZoneIndex index;

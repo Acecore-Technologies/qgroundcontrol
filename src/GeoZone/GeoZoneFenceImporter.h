@@ -58,8 +58,8 @@ public:
     /// Adds exclusion fences for the zones
     /// @return Number of fence polygons and circles added
     int addExclusions(const QList<GeoZone*> &zones, double simplifyTolerance = 0);
-    /// Same as addExclusions, for GeoZone objects from QML
-    Q_INVOKABLE int addZones(const QList<QObject*> &zones, double simplifyTolerance = 0);
+    /// Same as addExclusions, for GeoZoneInfo values from QML
+    Q_INVOKABLE int addZones(const QVariantList &zones, double simplifyTolerance = 0);
 
     /// Summarizes the fences addExclusions would add, see preview
     QVariantMap exclusionsPreview(const QList<GeoZone*> &zones, double simplifyTolerance = 0) const;

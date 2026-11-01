@@ -9,6 +9,7 @@
 
 #include "GeoZoneManager.h"
 #include "GeoZoneFenceImporter.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
@@ -46,7 +47,6 @@ QString defaultStorageDir()
 GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     : QObject(parent)
     , _repository(new GeoZoneSourceRepository(storageDir.isEmpty() ? defaultStorageDir() : storageDir, this))
-    , _zones(new QmlObjectListModel(this))
     , _activeTimer(new QTimer(this))
 {
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
@@ -78,7 +78,7 @@ GeoZoneManager *GeoZoneManager::instance()
 
 void GeoZoneManager::registerQmlTypes()
 {
-    (void) qmlRegisterUncreatableType<GeoZone>("QGroundControl.GeoZone", 1, 0, "GeoZone", "Reference only");
+    (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, "QGroundControl.GeoZone", 1, 0, "GeoZone", "Enums only");
     (void) qmlRegisterUncreatableType<GeoZoneMonitor>("QGroundControl.GeoZone", 1, 0, "GeoZoneMonitor", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapModel");
     (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
@@ -132,9 +132,7 @@ void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
     const QGeoRectangle previousBoundingBox = _catalog.boundingBox();
     _catalog.rebuild(_repository->sourceList());
 
-    // A single reset, so bindings to the count don't see the zones of other sources disappear
     const QList<GeoZone*> &zones = _catalog.zones();
-    (void) _zones->swapObjectList(QList<QObject*>(zones.cbegin(), zones.cend()));
     if (zones.isEmpty()) {
         _activeTimer->stop();
     } else if (!_activeTimer->isActive()) {
@@ -142,6 +140,7 @@ void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
     }
 
     emit zonesChanged(source);
+    emit zoneCountChanged();
     if (_catalog.boundingBox() != previousBoundingBox) {
         emit boundingBoxChanged();
     }
@@ -150,26 +149,34 @@ void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
 void GeoZoneManager::_updateActive()
 {
     const QDateTime now = QDateTime::currentDateTimeUtc();
-    for (int i = 0; i < _zones->count(); i++) {
-        _zones->value<GeoZone*>(i)->updateActive(now);
+    bool changed = false;
+    for (GeoZone *zone : _catalog.zones()) {
+        changed = zone->updateActive(now) || changed;
     }
     _repository->updateValidity();
+    if (changed) {
+        emit activeZonesChanged();
+    }
 }
 
-QList<QObject*> GeoZoneManager::labelZones(const QGeoRectangle &region) const
+QVariantList GeoZoneManager::labelZones(const QGeoRectangle &region) const
 {
-    const QList<GeoZone*> zones = _catalog.labelZones(region, maxLabelCount);
-    return QList<QObject*>(zones.cbegin(), zones.cend());
+    return GeoZoneInfo::toVariantList(_catalog.labelZones(region, maxLabelCount));
 }
 
-QList<QObject*> GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
+QVariantList GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
 {
-    const QList<GeoZone*> zones = _catalog.zonesAt(coordinate);
-    return QList<QObject*>(zones.cbegin(), zones.cend());
+    return GeoZoneInfo::toVariantList(_catalog.zonesAt(coordinate));
 }
 
-QList<QObject*> GeoZoneManager::searchZones(const QString &text, int maxResults) const
+QVariantList GeoZoneManager::searchZones(const QString &text, int maxResults) const
 {
-    const QList<GeoZone*> zones = _catalog.search(text, maxResults);
-    return QList<QObject*>(zones.cbegin(), zones.cend());
+    return GeoZoneInfo::toVariantList(_catalog.search(text, maxResults));
+}
+
+void GeoZoneManager::showZone(const QVariant &zone)
+{
+    if (GeoZoneInfo::fromVariant(zone)) {
+        emit showZoneRequested(zone);
+    }
 }

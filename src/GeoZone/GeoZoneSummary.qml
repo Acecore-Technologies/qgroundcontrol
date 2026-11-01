@@ -30,8 +30,8 @@ ColumnLayout {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
         text:               _geoZoneManager.busy ? _geoZoneManager.progressText :
-                                (_geoZoneManager.sources.count === 1 ? qsTr("%1 zones from 1 source.").arg(_geoZoneManager.zones.count) :
-                                                                      qsTr("%1 zones from %2 sources.").arg(_geoZoneManager.zones.count).arg(_geoZoneManager.sources.count))
+                                (_geoZoneManager.sources.count === 1 ? qsTr("%1 zones from 1 source.").arg(_geoZoneManager.zoneCount) :
+                                                                      qsTr("%1 zones from %2 sources.").arg(_geoZoneManager.zoneCount).arg(_geoZoneManager.sources.count))
     }
 
     QGCLabel {

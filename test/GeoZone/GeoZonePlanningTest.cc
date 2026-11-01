@@ -62,8 +62,8 @@ void GeoZonePlanningTest::_testMissionCheck()
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 4);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 0), 5);
     QTRY_COMPARE(check.crossedZones().count(), 2);
-    QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[0])->identifier(), QStringLiteral("P"));
-    QCOMPARE(qobject_cast<GeoZone*>(check.crossedZones()[1])->identifier(), QStringLiteral("C"));
+    QCOMPARE(check.crossedZones()[0]->identifier(), QStringLiteral("P"));
+    QCOMPARE(check.crossedZones()[1]->identifier(), QStringLiteral("C"));
     QVERIFY(check.warningText().contains(QStringLiteral("P (Prohibited)")));
     // The path north also passes through the U-space airspace
     QCOMPARE(check.uSpaceZones().count(), 1);
@@ -82,7 +82,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     QCOMPARE(check.unfencedZones().count(), 1);
     GeoZoneFenceImporter importer;
     importer.setGeoFenceController(geoFenceController);
-    QCOMPARE(importer.addZones(check.unfencedZones()), 1);
+    QCOMPARE(importer.addZones(check.property("unfencedZones").toList()), 1);
     QTRY_VERIFY(check.unfencedZones().isEmpty());
     QVERIFY(check.fenceText().isEmpty());
     geoFenceController->deleteFences(false);
@@ -137,9 +137,9 @@ void GeoZonePlanningTest::_testMissionCheck()
     survey->surveyAreaPolygon()->appendVertices({ surveyCenter.atDistanceAndAzimuth(424, 315), surveyCenter.atDistanceAndAzimuth(424, 45),
                                                   surveyCenter.atDistanceAndAzimuth(424, 135), surveyCenter.atDistanceAndAzimuth(424, 225) });
     const auto surveyZoneCrossed = [&check]() {
-        const QList<QObject*> crossed = check.crossedZones();
-        return std::any_of(crossed.cbegin(), crossed.cend(), [](const QObject *zone) {
-            return qobject_cast<const GeoZone*>(zone)->identifier() == QStringLiteral("S");
+        const QList<GeoZone*> crossed = check.crossedZones();
+        return std::any_of(crossed.cbegin(), crossed.cend(), [](const GeoZone *zone) {
+            return zone->identifier() == QStringLiteral("S");
         });
     };
     QTRY_VERIFY(surveyZoneCrossed());
@@ -168,7 +168,7 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QString errorString;
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
         QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), raised }), errorString), qPrintable(errorString));
-    const GeoZone *const prohibited = manager.searchZones(QStringLiteral("P")).isEmpty() ? nullptr : qobject_cast<const GeoZone*>(manager.searchZones(QStringLiteral("P")).first());
+    const GeoZone *const prohibited = manager.searchZones(QStringLiteral("P")).isEmpty() ? nullptr : GeoZoneInfo::fromVariant(manager.searchZones(QStringLiteral("P")).first());
     QVERIFY(prohibited && (prohibited->identifier() == QStringLiteral("P")));
 
     // Around the zone, keeping the margin
@@ -340,11 +340,11 @@ void GeoZonePlanningTest::_testGeoFenceImport()
     QCOMPARE(ed269.zones.count(), 3);
     QCOMPARE(ed318.zones.count(), 3);
 
-    QObject zoneParent;
+    ZoneOwner zoneParent;
     const QList<GeoZone*> zones = {
-        new GeoZone(ed269.zones[0], &zoneParent),   // One polygon after merging identical footprints
-        new GeoZone(ed269.zones[1], &zoneParent),   // Circle
-        new GeoZone(ed318.zones[1], &zoneParent),   // Two polygons
+        zoneParent.add(ed269.zones[0]),   // One polygon after merging identical footprints
+        zoneParent.add(ed269.zones[1]),   // Circle
+        zoneParent.add(ed318.zones[1]),   // Two polygons
     };
 
     PlanMasterController masterController;
@@ -426,7 +426,7 @@ void GeoZonePlanningTest::_testGeoFenceImport()
 void GeoZonePlanningTest::_testGeoFenceImportPreview()
 {
     // Two circular zones published as 40 vertex polygons
-    QObject zoneParent;
+    ZoneOwner zoneParent;
     QList<GeoZone*> zones;
     for (int i = 0; i < 2; i++) {
         GeoZone::Volume volume;
@@ -435,7 +435,7 @@ void GeoZonePlanningTest::_testGeoFenceImportPreview()
         data.identifier = QStringLiteral("Z%1").arg(i);
         data.restriction = GeoZone::Prohibited;
         data.volumes.append(volume);
-        zones.append(new GeoZone(data, &zoneParent));
+        zones.append(zoneParent.add(data));
     }
 
     PlanMasterController masterController;
@@ -501,7 +501,7 @@ void GeoZonePlanningTest::_testMapModel()
     QCOMPARE(identifiers(model.polygons()), QStringList({ QStringLiteral("BIG") }));
     QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("NEAR"), QStringLiteral("TINY") }));
     QCOMPARE(model.hiddenZoneCount(), 0);
-    QCOMPARE(model.labelZones()->count(), 0);
+    QCOMPARE(model.labelZones().count(), 0);
 
     GeoZoneMapItem *const polygonItem = model.polygons()->value<GeoZoneMapItem*>(0);
     const qsizetype lowDetailCount = QGeoPolygon(polygonItem->geoShape()).perimeter().count();
@@ -510,7 +510,7 @@ void GeoZonePlanningTest::_testMapModel()
     // Zooming in keeps the items and adds detail. Only zones centered in the view are labelled.
     model.setView(view, 16, true);
     QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
-    QCOMPARE(model.labelZones()->count(), 2);
+    QCOMPARE(model.labelZones().count(), 2);
     QVERIFY(QGeoPolygon(polygonItem->geoShape()).perimeter().count() > lowDetailCount);
 
     // Another file adds items, removing a source removes its items
@@ -530,7 +530,7 @@ void GeoZonePlanningTest::_testMapModel()
 
     model.setView(QGeoRectangle(), 16, true);
     QCOMPARE(model.circles()->count(), 0);
-    QCOMPARE(model.labelZones()->count(), 0);
+    QCOMPARE(model.labelZones().count(), 0);
 
     model.setView(view, 16, true);
     manager.clear();
@@ -560,8 +560,8 @@ void GeoZonePlanningTest::_testMapModelShapeLimit()
     for (int i = 0; i < model.circles()->count(); i++) {
         QVERIFY(model.circles()->value<GeoZoneMapItem*>(i)->radius() >= 100 + extraZones);
     }
-    QVERIFY(model.labelZones()->count() > 0);
-    for (int i = 0; i < model.labelZones()->count(); i++) {
-        QVERIFY(model.labelZones()->value<GeoZone*>(i)->identifier().mid(1).toInt() >= extraZones);
+    QVERIFY(model.labelZones().count() > 0);
+    for (int i = 0; i < model.labelZones().count(); i++) {
+        QVERIFY(GeoZoneInfo::fromVariant(model.labelZones().at(i))->identifier().mid(1).toInt() >= extraZones);
     }
 }

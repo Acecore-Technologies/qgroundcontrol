@@ -687,7 +687,7 @@ Item {
                     ToolStripAction {
                         text:               qsTr("Geozones")
                         iconSource:         "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
-                        visible:            QGroundControl.geoZoneManager.zones.count > 0
+                        visible:            QGroundControl.geoZoneManager.zoneCount > 0
                         dropPanelComponent: geoZoneDropPanel
                     }
                 ]
