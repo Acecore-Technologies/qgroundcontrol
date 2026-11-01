@@ -31,14 +31,16 @@ QString tr(const char *text)
 }
 
 #ifdef GEOZONE_HAVE_OPENSSL
-/// @return The Ed25519 private key of a PEM, nullptr when it isn't one
+/// @return The Ed25519 private key of a PEM, nullptr when it isn't one or is encrypted
 EVP_PKEY *readPrivateKey(const QByteArray &pem)
 {
     BIO *const bio = BIO_new_mem_buf(pem.constData(), static_cast<int>(pem.size()));
     if (!bio) {
         return nullptr;
     }
-    EVP_PKEY *key = PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr);
+    // Without a callback OpenSSL would ask for the passphrase of an encrypted key on the terminal
+    pem_password_cb *const noPassphrase = [](char *, int, int, void *) { return 0; };
+    EVP_PKEY *key = PEM_read_bio_PrivateKey(bio, nullptr, noPassphrase, nullptr);
     BIO_free(bio);
     if (key && (EVP_PKEY_id(key) != EVP_PKEY_ED25519)) {
         EVP_PKEY_free(key);
@@ -100,7 +102,7 @@ QByteArray publicKey(const QByteArray &privateKeyPem, QString &errorString)
 #ifdef GEOZONE_HAVE_OPENSSL
     EVP_PKEY *const key = readPrivateKey(privateKeyPem);
     if (!key) {
-        errorString = tr("The file is not an Ed25519 private key in PEM format.");
+        errorString = tr("The file is not an unencrypted Ed25519 private key in PEM format.");
         return QByteArray();
     }
     const QByteArray raw = rawPublicKey(key);
@@ -118,7 +120,7 @@ QByteArray sign(const QByteArray &privateKeyPem, const QByteArray &data, QString
 #ifdef GEOZONE_HAVE_OPENSSL
     EVP_PKEY *const key = readPrivateKey(privateKeyPem);
     if (!key) {
-        errorString = tr("The file is not an Ed25519 private key in PEM format.");
+        errorString = tr("The file is not an unencrypted Ed25519 private key in PEM format.");
         return QByteArray();
     }
     EVP_MD_CTX *const context = EVP_MD_CTX_new();

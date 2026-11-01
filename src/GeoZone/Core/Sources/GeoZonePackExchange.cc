@@ -159,6 +159,12 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
     const QString packName = QFileInfo(packPath).fileName();
     for (const GeoZonePack::Source &packSource : contents.sources) {
         const GeoZoneSourceIndex::Entry entry = GeoZoneSourceIndex::entryFromJson(packSource.manifest);
+        // Feeds are requested at their key, which the service was checked against
+        if (!entry.url.isEmpty() && (entry.url != entry.key)) {
+            (void) QFile::remove(packSource.filePath);
+            import.errors.append(tr("%1: its address doesn't match the source.").arg(packSource.manifest.value(QStringLiteral("name")).toString()));
+            continue;
+        }
         ImportSource source;
         source.known = isKnown(entry.key);
         if (!source.known) {

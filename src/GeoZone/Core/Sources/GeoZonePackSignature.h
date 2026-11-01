@@ -30,7 +30,8 @@ bool available();
 
 /// @return A new Ed25519 private key in PEM (PKCS #8), empty when unavailable
 QByteArray generatePrivateKey();
-/// @return The raw public key of a PEM private key, empty with errorString set when it isn't an Ed25519 key
+/// @return The raw public key of a PEM private key, empty with errorString set when it isn't an unencrypted
+///         Ed25519 key. Encrypted keys aren't supported.
 QByteArray publicKey(const QByteArray &privateKeyPem, QString &errorString);
 /// @return The signature of the data, empty with errorString set on errors
 QByteArray sign(const QByteArray &privateKeyPem, const QByteArray &data, QString &errorString);

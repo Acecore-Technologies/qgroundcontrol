@@ -2182,6 +2182,21 @@ void GeoZoneManagerTest::_testPackServiceTrust()
     QCOMPARE(other.sources()->count(), 0);
     QCOMPARE(QDir(QDir(otherDir.path()).filePath(QStringLiteral("downloads"))).entryList(QDir::Files).count(), 0);
 
+    // nor a source requested elsewhere than the address its service was checked against
+    const QString mismatchPackPath = packDir.filePath(QStringLiteral("mismatch.zip"));
+    QVERIFY(_rewritePack(packPath, mismatchPackPath, [&hostile](QJsonObject &source) {
+        source.insert(QStringLiteral("url"), hostile.url(QStringLiteral("/zones")));
+        QJsonObject packService = source.value(QStringLiteral("service")).toObject();
+        packService.insert(QStringLiteral("tokenUrl"), hostile.url(QStringLiteral("/token")));
+        source.insert(QStringLiteral("service"), packService);
+    }));
+    QVERIFY(other.importPack(mismatchPackPath));
+    QVERIFY(!otherSpy.last()[0].toBool());
+    QVERIFY2(otherSpy.last()[1].toString().contains(QStringLiteral("its address doesn't match the source")), qPrintable(otherSpy.last()[1].toString()));
+    QCOMPARE(other.sources()->count(), 0);
+    QVERIFY(manager.importPack(mismatchPackPath));
+    QCOMPARE(feed->service(), moved);
+
     // nor the headers of the pack, nor the secret kept for its URL, which the user enters again
     const QString headersPackPath = packDir.filePath(QStringLiteral("headers.zip"));
     QVERIFY(_rewritePack(packPath, headersPackPath, [](QJsonObject &source) {
@@ -2236,6 +2251,13 @@ void GeoZoneManagerTest::_testSignedPacks()
     QVERIFY(!GeoZonePackSignature::verify(otherPublicKey, "manifest", signature));
     QVERIFY(GeoZonePackSignature::publicKey("not a key", errorString).isEmpty());
     QVERIFY(!errorString.isEmpty());
+    // Encrypted keys are refused rather than asking for their passphrase
+    QVERIFY(GeoZonePackSignature::publicKey("-----BEGIN ENCRYPTED PRIVATE KEY-----\n"
+                                            "MIGbMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAg7UG1U/8LOlQICCAAw\n"
+                                            "DAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEECmJlPVm8BujMIh6J03w/1gEQIt+\n"
+                                            "hodb50orx9YuXR+6Ieaq/t1vGeVWASzoilaIFhl3GOg9EMeMIMS48tcEiCzRlnIQ\n"
+                                            "XhE+UU0t/+4fa2ADlQ4=\n"
+                                            "-----END ENCRYPTED PRIVATE KEY-----\n", errorString).isEmpty());
 
     // Public keys are given in base64 or PEM, as openssl pkey -pubout writes them
     const QByteArray spki = QByteArray::fromHex("302a300506032b6570032100") + publicKey;
