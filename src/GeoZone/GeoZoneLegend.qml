@@ -43,11 +43,11 @@ ColumnLayout {
         required property int       restriction
         required property string    text
 
-        readonly property bool _shown: (root._geoZoneManager.hiddenRestrictions & (1 << restriction)) === 0
+        readonly property bool _shown: (root._geoZoneManager.display.hiddenRestrictions & (1 << restriction)) === 0
 
         QGCCheckBox {
             checked:    restrictionRow._shown
-            onClicked:  root._geoZoneManager.setRestrictionVisible(restrictionRow.restriction, checked)
+            onClicked:  root._geoZoneManager.display.setRestrictionVisible(restrictionRow.restriction, checked)
         }
 
         Swatch {

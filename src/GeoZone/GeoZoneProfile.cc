@@ -11,6 +11,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
 #include "MissionController.h"
 
@@ -41,7 +42,7 @@ GeoZoneProfile::GeoZoneProfile(GeoZoneManager *manager, QObject *parent)
     // The bands reference no zones, but they are outdated
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneProfile::_clear);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, &_updateTimer, qOverload<>(&QTimer::start));
-    (void) connect(_manager, &GeoZoneManager::plannedStartChanged, &_updateTimer, qOverload<>(&QTimer::start));
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, &_updateTimer, qOverload<>(&QTimer::start));
 }
 
 MissionController *GeoZoneProfile::missionController() const

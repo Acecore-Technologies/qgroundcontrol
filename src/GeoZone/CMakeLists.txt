@@ -10,6 +10,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneAuthorisations.h
         GeoZoneCatalog.cc
         GeoZoneCatalog.h
+        GeoZoneDisplay.cc
+        GeoZoneDisplay.h
         GeoZoneDownloader.cc
         GeoZoneDownloader.h
         GeoZoneFenceImporter.cc
@@ -47,6 +49,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneParserUtils.cc
         GeoZoneParserUtils.h
         GeoZonePlanData.cc
+        GeoZonePlanning.cc
+        GeoZonePlanning.h
         GeoZonePlanData.h
         GeoZonePolicy.cc
         GeoZonePolicy.h

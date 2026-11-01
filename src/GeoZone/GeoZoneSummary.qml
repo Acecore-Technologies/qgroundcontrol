@@ -41,7 +41,7 @@ ColumnLayout {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
         text:               qsTr("%1 of the smallest zones in view are not shown. Zoom in to see them.").arg(root.hiddenZoneCount)
-        visible:            _geoZoneManager.visible && root.hiddenZoneCount > 0
+        visible:            _geoZoneManager.display.visible && root.hiddenZoneCount > 0
     }
 
     QGCLabel {

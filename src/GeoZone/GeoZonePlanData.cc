@@ -10,6 +10,7 @@
 #include "GeoZonePlanData.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
 #include "PlanMasterController.h"
 
@@ -28,17 +29,17 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
 {
     manager = manager ? manager : GeoZoneManager::instance();
     QJsonObject json;
-    if (manager->plannedStart().isValid()) {
-        json.insert(plannedStartKey, manager->plannedStart().toUTC().toString(Qt::ISODate));
+    if (manager->planning()->plannedStart().isValid()) {
+        json.insert(plannedStartKey, manager->planning()->plannedStart().toUTC().toString(Qt::ISODate));
     }
 
     QJsonArray authorisations;
-    if ((manager->authorisations()->count() > 0) && planController) {
+    if ((manager->planning()->authorisations()->count() > 0) && planController) {
         GeoZoneMissionCheck check(manager);
         check.setMissionController(planController->missionController());
         check.update();
         for (const GeoZone *zone : check.authorisedZones()) {
-            if (const GeoZoneAuthorisation *const authorisation = manager->authorisations()->find(zone)) {
+            if (const GeoZoneAuthorisation *const authorisation = manager->planning()->authorisations()->find(zone)) {
                 authorisations.append(authorisation->toJson());
             }
         }
@@ -58,7 +59,7 @@ void load(const QJsonObject &planJson, GeoZoneManager *manager)
     const QJsonObject json = planJson.value(jsonKey).toObject();
     const QDateTime plannedStart = QDateTime::fromString(json.value(plannedStartKey).toString(), Qt::ISODate);
     if (plannedStart.isValid()) {
-        manager->setPlannedStart(plannedStart);
+        manager->planning()->setPlannedStart(plannedStart);
     }
 
     QList<GeoZoneAuthorisation> authorisations;
@@ -68,7 +69,7 @@ void load(const QJsonObject &planJson, GeoZoneManager *manager)
         }
     }
     // Permits are the operator's, so those of a plan from elsewhere are only added when accepted
-    manager->authorisations()->offer(authorisations);
+    manager->planning()->authorisations()->offer(authorisations);
 }
 
 } // namespace GeoZonePlanData

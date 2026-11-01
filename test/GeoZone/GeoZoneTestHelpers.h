@@ -22,6 +22,8 @@
 #include "GeoZoneLoader.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneDisplay.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneMapLayer.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"

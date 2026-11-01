@@ -763,7 +763,7 @@ FlightMap {
                             geoZoneMapVisuals.showZonesAt(mapClickCoord)
                         }
 
-                        readonly property int _zoneCount: geoZoneMapVisuals.showZones && GeoZoneManager.visible ?
+                        readonly property int _zoneCount: geoZoneMapVisuals.showZones && GeoZoneManager.display.visible ?
                                                               GeoZoneManager.zonesAt(mapClickCoord).length : 0
                     }
 

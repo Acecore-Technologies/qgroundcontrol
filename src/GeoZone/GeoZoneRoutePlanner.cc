@@ -11,6 +11,7 @@
 #include "FactMetaData.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZoneTerrain.h"
@@ -399,7 +400,7 @@ QList<GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position>
 {
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
     QList<GeoZone*> zones;
-    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->authorisations()))) {
+    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->planning()->authorisations()))) {
         zones.append(hit.zone);
     }
     return zones;

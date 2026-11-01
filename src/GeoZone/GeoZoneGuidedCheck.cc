@@ -9,6 +9,7 @@
 
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneTerrain.h"
 #include "Vehicle.h"
@@ -26,7 +27,7 @@ QString GeoZoneGuidedCheck::pathWarning(const QList<GeoZone::Position> &path) co
 {
     QList<GeoZone*> zones;
     GeoZoneManager *const manager = _monitor->manager();
-    for (const GeoZoneCatalog::PathHit &hit : manager->catalog().pathHits(path, GeoZonePolicy::alerts().excludingAuthorised(manager->authorisations()))) {
+    for (const GeoZoneCatalog::PathHit &hit : manager->catalog().pathHits(path, GeoZonePolicy::alerts().excludingAuthorised(manager->planning()->authorisations()))) {
         // Zones the vehicle is already in were alerted when it entered them
         if ((hit.entry.segment > 0) || (hit.entry.fraction > 0)) {
             zones.append(hit.zone);

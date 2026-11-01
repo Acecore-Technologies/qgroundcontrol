@@ -14,6 +14,7 @@
 #include "GeoZoneGeometry.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneSource.h"
 #include "MissionController.h"
 #include "QGCFenceCircle.h"
@@ -45,8 +46,8 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMissionCheck::_clearZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-    (void) connect(_manager, &GeoZoneManager::plannedStartChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-    (void) connect(_manager->authorisations(), &GeoZoneAuthorisations::changed, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    (void) connect(_manager->planning()->authorisations(), &GeoZoneAuthorisations::changed, this, &GeoZoneMissionCheck::_scheduleUpdate);
 }
 
 MissionController *GeoZoneMissionCheck::missionController() const
@@ -265,7 +266,7 @@ QString GeoZoneMissionCheck::infoText() const
 
 std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::plannedFlightTimes(const GeoZoneManager *manager, const MissionController *missionController)
 {
-    const QDateTime start = manager->plannedStart();
+    const QDateTime start = manager->planning()->plannedStart();
     if (!start.isValid()) {
         return {};
     }
@@ -368,7 +369,7 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
         plannedEnd = plannedStart.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0)));
     }
     // Zones authorised during the whole flight are listed for information
-    const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd).excludingAuthorised(_manager->authorisations());
+    const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd).excludingAuthorised(_manager->planning()->authorisations());
 
     const int inactiveZoneCount = static_cast<int>(zones.removeIf([&policy](const GeoZone *zone) { return !policy.acceptsSchedule(zone); }));
     QList<GeoZone*> authorised;

@@ -32,7 +32,7 @@ QGCPopupDialog {
 
     readonly property real _labelWidth: ScreenTools.defaultFontPixelWidth * 14
     readonly property real _valueWidth: ScreenTools.defaultFontPixelWidth * 45
-    readonly property var  _authorisations: GeoZoneManager.authorisations
+    readonly property var  _authorisations: GeoZoneManager.planning.authorisations
 
     property int _authorisationRevision: 0  ///< Re-reads the authorisation when the authorisations change
     readonly property var _authorisation: (_authorisationRevision, geoZone ? _authorisations.authorisationOf(geoZone) : ({}))

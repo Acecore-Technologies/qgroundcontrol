@@ -41,7 +41,7 @@ Rectangle {
     readonly property string _outdatedText: GeoZoneManager.validityWarning !== "" ?
                                                 qsTr("Geozone data may be outdated: %1").arg(GeoZoneManager.validityWarning.replace(/\n/g, "; ")) : ""
 
-    readonly property var  _pendingAuthorisations: GeoZoneManager.authorisations.pendingAuthorisations
+    readonly property var  _pendingAuthorisations: GeoZoneManager.planning.authorisations.pendingAuthorisations
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth
     readonly property real _availableWidth: Math.max(rightLimit - leftLimit, ScreenTools.defaultFontPixelWidth * 20)
 
@@ -130,8 +130,8 @@ Rectangle {
             wrapMode:               Text.WordWrap
             horizontalAlignment:    Text.AlignHCenter
             font.pointSize:         ScreenTools.smallFontPointSize
-            text:                   qsTr("Checked for a flight starting %1 (local time)").arg(Qt.formatDateTime(GeoZoneManager.plannedStart, "yyyy-MM-dd HH:mm"))
-            visible:                !isNaN(GeoZoneManager.plannedStart.getTime())
+            text:                   qsTr("Checked for a flight starting %1 (local time)").arg(Qt.formatDateTime(GeoZoneManager.planning.plannedStart, "yyyy-MM-dd HH:mm"))
+            visible:                !isNaN(GeoZoneManager.planning.plannedStart.getTime())
         }
 
         QGCLabel {
@@ -166,12 +166,12 @@ Rectangle {
 
             QGCButton {
                 text:       qsTr("Add")
-                onClicked:  GeoZoneManager.authorisations.acceptPending()
+                onClicked:  GeoZoneManager.planning.authorisations.acceptPending()
             }
 
             QGCButton {
                 text:       qsTr("Ignore")
-                onClicked:  GeoZoneManager.authorisations.dismissPending()
+                onClicked:  GeoZoneManager.planning.authorisations.dismissPending()
             }
         }
 
@@ -204,7 +204,7 @@ Rectangle {
         anchors.fill:   parent
         z:              -1
         onClicked: {
-            GeoZoneManager.visible = true
+            GeoZoneManager.display.visible = true
             if (check.crossedZonesBoundingBox.isValid) {
                 map.fitViewportToGeoShape(check.crossedZonesBoundingBox, ScreenTools.defaultFontPixelHeight * 2)
             }

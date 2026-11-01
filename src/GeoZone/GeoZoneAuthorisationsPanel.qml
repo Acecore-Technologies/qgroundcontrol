@@ -21,7 +21,7 @@ ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
 
-    readonly property var _authorisations: GeoZoneManager.authorisations
+    readonly property var _authorisations: GeoZoneManager.planning.authorisations
 
     QGCLabel {
         Layout.fillWidth:   true

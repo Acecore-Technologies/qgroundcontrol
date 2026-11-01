@@ -759,11 +759,11 @@ void GeoZoneManagerTest::_testSettings()
     QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
 
     // The manager visibility is the setting
-    QSignalSpy visibleSpy(&manager, &GeoZoneManager::visibleChanged);
+    QSignalSpy visibleSpy(manager.display(), &GeoZoneDisplay::visibleChanged);
     settings->showZones()->setRawValue(false);
-    QVERIFY(!manager.visible());
+    QVERIFY(!manager.display()->visible());
     QCOMPARE(visibleSpy.count(), 1);
-    manager.setVisible(true);
+    manager.display()->setVisible(true);
     QVERIFY(settings->showZones()->rawValue().toBool());
 
     // Outdated data is reported at the configured age
@@ -854,10 +854,10 @@ void GeoZoneManagerTest::_testZoneSearch()
     QCOMPARE(identifiers(manager.zonesAt(center)), QStringList({ QStringLiteral("LSZH") }));
     QVERIFY(manager.zonesAt(QGeoCoordinate(48, 9)).isEmpty());
     // Zones hidden on maps aren't picked
-    const auto restoreRestrictions = qScopeGuard([&manager]() { manager.setRestrictionVisible(GeoZone::Prohibited, true); });
-    manager.setRestrictionVisible(GeoZone::Prohibited, false);
+    const auto restoreRestrictions = qScopeGuard([&manager]() { manager.display()->setRestrictionVisible(GeoZone::Prohibited, true); });
+    manager.display()->setRestrictionVisible(GeoZone::Prohibited, false);
     QCOMPARE(identifiers(manager.zonesAt(center.atDistanceAndAzimuth(500, 90))), QStringList({ QStringLiteral("LSZH") }));
-    manager.setRestrictionVisible(GeoZone::Prohibited, true);
+    manager.display()->setRestrictionVisible(GeoZone::Prohibited, true);
 
     // Names or identifiers containing the text, those starting with it first, then the most restrictive
     QCOMPARE(identifiers(manager.searchZones(QStringLiteral("zurich"))), QStringList({ QStringLiteral("LSZH"), QStringLiteral("GZW1") }));

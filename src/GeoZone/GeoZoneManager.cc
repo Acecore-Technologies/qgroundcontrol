@@ -8,6 +8,8 @@
  ****************************************************************************/
 
 #include "GeoZoneManager.h"
+#include "GeoZoneDisplay.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneAuthorisations.h"
@@ -42,23 +44,21 @@ QString defaultStorageDir()
 GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     : QObject(parent)
     , _repository(new GeoZoneSourceRepository(storageDir.isEmpty() ? defaultStorageDir() : storageDir, this))
-    , _authorisations(new GeoZoneAuthorisations(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
+    , _display(new GeoZoneDisplay(this))
+    , _planning(new GeoZonePlanning(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
     , _activeTimer(new QTimer(this))
 {
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    (void) connect(settings->showZones(), &Fact::rawValueChanged, this, [this]() { emit visibleChanged(visible()); });
-    (void) connect(settings->hiddenRestrictions(), &Fact::rawValueChanged, this, &GeoZoneManager::hiddenRestrictionsChanged);
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);
 
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAboutToChange, this, &GeoZoneManager::zonesAboutToChange);
     (void) connect(_repository, &GeoZoneSourceRepository::sourceChanged, this, &GeoZoneManager::_endZonesChange);
-    (void) connect(_repository, &GeoZoneSourceRepository::userLoaded, this, [this]() { setVisible(true); });
+    (void) connect(_repository, &GeoZoneSourceRepository::userLoaded, _display, [this]() { _display->setVisible(true); });
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAdded, this, &GeoZoneManager::sourceAdded);
     (void) connect(_repository, &GeoZoneSourceRepository::loadFailed, this, &GeoZoneManager::loadFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::storageFailed, this, &GeoZoneManager::storageFailed);
-    (void) connect(_authorisations, &GeoZoneAuthorisations::saveFailed, this, &GeoZoneManager::storageFailed);
+    (void) connect(_planning->authorisations(), &GeoZoneAuthorisations::saveFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::outdatedDataFound, this, &GeoZoneManager::outdatedDataFound);
     (void) connect(_repository, &GeoZoneSourceRepository::busyChanged, this, &GeoZoneManager::busyChanged);
     (void) connect(_repository, &GeoZoneSourceRepository::progressChanged, this, &GeoZoneManager::progressChanged);
@@ -93,37 +93,6 @@ bool GeoZoneManager::addArea(const QString &provider, const QGeoRectangle &area)
     }
     addUrl(url);
     return true;
-}
-
-bool GeoZoneManager::visible() const
-{
-    return GeoZoneSettings::instance()->showZones()->rawValue().toBool();
-}
-
-void GeoZoneManager::setPlannedStart(const QDateTime &plannedStart)
-{
-    const QDateTime start = plannedStart.isValid() ? plannedStart.toUTC() : QDateTime();
-    if (start != _plannedStart) {
-        _plannedStart = start;
-        emit plannedStartChanged();
-    }
-}
-
-void GeoZoneManager::setVisible(bool visible)
-{
-    GeoZoneSettings::instance()->showZones()->setRawValue(visible);
-}
-
-int GeoZoneManager::hiddenRestrictions() const
-{
-    return GeoZoneSettings::instance()->hiddenRestrictions()->rawValue().toInt();
-}
-
-void GeoZoneManager::setRestrictionVisible(int restriction, bool visible)
-{
-    const int bit = 1 << restriction;
-    const int hidden = visible ? (hiddenRestrictions() & ~bit) : (hiddenRestrictions() | bit);
-    GeoZoneSettings::instance()->hiddenRestrictions()->setRawValue(hidden);
 }
 
 int GeoZoneManager::disabledSourceCount() const
@@ -174,7 +143,7 @@ QVariantList GeoZoneManager::labelZones(const QGeoRectangle &region) const
 QVariantList GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
 {
     QList<GeoZone*> zones = _catalog.zonesAt(coordinate);
-    const int hidden = hiddenRestrictions();
+    const int hidden = _display->hiddenRestrictions();
     (void) zones.removeIf([hidden](const GeoZone *zone) { return (hidden & (1 << zone->restriction())) != 0; });
     return GeoZoneInfo::toVariantList(zones);
 }

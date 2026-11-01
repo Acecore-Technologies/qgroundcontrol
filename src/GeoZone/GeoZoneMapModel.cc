@@ -9,6 +9,7 @@
 
 #include "GeoZoneMapModel.h"
 #include "GeoZone.h"
+#include "GeoZoneDisplay.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
@@ -82,7 +83,7 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_removeSource);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_refresh);
     (void) connect(_manager, &GeoZoneManager::activeZonesChanged, this, &GeoZoneMapModel::_updateActive);
-    (void) connect(_manager, &GeoZoneManager::hiddenRestrictionsChanged, this, &GeoZoneMapModel::_refresh);
+    (void) connect(_manager->display(), &GeoZoneDisplay::hiddenRestrictionsChanged, this, &GeoZoneMapModel::_refresh);
 }
 
 GeoZoneMapModel::~GeoZoneMapModel()
@@ -118,7 +119,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     }
     const double marginX = viewWidth * viewMargin;
     const double marginY = views.first().height() * viewMargin;
-    const int hiddenRestrictions = _manager->hiddenRestrictions();
+    const int hiddenRestrictions = _manager->display()->hiddenRestrictions();
     QList<GeoZoneMercatorBounds> nearViews;
     QList<const GeoZoneShape*> nearShapes;
     QSet<const GeoZoneShape*> nearShapeSet;

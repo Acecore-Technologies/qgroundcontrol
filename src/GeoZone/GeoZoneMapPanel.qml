@@ -31,7 +31,7 @@ ColumnLayout {
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 32
-    readonly property bool  _planned:           !isNaN(_geoZoneManager.plannedStart.getTime())
+    readonly property bool  _planned:           !isNaN(_geoZoneManager.planning.plannedStart.getTime())
     readonly property string _timeFormat:       "yyyy-MM-dd HH:mm"
 
     property bool _invalidTime: false
@@ -41,7 +41,7 @@ ColumnLayout {
         const date = Date.fromLocaleString(Qt.locale(), text.trim(), _timeFormat)
         _invalidTime = isNaN(date.getTime())
         if (!_invalidTime) {
-            _geoZoneManager.plannedStart = date
+            _geoZoneManager.planning.plannedStart = date
             plannedTimeField.text = Qt.formatDateTime(date, _timeFormat)
         }
     }
@@ -50,15 +50,15 @@ ColumnLayout {
         return Qt.formatDateTime(new Date(), _timeFormat)
     }
 
-    Component.onCompleted: plannedTimeField.text = _planned ? Qt.formatDateTime(_geoZoneManager.plannedStart, _timeFormat) : _nowText()
+    Component.onCompleted: plannedTimeField.text = _planned ? Qt.formatDateTime(_geoZoneManager.planning.plannedStart, _timeFormat) : _nowText()
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
     QGCCheckBoxSlider {
         Layout.fillWidth:   true
         text:               qsTr("Show geozones")
-        checked:            root._geoZoneManager.visible
-        onClicked:          root._geoZoneManager.visible = checked
+        checked:            root._geoZoneManager.display.visible
+        onClicked:          root._geoZoneManager.display.visible = checked
     }
 
     GeoZoneLegend {
@@ -89,7 +89,7 @@ ColumnLayout {
             if (checked) {
                 root._applyPlannedTime(plannedTimeField.text)
             } else {
-                root._geoZoneManager.clearPlannedStart()
+                root._geoZoneManager.planning.clearPlannedStart()
             }
         }
     }

@@ -26,7 +26,8 @@
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 
-class GeoZoneAuthorisations;
+class GeoZoneDisplay;
+class GeoZonePlanning;
 class GeoZoneShape;
 class GeoZoneSource;
 class QmlObjectListModel;
@@ -39,15 +40,15 @@ class GeoZoneManager : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("QmlObjectListModel.h")
     Q_MOC_INCLUDE("GeoZoneSource.h")
-    Q_MOC_INCLUDE("GeoZoneAuthorisations.h")
+    Q_MOC_INCLUDE("GeoZoneDisplay.h")
+    Q_MOC_INCLUDE("GeoZonePlanning.h")
 
     Q_PROPERTY(int                  zoneCount           READ zoneCount          NOTIFY zoneCountChanged FINAL)            ///< Zones of all sources
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
-    Q_PROPERTY(GeoZoneAuthorisations* authorisations    READ authorisations     CONSTANT FINAL)                           ///< Zones the operator is authorised to fly in
+    Q_PROPERTY(GeoZoneDisplay*      display             READ display            CONSTANT FINAL)                           ///< Which zones the maps draw
+    Q_PROPERTY(GeoZonePlanning*     planning            READ planning           CONSTANT FINAL)                           ///< Planned flight start and authorisations for mission checks
     Q_PROPERTY(GeoZoneSettings*     settings            READ settings           CONSTANT FINAL)
     Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
-    Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged FINAL)
-    Q_PROPERTY(int                  hiddenRestrictions  READ hiddenRestrictions NOTIFY hiddenRestrictionsChanged FINAL)    ///< Bit mask of the restrictions not drawn on maps, 1 << GeoZone::Restriction
     Q_PROPERTY(int                  disabledSourceCount READ disabledSourceCount NOTIFY zoneCountChanged FINAL)           ///< Sources whose zones are left out
     Q_PROPERTY(bool                 busy                READ busy               NOTIFY busyChanged FINAL)                 ///< Sources are being loaded or downloaded
     Q_PROPERTY(double               progress            READ progress           NOTIFY progressChanged FINAL)             ///< Fraction of the downloads received, negative when unknown
@@ -56,7 +57,6 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
     Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
-    Q_PROPERTY(QDateTime            plannedStart        READ plannedStart       WRITE setPlannedStart NOTIFY plannedStartChanged FINAL)    ///< Planned flight start for mission checks, invalid to check zones whatever their schedule                           ///< Maps with name and url of national feeds
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
@@ -123,20 +123,14 @@ public:
     QmlObjectListModel *sources() const { return _repository->sources(); }
     GeoZoneSource *source(const QString &key) const { return _repository->source(key); }
     GeoZoneSourceRepository *repository() const { return _repository; }
-    GeoZoneAuthorisations *authorisations() const { return _authorisations; }
+    GeoZoneDisplay *display() const { return _display; }
+    GeoZonePlanning *planning() const { return _planning; }
     static GeoZoneSettings *settings() { return GeoZoneSettings::instance(); }
     /// Polygons and circles of all zones for map display
     const QList<GeoZoneShape*> &shapes() const { return _catalog.shapes(); }
     /// @return Shapes of the zones whose bounding box intersects the bounds in degrees
     QList<const GeoZoneShape*> shapesInArea(double south, double west, double north, double east) const { return _catalog.shapesInArea(south, west, north, east); }
     QGeoRectangle boundingBox() const { return _catalog.boundingBox(); }
-    bool visible() const;
-    void setVisible(bool visible);
-    int hiddenRestrictions() const;
-    /// @return true if zones with the restriction are drawn on maps
-    Q_INVOKABLE bool restrictionVisible(int restriction) const { return (hiddenRestrictions() & (1 << restriction)) == 0; }
-    /// Shows or hides the zones with the restriction on maps. Checks and alerts still apply to them.
-    Q_INVOKABLE void setRestrictionVisible(int restriction, bool visible);
     int disabledSourceCount() const;
     bool busy() const { return _repository->busy(); }
     double progress() const { return _repository->progress(); }
@@ -154,11 +148,6 @@ public:
 
     QString storageDir() const { return _repository->storageDir(); }
 
-    QDateTime plannedStart() const { return _plannedStart; }
-    void setPlannedStart(const QDateTime &plannedStart);
-    /// Checks missions against zones whatever their schedule
-    Q_INVOKABLE void clearPlannedStart() { setPlannedStart(QDateTime()); }
-
 signals:
     /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
     void zonesAboutToChange(GeoZoneSource *source);
@@ -169,9 +158,6 @@ signals:
     void zoneCountChanged();
     /// Zones became active or inactive with the time, see GeoZone::active
     void activeZonesChanged();
-    void plannedStartChanged();
-    void hiddenRestrictionsChanged();
-    void visibleChanged(bool visible);
     void busyChanged(bool busy);
     void progressChanged();
     void validityWarningChanged();
@@ -187,10 +173,10 @@ private:
     void _endZonesChange(GeoZoneSource *source);
 
     GeoZoneSourceRepository *_repository = nullptr;
-    GeoZoneAuthorisations *_authorisations = nullptr;
+    GeoZoneDisplay *_display = nullptr;
+    GeoZonePlanning *_planning = nullptr;
     GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
-    QDateTime _plannedStart;
 
     static constexpr int _activeUpdateIntervalMSecs = 60 * 1000;
 };

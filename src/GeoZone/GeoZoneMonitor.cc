@@ -14,6 +14,7 @@
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneTerrain.h"
@@ -437,7 +438,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
     limits.time = settings->approachTime()->rawValue().toDouble();
 
     // Authorised zones don't alert while the authorisation is valid
-    const GeoZonePolicy policy = GeoZonePolicy::alerts().excludingAuthorised(_manager->authorisations());
+    const GeoZonePolicy policy = GeoZonePolicy::alerts().excludingAuthorised(_manager->planning()->authorisations());
     Tracker &tracker = _trackers[vehicleId];
     const GeoZoneAlertTracker::Update update = tracker.alerts.update(_manager->catalog(), policy, position, velocity, limits);
     if (update.nearby != tracker.nearby) {

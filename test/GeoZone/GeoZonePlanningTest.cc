@@ -156,21 +156,21 @@ void GeoZonePlanningTest::_testMissionCheck()
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("temporary.json"), QJsonArray{ temporary }), errorString), qPrintable(errorString));
     QTRY_COMPARE(check.crossedZones().count(), 3);
     QCOMPARE(check.inactiveZoneCount(), 0);
-    manager.setPlannedStart(_utc(QDate(2027, 1, 1), QTime(8, 0)));
+    manager.planning()->setPlannedStart(_utc(QDate(2027, 1, 1), QTime(8, 0)));
     QTRY_COMPARE(check.crossedZones().count(), 2);
     QCOMPARE(check.inactiveZoneCount(), 1);
     QVERIFY(check.infoText().contains(QStringLiteral("1 zone(s) on the path are not active at the planned flight time.")));
     // The mission takes a few minutes, so a start just before the restriction overlaps it
     const QDateTime overlappingStart = _utc(QDate(2027, 1, 1), QTime(10, 0)).addSecs(-std::llround(missionController->missionTime() / 2));
     QVERIFY(missionController->missionTime() > 10);
-    manager.setPlannedStart(overlappingStart);
+    manager.planning()->setPlannedStart(overlappingStart);
     QTRY_COMPARE(check.crossedZones().count(), 3);
     // A mission started now, like one on the vehicle, ignores the planned start
     check.setFlightNow(true);
     QTRY_COMPARE(check.crossedZones().count(), 2);
     QVERIFY(!check.infoText().contains(QStringLiteral("planned flight time")));
     check.setFlightNow(false);
-    manager.clearPlannedStart();
+    manager.planning()->clearPlannedStart();
     QTRY_COMPARE(check.inactiveZoneCount(), 0);
     QCOMPARE(check.crossedZones().count(), 3);
 
@@ -270,7 +270,7 @@ void GeoZonePlanningTest::_testAuthorisations()
     controlZone[QStringLiteral("country")] = QStringLiteral("CHE");
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ controlZone }), errorString), qPrintable(errorString));
     GeoZone *const zone = manager.zoneList().constFirst();
-    GeoZoneAuthorisations *const authorisations = manager.authorisations();
+    GeoZoneAuthorisations *const authorisations = manager.planning()->authorisations();
     const QVariant zoneInfo = QVariant::fromValue(GeoZoneInfo(zone));
     QCOMPARE(GeoZoneAuthorisations::zoneKey(zone), QStringLiteral("CHE/CTR"));
 
@@ -318,9 +318,9 @@ void GeoZonePlanningTest::_testAuthorisations()
 
     // An authorisation from tomorrow covers a flight planned then, not one now
     QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-124"), today.addDays(1).toString(Qt::ISODate), today.addDays(3).toString(Qt::ISODate)).isEmpty());
-    manager.setPlannedStart(QDateTime(today, QTime(12, 0)));
+    manager.planning()->setPlannedStart(QDateTime(today, QTime(12, 0)));
     QTRY_COMPARE(check.crossedZones().count(), 1);
-    manager.setPlannedStart(QDateTime(today.addDays(2), QTime(12, 0)));
+    manager.planning()->setPlannedStart(QDateTime(today.addDays(2), QTime(12, 0)));
     QTRY_VERIFY(check.crossedZones().isEmpty());
 
     // Plans entering the zone keep the planned start and the authorisation
@@ -333,10 +333,10 @@ void GeoZonePlanningTest::_testAuthorisations()
 
     // Opening the plan offers its authorisations, which are only added when accepted
     authorisations->revoke(QStringLiteral("CHE/CTR"));
-    manager.clearPlannedStart();
+    manager.planning()->clearPlannedStart();
     QCOMPARE(authorisations->count(), 0);
     GeoZonePlanData::load(planJson, &manager);
-    QCOMPARE(manager.plannedStart(), QDateTime(today.addDays(2), QTime(12, 0)).toUTC());
+    QCOMPARE(manager.planning()->plannedStart(), QDateTime(today.addDays(2), QTime(12, 0)).toUTC());
     QCOMPARE(authorisations->count(), 0);
     QCOMPARE(authorisations->pendingAuthorisations().count(), 1);
     QCOMPARE(authorisations->pendingAuthorisations()[0].toMap()[QStringLiteral("permit")].toString(), QStringLiteral("P-124"));
@@ -355,9 +355,9 @@ void GeoZonePlanningTest::_testAuthorisations()
     GeoZoneManager restarted(storage);
     restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
     QCOMPARE(restarted.zoneCount(), 1);
-    QCOMPARE(restarted.authorisations()->count(), 1);
-    QVERIFY(restarted.authorisations()->find(restarted.zoneList().constFirst()));
-    manager.clearPlannedStart();
+    QCOMPARE(restarted.planning()->authorisations()->count(), 1);
+    QVERIFY(restarted.planning()->authorisations()->find(restarted.zoneList().constFirst()));
+    manager.planning()->clearPlannedStart();
 }
 
 void GeoZonePlanningTest::_testRoutePlanner()
@@ -828,13 +828,13 @@ void GeoZonePlanningTest::_testMapModel()
     QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
 
     // Restrictions hidden on maps leave out their shapes and labels
-    const auto restoreRestrictions = qScopeGuard([&manager]() { manager.setRestrictionVisible(GeoZone::Conditional, true); });
+    const auto restoreRestrictions = qScopeGuard([&manager]() { manager.display()->setRestrictionVisible(GeoZone::Conditional, true); });
     QVERIFY(!model.labelZones().isEmpty());
-    manager.setRestrictionVisible(GeoZone::Conditional, false);
-    QVERIFY(!manager.restrictionVisible(GeoZone::Conditional));
+    manager.display()->setRestrictionVisible(GeoZone::Conditional, false);
+    QVERIFY(!manager.display()->restrictionVisible(GeoZone::Conditional));
     QCOMPARE(model.circles()->count(), 0);
     QVERIFY(model.labelZones().isEmpty());
-    manager.setRestrictionVisible(GeoZone::Conditional, true);
+    manager.display()->setRestrictionVisible(GeoZone::Conditional, true);
     QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
 
     model.setView(QGeoRectangle(), 16, true);
