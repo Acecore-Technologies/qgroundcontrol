@@ -95,7 +95,7 @@ QString alertText(const GeoZoneManager &manager, const QString &event, const QSt
     return zone ? QStringLiteral("%1 geozone %2 (%3)").arg(event, zone->name(), zone->restrictionText()) : identifier;
 }
 
-QStringList identifiers(const QList<GeoZone*> &zones)
+QStringList identifiers(const QList<const GeoZone*> &zones)
 {
     QStringList list;
     for (const GeoZone *zone : zones) {
@@ -107,9 +107,9 @@ QStringList identifiers(const QList<GeoZone*> &zones)
 
 QStringList nearbyIdentifiers(const GeoZoneMonitor &monitor)
 {
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     for (const QVariant &nearby : monitor.nearbyZones()) {
-        zones.append(const_cast<GeoZone*>(GeoZoneInfo::fromVariant(nearby.toMap().value(QStringLiteral("zone")))));
+        zones.append(GeoZoneInfo::fromVariant(nearby.toMap().value(QStringLiteral("zone"))));
     }
     return identifiers(zones);
 }

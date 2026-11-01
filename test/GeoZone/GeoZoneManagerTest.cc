@@ -59,7 +59,7 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
 
         QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), GeoZonePolicy({ GeoZone::Prohibited })).count(), 1);
         const QGeoRectangle ireland(QGeoCoordinate(52.0, -9.0), QGeoCoordinate(51.0, -8.0));
-        const QList<GeoZone*> zonesInArea = manager.catalog().zonesInArea(ireland, GeoZonePolicy({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::USpace }));
+        const QList<const GeoZone*> zonesInArea = manager.catalog().zonesInArea(ireland, GeoZonePolicy({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::USpace }));
         QCOMPARE(zonesInArea.count(), 1);
         QCOMPARE(zonesInArea[0]->name(), QStringLiteral("Control zone"));
 
@@ -1109,4 +1109,55 @@ void GeoZoneManagerTest::_testWfsPaging()
     QTRY_VERIFY(!restarted.busy());
     QCOMPARE(restarted.zoneCount(), 4);
     QVERIFY(restarted.source(url)->warningText().contains(QStringLiteral("left out 1 zones")));
+}
+
+void GeoZoneManagerTest::_testCatalogSnapshot()
+{
+    // Checks on worker threads query copies of the catalog, which share its data and keep its zones while the
+    // sources change
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("old.json"), QJsonArray{
+        _circleFeature(QStringLiteral("OLD"), QStringLiteral("PROHIBITED"), center, 500) }), errorString), qPrintable(errorString));
+
+    QWeakPointer<const GeoZone> oldZone;
+    {
+        const GeoZoneCatalog snapshot = manager.catalog();
+        QCOMPARE(&snapshot.zones(), &manager.catalog().zones());
+        oldZone = snapshot.zones().constFirst()->sharedFromThis();
+
+        // Rebuilding the manager's catalog leaves the copy answering with the previous zones after their source
+        // is deleted
+        const QPointer<GeoZoneSource> oldSource = manager.sources()->value<GeoZoneSource*>(0);
+        QVERIFY(oldSource);
+        manager.clear();
+        QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("new.json"), QJsonArray{
+            _circleFeature(QStringLiteral("NEW"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+        QTRY_VERIFY(oldSource.isNull());
+        QVERIFY(&snapshot.zones() != &manager.catalog().zones());
+        QVERIFY(!oldZone.isNull());
+
+        const QList<const GeoZone*> oldZones = snapshot.zonesAt(center);
+        QCOMPARE(oldZones.count(), 1);
+        QCOMPARE(oldZones[0]->identifier(), QStringLiteral("OLD"));
+        QCOMPARE(snapshot.zonesInArea(QGeoRectangle(), GeoZonePolicy({ GeoZone::Prohibited })).count(), 1);
+        const QList<GeoZoneCatalog::PathHit> hits = snapshot.pathHits({ GeoZone::Position{ center.atDistanceAndAzimuth(1000, 270) },
+                                                                        GeoZone::Position{ center.atDistanceAndAzimuth(1000, 90) } },
+                                                                      GeoZonePolicy({ GeoZone::Prohibited }));
+        QCOMPARE(hits.count(), 1);
+        QVERIFY(qAbs(hits[0].distance - 500) < 1);
+
+        const QList<const GeoZone*> newZones = manager.catalog().zonesAt(center);
+        QCOMPARE(newZones.count(), 1);
+        QCOMPARE(newZones[0]->identifier(), QStringLiteral("NEW"));
+
+        // A copy of the copy shares its data too
+        const GeoZoneCatalog copy = snapshot;
+        QCOMPARE(&copy.zones(), &snapshot.zones());
+    }
+    // The last copy releases the previous zones
+    QVERIFY(oldZone.isNull());
 }

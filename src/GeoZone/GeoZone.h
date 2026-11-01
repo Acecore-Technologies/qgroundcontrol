@@ -29,6 +29,7 @@
 #include <optional>
 #include <utility>
 
+#include "GeoZoneBox.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneSchedule.h"
 
@@ -85,7 +86,8 @@ public:
         /// Sets the references from the published codes
         void setReferences(const QString &lowerCode, const QString &upperCode);
 
-        QGeoRectangle boundingBox() const;
+        /// Of the outer ring or the circle, invalid without them
+        GeoZoneBox boundingBox() const;
     };
 
     /// Horizontal position with optional altitudes
@@ -139,8 +141,11 @@ public:
     QString issuesText() const { return _data.issues.join(QStringLiteral("\n")); }
     QString applicabilityText() const;
     QString verticalLimitsText() const;
-    QGeoCoordinate center() const { return _boundingBox.center(); }
-    QGeoRectangle boundingBox() const { return _boundingBox; }
+    QGeoCoordinate center() const { return _box.center(); }
+    /// Bounds of all volumes, which may cross the antimeridian
+    const GeoZoneBox &box() const { return _box; }
+    /// Same as box, for QML and maps
+    QGeoRectangle boundingBox() const { return _box.toRectangle(); }
     bool active() const { return _active.load(std::memory_order_relaxed); }
     QString sourceKey() const { return _sourceKey; }
     QString sourceText() const { return _sourceText; }
@@ -232,8 +237,6 @@ public:
 
 private:
     static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet);
-    /// @return Approximate distance in meters from the projection origin to the box, 0 inside
-    static double _boxDistance(const QRectF &box, const GeoZoneGeometry::LocalProjection &projection);
 
     /// Polygon volumes projected around the zone center, so that queries don't project them again
     struct Projected {
@@ -245,8 +248,8 @@ private:
     const Projected &_projected() const;
 
     const Data _data;
-    QList<QRectF> _volumeBoxes;     ///< Outer ring extents of the polygon volumes, x is longitude and y latitude
-    QGeoRectangle _boundingBox;
+    QList<GeoZoneBox> _volumeBoxes; ///< Outer ring extents of the polygon volumes, invalid for circles
+    GeoZoneBox _box;
     std::atomic<bool> _active = true;   ///< Updated on the GUI thread, read by checks on worker threads
     QString _sourceKey;
     QString _sourceText;

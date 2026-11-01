@@ -13,37 +13,6 @@
 #include <algorithm>
 #include <cmath>
 
-bool GeoZoneIndex::Box::intersects(const Box &other) const
-{
-    if ((south > other.north) || (other.south > north)) {
-        return false;
-    }
-    // Either box may cross the antimeridian
-    for (const double shift : { -360.0, 0.0, 360.0 }) {
-        if ((west <= (other.east + shift)) && ((other.west + shift) <= east)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-GeoZoneIndex::Box GeoZoneIndex::_box(double south, double west, double north, double east)
-{
-    return Box{ north, south, west, (west > east) ? (east + 360) : east };
-}
-
-GeoZoneIndex::Box GeoZoneIndex::_box(const QGeoRectangle &rectangle)
-{
-    return _box(rectangle.bottomRight().latitude(), rectangle.topLeft().longitude(), rectangle.topLeft().latitude(), rectangle.bottomRight().longitude());
-}
-
-std::pair<double, double> GeoZoneIndex::longitudeSpan(double longitude1, double longitude2)
-{
-    const double west = (std::min)(longitude1, longitude2);
-    const double east = (std::max)(longitude1, longitude2);
-    return ((east - west) > 180) ? std::make_pair(east, west) : std::make_pair(west, east);
-}
-
 int GeoZoneIndex::_cell(double degrees)
 {
     return static_cast<int>(std::floor(degrees / cellSizeDegrees));
@@ -73,19 +42,17 @@ void GeoZoneIndex::build(const QList<GeoZone*> &zones)
     clear();
     _boxes.reserve(zones.count());
     for (int i = 0; i < zones.count(); i++) {
-        const QGeoRectangle rectangle = zones[i]->boundingBox();
-        if (!rectangle.isValid()) {
-            // Never matches a query
-            _boxes.append(Box{ -1000, -1000, -1000, -1000 });
+        // Invalid boxes never match a query
+        const GeoZoneBox &box = zones[i]->box();
+        _boxes.append(box);
+        if (!box.isValid()) {
             continue;
         }
 
-        const Box box = _box(rectangle);
-        _boxes.append(box);
-        const int south = _cell(box.south);
-        const int north = _cell(box.north);
-        const int west = _cell(box.west);
-        const int east = _cell(box.east);
+        const int south = _cell(box.south());
+        const int north = _cell(box.north());
+        const int west = _cell(box.west());
+        const int east = _cell(box.east());
         if ((static_cast<qint64>(north - south + 1) * (east - west + 1)) > maxCellsPerZone) {
             _largeZones.append(i);
             continue;
@@ -100,24 +67,20 @@ void GeoZoneIndex::build(const QList<GeoZone*> &zones)
 
 QList<int> GeoZoneIndex::query(const QGeoRectangle &area) const
 {
-    if (!area.isValid()) {
-        return QList<int>();
-    }
-    return query(area.bottomRight().latitude(), area.topLeft().longitude(), area.topLeft().latitude(), area.bottomRight().longitude());
+    return query(GeoZoneBox(area));
 }
 
-QList<int> GeoZoneIndex::query(double south, double west, double north, double east) const
+QList<int> GeoZoneIndex::query(const GeoZoneBox &queryBox) const
 {
     QList<int> result;
-    if (_boxes.isEmpty()) {
+    if (_boxes.isEmpty() || !queryBox.isValid()) {
         return result;
     }
 
-    const Box queryBox = _box(south, west, north, east);
-    const int southCell = _cell(queryBox.south);
-    const int northCell = _cell(queryBox.north);
-    const int westCell = _cell(queryBox.west);
-    const int eastCell = _cell(queryBox.east);
+    const int southCell = _cell(queryBox.south());
+    const int northCell = _cell(queryBox.north());
+    const int westCell = _cell(queryBox.west());
+    const int eastCell = _cell(queryBox.east());
     if ((static_cast<qint64>(northCell - southCell + 1) * (eastCell - westCell + 1)) > maxCellsPerQuery) {
         for (int i = 0; i < _boxes.count(); i++) {
             if (_boxes[i].intersects(queryBox)) {

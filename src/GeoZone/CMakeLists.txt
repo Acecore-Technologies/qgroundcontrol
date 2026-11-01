@@ -10,6 +10,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneAlertTracker.h
         GeoZoneAuthorisations.cc
         GeoZoneAuthorisations.h
+        GeoZoneBox.cc
+        GeoZoneBox.h
         GeoZoneCatalog.cc
         GeoZoneCatalog.h
         GeoZoneDisplay.cc

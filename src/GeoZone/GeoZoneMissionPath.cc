@@ -10,6 +10,7 @@
 #include "GeoZoneMissionPath.h"
 #include "ComplexMissionItem.h"
 #include "FlightPathSegment.h"
+#include "GeoZoneBox.h"
 #include "GeoZoneTerrain.h"
 #include "LandingComplexItem.h"
 #include "MissionController.h"
@@ -24,8 +25,6 @@
 #include "TransectStyleComplexItem.h"
 #include "Vehicle.h"
 #include "VisualMissionItem.h"
-
-#include <QtPositioning/QGeoRectangle>
 
 #include <algorithm>
 #include <cmath>
@@ -74,7 +73,7 @@ std::optional<GeoZone::Area> areaOf(ComplexMissionItem *complexItem)
         }
     }
 
-    const QGeoCoordinate center = QGeoRectangle(polygon).center();
+    const QGeoCoordinate center = GeoZoneBox::fromPath(polygon).center();
     return GeoZone::Area{ polygon,
                           GeoZone::Position{ center, complexItem->minAMSLAltitude(), maxTerrain },
                           GeoZone::Position{ center, complexItem->maxAMSLAltitude(), minTerrain } };

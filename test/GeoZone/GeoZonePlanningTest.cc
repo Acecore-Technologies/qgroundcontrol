@@ -60,6 +60,85 @@ void GeoZonePlanningTest::_testPathHits()
     QVERIFY(!GeoZonePolicy::isRestricted(GeoZone::USpace));
 }
 
+void GeoZonePlanningTest::_testAntimeridianQueries()
+{
+    // A zone from 179.9 E to 179.9 W, one on the other side of the world and one along the equator from 0 to 160 W,
+    // spanning more than 180 degrees of longitude
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _polygonFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), { QGeoCoordinate(-16.6, 179.9), QGeoCoordinate(-16.4, 179.9),
+                                                                             QGeoCoordinate(-16.4, -179.9), QGeoCoordinate(-16.6, -179.9) }),
+        _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(-16.5, 0), 5000),
+        _polygonFeature(QStringLiteral("WIDE"), QStringLiteral("PROHIBITED"), { QGeoCoordinate(-1, 0), QGeoCoordinate(-1, 50), QGeoCoordinate(-1, 100),
+                                                                                QGeoCoordinate(-1, 150), QGeoCoordinate(-1, -160), QGeoCoordinate(1, -160),
+                                                                                QGeoCoordinate(1, 150), QGeoCoordinate(1, 100), QGeoCoordinate(1, 50),
+                                                                                QGeoCoordinate(1, 0) }),
+    }), errorString), qPrintable(errorString));
+    const GeoZoneCatalog &catalog = manager.catalog();
+    const GeoZonePolicy policy({ GeoZone::Prohibited });
+    const auto identifiers = [](const QList<const GeoZone*> &zones) {
+        QStringList result;
+        for (const GeoZone *zone : zones) {
+            result.append(zone->identifier());
+        }
+        return result;
+    };
+
+    // Points on both sides of the antimeridian
+    QCOMPARE(identifiers(catalog.zonesAt(QGeoCoordinate(-16.5, 179.95))), QStringList({ QStringLiteral("X") }));
+    QCOMPARE(identifiers(catalog.zonesAt(QGeoCoordinate(-16.5, -179.95))), QStringList({ QStringLiteral("X") }));
+    QCOMPARE(identifiers(catalog.zonesAt(QGeoCoordinate(-16.5, 180))), QStringList({ QStringLiteral("X") }));
+    QVERIFY(catalog.zonesAt(QGeoCoordinate(-16.5, 179.8)).isEmpty());
+
+    // Areas across the antimeridian, and the rest of the world between the same longitudes
+    QCOMPARE(identifiers(catalog.zonesInArea(GeoZoneBox(-17, 179.8, -16, -179.8), policy)), QStringList({ QStringLiteral("X") }));
+    QCOMPARE(identifiers(catalog.zonesInArea(QGeoRectangle(QGeoCoordinate(-16, 179.8), QGeoCoordinate(-17, -179.8)), policy)), QStringList({ QStringLiteral("X") }));
+    QCOMPARE(identifiers(catalog.zonesInArea(GeoZoneBox(-17, -179.8, -16, 179.8), policy)), QStringList({ QStringLiteral("FAR") }));
+
+    // Survey areas across the antimeridian and on the other side of the world
+    const GeoZone::Area area{ { QGeoCoordinate(-16.6, 179.8), QGeoCoordinate(-16.4, 179.8), QGeoCoordinate(-16.4, -179.8), QGeoCoordinate(-16.6, -179.8) }, {}, {} };
+    QCOMPARE(identifiers(catalog.zonesIntersectingAreas({ area }, policy)), QStringList({ QStringLiteral("X") }));
+    const GeoZone::Area farArea{ { QGeoCoordinate(-16.6, -0.1), QGeoCoordinate(-16.4, -0.1), QGeoCoordinate(-16.4, 0.1), QGeoCoordinate(-16.6, 0.1) }, {}, {} };
+    QCOMPARE(identifiers(catalog.zonesIntersectingAreas({ farArea }, policy)), QStringList({ QStringLiteral("FAR") }));
+
+    // A mission path across the antimeridian enters the zone at its west edge
+    const QGeoCoordinate from(-16.5, 179.8);
+    const QGeoCoordinate to(-16.5, -179.8);
+    const double entryDistance = from.distanceTo(QGeoCoordinate(-16.5, 179.9));
+    const QList<GeoZoneCatalog::PathHit> hits = catalog.pathHits({ GeoZone::Position{ from }, GeoZone::Position{ to } }, policy);
+    QCOMPARE(hits.count(), 1);
+    QCOMPARE(hits[0].zone->identifier(), QStringLiteral("X"));
+    QVERIFY(qAbs(hits[0].distance - entryDistance) < (entryDistance * 0.01));
+
+    // The profile of a segment across the antimeridian passes through the zone
+    GeoZoneMissionPath::Segment segment;
+    segment.from = from;
+    segment.to = to;
+    segment.distance = from.distanceTo(to);
+    const QList<GeoZoneProfile::Band> bands = GeoZoneProfile::computeBands({ segment }, catalog);
+    QCOMPARE(bands.count(), 1);
+    QCOMPARE(bands[0].name, QStringLiteral("X"));
+    QVERIFY(qAbs(bands[0].points.constFirst().distance - entryDistance) < 20);
+    QVERIFY(qAbs(bands[0].points.constLast().distance - (segment.distance - entryDistance)) < 20);
+
+    // Vehicles past the antimeridian more than 180 degrees from the west end of the wide zone are alerted inside it
+    // and near its east end
+    const GeoZoneAlertTracker::Limits limits{ 100, 100, 0 };
+    GeoZoneAlertTracker::Update update = GeoZoneAlertTracker().update(catalog, policy, GeoZone::Position{ QGeoCoordinate(0, -170) }, {}, limits);
+    QCOMPARE(update.alerts.count(), 1);
+    QCOMPARE(update.alerts[0].zone->identifier(), QStringLiteral("WIDE"));
+    QVERIFY(update.alerts[0].inside);
+    const QGeoCoordinate nearEastEnd(0, -159.9995);
+    update = GeoZoneAlertTracker().update(catalog, policy, GeoZone::Position{ nearEastEnd }, {}, limits);
+    QCOMPARE(update.alerts.count(), 1);
+    QCOMPARE(update.alerts[0].zone->identifier(), QStringLiteral("WIDE"));
+    QVERIFY(!update.alerts[0].inside);
+    QVERIFY(qAbs(update.alerts[0].distance - nearEastEnd.distanceTo(QGeoCoordinate(0, -160))) < 1);
+}
+
 void GeoZonePlanningTest::_testMissionCheck()
 {
     const QGeoCoordinate center(47, 8);
@@ -185,7 +264,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     survey->surveyAreaPolygon()->appendVertices({ surveyCenter.atDistanceAndAzimuth(424, 315), surveyCenter.atDistanceAndAzimuth(424, 45),
                                                   surveyCenter.atDistanceAndAzimuth(424, 135), surveyCenter.atDistanceAndAzimuth(424, 225) });
     const auto surveyZoneCrossed = [&check]() {
-        const QList<GeoZone*> crossed = check.crossedZones();
+        const QList<const GeoZone*> crossed = check.crossedZones();
         return std::any_of(crossed.cbegin(), crossed.cend(), [](const GeoZone *zone) {
             return zone->identifier() == QStringLiteral("S");
         });
@@ -640,7 +719,7 @@ void GeoZonePlanningTest::_testGeoFenceImport()
     QCOMPARE(ed318.zones.count(), 3);
 
     ZoneOwner zoneParent;
-    const QList<GeoZone*> zones = {
+    const QList<const GeoZone*> zones = {
         zoneParent.add(ed269.zones[0]),   // One polygon after merging identical footprints
         zoneParent.add(ed269.zones[1]),   // Circle
         zoneParent.add(ed318.zones[1]),   // Two polygons
@@ -726,7 +805,7 @@ void GeoZonePlanningTest::_testGeoFenceImportPreview()
 {
     // Two circular zones published as 40 vertex polygons
     ZoneOwner zoneParent;
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     for (int i = 0; i < 2; i++) {
         GeoZone::Volume volume;
         volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));

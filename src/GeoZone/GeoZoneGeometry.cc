@@ -391,12 +391,21 @@ QPointF LocalProjection::lonLatToLocal(const QPointF &lonLat) const
     return QPointF(longitudeDelta * _metersPerDegreeLongitude, (lonLat.y() - _originLatitude) * _metersPerDegreeLatitude);
 }
 
+QPointF LocalProjection::lonLatToLocal(const QPointF &lonLat, const QPointF &previous) const
+{
+    const double previousDelta = (_metersPerDegreeLongitude != 0) ? (previous.x() / _metersPerDegreeLongitude) : 0;
+    double longitudeDelta = lonLat.x() - _originLongitude;
+    // Whole turns, so that unwrapped longitudes are projected exactly like single points
+    longitudeDelta += 360.0 * std::round((previousDelta - longitudeDelta) / 360.0);
+    return QPointF(longitudeDelta * _metersPerDegreeLongitude, (lonLat.y() - _originLatitude) * _metersPerDegreeLatitude);
+}
+
 QList<QPointF> LocalProjection::lonLatToLocal(const QList<QPointF> &lonLats) const
 {
     QList<QPointF> points;
     points.reserve(lonLats.count());
     for (const QPointF &lonLat : lonLats) {
-        points.append(lonLatToLocal(lonLat));
+        points.append(points.isEmpty() ? lonLatToLocal(lonLat) : lonLatToLocal(lonLat, points.constLast()));
     }
     return points;
 }
@@ -407,12 +416,17 @@ double LocalProjection::eastScaleAt(double latitude) const
     return (originCos > 1e-9) ? (std::cos(latitude * kDegreesToRadians) / originCos) : 1.0;
 }
 
+QPointF LocalProjection::toLocal(const QGeoCoordinate &coordinate, const QPointF &previous) const
+{
+    return lonLatToLocal(QPointF(coordinate.longitude(), coordinate.latitude()), previous);
+}
+
 QList<QPointF> LocalProjection::toLocal(const QList<QGeoCoordinate> &coordinates) const
 {
     QList<QPointF> points;
     points.reserve(coordinates.count());
     for (const QGeoCoordinate &coordinate : coordinates) {
-        points.append(toLocal(coordinate));
+        points.append(points.isEmpty() ? toLocal(coordinate) : toLocal(coordinate, points.constLast()));
     }
     return points;
 }
@@ -630,8 +644,7 @@ QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double 
 
     const LocalProjection projection(ring.first());
     QList<QPointF> original;
-    for (const QGeoCoordinate &coordinate : ring) {
-        const QPointF point = projection.toLocal(coordinate);
+    for (const QPointF &point : projection.toLocal(ring)) {
         if (original.isEmpty() || (point != original.last())) {
             original.append(point);
         }

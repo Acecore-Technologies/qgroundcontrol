@@ -150,7 +150,7 @@ void GeoZoneSource::_clearZones()
     // Zones are deleted when GeoZoneInfo values in QML no longer share them
     _zones.clear();
     _sharedZones.clear();
-    _boundingBox = QGeoRectangle();
+    _box = GeoZoneBox();
 }
 
 QString GeoZoneSource::_sourceText() const
@@ -216,9 +216,7 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
         zone->setSourceKey(_key);
         zone->setSourceText(sourceText);
         _zones.append(zone);
-        if (zone->boundingBox().isValid()) {
-            _boundingBox = _boundingBox.isValid() ? _boundingBox.united(zone->boundingBox()) : zone->boundingBox();
-        }
+        _box = _box.united(zone->box());
 
         // Volumes stacked at different altitudes often share the same footprint, only draw it once. The zone's rings
         // are drawn, which are continuous across the antimeridian.

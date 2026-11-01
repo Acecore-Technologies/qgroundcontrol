@@ -32,7 +32,7 @@ void GeoZoneFenceImporter::setGeoFenceController(GeoFenceController *geoFenceCon
     }
 }
 
-QList<GeoZone*> GeoZoneFenceImporter::_zonesToImport(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours)
+QList<const GeoZone*> GeoZoneFenceImporter::_zonesToImport(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours)
 {
     QList<GeoZone::Restriction> restrictionList;
     for (const QVariant &restriction : restrictions) {
@@ -85,7 +85,7 @@ QVariantMap GeoZoneFenceImporter::preview(const QVariantList &restrictions, cons
     return _preview(_fencesFor(restrictions, area, activeWithinHours, simplifyTolerance));
 }
 
-QVariantMap GeoZoneFenceImporter::exclusionsPreview(const QList<GeoZone*> &zones, double simplifyTolerance) const
+QVariantMap GeoZoneFenceImporter::exclusionsPreview(const QList<const GeoZone*> &zones, double simplifyTolerance) const
 {
     if (!_geoFenceController) {
         return QVariantMap();
@@ -168,7 +168,7 @@ private:
 
 } // namespace
 
-GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<GeoZone*> &zones, double simplifyTolerance) const
+GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<const GeoZone*> &zones, double simplifyTolerance) const
 {
     ShapeSet<QList<QGeoCoordinate>, _polygonHash> polygonSet;
     QmlObjectListModel *const polygons = _geoFenceController->polygons();
@@ -203,14 +203,10 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<GeoZon
 
 int GeoZoneFenceImporter::addZones(const QVariantList &zones, double simplifyTolerance)
 {
-    QList<GeoZone*> geoZones;
-    for (const GeoZone *zone : GeoZoneInfo::fromVariantList(zones)) {
-        geoZones.append(const_cast<GeoZone*>(zone));
-    }
-    return addExclusions(geoZones, simplifyTolerance);
+    return addExclusions(GeoZoneInfo::fromVariantList(zones), simplifyTolerance);
 }
 
-int GeoZoneFenceImporter::addExclusions(const QList<GeoZone*> &zones, double simplifyTolerance)
+int GeoZoneFenceImporter::addExclusions(const QList<const GeoZone*> &zones, double simplifyTolerance)
 {
     if (!_geoFenceController) {
         return 0;

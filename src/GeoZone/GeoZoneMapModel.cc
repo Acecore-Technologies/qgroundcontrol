@@ -150,7 +150,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         bool inView;
     };
     QList<Candidate> candidates;
-    QSet<GeoZone*> zonesInView;
+    QSet<const GeoZone*> zonesInView;
     const double pixels = GeoZoneShape::mercatorPixels(zoomLevel);
     for (const GeoZoneShape *shape : std::as_const(nearShapes)) {
         const GeoZoneMercatorBounds &bounds = shape->mercatorBounds();
@@ -174,7 +174,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
 
     QList<const GeoZoneShape*> polygonShapes;
     QList<const GeoZoneShape*> circleShapes;
-    QSet<GeoZone*> shownZones;
+    QSet<const GeoZone*> shownZones;
     for (const Candidate &candidate : candidates) {
         (candidate.shape->isCircle() ? circleShapes : polygonShapes).append(candidate.shape);
         shownZones.insert(candidate.shape->zone());
@@ -187,9 +187,9 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         _polygons->value<GeoZoneMapItem*>(i)->setZoomLevel(level);
     }
 
-    QList<GeoZone*> labelZones;
+    QList<const GeoZone*> labelZones;
     if (showLabels) {
-        for (GeoZone *zone : _manager->catalog().labelZones(visibleRegion, GeoZoneManager::maxLabelCount)) {
+        for (const GeoZone *zone : _manager->catalog().labelZones(visibleRegion, GeoZoneManager::maxLabelCount)) {
             if (shownZones.contains(zone)) {
                 labelZones.append(zone);
             }
@@ -202,7 +202,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     }
 
     int hiddenZoneCount = 0;
-    for (GeoZone *zone : std::as_const(zonesInView)) {
+    for (const GeoZone *zone : std::as_const(zonesInView)) {
         if (!shownZones.contains(zone)) {
             hiddenZoneCount++;
         }

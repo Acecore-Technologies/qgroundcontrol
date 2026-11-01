@@ -28,5 +28,7 @@ private slots:
     void _testShapeSimplification();
     void _testMapLayerTriangulation();
     void _testAntimeridian();
+    void _testBoxAcrossAntimeridian();
+    void _testProjectionContinuity();
     void _testConcurrentQueries();
 };

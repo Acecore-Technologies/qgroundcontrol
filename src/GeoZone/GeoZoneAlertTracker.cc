@@ -26,7 +26,7 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         return update;
     }
 
-    QGeoRectangle area = QGeoCircle(position.coordinate, limits.distance + hysteresisDistance).boundingGeoRectangle();
+    GeoZoneBox area(QGeoCircle(position.coordinate, limits.distance + hysteresisDistance).boundingGeoRectangle());
     // Zones the vehicle would enter at its velocity within the approach time are near too
     const bool predict = velocity.valid && (limits.time > 0) &&
                          ((velocity.groundSpeed() >= minPredictionSpeed) || (std::abs(velocity.up) >= minPredictionSpeed));
@@ -34,11 +34,11 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     QList<GeoZone::Position> ahead;
     if (predict) {
         ahead = predictedPath(position, velocity, horizon);
-        area = area.united(QGeoRectangle(QList<QGeoCoordinate>{ position.coordinate, ahead.constLast().coordinate }));
+        area = area.united(GeoZoneBox::fromPath({ position.coordinate, ahead.constLast().coordinate }));
     }
 
     QSet<QString> nearbyZones;
-    for (GeoZone *zone : catalog.zonesInArea(area, policy)) {
+    for (const GeoZone *zone : catalog.zonesInArea(area, policy)) {
         const QString &key = zone->key();
         const State previous = _states.value(key, State::Away);
         const double nearLimit = limits.distance + ((previous != State::Away) ? hysteresisDistance : 0);
@@ -176,7 +176,7 @@ GeoZoneAlertTracker::Velocity GeoZoneVelocityEstimator::add(qint64 msecs, const 
 QList<GeoZoneVerticalBand> GeoZoneVerticalBand::at(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position)
 {
     QList<GeoZoneVerticalBand> bands;
-    for (GeoZone *zone : catalog.zonesAt(position.coordinate)) {
+    for (const GeoZone *zone : catalog.zonesAt(position.coordinate)) {
         if (!policy.accepts(zone)) {
             continue;
         }

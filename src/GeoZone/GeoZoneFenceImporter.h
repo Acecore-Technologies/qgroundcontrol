@@ -57,12 +57,12 @@ public:
 
     /// Adds exclusion fences for the zones
     /// @return Number of fence polygons and circles added
-    int addExclusions(const QList<GeoZone*> &zones, double simplifyTolerance = 0);
+    int addExclusions(const QList<const GeoZone*> &zones, double simplifyTolerance = 0);
     /// Same as addExclusions, for GeoZoneInfo values from QML
     Q_INVOKABLE int addZones(const QVariantList &zones, double simplifyTolerance = 0);
 
     /// Summarizes the fences addExclusions would add, see preview
-    QVariantMap exclusionsPreview(const QList<GeoZone*> &zones, double simplifyTolerance = 0) const;
+    QVariantMap exclusionsPreview(const QList<const GeoZone*> &zones, double simplifyTolerance = 0) const;
 
 signals:
     void geoFenceControllerChanged();
@@ -88,11 +88,11 @@ private:
         friend bool operator==(const PreviewKey &, const PreviewKey &) = default;
     };
 
-    Fences _newFences(const QList<GeoZone*> &zones, double simplifyTolerance) const;
+    Fences _newFences(const QList<const GeoZone*> &zones, double simplifyTolerance) const;
     Fences _fencesFor(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double simplifyTolerance) const;
     QVariantMap _preview(const Fences &fences) const;
     int _addFences(const Fences &fences);
-    static QList<GeoZone*> _zonesToImport(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours);
+    static QList<const GeoZone*> _zonesToImport(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours);
 
     QPointer<GeoFenceController> _geoFenceController;
     mutable std::optional<std::pair<PreviewKey, Fences>> _previewFences;

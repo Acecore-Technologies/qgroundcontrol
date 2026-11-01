@@ -82,7 +82,7 @@ private:
         QList<std::pair<int, double>> altitudes;    ///< Visual item indexes with their new altitude in the item's altitude mode
     };
 
-    QList<GeoZone*> _zonesOnPath(const QList<GeoZone::Position> &path) const;
+    QList<const GeoZone*> _zonesOnPath(const QList<GeoZone::Position> &path) const;
     /// @return New altitudes of the leg's waypoints keeping it floorMargin below the floor of the zone and
     ///         minGroundClearance above the terrain, empty when that isn't possible or the altitudes aren't known
     QList<std::pair<int, double>> _altitudesBelowFloor(const GeoZoneMissionPath::Leg &leg, const GeoZone *zone) const;

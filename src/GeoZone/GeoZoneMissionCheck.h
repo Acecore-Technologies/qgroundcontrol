@@ -63,14 +63,14 @@ public:
     void setMissionController(MissionController *missionController);
 
     /// Restricted zones the mission enters, most restrictive first
-    const QList<GeoZone*> &crossedZones() const { return _crossedZones; }
+    const QList<const GeoZone*> &crossedZones() const { return _crossedZones; }
     QVariantList crossedZonesInfo() const { return GeoZoneInfo::toVariantList(_crossedZones); }
     QString warningText() const;
-    const QList<GeoZone*> &uSpaceZones() const { return _uSpaceZones; }
+    const QList<const GeoZone*> &uSpaceZones() const { return _uSpaceZones; }
     QVariantList uSpaceZonesInfo() const { return GeoZoneInfo::toVariantList(_uSpaceZones); }
-    const QList<GeoZone*> &permittedZones() const { return _permittedZones; }
+    const QList<const GeoZone*> &permittedZones() const { return _permittedZones; }
     QVariantList permittedZonesInfo() const { return GeoZoneInfo::toVariantList(_permittedZones); }
-    const QList<GeoZone*> &authorisedZones() const { return _authorisedZones; }
+    const QList<const GeoZone*> &authorisedZones() const { return _authorisedZones; }
     QVariantList authorisedZonesInfo() const { return GeoZoneInfo::toVariantList(_authorisedZones); }
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
@@ -80,7 +80,7 @@ public:
     void setFlightNow(bool flightNow);
     GeoFenceController *geoFenceController() const;
     void setGeoFenceController(GeoFenceController *geoFenceController);
-    const QList<GeoZone*> &unfencedZones() const { return _unfencedZones; }
+    const QList<const GeoZone*> &unfencedZones() const { return _unfencedZones; }
     QVariantList unfencedZonesInfo() const { return GeoZoneInfo::toVariantList(_unfencedZones); }
     QString fenceText() const;
 
@@ -96,7 +96,7 @@ public:
 
     /// Zones a mission path enters
     struct Evaluation {
-        QList<GeoZone*> zones;                          ///< Most restrictive first
+        QList<const GeoZone*> zones;                    ///< Most restrictive first
         QHash<const GeoZone*, QStringList> pathLabels;  ///< Labels of the paths entering zones the drawn flight path doesn't
     };
 
@@ -124,14 +124,14 @@ private:
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
-    QList<GeoZone*> _crossedZones;
-    QList<GeoZone*> _uSpaceZones;
-    QList<GeoZone*> _permittedZones;
-    QList<GeoZone*> _authorisedZones;
+    QList<const GeoZone*> _crossedZones;
+    QList<const GeoZone*> _uSpaceZones;
+    QList<const GeoZone*> _permittedZones;
+    QList<const GeoZone*> _authorisedZones;
     int _inactiveZoneCount = 0;
     bool _flightNow = false;
     QPointer<GeoFenceController> _geoFenceController;
-    QList<GeoZone*> _unfencedZones;
+    QList<const GeoZone*> _unfencedZones;
     QHash<const GeoZone*, QStringList> _pathLabels;
     QTimer _updateTimer;
     quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones

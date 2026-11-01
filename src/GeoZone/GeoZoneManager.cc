@@ -142,7 +142,7 @@ QVariantList GeoZoneManager::labelZones(const QGeoRectangle &region) const
 
 QVariantList GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
 {
-    QList<GeoZone*> zones = _catalog.zonesAt(coordinate);
+    QList<const GeoZone*> zones = _catalog.zonesAt(coordinate);
     const int hidden = _display->hiddenRestrictions();
     (void) zones.removeIf([hidden](const GeoZone *zone) { return (hidden & (1 << zone->restriction())) != 0; });
     return GeoZoneInfo::toVariantList(zones);

@@ -396,10 +396,10 @@ QList<std::pair<int, double>> GeoZoneRoutePlanner::_altitudesBelowFloor(const Ge
     return altitudes;
 }
 
-QList<GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path) const
+QList<const GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path) const
 {
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->planning()->authorisations()))) {
         zones.append(hit.zone);
     }
@@ -424,10 +424,10 @@ void GeoZoneRoutePlanner::update()
         if (!segment.terrainAMSL.isEmpty()) {
             legTerrain = std::accumulate(segment.terrainAMSL.cbegin(), segment.terrainAMSL.cend(), 0.0) / segment.terrainAMSL.count();
         }
-        QList<GeoZone*> crossed;
+        QList<const GeoZone*> crossed;
         for (const GeoZoneMissionPath::Path &path : GeoZoneMissionPath::pathsFromSegments({ segment })) {
             // Like detours, with the terrain of the loaded tiles where the leg has no terrain samples
-            for (GeoZone *zone : _zonesOnPath(GeoZoneTerrain::withTerrain(path.positions))) {
+            for (const GeoZone *zone : _zonesOnPath(GeoZoneTerrain::withTerrain(path.positions))) {
                 if (!crossed.contains(zone)) {
                     crossed.append(zone);
                 }
@@ -458,7 +458,7 @@ void GeoZoneRoutePlanner::update()
         }
 
         // Detours entering other zones avoid those too
-        QList<const GeoZone*> avoided(crossed.cbegin(), crossed.cend());
+        QList<const GeoZone*> avoided = crossed;
         QList<QGeoCoordinate> waypoints;
         bool found = false;
         for (int round = 0; round < maxDetourRounds; round++) {
@@ -488,7 +488,7 @@ void GeoZoneRoutePlanner::update()
                 detourSegment.toAltitudeAMSL = altitudeAt(along);
                 detourSegments.append(detourSegment);
             }
-            QList<GeoZone*> entered;
+            QList<const GeoZone*> entered;
             for (const GeoZoneMissionPath::Path &detourPath : GeoZoneMissionPath::pathsFromSegments(detourSegments)) {
                 // The terrain tiles give the terrain along the detour where they are loaded, the leg's is close elsewhere
                 QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain(detourPath.positions);
@@ -497,7 +497,7 @@ void GeoZoneRoutePlanner::update()
                         position.terrainAMSL = legTerrain;
                     }
                 }
-                for (GeoZone *zone : _zonesOnPath(path)) {
+                for (const GeoZone *zone : _zonesOnPath(path)) {
                     if (!avoided.contains(zone) && !entered.contains(zone)) {
                         entered.append(zone);
                     }
@@ -508,7 +508,7 @@ void GeoZoneRoutePlanner::update()
                 found = true;
                 break;
             }
-            avoided.append(QList<const GeoZone*>(entered.cbegin(), entered.cend()));
+            avoided.append(entered);
         }
 
         QStringList names;

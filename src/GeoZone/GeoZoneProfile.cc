@@ -9,7 +9,7 @@
 
 #include "GeoZoneProfile.h"
 #include "GeoZoneCatalog.h"
-#include "GeoZoneIndex.h"
+#include "GeoZoneBox.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
@@ -17,7 +17,6 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QSet>
-#include <QtPositioning/QGeoRectangle>
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFutureWatcher>
@@ -206,30 +205,15 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<GeoZoneMiss
         }
 
         const double length = segment.from.distanceTo(segment.to);
-        const double segmentMinLatitude = (std::min)(segment.from.latitude(), segment.to.latitude());
-        const double segmentMaxLatitude = (std::max)(segment.from.latitude(), segment.to.latitude());
-        // Longitudes are continuous across the antimeridian, east past 180 degrees when crossing it
-        const auto continuousSpan = [](double west, double east) { return std::make_pair(west, (east < west) ? (east + 360) : east); };
-        const auto segmentSpan = GeoZoneIndex::longitudeSpan(segment.from.longitude(), segment.to.longitude());
-        const auto [segmentWest, segmentEast] = continuousSpan(segmentSpan.first, segmentSpan.second);
+        // The segment takes the shorter way, which may cross the antimeridian
+        const GeoZoneBox segmentBox = GeoZoneBox::fromPath({ segment.from, segment.to });
 
         QList<Candidate> candidates;
-        for (const GeoZone *zone : catalog.zonesInArea(QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), policy)) {
+        for (const GeoZone *zone : catalog.zonesInArea(segmentBox, policy)) {
             const QList<GeoZone::Volume> &volumes = zone->data().volumes;
             for (int v = 0; v < volumes.count(); v++) {
-                const QGeoRectangle box = volumes[v].boundingBox();
-                if (!box.isValid()) {
-                    continue;
-                }
-                if ((box.topLeft().latitude() < segmentMinLatitude) || (box.bottomLeft().latitude() > segmentMaxLatitude)) {
-                    continue;
-                }
-                const auto [boxWest, boxEast] = continuousSpan(box.topLeft().longitude(), box.bottomRight().longitude());
-                for (const double shift : { -360.0, 0.0, 360.0 }) {
-                    if ((boxWest <= (segmentEast + shift)) && ((segmentWest + shift) <= boxEast)) {
-                        candidates.append(Candidate{ zone, v });
-                        break;
-                    }
+                if (volumes[v].boundingBox().intersects(segmentBox)) {
+                    candidates.append(Candidate{ zone, v });
                 }
             }
         }

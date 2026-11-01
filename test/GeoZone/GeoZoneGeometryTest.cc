@@ -749,7 +749,7 @@ void GeoZoneGeometryTest::_testAntimeridian()
     QCOMPARE(index.query(-16.5, 179.2, -16.5, 179.2), QList<int>());
     QCOMPARE(index.query(QGeoRectangle(QGeoCoordinate(-16, 179), QGeoCoordinate(-17, -179))), QList<int>({ 0, 1 }));
     QCOMPARE(index.query(-16.5, -0.1, -16.4, 0.1), QList<int>({ 2 }));
-    const auto [west, east] = GeoZoneIndex::longitudeSpan(179, -179);
+    const auto [west, east] = GeoZoneBox::longitudeSpan(179, -179);
     QCOMPARE(index.query(-16.5, west, -16.5, east), QList<int>({ 0, 1 }));
 
     // The map shape stays narrow and is found by views on either side of the antimeridian
@@ -759,6 +759,132 @@ void GeoZoneGeometryTest::_testAntimeridian()
     QVERIFY(shape.mercatorBounds().intersects({ 0.0, y - 0.001, 0.0005, y + 0.001 }));
     QVERIFY(shape.mercatorBounds().intersects({ 0.9995, y - 0.001, 1.0, y + 0.001 }));
     QVERIFY(!shape.mercatorBounds().intersects({ 0.5, y - 0.001, 0.6, y + 0.001 }));
+}
+
+void GeoZoneGeometryTest::_testBoxAcrossAntimeridian()
+{
+    // A west longitude larger than the east one crosses the antimeridian, the east one continues past 180 degrees
+    const GeoZoneBox crossing(-17, 179.5, -16, -179.5);
+    QVERIFY(crossing.isValid());
+    QVERIFY(crossing.crossesAntimeridian());
+    QCOMPARE(crossing.west(), 179.5);
+    QCOMPARE(crossing.east(), 180.5);
+    QCOMPARE(crossing.width(), 1.0);
+    QCOMPARE(crossing.center().latitude(), -16.5);
+    QCOMPARE(qAbs(crossing.center().longitude()), 180.0);
+    QVERIFY(crossing.contains(QGeoCoordinate(-16.5, 179.9)));
+    QVERIFY(crossing.contains(QGeoCoordinate(-16.5, -179.9)));
+    QVERIFY(crossing.contains(QGeoCoordinate(-16.5, 180)));
+    QVERIFY(crossing.contains(QGeoCoordinate(-16.5, -180)));
+    QVERIFY(!crossing.contains(QGeoCoordinate(-16.5, 179)));
+    QVERIFY(!crossing.contains(QGeoCoordinate(-16.5, 0)));
+    QVERIFY(!crossing.contains(QGeoCoordinate(-15.5, 179.9)));
+    QVERIFY(!GeoZoneBox().contains(QGeoCoordinate(0, 0)));
+
+    // Boxes on either side, single points and meridian segments intersect it, the rest of the world doesn't
+    QVERIFY(crossing.intersects(GeoZoneBox(-16.6, 179, -16.4, 179.6)));
+    QVERIFY(crossing.intersects(GeoZoneBox(-16.6, -179.6, -16.4, -179)));
+    QVERIFY(crossing.intersects(GeoZoneBox(-16.5, -179.9, -16.5, -179.9)));
+    QVERIFY(GeoZoneBox(-16.6, 179.9, -16.4, 179.9).intersects(crossing));
+    QVERIFY(!crossing.intersects(GeoZoneBox(-16.6, -179, -16.4, 179)));
+    QVERIFY(!crossing.intersects(GeoZoneBox(-15.9, 179, -15, -179)));
+    QVERIFY(!crossing.intersects(GeoZoneBox()));
+    QVERIFY(GeoZoneBox(-17, -100, -16, 300).intersects(GeoZoneBox(-16.5, 0, -16.5, 0)));
+
+    // Converts both ways with QGeoRectangle, which crosses the antimeridian the same way
+    const QGeoRectangle rectangle(QGeoCoordinate(-16, 179.5), QGeoCoordinate(-17, -179.5));
+    QVERIFY(GeoZoneBox(rectangle) == crossing);
+    QVERIFY(crossing.toRectangle() == rectangle);
+    QVERIFY(!GeoZoneBox(QGeoRectangle()).isValid());
+    QVERIFY(!crossing.toRectangle().contains(QGeoCoordinate(-16.5, 0)));
+
+    // Paths and polygons follow their edges, which go the shorter way around
+    const QList<QGeoCoordinate> polygon = { QGeoCoordinate(-17, 179.5), QGeoCoordinate(-16, 179.5), QGeoCoordinate(-16, -179.5), QGeoCoordinate(-17, -179.5) };
+    QVERIFY(GeoZoneBox::fromPath(polygon) == crossing);
+    const GeoZoneBox longEdges = GeoZoneBox::fromPath({ QGeoCoordinate(0, 0), QGeoCoordinate(0, 100), QGeoCoordinate(1, -100) });
+    QCOMPARE(longEdges.west(), 0.0);
+    QCOMPARE(longEdges.east(), 260.0);
+    QVERIFY(longEdges.contains(QGeoCoordinate(0.5, 180)));
+    QVERIFY(!longEdges.contains(QGeoCoordinate(0.5, -50)));
+    const GeoZoneBox segment = GeoZoneBox::fromPath({ QGeoCoordinate(-16.5, -179.9), QGeoCoordinate(-16.5, 179.9) });
+    QVERIFY(segment.crossesAntimeridian());
+    QVERIFY(qAbs(segment.width() - 0.2) < 1e-9);
+    QCOMPARE(segment.height(), 0.0);
+    QVERIFY(segment.intersects(crossing));
+    QVERIFY(!segment.intersects(GeoZoneBox(-17, -1, -16, 1)));
+    QVERIFY(!GeoZoneBox::fromPath({ QGeoCoordinate() }).isValid());
+    const auto [west, east] = GeoZoneBox::longitudeSpan(179.9, -179.9);
+    QCOMPARE(west, 179.9);
+    QCOMPARE(east, -179.9);
+    QVERIFY(qAbs(segment.west() - 179.9) < 1e-9);
+    QVERIFY(qAbs(segment.east() - 180.1) < 1e-9);
+
+    // Uniting boxes on both sides of the antimeridian goes the shorter way too
+    const GeoZoneBox united = GeoZoneBox(-17, 179, -16, 179.5).united(GeoZoneBox(-16.5, -179.5, -15, -179));
+    QVERIFY(united.crossesAntimeridian());
+    QVERIFY(qAbs(united.width() - 2) < 1e-9);
+    QCOMPARE(united.south(), -17.0);
+    QCOMPARE(united.north(), -15.0);
+    QVERIFY(GeoZoneBox().united(crossing) == crossing);
+
+    // Distances are measured the shorter way around, across the antimeridian
+    const double degree = QGeoCoordinate(-16.5, 179).distanceTo(QGeoCoordinate(-16.5, 180));
+    QCOMPARE(crossing.distanceTo(QGeoCoordinate(-16.5, 180)), 0.0);
+    QVERIFY(qAbs(crossing.distanceTo(QGeoCoordinate(-16.5, -178.5)) - degree) < (degree * 0.01));
+    QVERIFY(qAbs(crossing.distanceTo(QGeoCoordinate(-16.5, 178.5)) - degree) < (degree * 0.01));
+    QVERIFY(qAbs(GeoZoneBox(-17, 179, -16, 179.5).distanceTo(QGeoCoordinate(-16.5, -179.5)) - degree) < (degree * 0.01));
+    QVERIFY(qAbs(GeoZoneBox(-17, -179.5, -16, -179).distanceTo(QGeoCoordinate(-16.5, 179.5)) - degree) < (degree * 0.01));
+    QVERIFY(qIsInf(GeoZoneBox().distanceTo(QGeoCoordinate(0, 0))));
+
+    // A zone spanning more than 180 degrees of longitude is near positions past the antimeridian, more than 180
+    // degrees from its west end, so that distances limited to its surroundings find it
+    ZoneOwner owner;
+    GeoZone::Data wideData;
+    wideData.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing({ QGeoCoordinate(-1, 0), QGeoCoordinate(-1, 50), QGeoCoordinate(-1, 100),
+                                                                        QGeoCoordinate(-1, 150), QGeoCoordinate(-1, -160), QGeoCoordinate(1, -160),
+                                                                        QGeoCoordinate(1, 150), QGeoCoordinate(1, 100), QGeoCoordinate(1, 50),
+                                                                        QGeoCoordinate(1, 0) }) } });
+    const GeoZone *const wide = owner.add(wideData);
+    QVERIFY(wide->box().crossesAntimeridian());
+    QVERIFY(qAbs(wide->box().width() - 200) < 1e-9);
+    QVERIFY(wide->contains(GeoZone::Position{ QGeoCoordinate(0, -170) }));
+    QVERIFY(!wide->contains(GeoZone::Position{ QGeoCoordinate(0, -150) }));
+    QCOMPARE(wide->distanceTo(GeoZone::Position{ QGeoCoordinate(0, -170) }, 0, 100), 0.0);
+    const QGeoCoordinate nearEastEnd(0, -159.99);
+    const double eastDistance = nearEastEnd.distanceTo(QGeoCoordinate(0, -160));
+    QVERIFY(qAbs(wide->distanceTo(GeoZone::Position{ nearEastEnd }, 0, 5000) - eastDistance) < (eastDistance * 0.01));
+}
+
+void GeoZoneGeometryTest::_testProjectionContinuity()
+{
+    // Paths continue from point to point across the antimeridian, even past 180 degrees from the origin
+    const GeoZoneGeometry::LocalProjection projection(QGeoCoordinate(0, 0));
+    const double metersPerDegree = projection.toLocal(QGeoCoordinate(0, 1)).x();
+    const QList<QPointF> points = projection.toLocal(QList<QGeoCoordinate>{ QGeoCoordinate(0, 90), QGeoCoordinate(0, 170),
+                                                                            QGeoCoordinate(0, -170), QGeoCoordinate(0, -100) });
+    QCOMPARE(points.count(), 4);
+    QVERIFY(qAbs(points[0].x() - (90 * metersPerDegree)) < 1e-3);
+    QVERIFY(qAbs(points[2].x() - (190 * metersPerDegree)) < 1e-3);
+    QVERIFY(qAbs(points[3].x() - (260 * metersPerDegree)) < 1e-3);
+    QCOMPARE(projection.lonLatToLocal(QList<QPointF>{ QPointF(90, 0), QPointF(170, 0), QPointF(-170, 0), QPointF(-100, 0) }), points);
+    QVERIFY(qAbs(projection.toGeo(points[3]).longitude() - (-100)) < 1e-9);
+
+    // Single points stay within 180 degrees of the origin, or of the previous point
+    QVERIFY(qAbs(projection.toLocal(QGeoCoordinate(0, -100)).x() - (-100 * metersPerDegree)) < 1e-3);
+    QCOMPARE(projection.toLocal(QGeoCoordinate(0, -100), points[2]), points[3]);
+    QCOMPARE(projection.toLocal(QGeoCoordinate(0, 10), points[3]), projection.toLocal(QGeoCoordinate(0, 10)) + QPointF(360 * metersPerDegree, 0));
+
+    // A ring across the antimeridian projected around its first vertex, as simplification does, keeps its shape
+    // although it extends more than 180 degrees east of the vertex
+    const QList<QGeoCoordinate> ring = { QGeoCoordinate(-1, 0), QGeoCoordinate(-1, 90), QGeoCoordinate(-1, 170), QGeoCoordinate(-1, -130),
+                                         QGeoCoordinate(1, -130), QGeoCoordinate(1, 170), QGeoCoordinate(1, 90), QGeoCoordinate(1, 0) };
+    const GeoZoneGeometry::LocalProjection ringProjection(ring.first());
+    const QList<QPointF> localRing = ringProjection.toLocal(ring);
+    const double ringMetersPerDegree = ringProjection.toLocal(QGeoCoordinate(-1, 1)).x();
+    QVERIFY(qAbs(GeoZoneGeometry::signedArea(localRing)) > (2 * 229 * ringMetersPerDegree * ringMetersPerDegree));
+    QVERIFY(GeoZoneGeometry::ringContains(localRing, ringProjection.toLocal(QGeoCoordinate(0, 120))));
+    QVERIFY(GeoZoneGeometry::ringContains(localRing, ringProjection.toLocal(QGeoCoordinate(0, -150), localRing[3])));
+    QVERIFY(!GeoZoneGeometry::ringContains(localRing, ringProjection.toLocal(QGeoCoordinate(0, -100), localRing[3])));
 }
 
 void GeoZoneGeometryTest::_testConcurrentQueries()

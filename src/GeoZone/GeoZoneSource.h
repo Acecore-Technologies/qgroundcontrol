@@ -15,6 +15,7 @@
 #include <QtCore/QSet>
 #include <QtPositioning/QGeoRectangle>
 
+#include "GeoZoneBox.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneProviders.h"
 
@@ -79,7 +80,9 @@ public:
     const QList<QSharedPointer<GeoZone>> &sharedZones() const { return _sharedZones; }
     /// Volumes sharing a footprint have one shape
     const QList<GeoZoneShape*> &shapes() const { return _shapes; }
-    QGeoRectangle boundingBox() const { return _boundingBox; }
+    /// Bounds of the zones, which may cross the antimeridian
+    const GeoZoneBox &box() const { return _box; }
+    QGeoRectangle boundingBox() const { return _box.toRectangle(); }
 
     /// Sets the dates of the stored copy before it is loaded, or when a feed is confirmed unchanged
     void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate);
@@ -166,5 +169,5 @@ private:
     QList<GeoZone*> _zones;
     QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones
     QList<GeoZoneShape*> _shapes;
-    QGeoRectangle _boundingBox;
+    GeoZoneBox _box;
 };

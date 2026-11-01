@@ -52,7 +52,7 @@ public:
 
     /// Zone near or around the vehicle
     struct Nearby {
-        GeoZone *zone = nullptr;
+        const GeoZone *zone = nullptr;
         bool inside = false;
         int distance = 0;       ///< Rounded meters
         int timeToEntry = -1;   ///< Rounded seconds until the vehicle enters at its current velocity, -1 when it doesn't
@@ -62,7 +62,7 @@ public:
 
     /// Zone newly approached or entered
     struct Alert {
-        GeoZone *zone = nullptr;
+        const GeoZone *zone = nullptr;
         bool inside = false;            ///< Entered, otherwise approached
         double distance = 0;            ///< Meters to the zone, 0 inside
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach, NaN when not predicted
@@ -130,7 +130,7 @@ private:
 /// Volume of a zone above or below a position
 struct GeoZoneVerticalBand
 {
-    GeoZone *zone = nullptr;
+    const GeoZone *zone = nullptr;
     double floor = qQNaN();     ///< Meters AMSL, NaN when the zone extends to the ground or the limit is unknown
     double ceiling = qQNaN();   ///< Meters AMSL, NaN without a ceiling or when the limit is unknown
 

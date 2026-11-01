@@ -116,7 +116,7 @@ enum class NameStyle : quint8 {
     WithRestriction,
 };
 
-QString _zoneNames(const QList<GeoZone*> &zones, NameStyle style)
+QString _zoneNames(const QList<const GeoZone*> &zones, NameStyle style)
 {
     QStringList names;
     for (qsizetype i = 0; i < (std::min)(zones.count(), qsizetype{ GeoZoneMissionCheck::maxListedZones }); i++) {
@@ -231,8 +231,8 @@ QString GeoZoneMissionCheck::warningText() const
     QStringList lines = { tr("The mission path enters restricted geozones: %1").arg(_zoneNames(_crossedZones, NameStyle::WithRestriction)) };
     // Zones entered besides the drawn flight path, like by a loiter circle or the return to launch
     QStringList labels;
-    QHash<QString, QList<GeoZone*>> labelZones;
-    for (GeoZone *zone : _crossedZones) {
+    QHash<QString, QList<const GeoZone*>> labelZones;
+    for (const GeoZone *zone : _crossedZones) {
         for (const QString &label : _pathLabels.value(zone)) {
             if (!labels.contains(label)) {
                 labels.append(label);
@@ -276,13 +276,11 @@ std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::plannedFlightTimes(const Ge
 
 QGeoRectangle GeoZoneMissionCheck::crossedZonesBoundingBox() const
 {
-    QGeoRectangle boundingBox;
+    GeoZoneBox box;
     for (const GeoZone *zone : _crossedZones) {
-        if (zone->boundingBox().isValid()) {
-            boundingBox = boundingBox.isValid() ? boundingBox.united(zone->boundingBox()) : zone->boundingBox();
-        }
+        box = box.united(zone->box());
     }
-    return boundingBox;
+    return box.toRectangle();
 }
 
 void GeoZoneMissionCheck::_scheduleUpdate()
@@ -344,7 +342,7 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
         }
     }
     // Camera footprints and turns extend past the flight lines, so whole areas count
-    for (GeoZone *zone : catalog.zonesIntersectingAreas(path.areas(), anyTime)) {
+    for (const GeoZone *zone : catalog.zonesIntersectingAreas(path.areas(), anyTime)) {
         onFlightPath.insert(zone);
         if (!evaluation.zones.contains(zone)) {
             evaluation.zones.append(zone);
@@ -361,7 +359,7 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
 
 void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
 {
-    QList<GeoZone*> zones = evaluation.zones;
+    QList<const GeoZone*> zones = evaluation.zones;
     // Zones which aren't active at any time during the planned flight don't apply
     auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
     if (_flightNow) {
@@ -372,18 +370,18 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
     const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd).excludingAuthorised(_manager->planning()->authorisations());
 
     const int inactiveZoneCount = static_cast<int>(zones.removeIf([&policy](const GeoZone *zone) { return !policy.acceptsSchedule(zone); }));
-    QList<GeoZone*> authorised;
-    for (GeoZone *zone : std::as_const(zones)) {
+    QList<const GeoZone*> authorised;
+    for (const GeoZone *zone : std::as_const(zones)) {
         if (policy.authorised(zone)) {
             authorised.append(zone);
         }
     }
     (void) zones.removeIf([&policy](const GeoZone *zone) { return policy.authorised(zone); });
 
-    QList<GeoZone*> crossed;
-    QList<GeoZone*> uSpace;
-    QList<GeoZone*> permitted;
-    for (GeoZone *zone : std::as_const(zones)) {
+    QList<const GeoZone*> crossed;
+    QList<const GeoZone*> uSpace;
+    QList<const GeoZone*> permitted;
+    for (const GeoZone *zone : std::as_const(zones)) {
         if (GeoZonePolicy::isRestricted(zone->restriction())) {
             crossed.append(zone);
         } else if (zone->restriction() == GeoZone::USpace) {
@@ -394,9 +392,9 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
     }
 
     // Vehicles which support a fence can be stopped at prohibited zones by it
-    QList<GeoZone*> unfenced;
+    QList<const GeoZone*> unfenced;
     if (_geoFenceController && _geoFenceController->supported()) {
-        for (GeoZone *zone : std::as_const(crossed)) {
+        for (const GeoZone *zone : std::as_const(crossed)) {
             if ((zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(_geoFenceController, zone)) {
                 unfenced.append(zone);
             }

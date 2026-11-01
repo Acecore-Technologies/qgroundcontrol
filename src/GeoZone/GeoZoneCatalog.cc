@@ -17,45 +17,41 @@
 
 void GeoZoneCatalog::rebuild(const QList<const GeoZoneSource*> &sources)
 {
-    _zones.clear();
-    _sharedZones.clear();
-    _shapes.clear();
-    _boundingBox = QGeoRectangle();
+    const QSharedPointer<Data> data = QSharedPointer<Data>::create();
     for (const GeoZoneSource *source : sources) {
-        _zones.append(source->zones());
-        _sharedZones.append(source->sharedZones());
-        _shapes.append(source->shapes());
-        if (source->boundingBox().isValid()) {
-            _boundingBox = _boundingBox.isValid() ? _boundingBox.united(source->boundingBox()) : source->boundingBox();
-        }
+        data->zones.append(source->zones());
+        data->sharedZones.append(source->sharedZones());
+        data->shapes.append(source->shapes());
+        data->boundingBox = data->boundingBox.united(source->box());
     }
 
     QHash<const GeoZone*, qsizetype> zoneIndexes;
-    zoneIndexes.reserve(_zones.count());
-    for (qsizetype i = 0; i < _zones.count(); i++) {
-        zoneIndexes.insert(_zones[i], i);
+    zoneIndexes.reserve(data->zones.count());
+    for (qsizetype i = 0; i < data->zones.count(); i++) {
+        zoneIndexes.insert(data->zones[i], i);
     }
-    _zoneShapes = QList<QList<const GeoZoneShape*>>(_zones.count());
-    for (const GeoZoneShape *shape : std::as_const(_shapes)) {
-        _zoneShapes[zoneIndexes.value(shape->zone())].append(shape);
+    data->zoneShapes = QList<QList<const GeoZoneShape*>>(data->zones.count());
+    for (const GeoZoneShape *shape : std::as_const(data->shapes)) {
+        data->zoneShapes[zoneIndexes.value(shape->zone())].append(shape);
     }
-    _index.build(_zones);
+    data->index.build(data->zones);
+    _data = data;
 }
 
 QList<const GeoZoneShape*> GeoZoneCatalog::shapesInArea(double south, double west, double north, double east) const
 {
     QList<const GeoZoneShape*> shapes;
-    for (const int index : _index.query(south, west, north, east)) {
-        shapes.append(_zoneShapes[index]);
+    for (const int index : _data->index.query(south, west, north, east)) {
+        shapes.append(_data->zoneShapes[index]);
     }
     return shapes;
 }
 
-QList<GeoZone*> GeoZoneCatalog::labelZones(const QGeoRectangle &region, int maxCount) const
+QList<const GeoZone*> GeoZoneCatalog::labelZones(const QGeoRectangle &region, int maxCount) const
 {
-    QList<GeoZone*> candidates;
-    for (const int index : _index.query(region)) {
-        GeoZone *const zone = _zones[index];
+    QList<const GeoZone*> candidates;
+    for (const int index : _data->index.query(region)) {
+        const GeoZone *const zone = _data->zones[index];
         if (region.contains(zone->center())) {
             candidates.append(zone);
         }
@@ -71,14 +67,14 @@ QList<GeoZone*> GeoZoneCatalog::labelZones(const QGeoRectangle &region, int maxC
     return candidates;
 }
 
-QList<GeoZone*> GeoZoneCatalog::zonesAt(const QGeoCoordinate &coordinate) const
+QList<const GeoZone*> GeoZoneCatalog::zonesAt(const QGeoCoordinate &coordinate) const
 {
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     if (!coordinate.isValid()) {
         return {};
     }
-    for (const int index : _index.query(coordinate.latitude(), coordinate.longitude(), coordinate.latitude(), coordinate.longitude())) {
-        GeoZone *const zone = _zones[index];
+    for (const int index : _data->index.query(coordinate.latitude(), coordinate.longitude(), coordinate.latitude(), coordinate.longitude())) {
+        const GeoZone *const zone = _data->zones[index];
         for (qsizetype i = 0; i < zone->data().volumes.count(); i++) {
             if (zone->volumeContains(i, coordinate)) {
                 zones.append(zone);
@@ -95,7 +91,7 @@ QList<GeoZone*> GeoZoneCatalog::zonesAt(const QGeoCoordinate &coordinate) const
     return zones;
 }
 
-QList<GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults) const
+QList<const GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults) const
 {
     const QString query = text.trimmed();
     if (query.isEmpty() || (maxResults <= 0)) {
@@ -103,11 +99,11 @@ QList<GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults) cons
     }
 
     struct Match {
-        GeoZone *zone;
+        const GeoZone *zone;
         bool prefix;
     };
     QList<Match> matches;
-    for (GeoZone *zone : _zones) {
+    for (const GeoZone *zone : _data->zones) {
         const QString name = zone->displayName();
         if (name.startsWith(query, Qt::CaseInsensitive) || zone->identifier().startsWith(query, Qt::CaseInsensitive)) {
             matches.append({ zone, true });
@@ -127,26 +123,26 @@ QList<GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults) cons
         return a.zone->displayName().compare(b.zone->displayName(), Qt::CaseInsensitive) < 0;
     });
 
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     for (qsizetype i = 0; i < (std::min)(matches.count(), qsizetype{ maxResults }); i++) {
         zones.append(matches[i].zone);
     }
     return zones;
 }
 
-QList<GeoZone*> GeoZoneCatalog::zonesInArea(const QGeoRectangle &area, const GeoZonePolicy &policy) const
+QList<const GeoZone*> GeoZoneCatalog::zonesInArea(const GeoZoneBox &area, const GeoZonePolicy &policy) const
 {
     QList<int> candidates;
     if (area.isValid()) {
-        candidates = _index.query(area);
+        candidates = _data->index.query(area);
     } else {
-        candidates.resize(_zones.count());
+        candidates.resize(_data->zones.count());
         std::iota(candidates.begin(), candidates.end(), 0);
     }
 
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     for (const int index : std::as_const(candidates)) {
-        GeoZone *const zone = _zones[index];
+        const GeoZone *const zone = _data->zones[index];
         if (policy.accepts(zone)) {
             zones.append(zone);
         }
@@ -166,9 +162,7 @@ QList<GeoZoneCatalog::PathHit> GeoZoneCatalog::pathHits(const QList<QList<GeoZon
             if (!from.isValid() || !to.isValid()) {
                 continue;
             }
-            const auto [west, east] = GeoZoneIndex::longitudeSpan(from.longitude(), to.longitude());
-            const QList<int> candidates = _index.query((std::min)(from.latitude(), to.latitude()), west, (std::max)(from.latitude(), to.latitude()), east);
-            for (const int index : candidates) {
+            for (const int index : _data->index.query(GeoZoneBox::fromPath({ from, to }))) {
                 QList<int> &candidatePathList = candidatePaths[index];
                 if (candidatePathList.isEmpty() || (candidatePathList.last() != pathIndex)) {
                     candidatePathList.append(pathIndex);
@@ -199,7 +193,7 @@ QList<GeoZoneCatalog::PathHit> GeoZoneCatalog::pathHits(const QList<QList<GeoZon
 
     QList<PathHit> hits;
     for (auto it = candidatePaths.cbegin(); it != candidatePaths.cend(); ++it) {
-        GeoZone *const zone = _zones[it->first];
+        const GeoZone *const zone = _data->zones[it->first];
         if (!policy.accepts(zone)) {
             continue;
         }
@@ -216,15 +210,16 @@ QList<GeoZoneCatalog::PathHit> GeoZoneCatalog::pathHits(const QList<QList<GeoZon
     return hits;
 }
 
-QList<GeoZone*> GeoZoneCatalog::zonesIntersectingAreas(const QList<GeoZone::Area> &areas, const GeoZonePolicy &policy) const
+QList<const GeoZone*> GeoZoneCatalog::zonesIntersectingAreas(const QList<GeoZone::Area> &areas, const GeoZonePolicy &policy) const
 {
-    QList<GeoZone*> zones;
+    QList<const GeoZone*> zones;
     for (const GeoZone::Area &area : areas) {
         if (area.polygon.count() < 3) {
             continue;
         }
-        for (const int index : _index.query(QGeoRectangle(area.polygon))) {
-            GeoZone *const zone = _zones[index];
+        // Edges go the shorter way around, which may cross the antimeridian, like those of the zones
+        for (const int index : _data->index.query(GeoZoneBox::fromPath(area.polygon))) {
+            const GeoZone *const zone = _data->zones[index];
             if (policy.accepts(zone) && !zones.contains(zone) && zone->intersectsArea(area)) {
                 zones.append(zone);
             }
