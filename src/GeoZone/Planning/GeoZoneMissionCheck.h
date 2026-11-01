@@ -21,6 +21,7 @@
 #include "GeoZone.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneMissionPath.h"
+#include "GeoZonePlanAudit.h"
 
 class GeoFenceController;
 class GeoZoneCatalog;
@@ -42,6 +43,8 @@ class Vehicle;
 /// contingency zones, which don't need a confirmation for the upload, with the items they would be flown from.
 /// The mission is checked again when the return parameters of the vehicle, the rally points or the breach return
 /// point change.
+/// Without flightNow, the zones relevant to the mission are compared with the geozone data the open plan was saved
+/// with, see GeoZonePlanning::planAudit and GeoZonePlanAudit.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -63,6 +66,8 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(QVariantList         contingencyZones    READ contingencyZonesInfo                           NOTIFY crossedZonesChanged FINAL)     ///< Restricted zones only returns from along the mission enter
     Q_PROPERTY(QString              contingencyText     READ contingencyText                                NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QString              auditText           READ auditText                                      NOTIFY auditChanged FINAL)            ///< How the geozone data changed since the plan was saved, empty without changes
+    Q_PROPERTY(QStringList          auditDetails        READ auditDetails                                   NOTIFY auditChanged FINAL)            ///< One line per change
 
 public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
@@ -104,6 +109,15 @@ public:
     ///         launch from items 3–7"
     QStringList contingencyLabels(const GeoZone *zone) const { return _contingencyLabels.value(zone); }
 
+    /// Zones the mission and the returns from along it enter, whether or not they apply then, see GeoZonePlanAudit
+    const QList<const GeoZone*> &relevantZones() const { return _relevantZones; }
+    /// @return The record of the zones relevant to the mission and the sources covering it, for the plan file
+    GeoZonePlanAudit::Record auditRecord() const;
+    QString auditText() const { return _auditText; }
+    QStringList auditDetails() const { return _auditDetails; }
+    /// Accepts the changes of the geozone data since the plan was saved, until it changes again
+    Q_INVOKABLE void acknowledgeAudit();
+
     /// @return true if exclusion fences of the controller cover the whole zone, like the fences GeoZoneFenceImporter
     ///         adds for it with any simplification, see GeoZoneFences::fencesCover
     static bool fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone);
@@ -126,6 +140,8 @@ public:
         QDateTime end;
         QList<const GeoZone*> contingencyZones;         ///< Entered by contingency paths while active, most restrictive first
         QHash<const GeoZone*, QStringList> contingencyLabels;   ///< Of the contingency paths entering them with their items
+        QList<const GeoZone*> relevantZones;            ///< Entered by any path whatever their schedule, see relevantZones()
+        GeoZoneBox area;                                ///< Of the paths
     };
 
     /// @return Zones the path or its areas enter whatever their authorisations, for a flight from start to end or at
@@ -144,6 +160,7 @@ signals:
     void crossedZonesChanged();
     void flightNowChanged();
     void geoFenceControllerChanged();
+    void auditChanged();
 
 private:
     void _scheduleUpdate();
@@ -160,6 +177,8 @@ private:
     std::pair<QDateTime, QDateTime> _flightTimes() const;
     /// Sorts the zones on the path by the policies of the planned flight
     void _apply(const Evaluation &evaluation);
+    /// Compares the relevant zones with the data the plan was saved with
+    void _updateAudit();
 
     GeoZoneManager *_manager = nullptr;
     QPointer<MissionController> _missionController;
@@ -174,6 +193,10 @@ private:
     QHash<const GeoZone*, QStringList> _pathLabels;
     QList<const GeoZone*> _contingencyZones;
     QHash<const GeoZone*, QStringList> _contingencyLabels;
+    QList<const GeoZone*> _relevantZones;
+    GeoZoneBox _area;
+    QString _auditText;
+    QStringList _auditDetails;
     QPointer<PlanMasterController> _masterController;
     QPointer<Vehicle> _vehicle;
     QObject *_planConnections = nullptr;        ///< Receiver of the plan's signals, replaced to disconnect them

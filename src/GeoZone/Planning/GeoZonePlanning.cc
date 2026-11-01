@@ -24,3 +24,11 @@ void GeoZonePlanning::setPlannedStart(const QDateTime &plannedStart)
         emit plannedStartChanged();
     }
 }
+
+void GeoZonePlanning::setPlanAudit(const std::optional<GeoZonePlanAudit::Record> &planAudit)
+{
+    if (planAudit != _planAudit) {
+        _planAudit = planAudit;
+        emit planAuditChanged();
+    }
+}

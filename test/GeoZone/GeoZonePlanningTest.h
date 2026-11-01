@@ -30,6 +30,7 @@ private slots:
     void _testAuthorisations();
     void _testBriefing();
     void _testBriefingExport();
+    void _testPlanAudit();
     void _testRoutePlanner();
     void _testProfileBands();
     void _testGeoFenceImport();

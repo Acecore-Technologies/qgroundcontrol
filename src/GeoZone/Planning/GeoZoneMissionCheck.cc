@@ -18,6 +18,8 @@
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneSourceRepository.h"
+#include "GeoZoneSourceVersion.h"
 #include "MissionController.h"
 #include "ParameterManager.h"
 #include "PlanMasterController.h"
@@ -50,6 +52,17 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
     (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
     (void) connect(_manager->planning()->authorisations(), &GeoZoneAuthorisations::changed, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    (void) connect(_manager->planning(), &GeoZonePlanning::planAuditChanged, this, [this]() {
+        // Running evaluations may be of the previous plan
+        _evaluation++;
+        _scheduleUpdate();
+    });
+    // The audit waits for the sources to load
+    (void) connect(_manager, &GeoZoneManager::busyChanged, this, [this](bool busy) {
+        if (!busy) {
+            _scheduleUpdate();
+        }
+    });
 }
 
 MissionController *GeoZoneMissionCheck::missionController() const
@@ -82,6 +95,12 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
         if (_masterController) {
             (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
             (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_connectVehicle);
+            // A new plan has no saved geozone data, opened and saved plans set it, see GeoZonePlanData
+            (void) connect(_masterController, &PlanMasterController::currentPlanFileChanged, this, [this]() {
+                if (!_flightNow && _masterController && _masterController->currentPlanFile().isEmpty()) {
+                    _manager->planning()->setPlanAudit(std::nullopt);
+                }
+            });
         }
         _connectMissionItems();
     }
@@ -332,6 +351,7 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     (void) _pathLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
     (void) _contingencyLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
+    (void) _relevantZones.removeIf(fromSource);
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
                               _authorisedZones.removeIf(fromSource) +
                               _unfencedZones.removeIf(fromSource) + _contingencyZones.removeIf(fromSource);
@@ -383,11 +403,13 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
     Evaluation evaluation;
     evaluation.start = start;
     evaluation.end = flightEnd;
+    evaluation.area = path.box();
     for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate(path.evaluatorPaths(start, end), path.areas()).zones) {
         if (!result.entered()) {
             continue;
         }
         evaluation.zones.append(result.zone);
+        evaluation.relevantZones.append(result.zone);
         if (!result.active()) {
             evaluation.inactiveZones.append(result.zone);
         } else if (!result.labels.isEmpty()) {
@@ -404,6 +426,9 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
         for (const GeoZonePathEvaluator::ZoneResult &zoneResult : result.zones) {
             if (evaluation.contingencyLabels.contains(zoneResult.zone)) {
                 evaluation.contingencyZones.append(zoneResult.zone);
+            }
+            if (!zoneResult.crossings.isEmpty() && !evaluation.relevantZones.contains(zoneResult.zone)) {
+                evaluation.relevantZones.append(zoneResult.zone);
             }
         }
         GeoZonePathEvaluator::sortBySeverity(evaluation.contingencyZones);
@@ -501,5 +526,43 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
         _authorisedZones = authorised;
         _inactiveZoneCount = inactiveZoneCount;
         emit crossedZonesChanged();
+    }
+    _relevantZones = evaluation.relevantZones;
+    _area = evaluation.area;
+    _updateAudit();
+}
+
+GeoZonePlanAudit::Record GeoZoneMissionCheck::auditRecord() const
+{
+    return GeoZonePlanAudit::Record::make(_relevantZones, GeoZoneSourceVersion::covering(_manager->repository()->sourceList(), _area),
+                                          GeoZoneEnvironment::currentDateTimeUtc());
+}
+
+void GeoZoneMissionCheck::acknowledgeAudit()
+{
+    if (!_auditText.isEmpty()) {
+        _manager->planning()->setPlanAudit(auditRecord());
+    }
+}
+
+void GeoZoneMissionCheck::_updateAudit()
+{
+    QString text;
+    QStringList details;
+    const std::optional<GeoZonePlanAudit::Record> &record = _manager->planning()->planAudit();
+    if (!_flightNow && record) {
+        // Sources still loading would look removed
+        if (_manager->busy()) {
+            return;
+        }
+        const GeoZonePlanAudit::Changes changes = GeoZonePlanAudit::compare(*record, _relevantZones, _manager->catalog(),
+                                                                            GeoZoneSourceVersion::covering(_manager->repository()->sourceList(), GeoZoneBox()));
+        text = changes.summary();
+        details = changes.details();
+    }
+    if ((text != _auditText) || (details != _auditDetails)) {
+        _auditText = text;
+        _auditDetails = details;
+        emit auditChanged();
     }
 }

@@ -12,9 +12,14 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QObject>
 
+#include <optional>
+
+#include "GeoZonePlanAudit.h"
+
 class GeoZoneAuthorisations;
 
-/// What mission checks plan the flight for: its start time and the authorisations the operator holds
+/// What mission checks plan the flight for: its start time and the authorisations the operator holds, and the geozone
+/// data the open plan was saved with, see GeoZonePlanAudit
 class GeoZonePlanning : public QObject
 {
     Q_OBJECT
@@ -33,10 +38,16 @@ public:
     Q_INVOKABLE void clearPlannedStart() { setPlannedStart(QDateTime()); }
     GeoZoneAuthorisations *authorisations() const { return _authorisations; }
 
+    /// Geozone data the open plan was saved with, nothing for plans without it, like new or older plans
+    const std::optional<GeoZonePlanAudit::Record> &planAudit() const { return _planAudit; }
+    void setPlanAudit(const std::optional<GeoZonePlanAudit::Record> &planAudit);
+
 signals:
     void plannedStartChanged();
+    void planAuditChanged();
 
 private:
     QDateTime _plannedStart;
+    std::optional<GeoZonePlanAudit::Record> _planAudit;
     GeoZoneAuthorisations *_authorisations = nullptr;
 };

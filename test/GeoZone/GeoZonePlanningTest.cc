@@ -10,6 +10,7 @@
 #include "GeoZonePlanningTest.h"
 #include "GeoZoneBriefing.h"
 #include "GeoZoneBriefingExport.h"
+#include "GeoZonePlanAudit.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestHelpers.h"
@@ -1319,6 +1320,114 @@ void GeoZonePlanningTest::_testBriefingExport()
     QVERIFY2(exporter.exportBriefing(dir.filePath(QStringLiteral("briefing.html"))), qPrintable(exporter.errorString()));
     QVERIFY(!exporter.exportBriefing(dir.filePath(QStringLiteral("missing/briefing.json"))));
     QVERIFY(!exporter.errorString().isEmpty());
+}
+
+void GeoZonePlanningTest::_testPlanAudit()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    const QJsonObject zoneA = _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1000, 90), 200);
+    const QJsonObject zoneB = _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2500, 90), 200);
+    const QJsonObject zoneD = _circleFeature(QStringLiteral("D"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 0), 200);
+    const auto load = [&](const QJsonArray &features) {
+        QString errorString;
+        return manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString);
+    };
+    QVERIFY(load({ zoneA, zoneB, zoneD }));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(3500, 90), 2);
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    const auto relevant = [&check]() {
+        QStringList identifiers;
+        for (const GeoZone *zone : check.relevantZones()) {
+            identifiers.append(zone->identifier());
+        }
+        identifiers.sort();
+        return identifiers;
+    };
+    QTRY_COMPARE(relevant(), (QStringList{ QStringLiteral("A"), QStringLiteral("B") }));
+
+    // Saved with the hashes of the zones the mission enters and the version of the source
+    QJsonObject planJson;
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    const QJsonObject audit = planJson[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("audit")].toObject();
+    QCOMPARE(audit[QStringLiteral("version")].toInt(), GeoZonePlanAudit::version);
+    QCOMPARE(audit[QStringLiteral("zones")].toArray().count(), 2);
+    QVERIFY(!audit[QStringLiteral("zones")].toArray()[0].toObject()[QStringLiteral("contentHash")].toString().isEmpty());
+    QCOMPARE(audit[QStringLiteral("sources")].toArray().count(), 1);
+    QVERIFY(manager.planning()->planAudit().has_value());
+    check.update();
+    QVERIFY(check.auditText().isEmpty());
+
+    // Reopened with the same data
+    manager.planning()->setPlanAudit(std::nullopt);
+    GeoZonePlanData::load(planJson, &manager);
+    QVERIFY(manager.planning()->planAudit().has_value());
+    check.update();
+    QVERIFY(check.auditText().isEmpty());
+
+    // Editing the mission into a zone published before isn't a change of the data
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 0), 3);
+    QTRY_VERIFY(relevant().contains(QStringLiteral("D")));
+    QVERIFY(check.auditText().isEmpty());
+    missionController->removeVisualItem(3);
+    QTRY_COMPARE(relevant(), (QStringList{ QStringLiteral("A"), QStringLiteral("B") }));
+
+    // A zone whose geometry changed
+    const QJsonObject largerA = _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1000, 90), 250);
+    QVERIFY(load({ largerA, zoneB, zoneD }));
+    check.update();
+    QVERIFY2(check.auditText().contains(QStringLiteral("1 zone(s) modified")), qPrintable(check.auditText()));
+    QVERIFY(check.auditText().contains(QStringLiteral("1 source(s) updated")));
+    QVERIFY2(check.auditDetails().contains(QStringLiteral("Modified: A (Authorisation required)")), qPrintable(check.auditDetails().join(QChar(u'\n'))));
+
+    // A zone removed and a new one on the path
+    const QJsonObject zoneE = _circleFeature(QStringLiteral("E"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1800, 90), 100);
+    QVERIFY(load({ largerA, zoneD, zoneE }));
+    check.update();
+    QVERIFY(check.auditText().contains(QStringLiteral("1 new")));
+    QVERIFY(check.auditText().contains(QStringLiteral("1 removed")));
+    QVERIFY(check.auditDetails().contains(QStringLiteral("Removed: B (Prohibited)")));
+    QVERIFY(check.auditDetails().contains(QStringLiteral("New: E (Prohibited)")));
+
+    // Acknowledged until the plan is opened again, the file keeps the data it was saved with
+    check.acknowledgeAudit();
+    check.update();
+    QVERIFY(check.auditText().isEmpty());
+    GeoZonePlanData::load(planJson, &manager);
+    check.update();
+    QVERIFY(!check.auditText().isEmpty());
+
+    // Saving again records the current data
+    QJsonObject resaved;
+    GeoZonePlanData::save(&masterController, resaved, &manager);
+    check.update();
+    QVERIFY(check.auditText().isEmpty());
+    GeoZonePlanData::load(resaved, &manager);
+    check.update();
+    QVERIFY(check.auditText().isEmpty());
+
+    // Plans without the audit load silently
+    QJsonObject legacy = planJson;
+    QJsonObject legacyZones = legacy[QString(GeoZonePlanData::jsonKey)].toObject();
+    legacyZones.remove(QStringLiteral("audit"));
+    legacy[QString(GeoZonePlanData::jsonKey)] = legacyZones;
+    GeoZonePlanData::load(legacy, &manager);
+    QVERIFY(!manager.planning()->planAudit().has_value());
+    check.update();
+    QVERIFY(check.auditText().isEmpty());
+    GeoZonePlanData::load(planJson, &manager);
+    GeoZonePlanData::load(QJsonObject(), &manager);
+    QVERIFY(!manager.planning()->planAudit().has_value());
 }
 
 void GeoZonePlanningTest::_testRoutePlanner()

@@ -10,11 +10,16 @@
 #include "GeoZonePlanData.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneManager.h"
+#include "GeoZonePlanAudit.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneSource.h"
+#include "GeoZoneSourceRepository.h"
 #include "PlanMasterController.h"
 
 #include <QtCore/QJsonArray>
+
+#include <algorithm>
 
 namespace GeoZonePlanData {
 
@@ -22,6 +27,7 @@ namespace {
 
 constexpr const char *plannedStartKey = "plannedStart";
 constexpr const char *authorisationsKey = "authorisations";
+constexpr const char *auditKey = "audit";
 
 } // namespace
 
@@ -33,8 +39,12 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
         json.insert(plannedStartKey, manager->planning()->plannedStart().toUTC().toString(Qt::ISODate));
     }
 
+    // Without geozone data there is nothing to audit
+    const QList<const GeoZoneSource*> sources = manager->repository()->sourceList();
+    const bool audit = std::any_of(sources.cbegin(), sources.cend(), [](const GeoZoneSource *source) { return source->enabled() && source->loaded(); });
+
     QJsonArray authorisations;
-    if ((manager->planning()->authorisations()->count() > 0) && planController) {
+    if (planController && (audit || (manager->planning()->authorisations()->count() > 0))) {
         GeoZoneMissionCheck check(manager);
         check.setMissionController(planController->missionController());
         check.update();
@@ -42,6 +52,11 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
             if (const GeoZoneAuthorisation *const authorisation = manager->planning()->authorisations()->find(zone)) {
                 authorisations.append(authorisation->toJson());
             }
+        }
+        if (audit) {
+            const GeoZonePlanAudit::Record record = check.auditRecord();
+            json.insert(auditKey, record.toJson());
+            manager->planning()->setPlanAudit(record);
         }
     }
     if (!authorisations.isEmpty()) {
@@ -70,6 +85,9 @@ void load(const QJsonObject &planJson, GeoZoneManager *manager)
     }
     // Permits are the operator's, so those of a plan from elsewhere are only added when accepted
     manager->planning()->authorisations()->offer(authorisations);
+
+    // Older plans don't have the data they were saved with
+    manager->planning()->setPlanAudit(GeoZonePlanAudit::Record::fromJson(json.value(auditKey).toObject()));
 }
 
 } // namespace GeoZonePlanData

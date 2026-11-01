@@ -16,18 +16,18 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Plan View banner warning when the mission enters restricted geozones, centered between leftLimit and rightLimit.
-/// Exports the geozone briefing of the mission, see exportBriefing().
+/// Plan View banner warning when the mission enters restricted geozones or the geozone data changed since the plan was
+/// saved, centered between leftLimit and rightLimit. Exports the geozone briefing of the mission, see exportBriefing().
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, contingencyLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, buttonRow.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(warningLabel.implicitWidth, contingencyLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, auditLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, buttonRow.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
-    border.color:   (missionCheck.warningText !== "" || _outdatedText !== "") ? qgcPal.warningText : qgcPal.text
+    border.color:   (missionCheck.warningText !== "" || _outdatedText !== "" || missionCheck.auditText !== "") ? qgcPal.warningText : qgcPal.text
     z:              QGroundControl.zOrderWidgets
-    visible:        missionCheck.warningText !== "" || missionCheck.contingencyText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== "" || _pendingAuthorisations.length > 0
+    visible:        missionCheck.warningText !== "" || missionCheck.contingencyText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== "" || _pendingAuthorisations.length > 0 || missionCheck.auditText !== ""
 
     required property var   missionController
     required property var   map                 ///< Fitted to the crossed zones when the banner is clicked
@@ -157,6 +157,34 @@ Rectangle {
             text:                   control._outdatedText
             textFormat:             Text.PlainText
             visible:                text !== ""
+        }
+
+        // The zones or sources changed since the plan was saved
+        QGCLabel {
+            id:                     auditLabel
+            width:                  parent.width
+            wrapMode:               Text.WordWrap
+            horizontalAlignment:    Text.AlignHCenter
+            color:                  qgcPal.warningText
+            text:                   check.auditText
+            textFormat:             Text.PlainText
+            visible:                text !== ""
+        }
+
+        Row {
+            anchors.horizontalCenter:   parent.horizontalCenter
+            spacing:                    control._margin
+            visible:                    auditLabel.visible
+
+            QGCButton {
+                text:       qsTr("Details")
+                onClicked:  mainWindow.showMessageDialog(qsTr("Geozone Data Changes"), control._plainText(check.auditDetails.join("\n")))
+            }
+
+            QGCButton {
+                text:       qsTr("Acknowledge")
+                onClicked:  check.acknowledgeAudit()
+            }
         }
 
         QGCLabel {

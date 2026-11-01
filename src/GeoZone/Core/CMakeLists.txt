@@ -68,6 +68,8 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneFences.h
     Evaluation/GeoZonePathEvaluator.cc
     Evaluation/GeoZonePathEvaluator.h
+    Evaluation/GeoZonePlanAudit.cc
+    Evaluation/GeoZonePlanAudit.h
     Evaluation/GeoZoneReturnModel.cc
     Evaluation/GeoZoneReturnModel.h
     Evaluation/GeoZoneSourceVersion.cc
