@@ -184,6 +184,23 @@ void mergePages(const QString &filePath, const QStringList &pagePaths)
 
 } // namespace
 
+bool GeoZoneLoader::parse(const QByteArray &content, GeoZoneParser::Result &result, QString &errorString, GeoZoneParser::Format formatHint,
+                          const QString &language, qint64 maxBytes)
+{
+    if (!content.startsWith("PK\x03\x04")) {
+        return GeoZoneParser::parse(content, result, errorString, formatHint, language);
+    }
+
+    // Packages split into several files are loaded together
+    result = GeoZoneParser::Result();
+    errorString.clear();
+    const QList<GeoZoneZip::File> files = GeoZoneZip::files(content, kZipSuffixes, maxBytes, errorString);
+    if (files.isEmpty()) {
+        return false;
+    }
+    return parseFiles(files, result, errorString, formatHint, language);
+}
+
 GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &store)
 {
     Result loadResult;
@@ -216,20 +233,9 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
         content = file.readAll();
     }
 
+    // Zip archives are read from the mapped file
     QString parseError;
-    bool parsed = false;
-    if (content.startsWith("PK\x03\x04")) {
-        // Read from the mapped archive. Packages split into several files are loaded together.
-        QString extractError;
-        const QList<GeoZoneZip::File> files = GeoZoneZip::files(content, kZipSuffixes, GeoZoneDownloader::defaultMaxBytes, extractError);
-        if (files.isEmpty()) {
-            loadResult.errorString = extractError;
-            return loadResult;
-        }
-        parsed = parseFiles(files, loadResult.result, parseError, job.formatHint, job.language);
-    } else {
-        parsed = GeoZoneParser::parse(content, loadResult.result, parseError, job.formatHint, job.language);
-    }
+    const bool parsed = parse(content, loadResult.result, parseError, job.formatHint, job.language);
     content.clear();
     if (mapped) {
         (void) file.unmap(mapped);

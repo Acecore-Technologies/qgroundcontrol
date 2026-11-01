@@ -108,3 +108,60 @@ jobs:
             status=1
           fi
           exit $status
+
+  # Fuzzes the parsers with libFuzzer for a minute each, building only the GeoZoneCore library and the fuzz targets
+  fuzz:
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      QT_VERSION: 6.8.3
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build zlib1g-dev
+
+      - name: Install Qt for Linux (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          dir: ${{ runner.temp }}
+          modules: qtpositioning
+          cache: true
+
+      - name: Build
+        run: |
+          cmake -S test/GeoZone/fuzz -B ${{ runner.temp }}/fuzz -G Ninja -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+                -DCMAKE_PREFIX_PATH=${{ env.QT_ROOT_DIR }}
+          cmake --build ${{ runner.temp }}/fuzz
+
+      - name: Fuzz
+        working-directory: ${{ runner.temp }}/fuzz
+        run: |
+          status=0
+          for target in Json Xml Zip; do
+            corpus=$(echo $target | tr '[:upper:]' '[:lower:]')
+            mkdir -p work/$corpus crashes
+            ./GeoZoneFuzz$target -max_total_time=60 -timeout=10 -rss_limit_mb=4096 -artifact_prefix=crashes/$corpus- \
+                work/$corpus corpus/$corpus || status=1
+          done
+          exit $status
+
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geozone-fuzz-crashes
+          path: ${{ runner.temp }}/fuzz/crashes

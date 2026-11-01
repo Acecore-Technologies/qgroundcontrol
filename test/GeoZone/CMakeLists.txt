@@ -67,3 +67,8 @@ qt_add_resources(GeoZoneCoreTest "geozone_core_test_resources"
 
 add_test(NAME GeoZoneCoreTest COMMAND GeoZoneCoreTest)
 add_dependencies(check GeoZoneCoreTest)
+
+option(GEOZONE_FUZZ "Build the fuzz targets of the geozone parsers, libFuzzer targets with clang" OFF)
+if(GEOZONE_FUZZ)
+    add_subdirectory(fuzz)
+endif()
