@@ -303,3 +303,5 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 - Return and contingency paths are estimates, see [Return and Contingency Paths](#return-and-contingency-paths).
 - GeoFences made from zones have no altitude limits and no holes, and the ArduPilot fence storage is estimated.
 - Secrets of services are stored unencrypted in the settings, and only SHA-256 hashes are checked, not signatures.
+
+Developers can find the architecture of the geozone module in the [Geozones developer guide](../../qgc-dev-guide/geozones.md).

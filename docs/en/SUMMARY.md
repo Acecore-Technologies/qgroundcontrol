@@ -96,6 +96,7 @@
     - [Plan View](qgc-dev-guide/views/plan.md)
       - [Dynamic UI for mission item editing](qgc-dev-guide/plan/mission_command_tree.md)
     - [Fly View](qgc-dev-guide/views/fly.md)
+  - [Geozones](qgc-dev-guide/geozones.md)
   - [File Formats](qgc-dev-guide/file_formats/index.md)
     - [Parameters](qgc-dev-guide/file_formats/parameters.md)
     - [Plan](qgc-dev-guide/file_formats/plan.md)
