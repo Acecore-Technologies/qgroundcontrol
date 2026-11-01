@@ -9,6 +9,7 @@
 
 #include "GeoZoneFlightTest.h"
 #include "GeoZoneGeometryTest.h"
+#include "GeoZoneIntentTest.h"
 #include "GeoZoneManagerTest.h"
 #include "GeoZoneMonitorTest.h"
 #include "GeoZoneParserTest.h"
@@ -21,6 +22,7 @@ namespace {
 
 const UnitTestWrapper<GeoZoneFlightTest> geoZoneFlightTest(QStringLiteral("GeoZoneFlightTest"), false);
 const UnitTestWrapper<GeoZoneGeometryTest> geoZoneGeometryTest(QStringLiteral("GeoZoneGeometryTest"), false);
+const UnitTestWrapper<GeoZoneIntentTest> geoZoneIntentTest(QStringLiteral("GeoZoneIntentTest"), false);
 const UnitTestWrapper<GeoZoneManagerTest> geoZoneManagerTest(QStringLiteral("GeoZoneManagerTest"), false);
 const UnitTestWrapper<GeoZoneMonitorTest> geoZoneMonitorTest(QStringLiteral("GeoZoneMonitorTest"), false);
 const UnitTestWrapper<GeoZoneParserTest> geoZoneParserTest(QStringLiteral("GeoZoneParserTest"), false);

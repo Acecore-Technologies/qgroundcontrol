@@ -4,6 +4,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneFlightTest.h
         GeoZoneGeometryTest.cc
         GeoZoneGeometryTest.h
+        GeoZoneIntentTest.cc
+        GeoZoneIntentTest.h
         GeoZoneManagerTest.cc
         GeoZoneManagerTest.h
         GeoZoneMonitorTest.cc
@@ -24,6 +26,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_
 # Registered with UnitTest in GeoZoneUnitTests.cc
 add_qgc_test(GeoZoneFlightTest)
 add_qgc_test(GeoZoneGeometryTest)
+add_qgc_test(GeoZoneIntentTest)
 add_qgc_test(GeoZoneManagerTest)
 add_qgc_test(GeoZoneMonitorTest)
 add_qgc_test(GeoZoneParserTest)
@@ -46,11 +49,13 @@ qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_test_resources"
     FILES ${GEOZONE_TEST_DATA}
 )
 
-# The tests of the parsers, the geometry and the return model also run headless, linked with the GeoZoneCore library only
+# The tests of the parsers, the geometry, the operational intent and the return model also run headless, linked with the GeoZoneCore library only
 qt_add_executable(GeoZoneCoreTest
     GeoZoneCoreTestMain.cc
     GeoZoneGeometryTest.cc
     GeoZoneGeometryTest.h
+    GeoZoneIntentTest.cc
+    GeoZoneIntentTest.h
     GeoZoneParserTest.cc
     GeoZoneParserTest.h
     GeoZoneReturnTest.cc

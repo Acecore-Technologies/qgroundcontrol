@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneGeometryTest.h"
+#include "GeoZoneIntentTest.h"
 #include "GeoZoneParserTest.h"
 #include "GeoZoneReturnTest.h"
 
@@ -29,6 +30,10 @@ int main(int argc, char *argv[])
     }
     {
         GeoZoneGeometryTest test;
+        status |= QTest::qExec(&test, argc, argv);
+    }
+    {
+        GeoZoneIntentTest test;
         status |= QTest::qExec(&test, argc, argv);
     }
     {
