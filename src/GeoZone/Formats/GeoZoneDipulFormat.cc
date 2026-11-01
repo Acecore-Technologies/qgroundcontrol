@@ -151,6 +151,7 @@ class GeoZoneDipulFormat : public GeoZoneFormat
 public:
     GeoZoneParser::Format format() const final { return GeoZoneParser::Format::Dipul; }
     QString name() const final { return QStringLiteral("DiPUL"); }
+    int detectionOrder() const final { return 20; }
     bool detect(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint) const final
     {
         if (features.isEmpty()) {
@@ -171,8 +172,4 @@ public:
 
 } // namespace
 
-const GeoZoneFormat *GeoZoneFormat::dipulFormat()
-{
-    static const GeoZoneDipulFormat instance;
-    return &instance;
-}
+GEOZONE_REGISTER_FORMAT(GeoZoneDipulFormat)

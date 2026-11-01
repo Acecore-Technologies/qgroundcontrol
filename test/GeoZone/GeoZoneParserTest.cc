@@ -476,6 +476,10 @@ void GeoZoneParserTest::_testParseErrors()
     QVERIFY(!GeoZoneParser::parse(R"({ "features": [ { "identifier": "X", "restriction": "PROHIBITED", "geometry": [] } ] })", result, errorString));
     QCOMPARE(result.skippedFeatures, 1);
 
+    // Other feature lists aren't taken for ED-269
+    QVERIFY(!GeoZoneParser::parse(R"({ "features": [ { "name": "Somewhere", "geometry": { "type": "Point", "coordinates": [8, 47] } } ] })", result, errorString));
+    QVERIFY(errorString.startsWith(QStringLiteral("The file is not in a supported geozone format.")));
+
     // Latitude out of range
     QVERIFY(!GeoZoneParser::parse(R"({ "type": "FeatureCollection", "features": [ { "type": "Feature", "properties": { "type": "PROHIBITED" },
         "geometry": { "type": "Polygon", "coordinates": [ [ [0, 95], [1, 95], [1, 96], [0, 95] ] ] } } ] })", result, errorString));

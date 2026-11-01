@@ -53,6 +53,7 @@ class GeoZoneFranceUasFormat : public GeoZoneFormat
 public:
     GeoZoneParser::Format format() const final { return GeoZoneParser::Format::FranceUas; }
     QString name() const final { return QStringLiteral("IGN UAS"); }
+    int detectionOrder() const final { return 30; }
     bool detect(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint) const final
     {
         if (features.isEmpty()) {
@@ -73,8 +74,4 @@ public:
 
 } // namespace
 
-const GeoZoneFormat *GeoZoneFormat::franceUasFormat()
-{
-    static const GeoZoneFranceUasFormat instance;
-    return &instance;
-}
+GEOZONE_REGISTER_FORMAT(GeoZoneFranceUasFormat)

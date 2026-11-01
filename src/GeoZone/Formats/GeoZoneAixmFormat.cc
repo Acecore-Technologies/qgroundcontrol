@@ -268,14 +268,11 @@ class GeoZoneAixmFormat : public GeoZoneFormat
 public:
     GeoZoneParser::Format format() const final { return GeoZoneParser::Format::Aixm; }
     QString name() const final { return QStringLiteral("AIXM 5.1"); }
+    int detectionOrder() const final { return 40; }
     bool isXml() const final { return true; }
     bool parseXml(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString) const final { return _parseAixm(xml, result, errorString); }
 };
 
 } // namespace
 
-const GeoZoneFormat *GeoZoneFormat::aixmFormat()
-{
-    static const GeoZoneAixmFormat instance;
-    return &instance;
-}
+GEOZONE_REGISTER_FORMAT(GeoZoneAixmFormat)

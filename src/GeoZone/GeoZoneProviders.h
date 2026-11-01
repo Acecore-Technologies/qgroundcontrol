@@ -61,7 +61,7 @@ public:
     static QString datasetLink(const QString &url, const QByteArray &data, const QDate &today);
 
     /// @return true for formats of short-lived restrictions, refreshed and outdated after hours rather than days
-    static bool isLive(GeoZoneParser::Format format) { return format == GeoZoneParser::Format::FaaTfr; }
+    static bool isLive(GeoZoneParser::Format format);
 
 private:
     static QString _bboxQuery(const QGeoRectangle &area, const QString &suffix = QString());

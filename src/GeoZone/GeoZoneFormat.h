@@ -15,7 +15,8 @@
 #include <QtCore/QJsonObject>
 
 /// A geozone data format, which recognizes its documents and converts their features into zones. Formats are stateless
-/// and used from worker threads. Adding a format takes a class in the Formats directory and an entry in formats().
+/// and used from worker threads. Adding a format takes a class in the Formats directory registered with
+/// GEOZONE_REGISTER_FORMAT, a GeoZoneParser::Format value, and its services in GeoZoneProviders::services().
 class GeoZoneFormat
 {
 public:
@@ -24,6 +25,11 @@ public:
     virtual GeoZoneParser::Format format() const = 0;
     /// Short name of the format, like "ED-318"
     virtual QString name() const = 0;
+    /// Formats are detected in increasing order. Those recognized by their feature properties come before ED-318,
+    /// whose FeatureCollection type they share.
+    virtual int detectionOrder() const = 0;
+    /// @return true for short-lived restrictions, refreshed and outdated after hours rather than days
+    virtual bool isLive() const { return false; }
 
     /// XML formats parse whole documents with parseXml(), JSON formats one feature at a time
     virtual bool isXml() const { return false; }
@@ -39,7 +45,7 @@ public:
     /// Services answering with an empty list when no zones apply, unlike files which must have zones
     virtual bool acceptsEmpty() const { return false; }
 
-    /// @return The formats, in the order in which they are detected. ED-269 is last, as the fallback.
+    /// @return The registered formats, in the order in which they are detected
     static const QList<const GeoZoneFormat*> &formats();
     /// @return The format, or null for Unknown
     static const GeoZoneFormat *find(GeoZoneParser::Format format);
@@ -47,10 +53,19 @@ public:
     /// @return true for the response of a web feature service whose features are all filtered out
     static bool isEmptyWfsResponse(const QJsonObject &root);
 
-    static const GeoZoneFormat *aixmFormat();
-    static const GeoZoneFormat *dipulFormat();
-    static const GeoZoneFormat *ed269Format();
-    static const GeoZoneFormat *ed318Format();
-    static const GeoZoneFormat *faaTfrFormat();
-    static const GeoZoneFormat *franceUasFormat();
+    /// Adds a format to formats() when the program starts, see GEOZONE_REGISTER_FORMAT
+    struct Registration {
+        explicit Registration(const GeoZoneFormat *format);
+    };
+
+private:
+    static QList<const GeoZoneFormat*> &_registered();
 };
+
+/// Registers a format class with a static instance. Formats are compiled into the application, so their
+/// registrations always run.
+#define GEOZONE_REGISTER_FORMAT(Class) \
+    namespace { \
+    const Class s_##Class; \
+    const GeoZoneFormat::Registration s_##Class##Registration(&s_##Class); \
+    }

@@ -9,6 +9,8 @@
 
 #include "GeoZoneFormat.h"
 
+#include <algorithm>
+
 bool GeoZoneFormat::parseXml(const QByteArray &, GeoZoneParser::Result &, QString &) const
 {
     return false;
@@ -28,17 +30,25 @@ bool GeoZoneFormat::parseFeature(const QJsonObject &, GeoZone::Data &) const
     return false;
 }
 
+QList<const GeoZoneFormat*> &GeoZoneFormat::_registered()
+{
+    static QList<const GeoZoneFormat*> registered;
+    return registered;
+}
+
+GeoZoneFormat::Registration::Registration(const GeoZoneFormat *format)
+{
+    _registered().append(format);
+}
+
 const QList<const GeoZoneFormat*> &GeoZoneFormat::formats()
 {
-    // Formats identified by their feature properties come before ED-318, whose FeatureCollection type they share
-    static const QList<const GeoZoneFormat*> formats = {
-        faaTfrFormat(),
-        dipulFormat(),
-        franceUasFormat(),
-        aixmFormat(),
-        ed318Format(),
-        ed269Format(),
-    };
+    // Registered while the program starts, before worker threads use them
+    static const QList<const GeoZoneFormat*> formats = []() {
+        QList<const GeoZoneFormat*> sorted = _registered();
+        std::stable_sort(sorted.begin(), sorted.end(), [](const GeoZoneFormat *a, const GeoZoneFormat *b) { return a->detectionOrder() < b->detectionOrder(); });
+        return sorted;
+    }();
     return formats;
 }
 

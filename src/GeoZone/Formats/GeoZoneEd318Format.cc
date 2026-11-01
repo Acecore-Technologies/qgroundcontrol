@@ -66,6 +66,7 @@ class GeoZoneEd318Format : public GeoZoneFormat
 public:
     GeoZoneParser::Format format() const final { return GeoZoneParser::Format::ED318; }
     QString name() const final { return QStringLiteral("ED-318"); }
+    int detectionOrder() const final { return 50; }
     bool detect(const QJsonObject &root, const QJsonArray &, GeoZoneParser::Format) const final
     {
         return root.value(QStringLiteral("type")).toString() == QStringLiteral("FeatureCollection");
@@ -82,8 +83,4 @@ public:
 
 } // namespace
 
-const GeoZoneFormat *GeoZoneFormat::ed318Format()
-{
-    static const GeoZoneEd318Format instance;
-    return &instance;
-}
+GEOZONE_REGISTER_FORMAT(GeoZoneEd318Format)

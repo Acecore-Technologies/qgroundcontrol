@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneProviders.h"
+#include "GeoZoneFormat.h"
 
 #include <QtCore/QUrl>
 
@@ -173,6 +174,12 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
         }
     }
     return QString();
+}
+
+bool GeoZoneProviders::isLive(GeoZoneParser::Format format)
+{
+    const GeoZoneFormat *const found = GeoZoneFormat::find(format);
+    return found && found->isLive();
 }
 
 QString GeoZoneProviders::_bboxQuery(const QGeoRectangle &area, const QString &suffix)

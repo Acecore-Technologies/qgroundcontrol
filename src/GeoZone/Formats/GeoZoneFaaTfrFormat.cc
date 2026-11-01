@@ -49,6 +49,8 @@ class GeoZoneFaaTfrFormat : public GeoZoneFormat
 public:
     GeoZoneParser::Format format() const final { return GeoZoneParser::Format::FaaTfr; }
     QString name() const final { return QStringLiteral("FAA TFR"); }
+    bool isLive() const final { return true; }
+    int detectionOrder() const final { return 10; }
     bool detect(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint) const final
     {
         if (features.isEmpty()) {
@@ -69,8 +71,4 @@ public:
 
 } // namespace
 
-const GeoZoneFormat *GeoZoneFormat::faaTfrFormat()
-{
-    static const GeoZoneFaaTfrFormat instance;
-    return &instance;
-}
+GEOZONE_REGISTER_FORMAT(GeoZoneFaaTfrFormat)

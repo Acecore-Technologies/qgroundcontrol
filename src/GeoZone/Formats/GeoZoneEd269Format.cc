@@ -11,6 +11,8 @@
 #include "GeoZoneParser.h"
 #include "GeoZoneParserUtils.h"
 
+#include <algorithm>
+
 using namespace GeoZoneParserUtils;
 
 namespace {
@@ -42,8 +44,24 @@ class GeoZoneEd269Format : public GeoZoneFormat
 public:
     GeoZoneParser::Format format() const final { return GeoZoneParser::Format::ED269; }
     QString name() const final { return QStringLiteral("ED-269"); }
-    /// The fallback, ED-269 has no identifying root members
-    bool detect(const QJsonObject &, const QJsonArray &, GeoZoneParser::Format) const final { return true; }
+    int detectionOrder() const final { return 60; }
+    /// ED-269 has no identifying root members, its features have a list of geometries with horizontal projections
+    bool detect(const QJsonObject &, const QJsonArray &features, GeoZoneParser::Format) const final
+    {
+        constexpr qsizetype checkedFeatures = 20;
+        for (qsizetype i = 0; i < (std::min)(features.count(), checkedFeatures); i++) {
+            const QJsonObject feature = features[i].toObject();
+            const QJsonValue geometry = feature.value(QStringLiteral("geometry"));
+            const QJsonArray geometries = geometry.toArray();
+            if (!geometries.isEmpty() && geometries.first().toObject().contains(QStringLiteral("horizontalProjection"))) {
+                return true;
+            }
+            if (geometry.isArray() && feature.contains(QStringLiteral("identifier")) && feature.contains(QStringLiteral("restriction"))) {
+                return true;
+            }
+        }
+        return false;
+    }
     void readMetadata(const QJsonObject &root, GeoZoneParser::Result &result) const final
     {
         result.title = _text(root.value(QStringLiteral("title")));
@@ -53,8 +71,4 @@ public:
 
 } // namespace
 
-const GeoZoneFormat *GeoZoneFormat::ed269Format()
-{
-    static const GeoZoneEd269Format instance;
-    return &instance;
-}
+GEOZONE_REGISTER_FORMAT(GeoZoneEd269Format)
