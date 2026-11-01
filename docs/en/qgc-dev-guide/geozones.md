@@ -18,7 +18,7 @@ The module has two layers:
 | `src/GeoZone` | The application layer: `GeoZoneModule` (the entry points), `GeoZoneManager` (the singleton publishing the zones and their queries to C++ and QML), `GeoZoneSettings` with `GeoZone.SettingsGroup.json`. |
 | `src/GeoZone/Map` | Map display: `GeoZoneMapModel`, `GeoZoneMapLayer` (scene graph rendering), `GeoZoneDisplay`, `GeoZoneNearbyModel`, the zone details, legend and search. |
 | `src/GeoZone/Planning` | Plan View: `GeoZoneMissionPath` (see [Mission Path](#mission-path)), `GeoZoneMissionWorker`, `GeoZoneMissionCheck`, `GeoZoneProfile`, `GeoZoneRoutePlanner`, `GeoZoneBriefingExport`, `GeoZoneFenceImporter` with `GeoZoneFenceUpload` (the upload and read back of the fence, a state machine from `Idle` through `Sending` and `Verifying` to `Verified`, `Mismatch`, `Failed` or `Aborted`), `GeoZoneFenceTags`, `GeoZoneGuidedCheck` (the checks of the guided commands, with the returns from `GeoZoneReturnModel` and the mission from `GeoZoneMissionPath`), `GeoZonePlanning` and `GeoZonePlanData` (the `geoZones` section of plan files). |
-| `src/GeoZone/Flight` | Fly View: `GeoZoneMonitor`, `GeoZoneVehicleMonitor`, `GeoZoneAlertArbiter`, `GeoZoneAlertHistory`, `GeoZoneAlertLog`, the indicator, alert popup, altitude strip and map layer. |
+| `src/GeoZone/Flight` | Fly View: `GeoZoneMonitor`, `GeoZoneVehicleMonitor`, `GeoZoneActiveVehicleView`, `GeoZoneAlertArbiter`, `GeoZoneTrafficMonitor`, `GeoZoneAlertHistory`, `GeoZoneAlertLog`, the indicator, alert popup, altitude strip and map layer. See [Flight Alerts](#flight-alerts). |
 | `src/GeoZone/Settings` | The Geozones page of the Application Settings. |
 
 The QML of each feature is next to its C++, in the `QGroundControl.GeoZone` QML module (`GeoZoneModule` in `src/GeoZone/CMakeLists.txt`).
@@ -53,7 +53,7 @@ The core never includes _QGroundControl_ headers. What it needs from the applica
                                                    ▼  catalog copies
    GeoZonePathEvaluator: GeoZoneMissionCheck, GeoZoneProfile, GeoZoneRouteSearch, GeoZoneGuidedCheck,
                          GeoZoneBriefing, GeoZoneFences
-   GeoZoneMonitor ─► GeoZoneVehicleMonitor ─► GeoZoneAlertTracker, GeoZoneAlertArbiter
+   GeoZoneMonitor ─► GeoZoneVehicleMonitor, GeoZoneTrafficMonitor ─► GeoZoneAlertTracker; GeoZoneAlertArbiter
    GeoZoneMapModel ─► GeoZoneMapLayer
 ```
 
@@ -113,6 +113,21 @@ There is one policy for what isn't known, in `GeoZoneVertical::bound()`: a limit
 The units use the planar vector helpers of `GeoZoneVector.h` shared with the geometry.
 
 The work of a search is bounded. Testing the edges from each node to all others takes time growing with the square of the nodes, a minute of a debug build for a maze of 1200 zones. Graphs of more than 1000 nodes are therefore first searched along the edges to the near nodes only (those of the grid cells around a node, at least 32 nodes of 8 obstacles, and the end), combining edges like Theta* where a node sees the one before the previous, and the path is then straightened; all edges are searched when that finds no path, except by the search of detours up to 1.3 times the leg, which then leaves it to the search with the full length limit. Each graph counts its work, the edges and nodes considered and the visibility tests weighted by 16, and its searches stop with `Failure::SearchLimit` at `Settings::maxSearchWork`, as they do after 64 rounds or at 20000 nodes. `GeoZonePlanningTest::_testRouteMaze` checks the time, the work and the length of a detour through a maze, which `GeoZoneBenchmark::_benchmarkRouteSearchMaze` measures.
+
+## Flight Alerts {#flight-alerts}
+
+`GeoZoneMonitor` (the `GeoZoneMonitor` QML singleton) monitors the vehicles on the GUI thread:
+
+- Each `Vehicle` gets a `GeoZoneVehicleMonitor`, keyed by the object (a reconnecting vehicle starts clean) and by a `key` unique for the session. Positions which don't come from a `Vehicle`, like those of tests and tools, are passed to `evaluate(position, vehicleId)` and get a monitor per vehicle id. `evaluateVehicles()` runs every second: `GeoZoneVehicleMonitor::update()` evaluates the vehicle's position with its `GeoZoneAlertTracker`, or marks the position unavailable when the coordinate is invalid, the link lost or the position stale. It also records where the terrain below the vehicle comes from (`TerrainSource`): the vehicle's height above terrain, the ground for a disarmed vehicle, or `GeoZoneTerrain` (`altitudeDegraded()`).
+- `GeoZoneActiveVehicleView` (`GeoZoneMonitor.activeVehicle` in QML) publishes the state of the active vehicle's monitor: nearby zones (also as `nearbyModel`), vertical bands, altitude and terrain, `positionUnavailable` (the zones and bands are then stale), `altitudeDegraded`, the predicted entry and the fence status. The monitor points it at another `GeoZoneVehicleMonitor` with `setMonitor()`, which reconnects the signals and emits `activeMonitorChanged()` and every change signal, so QML binds to one object whatever vehicle is active.
+- Each alert is an `AlertEvent` (`Approach`, `Entry`, `PositionLost` or `Traffic`), emitted as `alertEvent()` for `GeoZoneAlertLog` and `GeoZoneAlertHistory`, as `alert()` for the popup, and submitted to the `GeoZoneAlertArbiter`.
+- `GeoZoneAlertArbiter` only keeps the state of the alerts and decides the announcements: the pending alerts, the breaches (entries into prohibited zones, repeated every 30 s until acknowledged or left), the mute, the zones muted per vehicle until it leaves them (`muteZone()`) and the vehicles whose position is lost, whose breaches are suspended. The monitor calls `tick()` after each evaluation, emits `alertRepeated()` for the repeats of the announcement and passes its text to the `GeoZoneMonitor::AudioSink` (`AudioOutput` in the application, `setAudioSink()` in tests) only when spoken alerts are on. So repeats, acknowledgements and mutes behave the same without speech.
+- When a vehicle's position becomes unavailable, the monitor suspends its breaches, doesn't pass the zones of its last position to `setInsideZones()`, and raises one `PositionLost` alert for the most restrictive nearby zone. The next position resumes the breaches, or ends them if the vehicle left. `positionLost(vehicleId)` does the same for position monitors.
+- `alertActions(alertId)` tells the popup what can be done about an alert: whether it is about the active vehicle, whether the vehicle is still inside the zone, whether the zone is muted and how far the vehicle climbs to be `climbClearance` above the zone's ceiling. The popup runs Hold, Return and Climb Above Ceiling through `globals.guidedControllerFlyView.confirmAction()`, the confirmation of the Fly View's own guided actions, and Mute Zone through `muteZone()`.
+- `GeoZoneTrafficMonitor` (`GeoZoneMonitor.traffic`) checks the traffic of `ADSBVehicleManager`, which the application monitor collects every 2 s while it is turned on, against the zones within the traffic radius of the active vehicle, with a `GeoZoneAlertTracker` per ICAO address. `evaluateTraffic()` takes the aircraft directly, as tests do. Entries become `Traffic` alerts whose severity is raised by `trafficSeverity`, so they are shown after those of the vehicles, and are only submitted to the arbiter when traffic alerts are spoken.
+- `GeoZoneAlertLog` buffers the alerts and writes them to the open file of the day every 2 s (`flush()` writes them at once), and deletes the files older than the retention setting when it starts a file.
+
+`GeoZoneMonitorTest` tests the arbiter, the speech, position loss, the alert actions, the traffic and the log with a fake clock and offline vehicles; `GeoZoneFlightTest::_testMockLinkVehicle()` flies a MockLink vehicle through the Zurich fixture, including a lost link.
 
 ## Adding a Format {#adding-a-format}
 

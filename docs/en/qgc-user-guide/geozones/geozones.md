@@ -263,9 +263,11 @@ Holes in zone polygons are also dropped. The ArduPilot fence storage is estimate
 
 ### Flight Alerts {#flight-alerts}
 
-While flying, _QGroundControl_ warns once (with a message and audio) when a connected vehicle comes within 100 m (or 30 m vertically, by default) of an active prohibited, authorisation required, conditional, unknown or U-space zone, or would enter it within 30 seconds at its current speed, direction and climb rate, and again when it enters the zone. Alerts based on the velocity give the time to entry, so fast vehicles are warned in time. The velocity is the one the vehicle sends with its position, or is estimated from its positions when it sends none. While a vehicle's link or position is lost, its alerts pause, since its last position isn't where it is, and the geozone indicator says so. Limits above ground use the vehicle's height above terrain, and the predicted path and guided commands use the terrain ahead where its data is loaded, so rising ground towards a zone counts. Where it isn't loaded, the terrain ahead is unknown rather than taken from the last known position, so zones with limits above ground count as reaching any altitude there. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude once the vehicle is armed; a disarmed vehicle is taken to be on the ground.
+While flying, _QGroundControl_ warns once (with a message and audio) when a connected vehicle comes within 100 m (or 30 m vertically, by default) of an active prohibited, authorisation required, conditional, unknown or U-space zone, or would enter it within 30 seconds at its current speed, direction and climb rate, and again when it enters the zone. Alerts based on the velocity give the time to entry, so fast vehicles are warned in time. The velocity is the one the vehicle sends with its position, or is estimated from its positions when it sends none. Limits above ground use the vehicle's height above terrain, and the predicted path and guided commands use the terrain ahead where its data is loaded, so rising ground towards a zone counts. Where it isn't loaded, the terrain ahead is unknown rather than taken from the last known position, so zones with limits above ground count as reaching any altitude there. When the vehicle sends no height above terrain, its height above ground is estimated from the terrain data of _QGroundControl_, which is less accurate: the altitude strip shows an **AGL estimated** badge and the indicator says so. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude once the vehicle is armed; a disarmed vehicle is taken to be on the ground.
 
-Every connected vehicle is monitored on its own, and alerts name the vehicle when several are connected. A vehicle which reconnects starts afresh, even with the same system id, so its alerts repeat. The geozone indicator in the Fly View toolbar turns red, orange, yellow or blue when the active vehicle is near or inside a zone, and is dimmed while no vehicle is monitored. Click it to see the nearby zones; expand it to change the display and flight alert settings.
+While a vehicle's link or position is lost, its alerts pause, since its last position isn't where it is. One alert names the most restrictive zone it was in or near: "Position lost inside geozone ..." or "Position lost near geozone ...". Its nearby zones and altitude strip keep showing its last position, marked **Stale** (a **?** badge on the indicator), and "Still inside geozone ..." isn't repeated meanwhile. When the position is back, the alerts resume: a vehicle still inside a prohibited zone is reminded at once, and one which left it is no longer.
+
+Every connected vehicle is monitored on its own, and alerts name the vehicle when several are connected. A vehicle which reconnects starts afresh, even with the same system id, so its alerts repeat. The geozone indicator in the Fly View toolbar turns red, orange, yellow or blue when the active vehicle is near or inside a zone, and is dimmed while no vehicle is monitored. Click it to see the nearby zones and, when it is checked, the [traffic](#traffic) in or near zones; expand it to change the display, flight alert and traffic settings.
 
 ### Guided Command Checks {#guided-command-checks}
 
@@ -277,13 +279,30 @@ Guided commands of the Fly View are checked too: the confirmation of **Go To Loc
 
 ### Spoken Alerts, Repeats and Muting {#spoken-alerts}
 
-Alerts are shown in a popup below the toolbar, the most restrictive zone first, and spoken. Alerts raised together, also by several vehicles, are spoken as one message naming the two most restrictive and counting the others ("..., and 2 more"). Spoken messages are at least 5 seconds apart, unless a more urgent alert comes: a more restrictive zone, or entering rather than approaching it. While a vehicle stays inside a prohibited zone, "Still inside geozone ..." is spoken and shown again every 30 seconds until the alert is acknowledged or the vehicle leaves the zone. **Acknowledge** in the popup acknowledges an alert, as do **Show** and **Acknowledge All** in the indicator. **Mute Alerts for 1 min** in the popup silences the spoken alerts for a minute (the indicator shows it, with **Unmute**); entering a prohibited zone is still announced once, and alerts raised while muted are not spoken later.
+Alerts are shown in a popup below the toolbar, the most restrictive zone first, and spoken unless **Speak flight alerts** is off. Alerts raised together, also by several vehicles, are spoken as one message naming the two most restrictive and counting the others ("..., and 2 more"). Spoken messages are at least 5 seconds apart, unless a more urgent alert comes: a more restrictive zone, or entering rather than approaching it. While a vehicle stays inside a prohibited zone, "Still inside geozone ..." is shown again, and spoken, every 30 seconds until the alert is acknowledged or the vehicle leaves the zone; the reminders are shown also when the alerts aren't spoken. **Acknowledge** in the popup acknowledges an alert, as do **Show** and **Acknowledge All** in the indicator. **Mute Alerts for 1 min** in the popup silences the alerts for a minute (the indicator shows it, with **Unmute**): they are still shown, but neither spoken nor repeated, except that entering a prohibited zone is still announced once, and alerts raised while muted are not spoken later.
+
+### Alert Actions {#alert-actions}
+
+When the popup shows alerts about the active vehicle while it flies, it offers:
+
+- **Hold** and **Return**: pause the vehicle or return it to launch.
+- **Climb Above Ceiling**, next to a zone with a known ceiling above the vehicle: change the altitude to 30 m above the ceiling, offered when that is within the maximum altitude of the guided altitude slider (_Fly View_ settings).
+
+Each opens the usual guided action confirmation of the Fly View, switching to it if needed, so the action is only sent once you confirm it with the slider; the climb sets the slider to the altitude above the ceiling, which you can still adjust.
+
+**Mute Zone**, next to a zone the vehicle is in, mutes that zone for that vehicle until it leaves the zone: its alerts are no longer shown, spoken or repeated, but still logged, and the indicator marks the zone **Muted**. The mute ends when the vehicle leaves the zone, so entering it again alerts again.
 
 ### Altitude Strip and Approach Path {#altitude-strip}
 
-While zones are above or below the active vehicle, a strip on the left of the Fly View shows their floors and ceilings with the vehicle's altitude, above the ground when the terrain is known.
+While zones are above or below the active vehicle, a strip on the left of the Fly View shows their floors and ceilings with the vehicle's altitude, above the ground when the terrain is known. It is dimmed and marked **Stale** while the vehicle's position is lost, and marked **AGL estimated** (with ≈ next to the height) when the height above ground comes from the terrain data of _QGroundControl_ rather than the vehicle.
 
 When the active vehicle would enter a zone within the approach alert time at its current velocity, the Fly View map draws its path to the entry point in the zone's color, with the zone name and the seconds left.
+
+### Traffic in Geozones {#traffic}
+
+With **Check traffic against geozones** on, the ADS-B and Remote ID aircraft received by _QGroundControl_ (see _Application Settings > ADSB Server_ and vehicles forwarding `ADSB_VEHICLE`) within the **Traffic check radius** of the active vehicle (10 km by default) are checked against the active zones every 2 seconds, like the vehicles, using the altitude they report. The expanded geozone indicator lists the aircraft in or near zones in a **Traffic in or near Geozones** section, with their callsign (or ICAO address), the most restrictive zone, whether they are inside or how far from it, and their altitude. Without terrain data below an aircraft, the ground below the active vehicle is used for limits above the ground. The closest 100 aircraft are checked.
+
+When an aircraft enters a zone, a low priority alert "Traffic ... entered geozone ..." is shown after the alerts of the vehicles and logged, but not spoken: **Traffic alerts** can turn these alerts off or also speak them.
 
 ### Vehicle Fence Breaches {#vehicle-fence-breaches}
 
@@ -291,7 +310,7 @@ When a vehicle reports a breach of its own fence (MAVLink `FENCE_STATUS`), _QGro
 
 ### Alert Log {#alert-log}
 
-Alerts are also appended to a `GeoZoneAlerts-<date>.csv` file per day (UTC) in the _Telemetry_ folder of the application load/save path, with the time, vehicle, position, altitude, terrain elevation, event, distance, zone and predicted time to entry, for reviewing flights.
+Alerts are also appended to a `GeoZoneAlerts-<date>.csv` file per day (UTC) in the _Telemetry_ folder of the application load/save path, with the time, vehicle, position, altitude, terrain elevation, event (`approaching`, `entered`, `position_lost` or `traffic_entered`), distance, zone, predicted time to entry and the aircraft of traffic alerts, for reviewing flights. Alerts are written to the file within 2 seconds. When a new file is started, the files older than **Keep alert logs** (30 days by default) are deleted.
 The indicator lists the **Recent Alerts** of the session, newest first, followed by those logged earlier the same day. Alerts not looked at yet are shown in bold and counted in a red badge on the indicator; **Acknowledge All** clears them. **Show** opens the details of the alert's zone and marks the vehicle position at the time of the alert on the map for two minutes (click the mark to remove it).
 
 ## Settings Reference {#settings-reference}
@@ -304,9 +323,13 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 | Flight Alerts | **Flight alerts** | On | | Turns the flight alerts and the nearby zones of the toolbar indicator on or off. |
 | Flight Alerts | **Speak flight alerts** | On | | Turns the audio of the alerts on or off. |
 | Flight Alerts | **Log flight alerts** | On | | Appends the alerts to the [CSV log](#alert-log). |
+| Flight Alerts | **Keep alert logs** | 30 days | 0–3650 days | How long the [CSV logs](#alert-log) are kept. 0 keeps them all. |
 | Flight Alerts | **Approach alert distance** | 100 m | 10–5000 m | How close horizontally the vehicle can come to a zone before it is alerted. |
 | Flight Alerts | **Approach alert height margin** | 30 m | 0–1000 m | How close below the floor or above the ceiling of a zone the vehicle can come before it is alerted. |
 | Flight Alerts | **Approach alert time** | 30 s | 0–600 s | How many seconds before entering a zone, at its current velocity, the vehicle is alerted. 0 turns these alerts off and alerts by distance only. |
+| Traffic | **Check traffic against geozones** | Off | | Lists the [ADS-B and Remote ID traffic](#traffic) in or near zones in the geozone indicator. |
+| Traffic | **Traffic check radius** | 10000 m | 500–100000 m | How far from the active vehicle traffic is checked. |
+| Traffic | **Traffic alerts** | Shown | Off, Shown, Shown and spoken | What happens when an aircraft enters a zone. |
 | Altitude Limits | **QNH** | 1013.25 hPa | 850–1100 hPa | The local sea level pressure (altimeter setting) converting flight levels to heights above mean sea level. The default is the standard pressure of flight levels. |
 | Data Updates | **Feed refresh interval** | 24 hours | 1–168 hours | How often feeds are downloaded again. |
 | Data Updates | **Live restrictions refresh interval** | 15 min | 5–240 min | How often feeds of temporary flight restrictions (TFRs) are downloaded again. |
