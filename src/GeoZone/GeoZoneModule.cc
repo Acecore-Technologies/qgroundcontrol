@@ -15,6 +15,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneFenceTags.h"
+#include "GeoZoneFenceUpload.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapLayer.h"
@@ -97,6 +98,7 @@ void registerQmlTypes()
     (void) qmlRegisterSingletonType<GeoZoneMonitor>(kUri, 1, 0, "GeoZoneMonitor", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneMonitor::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneFenceTags>(kUri, 1, 0, "GeoZoneFenceTags", [](QQmlEngine*, QJSEngine*) -> QObject* { return new GeoZoneFenceTags(); });
     (void) qmlRegisterUncreatableType<GeoZoneFenceTag>(kUri, 1, 0, "GeoZoneFenceTag", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneFenceUpload>(kUri, 1, 0, "GeoZoneFenceUpload", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneSettings>(kUri, 1, 0, "GeoZoneSettings", "Reference only");

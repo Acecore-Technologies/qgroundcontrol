@@ -2277,7 +2277,7 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
     GeoZoneFenceImporter importer;
     importer.setGeoFenceController(geoFenceController);
-    QVERIFY(!importer.canUpload());
+    QVERIFY(!importer.upload()->canUpload());
 
     // Without a vehicle the fence fits PX4 and ArduPilot copters, with the circle as a polygon. 80 polygon points don't.
     QSignalSpy selectionSpy(&importer, &GeoZoneFenceImporter::selectionChanged);
@@ -2369,7 +2369,8 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
         GeoFenceController *const geoFenceController = masterController.geoFenceController();
         GeoZoneFenceImporter importer;
         importer.setGeoFenceController(geoFenceController);
-        QVERIFY(importer.canUpload());
+        GeoZoneFenceUpload *const upload = importer.upload();
+        QVERIFY(upload->canUpload());
 
         // PX4 stores 64 points, the MockLink ArduCopter is estimated with 16 KB storage. Both store circles.
         importer.select(zones, 25);
@@ -2391,9 +2392,9 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
 
         // The fence is sent and read back
         importer.uploadToVehicle();
-        QCOMPARE(importer.uploadState(), GeoZoneFenceImporter::Uploading);
-        QTRY_COMPARE_WITH_TIMEOUT(importer.uploadState(), GeoZoneFenceImporter::UploadVerified, 15000);
-        QVERIFY2(importer.uploadMessage().startsWith(QStringLiteral("Verified")), qPrintable(importer.uploadMessage()));
+        QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
+        QVERIFY2(upload->message().startsWith(QStringLiteral("Verified")), qPrintable(upload->message()));
         GeoFenceManager *const manager = vehicle->geoFenceManager();
         QCOMPARE(manager->polygons().count(), 1);
         QCOMPARE(manager->circles().count(), 1);
@@ -2407,34 +2408,34 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
         // A vehicle without room for the fence rejects it
         _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailWriteRequest0ErrorAck, MAV_MISSION_NO_SPACE);
         importer.uploadToVehicle();
-        QTRY_COMPARE_WITH_TIMEOUT(importer.uploadState(), GeoZoneFenceImporter::UploadFailed, 15000);
-        QVERIFY2(importer.uploadMessage().contains(QStringLiteral("no room")), qPrintable(importer.uploadMessage()));
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Failed, 15000);
+        QVERIFY2(upload->message().contains(QStringLiteral("no room")), qPrintable(upload->message()));
         _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailNone, MAV_MISSION_ACCEPTED);
 
         _disconnectMockLink();
-        QTRY_VERIFY(!importer.canUpload());
+        QTRY_VERIFY(!upload->canUpload());
         importer.uploadToVehicle();
-        QCOMPARE(importer.uploadState(), GeoZoneFenceImporter::UploadFailed);
+        QCOMPARE(upload->state(), GeoZoneFenceUpload::Failed);
     }
 
     // Fences read back are compared within the tolerance, in any order
-    GeoZoneFenceImporter::FenceSnapshot sent;
+    GeoZoneFenceUpload::FenceSnapshot sent;
     sent.polygons.append({ false, _circleRing(QGeoCoordinate(47, 8), 500, 8) });
     sent.polygons.append({ true, _circleRing(QGeoCoordinate(47, 8), 5000, 4) });
     sent.circles.append({ false, QGeoCircle(QGeoCoordinate(47, 8.05), 300) });
     sent.returnPoint = QGeoCoordinate(47, 7.95, 50);
-    GeoZoneFenceImporter::FenceSnapshot received = sent;
+    GeoZoneFenceUpload::FenceSnapshot received = sent;
     std::swap(received.polygons[0], received.polygons[1]);
     received.circles[0].circle.setRadius(300.1);
     received.returnPoint.setAltitude(0);
-    QVERIFY(GeoZoneFenceImporter::compareFences(sent, received).isEmpty());
+    QVERIFY(GeoZoneFenceUpload::compareFences(sent, received).isEmpty());
     received.circles[0].circle.setRadius(302);
-    QVERIFY(GeoZoneFenceImporter::compareFences(sent, received).contains(QStringLiteral("Fences differing from the plan: 1.")));
+    QVERIFY(GeoZoneFenceUpload::compareFences(sent, received).contains(QStringLiteral("Fences differing from the plan: 1.")));
     received.circles.clear();
-    QVERIFY(GeoZoneFenceImporter::compareFences(sent, received).contains(QStringLiteral("0 circles")));
+    QVERIFY(GeoZoneFenceUpload::compareFences(sent, received).contains(QStringLiteral("0 circles")));
     received = sent;
     received.returnPoint = QGeoCoordinate();
-    QVERIFY(!GeoZoneFenceImporter::compareFences(sent, received).isEmpty());
+    QVERIFY(!GeoZoneFenceUpload::compareFences(sent, received).isEmpty());
 }
 
 void GeoZonePlanningTest::_testMapModel()

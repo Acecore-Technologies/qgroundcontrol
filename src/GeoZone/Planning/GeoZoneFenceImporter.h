@@ -20,9 +20,8 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoFenceController.h"
+#include "GeoZoneFenceUpload.h"
 #include "GeoZoneFences.h"
-#include "QGCFenceCircle.h"
-#include "QGCFencePolygon.h"
 
 class GeoZone;
 class Vehicle;
@@ -31,7 +30,7 @@ class Vehicle;
 /// boundary is excluded, and fences identical to existing ones are not added again.
 /// Selections fit zones into the fence storage of the plan's vehicle, the zones most relevant for the planned flight
 /// first, see GeoZoneFences::select, and replace the fences from geozones. The fence can then be uploaded and read
-/// back from the vehicle to verify it.
+/// back from the vehicle to verify it, see GeoZoneFenceUpload.
 class GeoZoneFenceImporter : public QObject
 {
     Q_OBJECT
@@ -40,24 +39,11 @@ class GeoZoneFenceImporter : public QObject
     Q_PROPERTY(QVariantMap          capacity            READ capacityInfo       NOTIFY selectionChanged FINAL)      ///< See capacityInfo
     Q_PROPERTY(QVariantList         choices             READ choicesInfo        NOTIFY selectionChanged FINAL)      ///< See choicesInfo
     Q_PROPERTY(int                  selectedCount       READ selectedCount      NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(UploadState          uploadState         READ uploadState        NOTIFY uploadStateChanged FINAL)
-    Q_PROPERTY(QString              uploadMessage       READ uploadMessage      NOTIFY uploadStateChanged FINAL)
-    Q_PROPERTY(bool                 canUpload           READ canUpload          NOTIFY canUploadChanged FINAL)      ///< A vehicle supporting fences is connected
+    Q_PROPERTY(GeoZoneFenceUpload*  upload              READ upload             CONSTANT FINAL)                     ///< Of the plan's fence to its vehicle
 
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);
 
-    enum UploadState {
-        UploadIdle,
-        Uploading,
-        Verifying,      ///< Reading the fence back
-        UploadVerified,
-        UploadMismatch, ///< The fence read back differs from the one sent
-        UploadFailed,
-    };
-    Q_ENUM(UploadState)
-
-    static constexpr double verifyTolerance = 0.5;  ///< Meters vertices, circle centers and radii read back may differ by
     static constexpr int maxListedChoices = 500;    ///< Zones left out listed by choicesInfo
 
     /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
@@ -100,9 +86,9 @@ public:
     /// @return Number of fence polygons and circles added
     Q_INVOKABLE int applySelection();
 
-    /// Applies the selection, sends the plan's fence to the vehicle like a plan upload does, then reads it back and
-    /// compares it with the plan's, see uploadState
+    /// Applies the selection and uploads the plan's fence to the vehicle, see GeoZoneFenceUpload
     Q_INVOKABLE void uploadToVehicle();
+    GeoZoneFenceUpload *upload() const { return _upload; }
 
     /// @return Map with text ("Vehicle fence: 40 of 64 points"), note (where the limits come from), warning (fence
     ///         parameters which keep the vehicle from enforcing exclusion fences), usedItems, maxItems, usedBytes,
@@ -112,35 +98,9 @@ public:
     ///         simplifyTolerance, selected, included and reason
     QVariantList choicesInfo() const;
 
-    UploadState uploadState() const { return _uploadState; }
-    QString uploadMessage() const { return _uploadMessage; }
-    bool canUpload() const;
-
-    /// Fence sent to or read back from a vehicle
-    struct FenceSnapshot {
-        struct Polygon {
-            bool inclusion = false;
-            QList<QGeoCoordinate> vertices;
-        };
-        struct Circle {
-            bool inclusion = false;
-            QGeoCircle circle;
-        };
-        QList<Polygon> polygons;
-        QList<Circle> circles;
-        QGeoCoordinate returnPoint;
-    };
-    static FenceSnapshot snapshot(GeoFenceController *geoFenceController);
-    static FenceSnapshot snapshot(const QList<QGCFencePolygon> &polygons, const QList<QGCFenceCircle> &circles, const QGeoCoordinate &returnPoint);
-
-    /// @return What differs between the fences beyond verifyTolerance, empty when they match. Fences may be in any order.
-    static QString compareFences(const FenceSnapshot &sent, const FenceSnapshot &received);
-
 signals:
     void geoFenceControllerChanged();
     void selectionChanged();
-    void uploadStateChanged();
-    void canUploadChanged();
 
 private:
     /// Fences for the zones which don't already exist in the fence, with the names of their zones
@@ -158,10 +118,6 @@ private:
     QString _parameterWarning() const;
     Vehicle *_vehicle() const;
     void _connectVehicle();
-    void _setUploadState(UploadState state, const QString &message);
-    void _uploadSent(bool error);
-    void _uploadReadBack();
-    QString _rejectionText(const QString &errorMessage) const;
 
     QPointer<GeoFenceController> _geoFenceController;
     QList<const GeoZone*> _zones;                       ///< Of the last selection
@@ -169,13 +125,8 @@ private:
     QHash<QString, bool> _included;                     ///< Zones included or left out by the user, by key
     GeoZoneFences::Capacity _capacity;
     GeoZoneFences::Selection _selection;
-    UploadState _uploadState = UploadIdle;
-    QString _uploadMessage;
-    QObject *_uploadConnections = nullptr;              ///< Receiver of the signals of an upload, deleted to disconnect them
     QObject *_vehicleConnections = nullptr;
-    FenceSnapshot _sentFence;
-    QString _uploadError;                               ///< Reported by the fence manager during the upload
-    int _uploadAckResult = 0;                           ///< MAV_MISSION_RESULT of the last fence MISSION_ACK, 0 when accepted
+    GeoZoneFenceUpload *const _upload = nullptr;
 
     static constexpr double _simplifySteps[] = { 0, 10, 25, 50, 100, 250, 500 };   ///< Meters, tried up to the maximum tolerance
 };

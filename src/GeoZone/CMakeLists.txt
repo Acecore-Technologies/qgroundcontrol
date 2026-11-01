@@ -23,6 +23,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Planning/GeoZoneFenceImporter.h
         Planning/GeoZoneFenceTags.cc
         Planning/GeoZoneFenceTags.h
+        Planning/GeoZoneFenceUpload.cc
+        Planning/GeoZoneFenceUpload.h
         Planning/GeoZoneGuidedCheck.cc
         Planning/GeoZoneGuidedCheck.h
         Planning/GeoZoneMissionCheck.cc

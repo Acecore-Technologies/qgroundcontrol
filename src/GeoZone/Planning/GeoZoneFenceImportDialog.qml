@@ -36,7 +36,8 @@ QGCPopupDialog {
     readonly property var   _capacity:          importer.capacity
     readonly property var   _selected:          importer.choices.filter(choice => choice.selected)
     readonly property var   _leftOut:           importer.choices.filter(choice => !choice.selected)
-    readonly property bool  _uploading:         importer.uploadState === GeoZoneFenceImporter.Uploading || importer.uploadState === GeoZoneFenceImporter.Verifying
+    readonly property var   _upload:            importer.upload
+    readonly property bool  _uploading:         _upload.busy
 
     // The dialog shows before the first selection is computed
     Component.onCompleted: selectionTimer.start()
@@ -305,7 +306,7 @@ QGCPopupDialog {
 
             QGCButton {
                 text:       qsTr("Upload to Vehicle")
-                enabled:    importer.canUpload && !control._uploading && _selected.length > 0
+                enabled:    _upload.canUpload && !control._uploading && _selected.length > 0
                 onClicked: {
                     if (selectionTimer.running) {
                         selectionTimer.stop()
@@ -318,18 +319,18 @@ QGCPopupDialog {
             QGCLabel {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
-                text:               importer.canUpload ? qsTr("Adds the fences to the plan and uploads the plan's fence, then reads it back to verify it.") : qsTr("Connect a vehicle supporting fences to upload.")
+                text:               _upload.canUpload ? qsTr("Adds the fences to the plan and uploads the plan's fence, then reads it back to verify it.") : qsTr("Connect a vehicle supporting fences to upload.")
                 font.pointSize:     ScreenTools.smallFontPointSize
-                visible:            importer.uploadState === GeoZoneFenceImporter.UploadIdle
+                visible:            _upload.state === GeoZoneFenceUpload.Idle
             }
 
             QGCLabel {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
-                text:               importer.uploadMessage
+                text:               _upload.message
                 textFormat:         Text.PlainText
-                visible:            importer.uploadState !== GeoZoneFenceImporter.UploadIdle
-                color:              (importer.uploadState === GeoZoneFenceImporter.UploadFailed || importer.uploadState === GeoZoneFenceImporter.UploadMismatch) ? qgcPal.warningText : qgcPal.text
+                visible:            _upload.state !== GeoZoneFenceUpload.Idle
+                color:              (_upload.state === GeoZoneFenceUpload.Failed || _upload.state === GeoZoneFenceUpload.Mismatch || _upload.state === GeoZoneFenceUpload.Aborted) ? qgcPal.warningText : qgcPal.text
             }
         }
     }
