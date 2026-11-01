@@ -136,6 +136,20 @@ void GeoZoneParserTest::_testParseFixtures()
     QVERIFY2(GeoZoneLoader::parse(bytes, loaded, errorString, static_cast<GeoZoneParser::Format>(formatHint)), qPrintable(errorString));
     QCOMPARE(loaded.zones.count(), zones);
     QCOMPARE(loaded.contentHash, result.contentHash);
+
+    // Features are hashed in a canonical form, independent of the order of their keys and the indentation
+    if (!fileName.endsWith(QStringLiteral(".xml"))) {
+        const QByteArray reserialized = QJsonDocument::fromJson(bytes.startsWith("\xEF\xBB\xBF") ? bytes.mid(3) : bytes).toJson(QJsonDocument::Indented);
+        QVERIFY(reserialized.size() > bytes.size() / 2);
+        GeoZoneParser::Result indented;
+        QVERIFY2(GeoZoneParser::parse(reserialized, indented, errorString, static_cast<GeoZoneParser::Format>(formatHint)), qPrintable(errorString));
+        QCOMPARE(indented.contentHash, result.contentHash);
+        QCOMPARE(indented.zones.count(), zones);
+        for (qsizetype i = 0; i < result.zones.count(); i++) {
+            QCOMPARE(result.zones[i].contentHash.size(), 20);
+            QCOMPARE(indented.zones[i].contentHash, result.zones[i].contentHash);
+        }
+    }
 }
 
 void GeoZoneParserTest::_testEmptyResponses_data()
@@ -190,6 +204,22 @@ void GeoZoneParserTest::_testParseED269()
     QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/ed269_test.json"), result, errorString), qPrintable(errorString));
     QCOMPARE(result.title, QStringLiteral("Test UASZoneVersion"));
     QCOMPARE(result.zones.count(), 3);
+
+    {
+        // Changing a feature changes its hash and the source's, the hashes of the other features stay
+        QFile file(QStringLiteral(":/unittest/ed269_test.json"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QByteArray changedBytes = file.readAll();
+        const qsizetype identifier = changedBytes.indexOf("\"T-PROH\"");
+        QVERIFY(identifier > 0);
+        changedBytes.replace(identifier, 8, "\"T-PROX\"");
+        GeoZoneParser::Result changed;
+        QVERIFY2(GeoZoneParser::parse(changedBytes, changed, errorString), qPrintable(errorString));
+        QVERIFY(changed.contentHash != result.contentHash);
+        QVERIFY(changed.zones[0].contentHash != result.zones[0].contentHash);
+        QCOMPARE(changed.zones[1].contentHash, result.zones[1].contentHash);
+        QCOMPARE(changed.zones[2].contentHash, result.zones[2].contentHash);
+    }
 
     const GeoZone::Data &prohibited = result.zones[0];
     QCOMPARE(prohibited.identifier, QStringLiteral("T-PROH"));

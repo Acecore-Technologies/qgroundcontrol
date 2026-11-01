@@ -11,6 +11,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneParserUtils.h"
 
+#include <QtCore/QCborValue>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
@@ -129,18 +130,24 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     }
     const QJsonArray features = featuresValue.toArray();
 
-    // Hashed one feature at a time, serializing all of them at once would take as much memory as the file
-    QCryptographicHash contentHash(QCryptographicHash::Sha1);
+    // Features are hashed in their binary CBOR form, which is much faster to write than JSON text and like it doesn't
+    // depend on the order of the keys and the whitespace of the document. The hashes are only compared within a
+    // session and with parse caches of the same parser version, they aren't persisted otherwise.
     QList<QByteArray> featureHashes;
     featureHashes.reserve(features.count());
     for (const QJsonValue &feature : features) {
-        const QByteArray featureJson = QJsonDocument(feature.toObject()).toJson(QJsonDocument::Compact);
-        contentHash.addData(featureJson);
-        featureHashes.append(QCryptographicHash::hash(featureJson, QCryptographicHash::Sha1));
+        featureHashes.append(QCryptographicHash::hash(QCborValue::fromJsonValue(feature).toCbor(), QCryptographicHash::Sha1));
     }
-    for (auto it = result.companions.cbegin(); it != result.companions.cend(); ++it) {
-        contentHash.addData(it.key().toUtf8());
-        contentHash.addData(it.value().version.toUtf8());
+    QCryptographicHash contentHash(QCryptographicHash::Sha1);
+    for (const QByteArray &featureHash : std::as_const(featureHashes)) {
+        contentHash.addData(featureHash);
+    }
+    // In key order, the order of a hash differs between runs
+    QStringList companionKeys = result.companions.keys();
+    companionKeys.sort();
+    for (const QString &key : std::as_const(companionKeys)) {
+        contentHash.addData(key.toUtf8());
+        contentHash.addData(result.companions.value(key).version.toUtf8());
     }
     result.contentHash = contentHash.result();
 
