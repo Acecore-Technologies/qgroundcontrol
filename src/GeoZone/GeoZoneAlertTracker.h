@@ -17,6 +17,7 @@
 #include "GeoZone.h"
 
 #include <cmath>
+#include <optional>
 
 class GeoZoneCatalog;
 class GeoZonePolicy;
@@ -67,9 +68,17 @@ public:
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach, NaN when not predicted
     };
 
+    /// Where and when the vehicle enters a zone at its current velocity
+    struct Entry {
+        const GeoZone *zone = nullptr;
+        double time = qQNaN();          ///< Seconds
+        GeoZone::Position position;
+    };
+
     struct Update {
         QList<Nearby> nearby;   ///< The most restrictive first, then those the vehicle is in, then the closest
         QList<Alert> alerts;    ///< The most restrictive first, entries before approaches
+        std::optional<Entry> firstEntry;    ///< Earliest predicted entry into a nearby zone within the approach time
     };
 
     /// Updates the states of the zones accepted by the policy, usually GeoZonePolicy::alerts, for a position of the
@@ -87,6 +96,8 @@ public:
     static QList<GeoZone::Position> predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds);
     /// @return Seconds until the predicted path covering the horizon at a constant speed enters the zone, NaN if it doesn't
     static double timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon);
+    /// @return Time and position where the predicted path covering the horizon at a constant speed enters the zone
+    static std::optional<Entry> predictedEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon);
 
 private:
     enum class State {

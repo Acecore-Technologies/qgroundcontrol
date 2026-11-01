@@ -245,6 +245,7 @@ void GeoZoneMonitor::_setPositionUnavailable(int vehicleId, bool unavailable)
     }
     if (vehicleId == _activeVehicleId) {
         emit positionUnavailableChanged();
+        emit predictionChanged();
     }
 }
 
@@ -264,6 +265,44 @@ void GeoZoneMonitor::_publishNearby()
     _nearbyModel->setItems(_activeNearby());
     emit nearbyZonesChanged();
     emit verticalBandsChanged();
+    emit predictionChanged();
+}
+
+const std::optional<GeoZoneAlertTracker::Entry> &GeoZoneMonitor::_activeEntry() const
+{
+    static const std::optional<GeoZoneAlertTracker::Entry> none;
+    const auto it = _trackers.constFind(_activeVehicleId);
+    if ((it == _trackers.constEnd()) || positionUnavailable()) {
+        return none;
+    }
+    return it->entry;
+}
+
+QVariantList GeoZoneMonitor::predictedPath() const
+{
+    const std::optional<GeoZoneAlertTracker::Entry> &entry = _activeEntry();
+    if (!entry) {
+        return {};
+    }
+    return { QVariant::fromValue(_trackers.value(_activeVehicleId).entryFrom), QVariant::fromValue(entry->position.coordinate) };
+}
+
+QGeoCoordinate GeoZoneMonitor::predictedEntry() const
+{
+    const std::optional<GeoZoneAlertTracker::Entry> &entry = _activeEntry();
+    return entry ? entry->position.coordinate : QGeoCoordinate();
+}
+
+int GeoZoneMonitor::predictedEntryTime() const
+{
+    const std::optional<GeoZoneAlertTracker::Entry> &entry = _activeEntry();
+    return entry ? static_cast<int>(std::lround(entry->time)) : -1;
+}
+
+QVariant GeoZoneMonitor::predictedEntryZone() const
+{
+    const std::optional<GeoZoneAlertTracker::Entry> &entry = _activeEntry();
+    return entry ? QVariant::fromValue(GeoZoneInfo(entry->zone)) : QVariant();
 }
 
 const QList<GeoZoneMonitor::Nearby> &GeoZoneMonitor::_activeNearby() const
@@ -379,6 +418,10 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
     bool activeChanged = false;
     for (auto it = _trackers.begin(); it != _trackers.end(); ++it) {
         const qsizetype removedBands = it->bands.removeIf([source](const GeoZoneVerticalBand &band) { return band.zone->sourceKey() == source->key(); });
+        if (it->entry && (it->entry->zone->sourceKey() == source->key())) {
+            it->entry.reset();
+            activeChanged = activeChanged || (it.key() == _activeVehicleId);
+        }
         if ((it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->sourceKey() == source->key(); }) + removedBands) > 0) {
             activeChanged = activeChanged || (it.key() == _activeVehicleId);
         }
@@ -452,6 +495,12 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         if (vehicleId == _activeVehicleId) {
             _publishNearby();
         }
+    }
+    const bool hadEntry = tracker.entry.has_value();
+    tracker.entry = update.firstEntry;
+    tracker.entryFrom = position.coordinate;
+    if ((vehicleId == _activeVehicleId) && (hadEntry || tracker.entry)) {
+        emit predictionChanged();
     }
 
     // Zones above and below are only shown for the active vehicle

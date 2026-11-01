@@ -56,7 +56,14 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
     Q_PROPERTY(double       altitudeAMSL        READ altitudeAMSL       NOTIFY verticalBandsChanged FINAL)    ///< Of the active vehicle, NaN when unknown
     Q_PROPERTY(double       terrainAMSL         READ terrainAMSL        NOTIFY verticalBandsChanged FINAL)    ///< Below the active vehicle, NaN when unknown
-    Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)    ///< The active vehicle has no current position, its alerts are paused
+    Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)
+    /// Where the active vehicle enters a nearby zone first at its current velocity within the approach time: the path
+    /// from the vehicle to the entry, the entry position, the seconds until then and the zone (GeoZoneInfo). Empty,
+    /// invalid and -1 without such an entry.
+    Q_PROPERTY(QVariantList     predictedPath       READ predictedPath      NOTIFY predictionChanged FINAL)
+    Q_PROPERTY(QGeoCoordinate   predictedEntry      READ predictedEntry     NOTIFY predictionChanged FINAL)
+    Q_PROPERTY(int              predictedEntryTime  READ predictedEntryTime NOTIFY predictionChanged FINAL)
+    Q_PROPERTY(QVariant         predictedEntryZone  READ predictedEntryZone NOTIFY predictionChanged FINAL)    ///< The active vehicle has no current position, its alerts are paused
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
@@ -134,6 +141,10 @@ public:
     /// Log of the alerts of vehicles, null for monitors of positions passed to evaluate()
     GeoZoneAlertLog *alertLog() const { return _alertLog; }
     GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
+    QVariantList predictedPath() const;
+    QGeoCoordinate predictedEntry() const;
+    int predictedEntryTime() const;
+    QVariant predictedEntryZone() const;
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
@@ -145,6 +156,7 @@ signals:
     void nearbyZonesChanged();
     void verticalBandsChanged();
     void positionUnavailableChanged();
+    void predictionChanged();
 
 private slots:
     void _vehicleAdded(Vehicle *vehicle);
@@ -174,7 +186,11 @@ private:
         QList<Nearby> nearby;
         QList<GeoZoneVerticalBand> bands;
         GeoZone::Position position;     ///< Last evaluated position
+        std::optional<GeoZoneAlertTracker::Entry> entry;    ///< First predicted entry from the last evaluated position
+        QGeoCoordinate entryFrom;       ///< Position the entry is predicted from
     };
+    /// @return First predicted entry of the active vehicle, nothing while it has no current position
+    const std::optional<GeoZoneAlertTracker::Entry> &_activeEntry() const;
 
     const Tracker *_activeTracker() const;
     void _setPositionUnavailable(int vehicleId, bool unavailable);

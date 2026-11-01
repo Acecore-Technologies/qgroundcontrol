@@ -27,6 +27,7 @@ Item {
     property real   labelMinZoomLevel:  11      ///< Zone labels are only shown from this zoom level up
     property var    highlightedZones:   []      ///< Zones drawn with a white border
     property bool   fitToAddedSources:  false   ///< Moves the map to the zones of files and feeds the user adds when they are out of view or too small to see
+    property bool   showPrediction:     false   ///< Shows where the active vehicle enters a zone at its velocity, see GeoZoneMonitor
 
     readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
 
@@ -138,9 +139,70 @@ Item {
         function onVisibleRegionChanged()   { _root._scheduleViewUpdate() }
     }
 
+    readonly property bool _predictionShown: showPrediction && map.visible && GeoZoneMonitor.predictedEntryTime >= 0
+    readonly property color _predictionColor: _predictionShown ? GeoZoneStyle.restrictionColor(GeoZoneMonitor.predictedEntryZone.restriction) : "transparent"
+
     Component.onCompleted: {
         _scheduleViewUpdate()
         map.addMapItem(_alertPositionItem)
+        map.addMapItem(_predictedPathItem)
+        map.addMapItem(_predictedEntryItem)
+    }
+
+    // Path of the active vehicle to the zone it enters at its velocity
+    MapPolyline {
+        id:             _predictedPathItem
+        path:           _root._predictionShown ? GeoZoneMonitor.predictedPath : []
+        line.width:     ScreenTools.defaultFontPixelHeight / 5
+        line.color:     _root._predictionColor
+        visible:        _root._predictionShown
+        z:              QGroundControl.zOrderMapItems
+    }
+
+    // Entry point with the seconds left
+    MapQuickItem {
+        id:             _predictedEntryItem
+        coordinate:     GeoZoneMonitor.predictedEntry
+        visible:        _root._predictionShown
+        anchorPoint.x:  entryDot.width / 2
+        anchorPoint.y:  entryDot.height / 2
+        z:              QGroundControl.zOrderMapItems + 1
+
+        sourceItem: Item {
+            width:  entryDot.width + entryLabel.width
+            height: entryDot.height
+
+            Rectangle {
+                id:             entryDot
+                width:          ScreenTools.defaultFontPixelHeight
+                height:         width
+                radius:         width / 2
+                color:          Qt.rgba(0, 0, 0, 0.5)
+                border.color:   _root._predictionColor
+                border.width:   ScreenTools.defaultFontPixelHeight / 5
+            }
+
+            Rectangle {
+                anchors.left:           entryDot.right
+                anchors.leftMargin:     ScreenTools.defaultFontPixelWidth / 2
+                anchors.verticalCenter: entryDot.verticalCenter
+                width:                  entryLabel.contentWidth + ScreenTools.defaultFontPixelWidth
+                height:                 entryLabel.contentHeight + ScreenTools.defaultFontPixelHeight / 4
+                radius:                 height / 4
+                color:                  Qt.rgba(0, 0, 0, 0.6)
+                border.color:           _root._predictionColor
+
+                QGCLabel {
+                    id:                 entryLabel
+                    anchors.centerIn:   parent
+                    color:              "white"
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    textFormat:         Text.PlainText
+                    text:               _root._predictionShown ?
+                                            qsTr("%1 in %2 s").arg(GeoZoneMonitor.predictedEntryZone.displayName).arg(GeoZoneMonitor.predictedEntryTime) : ""
+                }
+            }
+        }
     }
 
     // Vehicle position of the alert shown from the alert history, click to hide it

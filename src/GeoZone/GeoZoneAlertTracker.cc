@@ -51,12 +51,16 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         }
         const bool inside = (insideDistance <= 0) || ((previous == State::Inside) && (insideDistance <= hysteresisDistance));
 
-        double entryTime = qQNaN();
+        std::optional<Entry> entry;
         if (!inside && predict) {
-            entryTime = timeToEntry(zone, ahead, horizon);
+            entry = predictedEntry(zone, ahead, horizon);
         }
+        const double entryTime = entry ? entry->time : qQNaN();
         const double timeLimit = limits.time + ((previous != State::Away) ? hysteresisTime : 0);
         const bool nearByTime = !std::isnan(entryTime) && (entryTime <= timeLimit);
+        if (nearByTime && (!update.firstEntry || (entryTime < update.firstEntry->time))) {
+            update.firstEntry = entry;
+        }
         if (!inside && !nearByDistance && !nearByTime) {
             continue;
         }
@@ -120,9 +124,15 @@ QList<GeoZone::Position> GeoZoneAlertTracker::predictedPath(const GeoZone::Posit
 
 double GeoZoneAlertTracker::timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon)
 {
+    const std::optional<Entry> entry = predictedEntry(zone, path, horizon);
+    return entry ? entry->time : qQNaN();
+}
+
+std::optional<GeoZoneAlertTracker::Entry> GeoZoneAlertTracker::predictedEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon)
+{
     const auto entry = zone->pathEntry(path);
     if (!entry) {
-        return qQNaN();
+        return std::nullopt;
     }
     // The vehicle moves along the path at a constant velocity, so the time is proportional to the distance
     double total = 0;
@@ -137,10 +147,8 @@ double GeoZoneAlertTracker::timeToEntry(const GeoZone *zone, const QList<GeoZone
         total += length;
     }
     // Climbing or descending in place
-    if (total < 0.01) {
-        return entry->fraction * horizon;
-    }
-    return (toEntry / total) * horizon;
+    const double time = (total < 0.01) ? (entry->fraction * horizon) : ((toEntry / total) * horizon);
+    return Entry{ zone, time, entry->position };
 }
 
 GeoZoneAlertTracker::Velocity GeoZoneVelocityEstimator::add(qint64 msecs, const GeoZone::Position &position)

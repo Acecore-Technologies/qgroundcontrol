@@ -192,11 +192,21 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
     // Flying away the zone is never entered
     monitor.evaluate(start, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ -25, 0, 0, true });
     QCOMPARE(alertSpy.count(), 0);
+    QCOMPARE(monitor.predictedEntryTime(), -1);
+    QVERIFY(monitor.predictedPath().isEmpty());
 
     // At 25 m/s the boundary 700 m ahead is reached in 28 s, within the approach time
+    QSignalSpy predictionSpy(&monitor, &GeoZoneMonitor::predictionChanged);
     monitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
     QCOMPARE(alertSpy.count(), 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Approaching geozone P (Prohibited), entry in about 28 s"));
+    // The map shows the path to the entry with the time left
+    QVERIFY(predictionSpy.count() > 0);
+    QCOMPARE(monitor.predictedEntryTime(), 28);
+    QVERIFY(qAbs(monitor.predictedEntry().distanceTo(center.atDistanceAndAzimuth(300, 180)) - 0) < 2);
+    QCOMPARE(monitor.predictedPath().count(), 2);
+    QCOMPARE(monitor.predictedPath().first().value<QGeoCoordinate>(), start.coordinate);
+    QCOMPARE(GeoZoneInfo::fromVariant(monitor.predictedEntryZone())->identifier(), QStringLiteral("P"));
     QCOMPARE(monitor.nearbyZones().count(), 1);
     QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("timeToEntry")].toInt(), 28);
     QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("distance")].toInt(), 700);

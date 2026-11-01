@@ -334,9 +334,10 @@ FlightMap {
     }
 
     GeoZoneMapVisuals {
-        id:         geoZoneMapVisuals
-        map:        _root
-        showZones:  _root.pipState.state !== _root.pipState.pipState
+        id:             geoZoneMapVisuals
+        map:            _root
+        showZones:      _root.pipState.state !== _root.pipState.pipState
+        showPrediction: showZones
     }
 
     GeoFenceMapVisuals {
