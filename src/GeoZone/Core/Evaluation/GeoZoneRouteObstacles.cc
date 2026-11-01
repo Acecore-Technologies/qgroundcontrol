@@ -166,6 +166,7 @@ void GeoZoneRouteObstacles::prepare()
     if (!_reach.isNull()) {
         extent = extent.intersected(_reach.united(QRectF(_start, _end).normalized()));
     }
+    _extent = extent;
     _edgeGrid.reset(extent);
     _obstacleGrid.reset(extent);
     _prepared = true;

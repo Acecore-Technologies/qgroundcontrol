@@ -284,4 +284,33 @@ void GeoZoneBenchmark::_benchmarkRouteSearch()
     QVERIFY(routed > (crossing / 2));
 }
 
+void GeoZoneBenchmark::_benchmarkRouteSearchMaze()
+{
+    // A leg of 20 km through a row of a maze of 1200 zones 420 m apart, see GeoZonePlanningTest::_testRouteMaze
+    const QGeoCoordinate southWest(46.5, 7.5);
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(QJsonDocument(QJsonObject{ { QStringLiteral("features"), _mazeFeatures(southWest, 40, 30, 420, 7) } }).toJson(), result, errorString),
+             qPrintable(errorString));
+    GeoZoneSource source(QStringLiteral("maze.json"), QString());
+    source.setResult(result, kStart, kStart);
+    GeoZoneCatalog catalog;
+    catalog.rebuild({ &source });
+    const GeoZoneGeometry::LocalProjection projection(southWest);
+    const GeoZoneRouteSearch::Leg leg{ GeoZone::Position{ projection.toGeo(QPointF(-1000, 6090)), 400 },
+                                       GeoZone::Position{ projection.toGeo(QPointF(19000, 6090)), 400 } };
+    GeoZoneRouteSearch search(catalog, GeoZonePolicy::routing(QDateTime(), QDateTime()));
+    search.setTerrainLookup([](const QGeoCoordinate &) { return 300.0; });
+
+    GeoZoneRouteSearch::Route detour;
+    QBENCHMARK_ONCE {
+        detour = search.detour(leg);
+    }
+    const GeoZoneRouteSearch::Statistics &statistics = detour.statistics;
+    qInfo() << "Length" << qRound(detour.length) << "waypoints" << detour.waypoints.count() << "rounds" << statistics.rounds << "obstacles"
+            << statistics.includedObstacles << "of" << statistics.obstacles << "nodes" << statistics.nodes << "visibility tests" << statistics.visibilityTests
+            << "cached" << statistics.cachedVisibility << "work" << statistics.work;
+    QVERIFY(detour.isValid());
+}
+
 QTEST_GUILESS_MAIN(GeoZoneBenchmark)

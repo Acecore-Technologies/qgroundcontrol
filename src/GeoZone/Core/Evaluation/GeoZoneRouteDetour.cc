@@ -39,12 +39,13 @@ QRectF _reachOf(const QPointF &start, const QPointF &end, double directLength, d
 
 } // namespace
 
-GeoZoneRouteDetour::GeoZoneRouteDetour(const GeoZone::Position &from, const GeoZone::Position &to, double margin, double maxLength,
+GeoZoneRouteDetour::GeoZoneRouteDetour(const GeoZone::Position &from, const GeoZone::Position &to, double margin, double maxLength, qint64 maxWork,
                                        const GeoZoneCancelToken &cancel, GeoZoneRouteSearch::Cache &cache, GeoZoneRouteSearch::Statistics &statistics)
     : _from(from)
     , _to(to)
     , _margin(margin)
     , _maxLength(maxLength)
+    , _maxWork(maxWork)
     , _cancel(cancel)
     , _statistics(statistics)
     , _projection(from.coordinate.atDistanceAndAzimuth(from.coordinate.distanceTo(to.coordinate) / 2, from.coordinate.azimuthTo(to.coordinate)))
@@ -78,7 +79,7 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
         _blockingZones = _obstacles.endInside();
         return Outcome::EndInside;
     }
-    GeoZoneRouteGraph graph(_obstacles, _start, _end, _maxLength, _cancel, _statistics);
+    GeoZoneRouteGraph graph(_obstacles, _start, _end, _maxLength, _maxWork, _cancel, _statistics);
 
     // The obstacles the straight line runs into
     graph.include(graph.hits(GeoZoneRouteGraph::kStart, GeoZoneRouteGraph::kEnd));
@@ -88,13 +89,13 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
         }
         _statistics.rounds++;
         QSet<int> blockers;
-        const QList<int> path = graph.shortestPath(true, &blockers);
+        QList<int> path = graph.shortestPath(true, &blockers, GeoZoneRouteGraph::Search::Near);
         if (_cancel.isCancelled()) {
             return Outcome::Cancelled;
         }
         if (path.isEmpty()) {
-            if (graph.nodeLimitReached()) {
-                return Outcome::NotFound;
+            if (graph.limitReached()) {
+                return Outcome::SearchLimit;
             }
             // The obstacles which left out nodes around those of the graph may leave a way around them
             const QList<int> pending = graph.takeNodeBlockers();
@@ -102,10 +103,29 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
                 graph.include(pending);
                 continue;
             }
+            if (graph.nearSearchIncomplete()) {
+                if (_preliminary) {
+                    return Outcome::TooLong;
+                }
+                blockers.clear();
+                path = graph.shortestPath(true, &blockers);
+                if (_cancel.isCancelled()) {
+                    return Outcome::Cancelled;
+                }
+            }
+        }
+        if (path.isEmpty()) {
+            if (graph.limitReached()) {
+                return Outcome::SearchLimit;
+            }
             if (!std::isinf(_maxLength)) {
                 // Whether a longer detour goes around the obstacles found so far
                 QSet<int> allBlockers;
-                const QList<int> longer = graph.shortestPath(false, &allBlockers);
+                QList<int> longer = graph.shortestPath(false, &allBlockers, GeoZoneRouteGraph::Search::Near);
+                if (longer.isEmpty() && !graph.limitReached() && graph.nearSearchIncomplete() && !_cancel.isCancelled()) {
+                    allBlockers.clear();
+                    longer = graph.shortestPath(false, &allBlockers);
+                }
                 if (_cancel.isCancelled()) {
                     return Outcome::Cancelled;
                 }
@@ -113,6 +133,9 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
                     _pathLength = graph.lengthOf(longer);
                     _blockingZones = _obstacles.zones(blockers);
                     return Outcome::TooLong;
+                }
+                if (graph.limitReached()) {
+                    return Outcome::SearchLimit;
                 }
                 blockers = allBlockers;
             }
@@ -146,7 +169,7 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
             return Outcome::EntersZone;
         }
     }
-    return Outcome::NotFound;
+    return Outcome::SearchLimit;
 }
 
 QList<QGeoCoordinate> GeoZoneRouteDetour::_coordinates(const GeoZoneRouteGraph &graph, const QList<int> &path) const

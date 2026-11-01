@@ -81,6 +81,18 @@ The Plan View checks see the mission as a `GeoZoneMissionPath`: the segments flo
 - Caches filled on first use from any thread are guarded: the simplified exclusion polygons of a `GeoZone` (`_simplifiedMutex`), its local projection (`std::once_flag`) and the Web Mercator rings of a `GeoZoneShape` per zoom level (`_mercatorMutex`). `GeoZoneIndex` queries don't modify the index.
 - An evaluator copy can run on any thread, unless its policy excludes authorised zones, since authorisations are only looked up on the GUI thread, or its terrain lookup, which is called from the evaluating thread, needs the GUI thread. Formats are stateless and parse on worker threads; `parseXml()` stops between features once `GeoZoneParserUtils::cancelled()`.
 
+## Route Search {#route-search}
+
+`GeoZoneRouteSearch` (`src/GeoZone/Core/Evaluation`) is the facade `GeoZoneRoutePlanner` uses: `plan()` searches a detour, a climb and a descent for a leg and sorts them by cost. Its parts are internal to the core:
+
+- `GeoZoneRouteObstacles`: the zone volumes a detour keeps the margin from, in a local projection around the leg. Their outlines are only projected, detailed ones simplified outward except near the ends of the leg, when a query comes near them, and their edges are put in a `GeoZoneRouteGrid` of cells which finds those near a segment. It tells whether a segment or a point keeps the margin, and where the nodes around the convex corners of an obstacle are.
+- `GeoZoneRouteGraph`: the visibility graph of a detour, its nodes, the cache of the visibility of its edges and the A* search of its shortest paths, which tests an edge only when it would reach a node first (Lazy Weighted A*).
+- `GeoZoneRouteDetour`: the rounds of a detour search, each adding to the graph the zones the path ran into, until it runs into none, and its outcome.
+- `GeoZoneRouteVertical`: the samples of the leg with their terrain, and the climbs over and descents under the zones.
+- `GeoZoneRouteVector.h`: planar vector helpers, a stand-in with the functions of the shared `GeoZoneVector.h`.
+
+The work of a search is bounded. Testing the edges from each node to all others takes time growing with the square of the nodes, a minute of a debug build for a maze of 1200 zones. Graphs of more than 1000 nodes are therefore first searched along the edges to the near nodes only (those of the grid cells around a node, at least 32 nodes of 8 obstacles, and the end), combining edges like Theta* where a node sees the one before the previous, and the path is then straightened; all edges are searched when that finds no path, except by the search of detours up to 1.3 times the leg, which then leaves it to the search with the full length limit. Each graph counts its work, the edges and nodes considered and the visibility tests weighted by 16, and its searches stop with `Failure::SearchLimit` at `Settings::maxSearchWork`, as they do after 64 rounds or at 20000 nodes. `GeoZonePlanningTest::_testRouteMaze` checks the time, the work and the length of a detour through a maze, which `GeoZoneBenchmark::_benchmarkRouteSearchMaze` measures.
+
 ## Adding a Format {#adding-a-format}
 
 1. Add a value at the end of `GeoZoneParser::Format`, whose values are stored in the parse caches.

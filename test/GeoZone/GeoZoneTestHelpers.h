@@ -226,6 +226,35 @@ inline QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double ra
     return ring;
 }
 
+/// Prohibited zones on a grid of columns by rows cells of the pitch in meters, north-east of the corner: circles and
+/// irregular polygons of random sizes and positions, so that about half the gaps between them are narrower than twice
+/// the default margin of the route search, a maze
+inline QJsonArray _mazeFeatures(const QGeoCoordinate &southWest, int columns, int rows, double pitch, quint32 seed)
+{
+    QRandomGenerator random(seed);
+    const GeoZoneGeometry::LocalProjection projection(southWest);
+    QJsonArray features;
+    for (int row = 0; row < rows; row++) {
+        for (int column = 0; column < columns; column++) {
+            const QPointF offset((random.generateDouble() - 0.5) * 0.2 * pitch, (random.generateDouble() - 0.5) * 0.2 * pitch);
+            const QGeoCoordinate center = projection.toGeo((QPointF(column + 0.5, row + 0.5) * pitch) + offset);
+            const double radius = pitch * (0.18 + (0.2 * random.generateDouble()));
+            const QString identifier = QStringLiteral("Maze %1-%2").arg(column).arg(row);
+            if (random.bounded(2) == 0) {
+                features.append(_circleFeature(identifier, QStringLiteral("PROHIBITED"), center, radius));
+                continue;
+            }
+            QList<QGeoCoordinate> ring;
+            const int vertexCount = 5 + random.bounded(8);
+            for (int vertex = 0; vertex < vertexCount; vertex++) {
+                ring.append(center.atDistanceAndAzimuth(radius * (0.6 + (0.4 * random.generateDouble())), vertex * 360.0 / vertexCount));
+            }
+            features.append(_polygonFeature(identifier, QStringLiteral("PROHIBITED"), ring));
+        }
+    }
+    return features;
+}
+
 inline double _distanceToRing(const QPointF &point, const QList<QPointF> &ring)
 {
     double minDistance = std::numeric_limits<double>::max();

@@ -628,8 +628,8 @@ QString GeoZoneRoutePlanner::_failureText(const LegJob &legJob, const GeoZoneRou
         reason = tr("going around %1 adds at least %2, more than the limit of %3.").arg(zones, _distanceText(route.length - direct), _distanceText(route.limit - direct));
         break;
     }
-    case Failure::NotFound:
-        reason = tr("no way around %1 was found.").arg(zones);
+    case Failure::SearchLimit:
+        reason = tr("the search for a way around %1 reached its limit.").arg(zones);
         break;
     case Failure::AltitudeUnknown:
         reason = tr("the altitudes of the leg aren't known.");

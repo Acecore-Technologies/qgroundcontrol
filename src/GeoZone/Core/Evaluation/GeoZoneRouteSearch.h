@@ -35,6 +35,9 @@
 /// first. Only the zones a candidate path runs into are added to the graph, until the path keeps the margin from all
 /// zones within reach of the length limit, which the catalog's index finds. Visibility tests are cached between these
 /// rounds, a cell grid finds the zone edges near a segment, and zone outlines are only projected when a test comes near.
+/// Large graphs, like those of mazes of zones, are first searched along the edges between near nodes only, then
+/// straightened, and along all edges when that finds no path. Searches stop with SearchLimit when their work reaches a
+/// limit, see GeoZoneRouteGraph.
 ///
 /// A search reads a catalog snapshot and keeps nothing between calls but the simplified zone outlines, so that it can
 /// run on a worker thread, when the terrain lookup and the policy can. Use a search, or its copies, from one thread at
@@ -55,6 +58,9 @@ public:
         double climbWeight = 5;             ///< Cost of climbing a meter, in meters of horizontal flight
         double descentWeight = 3;           ///< Cost of descending a meter, in meters of horizontal flight
         double sampleSpacing = 25;          ///< Meters between the positions where climbs and descents are checked
+        /// Units of work after which a detour search stops with SearchLimit, about 20 seconds of a debug build and a few
+        /// of a release build, see Statistics::work
+        qint64 maxSearchWork = 100000000;
     };
 
     /// Way of avoiding the zones
@@ -72,7 +78,7 @@ public:
         EndInside,          ///< The leg ends inside the zones
         Enclosed,           ///< The zones surround the start or the end
         TooLong,            ///< Detours around the zones are longer than the limit, see Route::limit
-        NotFound,           ///< The zones are too many or too complex for a detour
+        SearchLimit,        ///< The search of a detour reached its limit of work before it found one, the zones are too many or too complex
         AltitudeUnknown,    ///< The altitudes of the leg aren't known
         NoCeiling,          ///< The zones have no ceiling, or none in meters, like flight levels
         ReachesGround,      ///< The zones extend to the ground
@@ -99,6 +105,7 @@ public:
         int nodes = 0;              ///< Of the graph, with the start and the end
         int visibilityTests = 0;    ///< Segments tested against the zones
         int cachedVisibility = 0;   ///< Visibility answered by the cache, entirely or for some zones
+        qint64 work = 0;            ///< Units of work of the searches of the graph, which stop at a limit
     };
 
     /// Way around, over or under the zones, or why it isn't possible
@@ -107,7 +114,9 @@ public:
         Failure failure = Failure::None;
         QStringList zones;                  ///< Names of the zones avoided, or of those preventing the route
         QList<QGeoCoordinate> waypoints;    ///< Detours: between the start and the end of the leg
-        double length = 0;                  ///< Detours: meters from the start to the end, a lower bound when TooLong
+        /// Detours: meters from the start to the end. TooLong: of the detour found around the zones it runs into first,
+        /// which other zones can only lengthen
+        double length = 0;
         double fromAltitude = qQNaN();      ///< Climbs and descents: new altitude AMSL of the start of the leg
         double toAltitude = qQNaN();        ///< Climbs and descents: new altitude AMSL of the end of the leg
         double altitude = qQNaN();          ///< Climbs and descents: meters AMSL just above the ceilings or below the floors

@@ -26,6 +26,8 @@
 #include "RallyPointController.h"
 #include "Vehicle.h"
 
+#include <QtCore/QElapsedTimer>
+
 #include <numeric>
 
 using namespace GeoZoneTestHelpers;
@@ -2407,6 +2409,55 @@ void GeoZonePlanningTest::_testRouteFailures()
     QVERIFY(result.routes.isEmpty());
     QCOMPARE(GeoZoneRouteSearch::detourAround(leg.from.coordinate, leg.to.coordinate, manager.catalog().search(QStringLiteral("Wall"), 1), settings, cancel).failure,
              GeoZoneRouteSearch::Failure::Cancelled);
+}
+
+void GeoZonePlanningTest::_testRouteMaze()
+{
+    // A leg of 20 km through a row of a maze of 1200 zones, whose detour took a minute of a debug build when A* tested the
+    // edges from each node to all others, with 4 million visibility tests
+    const QGeoCoordinate southWest(46.5, 7.5);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("maze.json"), _mazeFeatures(southWest, 40, 30, 420, 7)), errorString), qPrintable(errorString));
+    QCOMPARE(manager.catalog().zones().count(), 1200);
+    const GeoZoneGeometry::LocalProjection projection(southWest);
+    const GeoZoneRouteSearch::Leg leg{ GeoZone::Position{ projection.toGeo(QPointF(-1000, 6090)), 50 },
+                                       GeoZone::Position{ projection.toGeo(QPointF(19000, 6090)), 50 } };
+    const GeoZonePolicy policy = GeoZonePolicy::routing(QDateTime(), QDateTime());
+    GeoZoneRouteSearch search(manager.catalog(), policy);
+    search.setTerrainLookup([](const QGeoCoordinate &) { return 0.0; });
+
+    QElapsedTimer timer;
+    timer.start();
+    const GeoZoneRouteSearch::Route detour = search.detour(leg);
+    const qint64 elapsed = timer.elapsed();
+    QVERIFY2(detour.isValid(), qPrintable(QString::number(int(detour.failure))));
+    // Generous for debug builds with sanitizers on a busy machine
+    QVERIFY2(elapsed < 30000, qPrintable(QString::number(elapsed)));
+    QVERIFY2(detour.statistics.visibilityTests < 1000000, qPrintable(QString::number(detour.statistics.visibilityTests)));
+    QVERIFY2(detour.statistics.work < search.settings().maxSearchWork, qPrintable(QString::number(detour.statistics.work)));
+    // Through the maze, within 2% of the shortest detour, 24672 m, which a search of all edges finds
+    QVERIFY2(detour.length < (24672 * 1.02), qPrintable(QString::number(detour.length)));
+    QVERIFY(detour.zones.count() > 10);
+    const QList<QGeoCoordinate> path = _routePath(leg.from.coordinate, detour, leg.to.coordinate);
+    QList<GeoZone::Position> positions;
+    for (const QGeoCoordinate &coordinate : path) {
+        positions.append(GeoZone::Position{ coordinate, 50 });
+    }
+    GeoZonePathEvaluator evaluator(manager.catalog(), policy);
+    QVERIFY(evaluator.evaluate({ GeoZonePathEvaluator::Path::fromPositions(positions) }).activeEnteredZones().isEmpty());
+
+    // Searches stop at the limit of their work
+    GeoZoneRouteSearch::Settings settings;
+    settings.maxSearchWork = 100000;
+    search.setSettings(settings);
+    const GeoZoneRouteSearch::Route limited = search.detour(leg);
+    QCOMPARE(limited.failure, GeoZoneRouteSearch::Failure::SearchLimit);
+    QCOMPARE(limited.zones, detour.zones);
+    QVERIFY(limited.waypoints.isEmpty());
+    QVERIFY2(limited.statistics.work < (2 * (settings.maxSearchWork + 100000)), qPrintable(QString::number(limited.statistics.work)));
 }
 
 void GeoZonePlanningTest::_testRoutePlannerWorker()

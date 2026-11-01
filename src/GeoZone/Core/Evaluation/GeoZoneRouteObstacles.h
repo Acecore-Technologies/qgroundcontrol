@@ -78,6 +78,43 @@ public:
         return false;
     }
 
+    /// Calls the visitor with each item of the cells the distance in cells away from the cell of the point, the ring
+    /// of cells around it, which is the cell itself at distance 0
+    /// @return false if the ring is entirely beyond the grid
+    template<typename Visitor>
+    bool visitRing(const QPointF &point, int distance, Visitor visitor) const
+    {
+        const int row = _row(point.y());
+        const int column = _column(point.x());
+        const int firstRow = row - distance;
+        const int lastRow = row + distance;
+        const int firstColumn = column - distance;
+        const int lastColumn = column + distance;
+        if ((firstRow < 0) && (firstColumn < 0) && (lastRow >= kCells) && (lastColumn >= kCells)) {
+            return false;
+        }
+        const auto visitCell = [this, &visitor](int cellRow, int cellColumn) {
+            for (const int item : _cells[(cellRow * kCells) + cellColumn]) {
+                visitor(item);
+            }
+        };
+        for (int cellRow = (std::max)(firstRow, 0); cellRow <= (std::min)(lastRow, kCells - 1); cellRow++) {
+            if ((cellRow == firstRow) || (cellRow == lastRow)) {
+                for (int cellColumn = (std::max)(firstColumn, 0); cellColumn <= (std::min)(lastColumn, kCells - 1); cellColumn++) {
+                    visitCell(cellRow, cellColumn);
+                }
+                continue;
+            }
+            if (firstColumn >= 0) {
+                visitCell(cellRow, firstColumn);
+            }
+            if (lastColumn < kCells) {
+                visitCell(cellRow, lastColumn);
+            }
+        }
+        return true;
+    }
+
 private:
     int _column(double x) const;
     int _row(double y) const;
@@ -162,6 +199,8 @@ public:
     /// Sets up the grids for the obstacles added so far, before the queries. Obstacles added later extend beyond them.
     void prepare();
 
+    /// @return Extent of the grids, see prepare
+    QRectF extent() const { return _extent; }
     int count() const { return static_cast<int>(_obstacles.count()); }
     const GeoZone *zone(int index) const { return _obstacles[index].zone; }
     /// @return Order in which the obstacle was added to the graph, -1 while it isn't
@@ -233,6 +272,7 @@ private:
     QList<Item> _items;
     GeoZoneRouteGrid _edgeGrid;     ///< Items within the margin of the cells
     GeoZoneRouteGrid _obstacleGrid; ///< Obstacles by their grown bounds
+    QRectF _extent;
     bool _prepared = false;
     QList<const GeoZone*> _startInside;
     QList<const GeoZone*> _endInside;

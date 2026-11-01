@@ -61,8 +61,8 @@ void _setOutcome(GeoZoneRouteSearch::Route &route, const GeoZoneRouteDetour &sea
         route.length = search.length();
         route.limit = maxLength;
         return;
-    case Outcome::NotFound:
-        route.failure = Failure::NotFound;
+    case Outcome::SearchLimit:
+        route.failure = Failure::SearchLimit;
         return;
     case Outcome::EntersZone:
         route.failure = Failure::EntersZone;
@@ -206,7 +206,8 @@ GeoZoneRouteSearch::Route GeoZoneRouteSearch::_detour(const Leg &leg, const QLis
     const double maxLength = maxDetourLength(directLength, _settings);
     const double shortLength = (std::min)(maxLength, (std::max)(directLength * kShortDetourFactor, directLength + kShortDetourAllowance));
     for (const double length : { shortLength, maxLength }) {
-        GeoZoneRouteDetour search(from, to, _settings.margin, length, _cancel, *_cache, route.statistics);
+        GeoZoneRouteDetour search(from, to, _settings.margin, length, _settings.maxSearchWork, _cancel, *_cache, route.statistics);
+        search.setPreliminary(length < maxLength);
         for (const GeoZone *zone : _catalog.zonesInArea(search.reachBox(), policy)) {
             const QList<GeoZone::Volume> &volumes = zone->data().volumes;
             for (int volume = 0; volume < volumes.count(); volume++) {
@@ -230,8 +231,8 @@ GeoZoneRouteSearch::Route GeoZoneRouteSearch::detourAround(const QGeoCoordinate 
     Route route;
     route.kind = Kind::Detour;
     Cache cache;
-    GeoZoneRouteDetour search(GeoZone::Position{ from }, GeoZone::Position{ to }, settings.margin, std::numeric_limits<double>::infinity(), cancel, cache,
-                              route.statistics);
+    GeoZoneRouteDetour search(GeoZone::Position{ from }, GeoZone::Position{ to }, settings.margin, std::numeric_limits<double>::infinity(),
+                              settings.maxSearchWork, cancel, cache, route.statistics);
     for (const GeoZone *zone : zones) {
         for (int volume = 0; volume < zone->data().volumes.count(); volume++) {
             search.addObstacle(zone, volume);

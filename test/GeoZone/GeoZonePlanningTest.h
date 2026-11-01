@@ -42,6 +42,7 @@ private slots:
     void _testRouteVertical_data();
     void _testRouteVertical();
     void _testRouteFailures();
+    void _testRouteMaze();
     void _testRoutePlannerWorker();
     void _testProfileBands();
     void _testGeoFenceImport();

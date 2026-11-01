@@ -37,7 +37,7 @@ public:
         EndInside,
         Enclosed,
         TooLong,
-        NotFound,
+        SearchLimit,
         EntersZone,
         Cancelled,
     };
@@ -46,8 +46,9 @@ public:
     using Verify = std::function<QList<const GeoZone*>(const QList<QGeoCoordinate> &path)>;
 
     /// @param maxLength Meters the detour may be long at most, infinite without limit
-    GeoZoneRouteDetour(const GeoZone::Position &from, const GeoZone::Position &to, double margin, double maxLength, const GeoZoneCancelToken &cancel,
-                       GeoZoneRouteSearch::Cache &cache, GeoZoneRouteSearch::Statistics &statistics);
+    /// @param maxWork   Units of work after which the search stops with SearchLimit, see GeoZoneRouteGraph::work
+    GeoZoneRouteDetour(const GeoZone::Position &from, const GeoZone::Position &to, double margin, double maxLength, qint64 maxWork,
+                       const GeoZoneCancelToken &cancel, GeoZoneRouteSearch::Cache &cache, GeoZoneRouteSearch::Statistics &statistics);
 
     double directLength() const { return _directLength; }
     /// @return Bounds of the paths within the length limit, invalid without limit or when they span the earth
@@ -55,6 +56,10 @@ public:
 
     /// Adds a volume of a zone as an obstacle, before run
     void addObstacle(const GeoZone *zone, int volume) { (void) _obstacles.add(zone, volume); }
+    /// Makes the search one tried before a search with a longer limit, which follows when it returns TooLong. It then
+    /// returns TooLong without searching all edges of large graphs, and without the length of the detour, when their
+    /// near edges don't lead to the end, see GeoZoneRouteGraph.
+    void setPreliminary(bool preliminary) { _preliminary = preliminary; }
 
     /// Searches the detour, verifying the paths keeping the margin with the function when set
     Outcome run(const Verify &verify);
@@ -72,6 +77,7 @@ private:
     const GeoZone::Position _to;
     const double _margin;
     const double _maxLength;
+    const qint64 _maxWork;
     const GeoZoneCancelToken _cancel;
     GeoZoneRouteSearch::Statistics &_statistics;
     const GeoZoneGeometry::LocalProjection _projection;
@@ -80,6 +86,7 @@ private:
     const double _directLength;
     const QRectF _reach;            ///< Of the paths within the length limit, null without limit
     GeoZoneRouteObstacles _obstacles;
+    bool _preliminary = false;
 
     QList<QGeoCoordinate> _waypoints;
     double _pathLength = 0;

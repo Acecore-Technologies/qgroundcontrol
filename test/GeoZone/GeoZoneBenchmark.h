@@ -42,6 +42,7 @@ private slots:
     void _benchmarkZonesInArea();
     void _benchmarkPathEvaluation();
     void _benchmarkRouteSearch();
+    void _benchmarkRouteSearchMaze();
 
 private:
     QByteArray _document;                       ///< ED-269 file with the zones

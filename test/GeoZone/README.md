@@ -73,8 +73,9 @@ through the targets in both cases.
 national dataset: parsing the 5 MB ED-269 file, restoring it as a stored source at startup by parsing it and writing
 its parse cache or from the cache (with the stored copy hashed when its time changed), loading it into a source,
 rebuilding the catalog with its index, 1000 `zonesAt` and 1000 `zonesInArea` queries of 10 km areas, evaluating a
-mission of 500 waypoints over 1000 km, and searching the routes around the zones of 50 legs of 20 km with
-`GeoZoneRouteSearch`. It takes a few seconds and is a test of its own, labeled `benchmark`, which the sanitizer workflow doesn't run:
+mission of 500 waypoints over 1000 km, searching the routes around the zones of 50 legs of 20 km with
+`GeoZoneRouteSearch`, and the detour of a leg through a maze of 1200 zones (`_mazeFeatures` of
+`GeoZoneTestHelpers.h`), the worst case of the search. It takes a few seconds and is a test of its own, labeled `benchmark`, which the sanitizer workflow doesn't run:
 
 ```sh
 ctest -L benchmark -V          # or ./GeoZoneBenchmark, with QtTest options like -iterations 20
