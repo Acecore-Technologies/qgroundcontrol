@@ -24,7 +24,8 @@
 ///   map click panel, and the layer's check making go to locations entering zones always confirmed
 /// - FlyViewWidgetLayer.qml: GeoZoneAltitudeStrip
 /// - GuidedActionConfirm.qml: GeoZoneGuidedActionWarning
-/// - PlanMasterController: GeoZonePlanData in plan files, with the fence names of GeoZoneFenceTags
+/// - PlanMasterController: GeoZonePlanData in plan files, with the fence names of GeoZoneFenceTags, and following the
+///   Plan View plan, see GeoZonePlanData::follow
 /// - GeoFenceEditor.qml: GeoZoneFenceList in place of the lists of polygon and of circular fences
 ///
 /// Changes outside the module which don't depend on it and could go upstream on their own: the fileName of

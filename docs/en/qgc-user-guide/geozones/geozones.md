@@ -145,6 +145,7 @@ If the vehicle supports a GeoFence, the warning also names the prohibited zones 
 ### Flight Time and Schedule Tolerance {#flight-time}
 
 By default zone schedules are ignored, since the mission may be flown at another time. To check a flight at a known time, turn on **Check zones at the flight time** in the Plan View **Geozones** panel and enter the local start time (**Now** sets the current time). The mission check, the altitude profile and **Route Around Zones...** then leave out zones which aren't active while the mission flies through them, estimating when it does from its duration as if the mission is flown at an even pace. Since the take-off may be early or late and the pace may differ, a zone still counts when it is active within 15 minutes before or after the estimated times it is flown through. The warning shows the time and how many zones were left out.
+The flight time belongs to the plan: it is saved with it, a plan opened without one has none, and a new plan, **Clear**, or a plan downloaded from the vehicle starts without one.
 
 ### Authorisations {#authorisations}
 

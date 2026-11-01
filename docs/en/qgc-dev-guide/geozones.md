@@ -139,7 +139,7 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/FlightDisplay/FlyViewMap.qml` | +13/-1 | `GeoZoneFlyMapLayer`, `GeoZoneMapClickButton` and confirmed go to locations entering zones |
 | `src/FlightDisplay/FlyViewWidgetLayer.qml` | +9 | `GeoZoneAltitudeStrip` |
 | `src/FlightDisplay/GuidedActionConfirm.qml` | +3 | `GeoZoneGuidedActionWarning` |
-| `src/MissionManager/PlanMasterController.cc` | +3 | `GeoZonePlanData::load()` and `save()` of the `geoZones` section of plan files |
+| `src/MissionManager/PlanMasterController.cc` | +4 | `GeoZonePlanData::load()` and `save()` of the `geoZones` section of plan files, and `follow()`, which resets the planned start and audit record when the Plan View replaces its mission |
 | `src/Vehicle/Vehicle.cc` | +2 | Clears `altitudeAboveTerr` when the terrain query fails |
 
 The `fileName` of `QGCFileDialog.qml` and the `Vehicle.cc` change don't depend on the module and could go upstream on their own.

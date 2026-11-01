@@ -94,12 +94,6 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
         if (_masterController) {
             (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, _worker, &GeoZoneMissionWorker::schedule);
             (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_connectVehicle);
-            // A new plan has no saved geozone data, opened and saved plans set it, see GeoZonePlanData
-            (void) connect(_masterController, &PlanMasterController::currentPlanFileChanged, this, [this]() {
-                if (!_flightNow && _masterController && _masterController->currentPlanFile().isEmpty()) {
-                    _manager->planning()->setPlanAudit(std::nullopt);
-                }
-            });
         }
         _connectMissionItems();
     }

@@ -16,6 +16,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
+#include "MissionController.h"
 #include "PlanMasterController.h"
 
 #include <QtCore/QJsonArray>
@@ -81,10 +82,8 @@ void load(PlanMasterController *planController, const QJsonObject &planJson, Geo
     }
 
     const QJsonObject json = planJson.value(jsonKey).toObject();
-    const QDateTime plannedStart = QDateTime::fromString(json.value(plannedStartKey).toString(), Qt::ISODate);
-    if (plannedStart.isValid()) {
-        manager->planning()->setPlannedStart(plannedStart);
-    }
+    // Invalid without one, so that the start of the previous plan isn't kept
+    manager->planning()->setPlannedStart(QDateTime::fromString(json.value(plannedStartKey).toString(), Qt::ISODate));
 
     QList<GeoZoneAuthorisation> authorisations;
     for (const QJsonValue &value : json.value(authorisationsKey).toArray()) {
@@ -97,6 +96,23 @@ void load(PlanMasterController *planController, const QJsonObject &planJson, Geo
 
     // Older plans don't have the data they were saved with
     manager->planning()->setPlanAudit(GeoZonePlanAudit::Record::fromJson(json.value(auditKey).toObject()));
+}
+
+void reset(GeoZoneManager *manager)
+{
+    manager = manager ? manager : GeoZoneManager::instance();
+    manager->planning()->clearPlannedStart();
+    manager->planning()->setPlanAudit(std::nullopt);
+}
+
+void follow(PlanMasterController *planController, GeoZoneManager *manager)
+{
+    if (!planController || planController->property("flyView").toBool()) {
+        return;
+    }
+    manager = manager ? manager : GeoZoneManager::instance();
+    // Emitted when the controller replaces its list of items, not when items are added or removed
+    (void) QObject::connect(planController->missionController(), &MissionController::visualItemsChanged, manager, [manager]() { reset(manager); });
 }
 
 } // namespace GeoZonePlanData

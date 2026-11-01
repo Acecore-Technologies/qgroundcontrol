@@ -1523,6 +1523,72 @@ void GeoZonePlanningTest::_testPlanAudit()
     QVERIFY(!manager.planning()->planAudit().has_value());
 }
 
+void GeoZonePlanningTest::_testPlannedStartPerPlan()
+{
+    // Plan files are loaded and saved with the application's manager
+    GeoZonePlanning *const planning = GeoZoneManager::instance()->planning();
+    const QDateTime start = _utc(QDate(2027, 1, 1), QTime(10, 0));
+    const GeoZonePlanAudit::Record record = GeoZonePlanAudit::Record::make({}, {}, start);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString withStart = dir.filePath(QStringLiteral("with-start.plan"));
+    const QString withoutStart = dir.filePath(QStringLiteral("without-start.plan"));
+    {
+        PlanMasterController masterController;
+        masterController.setFlyView(false);
+        masterController.start();
+        (void) masterController.missionController()->insertSimpleMissionItem(QGeoCoordinate(47, 8), 1);
+        planning->setPlannedStart(start);
+        masterController.saveToFile(withStart);
+        planning->clearPlannedStart();
+        masterController.saveToFile(withoutStart);
+    }
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+
+    // A plan without a planned start doesn't keep the one of the plan before
+    masterController.loadFromFile(withStart);
+    QCOMPARE(planning->plannedStart(), start);
+    masterController.loadFromFile(withoutStart);
+    QVERIFY(!planning->plannedStart().isValid());
+
+    // A new plan has neither the planned start nor the audit record of the previous one
+    masterController.loadFromFile(withStart);
+    QCOMPARE(planning->plannedStart(), start);
+    planning->setPlanAudit(record);
+    masterController.removeAll();
+    QVERIFY(!planning->plannedStart().isValid());
+    QVERIFY(!planning->planAudit().has_value());
+    // Nor is the start of a new plan kept when items are added and removed
+    planning->setPlannedStart(start);
+    (void) masterController.missionController()->insertSimpleMissionItem(QGeoCoordinate(47, 8), 1);
+    masterController.missionController()->removeVisualItem(1);
+    QCOMPARE(planning->plannedStart(), start);
+
+    // The Fly View follows the mission on the vehicle, which isn't the plan
+    PlanMasterController flyController;
+    flyController.start();
+    flyController.removeAll();
+    QCOMPARE(planning->plannedStart(), start);
+
+    // Nor does a plan downloaded from the vehicle
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+    QTRY_COMPARE(masterController.managerVehicle(), vehicle);
+    QTRY_VERIFY(!masterController.syncInProgress());
+    planning->setPlannedStart(start);
+    planning->setPlanAudit(record);
+    masterController.loadFromVehicle();
+    QTRY_VERIFY_WITH_TIMEOUT(!planning->plannedStart().isValid(), 15000);
+    QVERIFY(!planning->planAudit().has_value());
+    QTRY_VERIFY(!masterController.syncInProgress());
+    _disconnectMockLink();
+}
+
 void GeoZonePlanningTest::_testRoutePlanner()
 {
     ScopedEnvironment environment;
