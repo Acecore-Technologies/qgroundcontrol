@@ -386,6 +386,31 @@ void GeoZoneMonitorTest::_testVehicleTelemetry()
     QVERIFY(!monitor.positionStale(21000 + 50000));
     QVERIFY(monitor.positionStale(21000 + 60001));
     QVERIFY(!GeoZoneVehicleMonitor(nullptr, 2, 3, clock).positionStale(100000));
+
+    // The ground below the vehicle comes from the height above terrain it sends, is where a disarmed vehicle is, or
+    // else comes from the terrain data of QGroundControl, which degrades the height above ground
+    ScopedEnvironment environment;
+    environment.setTerrain(380);
+    using TerrainSource = GeoZoneVehicleMonitor::TerrainSource;
+    TerrainSource source = TerrainSource::Unknown;
+    GeoZone::Position position = GeoZoneVehicleMonitor::vehiclePosition(start, 500, 90, true, &source);
+    QCOMPARE(position.terrainAMSL, 410.0);
+    QVERIFY(source == TerrainSource::Vehicle);
+    position = GeoZoneVehicleMonitor::vehiclePosition(start, 500, qQNaN(), false, &source);
+    QCOMPARE(position.terrainAMSL, 500.0);
+    QVERIFY(source == TerrainSource::Ground);
+    position = GeoZoneVehicleMonitor::vehiclePosition(start, 500, qQNaN(), true, &source);
+    QCOMPARE(position.altitudeAMSL, 500.0);
+    QCOMPARE(position.terrainAMSL, 380.0);
+    QVERIFY(source == TerrainSource::Database);
+    environment.setTerrain(qQNaN());
+    position = GeoZoneVehicleMonitor::vehiclePosition(start, 500, qQNaN(), true, &source);
+    QVERIFY(std::isnan(position.terrainAMSL));
+    QVERIFY(source == TerrainSource::Unknown);
+    position = GeoZoneVehicleMonitor::vehiclePosition(start, qQNaN(), 90, true, &source);
+    QVERIFY(std::isnan(position.altitudeAMSL) && std::isnan(position.terrainAMSL));
+    QVERIFY(source == TerrainSource::Unknown);
+    QVERIFY(!monitor.altitudeDegraded());
 }
 
 void GeoZoneMonitorTest::_testMonitorMultipleVehicles()

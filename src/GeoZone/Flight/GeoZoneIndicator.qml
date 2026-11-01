@@ -19,7 +19,8 @@ import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
-/// Shows whether the active vehicle is in or near restricted geozones, with the map legend and geozone options
+/// Shows whether the active vehicle is in or near restricted geozones, with the map legend and geozone options. A badge
+/// marks the nearby zones stale while the vehicle's position is lost.
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
@@ -33,6 +34,7 @@ Item {
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
+    readonly property bool _stale:          _monitor.monitoring && _active.positionUnavailable
 
     function _restrictionColor(restriction) {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
@@ -55,6 +57,25 @@ Item {
         sourceSize.height:  height
         color:              control._active.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._active.alertRestriction : -1)
         opacity:            (control._monitor.monitoring && !control._active.positionUnavailable) ? 1 : 0.5
+    }
+
+    // The nearby zones are those of the last known position
+    Rectangle {
+        anchors.bottom: parent.bottom
+        anchors.right:  geoZoneIcon.right
+        height:         ScreenTools.defaultFontPixelHeight * 0.9
+        width:          height
+        radius:         height / 2
+        color:          qgcPal.colorOrange
+        visible:        control._stale
+
+        QGCLabel {
+            anchors.centerIn:   parent
+            text:               "?"
+            color:              "black"
+            font.bold:          true
+            font.pointSize:     ScreenTools.smallFontPointSize
+        }
     }
 
     // Alerts not acknowledged in the alert history
@@ -110,13 +131,43 @@ Item {
                             visible:            control._active.fenceBreached
                         }
 
-                        QGCLabel {
+                        RowLayout {
                             id:                 _pausedLabel
+                            Layout.fillWidth:   true
+                            spacing:            ScreenTools.defaultFontPixelWidth
+                            visible:            control._stale
+
+                            Rectangle {
+                                Layout.alignment:       Qt.AlignTop
+                                Layout.preferredWidth:  staleLabel.contentWidth + ScreenTools.defaultFontPixelWidth
+                                Layout.preferredHeight: staleLabel.contentHeight + 2
+                                radius:                 height / 2
+                                color:                  qgcPal.colorOrange
+
+                                QGCLabel {
+                                    id:                 staleLabel
+                                    anchors.centerIn:   parent
+                                    text:               qsTr("Stale")
+                                    color:              "black"
+                                    font.bold:          true
+                                    font.pointSize:     ScreenTools.smallFontPointSize
+                                }
+                            }
+
+                            QGCLabel {
+                                Layout.fillWidth:   true
+                                wrapMode:           Text.WordWrap
+                                color:              qgcPal.warningText
+                                text:               qsTr("Position lost: the vehicle sends no current position, its alerts are paused. The zones below are from its last position.")
+                            }
+                        }
+
+                        QGCLabel {
                             Layout.fillWidth:   true
                             wrapMode:           Text.WordWrap
                             color:              qgcPal.warningText
-                            text:               qsTr("No current position from the vehicle, its alerts are paused. The zones below are from its last position.")
-                            visible:            control._monitor.monitoring && control._active.positionUnavailable
+                            text:               qsTr("The vehicle sends no height above terrain: its height above ground is estimated from terrain data, so limits above ground are less accurate.")
+                            visible:            control._monitor.monitoring && control._active.altitudeDegraded && !control._stale
                         }
 
                         RowLayout {
@@ -143,6 +194,7 @@ Item {
                             RowLayout {
                                 id:         nearbyRow
                                 spacing:    ScreenTools.defaultFontPixelWidth
+                                opacity:    control._stale ? 0.5 : 1
 
                                 required property var   zone
                                 required property bool  inside

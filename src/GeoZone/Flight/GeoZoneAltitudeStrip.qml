@@ -18,7 +18,8 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
 /// Vertical strip of the geozones above and below the active vehicle, with their floors and ceilings and the vehicle's
-/// altitude, so the pilot sees how far it is from entering or leaving them
+/// altitude, so the pilot sees how far it is from entering or leaving them. Badges mark the strip stale while the
+/// vehicle's position is lost, and its height above ground as estimated from terrain data when the vehicle sends none.
 Rectangle {
     id:         control
     width:      ScreenTools.defaultFontPixelWidth * 18
@@ -31,10 +32,12 @@ Rectangle {
     readonly property var   _bands:         _active.verticalBands
     readonly property real  _altitude:      _active.altitudeAMSL
     readonly property real  _terrain:       _active.terrainAMSL
+    readonly property bool  _stale:         _active.positionUnavailable
+    readonly property bool  _degraded:      _active.altitudeDegraded && !_stale
     readonly property real  _margin:        ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _barX:          _margin
     readonly property real  _barWidth:      ScreenTools.defaultFontPixelWidth * 2.5
-    readonly property real  _plotTop:       titleLabel.y + titleLabel.height + _margin
+    readonly property real  _plotTop:       (badgeFlow.visible ? badgeFlow.y + badgeFlow.height : titleLabel.y + titleLabel.height) + _margin
     readonly property real  _plotHeight:    height - _plotTop - _margin
 
     // Shown range: the ground or below the vehicle up to the limits near it
@@ -64,6 +67,22 @@ Rectangle {
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
+    component Badge: Rectangle {
+        property alias text: badgeLabel.text
+
+        width:  badgeLabel.contentWidth + ScreenTools.defaultFontPixelWidth
+        height: badgeLabel.contentHeight + 2
+        radius: height / 2
+
+        QGCLabel {
+            id:                 badgeLabel
+            anchors.centerIn:   parent
+            font.pointSize:     ScreenTools.smallFontPointSize
+            font.bold:          true
+            color:              "black"
+        }
+    }
+
     QGCLabel {
         id:                 titleLabel
         x:                  control._margin
@@ -72,6 +91,27 @@ Rectangle {
         text:               isNaN(control._terrain) ? qsTr("Geozones here") : qsTr("Geozones here, above ground")
         font.pointSize:     ScreenTools.smallFontPointSize
         wrapMode:           Text.WordWrap
+    }
+
+    Flow {
+        id:         badgeFlow
+        x:          control._margin
+        y:          titleLabel.y + titleLabel.height + (control._margin / 2)
+        width:      control.width - (control._margin * 2)
+        spacing:    control._margin
+        visible:    control._stale || control._degraded
+
+        Badge {
+            text:       qsTr("Stale")
+            color:      qgcPal.colorOrange
+            visible:    control._stale
+        }
+
+        Badge {
+            text:       qsTr("AGL estimated")
+            color:      qgcPal.colorYellow
+            visible:    control._degraded
+        }
     }
 
     // Ground
@@ -90,6 +130,7 @@ Rectangle {
         Item {
             id:         bandItem
             anchors.fill: parent
+            opacity:    control._stale ? 0.5 : 1
 
             required property var   modelData
             required property int   index
@@ -125,20 +166,22 @@ Rectangle {
         }
     }
 
-    // Vehicle
+    // Vehicle, at its last known altitude while its position is lost
     Rectangle {
         x:          control._barX - control._margin
         y:          control._y(control._altitude) - (height / 2)
         width:      control._barWidth + (control._margin * 2)
         height:     2
         color:      qgcPal.text
+        opacity:    control._stale ? 0.5 : 1
     }
 
     QGCLabel {
         x:              control._barX + control._barWidth + control._margin
         y:              Math.min(Math.max(control._y(control._altitude) - (height / 2), control._plotTop), control._plotTop + control._plotHeight - height)
-        text:           "\u25C0 " + control._heightText(control._altitude)
+        text:           "\u25C0 " + control._heightText(control._altitude) + (control._degraded ? " \u2248" : "")
         font.bold:      true
         font.pointSize: ScreenTools.smallFontPointSize
+        opacity:        control._stale ? 0.5 : 1
     }
 }

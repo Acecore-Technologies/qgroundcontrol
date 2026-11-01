@@ -36,6 +36,7 @@ void GeoZoneActiveVehicleView::setMonitor(GeoZoneVehicleMonitor *monitor)
         (void) connect(monitor, &GeoZoneVehicleMonitor::verticalBandsChanged, this, &GeoZoneActiveVehicleView::verticalBandsChanged);
         (void) connect(monitor, &GeoZoneVehicleMonitor::predictionChanged, this, &GeoZoneActiveVehicleView::predictionChanged);
         (void) connect(monitor, &GeoZoneVehicleMonitor::positionUnavailableChanged, this, &GeoZoneActiveVehicleView::positionUnavailableChanged);
+        (void) connect(monitor, &GeoZoneVehicleMonitor::terrainSourceChanged, this, &GeoZoneActiveVehicleView::altitudeDegradedChanged);
         (void) connect(monitor, &GeoZoneVehicleMonitor::fenceStatusChanged, this, &GeoZoneActiveVehicleView::fenceStatusChanged);
     }
 
@@ -44,6 +45,7 @@ void GeoZoneActiveVehicleView::setMonitor(GeoZoneVehicleMonitor *monitor)
     emit verticalBandsChanged();
     emit predictionChanged();
     emit positionUnavailableChanged();
+    emit altitudeDegradedChanged();
     emit fenceStatusChanged();
 }
 
@@ -126,6 +128,11 @@ double GeoZoneActiveVehicleView::terrainAMSL() const
 bool GeoZoneActiveVehicleView::positionUnavailable() const
 {
     return _monitor && _monitor->positionUnavailable();
+}
+
+bool GeoZoneActiveVehicleView::altitudeDegraded() const
+{
+    return _monitor && _monitor->altitudeDegraded();
 }
 
 QVariantList GeoZoneActiveVehicleView::predictedPath() const

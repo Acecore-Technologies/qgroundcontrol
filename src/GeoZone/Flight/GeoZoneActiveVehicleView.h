@@ -44,6 +44,9 @@ class GeoZoneActiveVehicleView : public QObject
     /// The vehicle has no current position: its alerts are paused and the nearby zones and bands are those of its last
     /// position, so they are stale
     Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)
+    /// The height above ground of the vehicle, which limits above ground are compared with, comes from the terrain data
+    /// of QGroundControl because the vehicle doesn't send its own, so it is less accurate
+    Q_PROPERTY(bool         altitudeDegraded    READ altitudeDegraded   NOTIFY altitudeDegradedChanged FINAL)
     /// Where the vehicle enters a nearby zone first at its current velocity within the approach time: the path from the
     /// vehicle to the entry, the entry position, the seconds until then and the zone (GeoZoneInfo). Empty, invalid and
     /// -1 without such an entry.
@@ -73,6 +76,7 @@ public:
     double altitudeAMSL() const;
     double terrainAMSL() const;
     bool positionUnavailable() const;
+    bool altitudeDegraded() const;
     QVariantList predictedPath() const;
     QGeoCoordinate predictedEntry() const;
     int predictedEntryTime() const;
@@ -87,6 +91,7 @@ signals:
     void nearbyZonesChanged();
     void verticalBandsChanged();
     void positionUnavailableChanged();
+    void altitudeDegradedChanged();
     void predictionChanged();
     void fenceStatusChanged();
 

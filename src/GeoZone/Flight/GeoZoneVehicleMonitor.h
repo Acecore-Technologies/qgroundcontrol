@@ -44,6 +44,14 @@ public:
     static constexpr int positionTimeoutMSecs = 5000;           ///< Positions are stale after this, or three times their usual interval
     static constexpr int reportedVelocityMaxAgeMSecs = 2000;    ///< Velocities reported by the vehicle are used up to this age
 
+    /// Where the terrain elevation below the vehicle, and so its height above ground, comes from
+    enum class TerrainSource {
+        Unknown,        ///< Not known, limits above ground apply at any altitude
+        Vehicle,        ///< The height above terrain the vehicle reports
+        Ground,         ///< A disarmed vehicle is on the ground
+        Database,       ///< The terrain data of QGroundControl, less accurate than the vehicle's own
+    };
+
     /// What the vehicle is evaluated against, which GeoZoneMonitor keeps until the settings or the zones change
     struct Context {
         const GeoZoneCatalog *catalog = nullptr;
@@ -95,6 +103,10 @@ public:
     const GeoZone::Position &bandsPosition() const { return _bandsPosition; }
     /// Last evaluated position
     const GeoZone::Position &position() const { return _position; }
+    /// Of the last position of the vehicle, Unknown for positions passed to evaluate()
+    TerrainSource terrainSource() const { return _terrainSource; }
+    /// The height above ground of the vehicle comes from the terrain data of QGroundControl rather than the vehicle
+    bool altitudeDegraded() const { return _terrainSource == TerrainSource::Database; }
 
     /// First predicted entry from the last evaluated position, nothing while the position is unavailable
     std::optional<Entry> entry() const { return _unavailable ? std::nullopt : _entry; }
@@ -118,7 +130,11 @@ public:
 
     /// @return Position of the vehicle with its altitude above mean sea level and the terrain elevation from its
     ///         altitude above terrain or GeoZoneTerrain, which is unknown without terrain data
-    static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate);
+    /// @param terrainSource Set to where the terrain elevation comes from
+    static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate, TerrainSource *terrainSource = nullptr);
+    /// @return Position at the altitude above mean sea level, with the terrain elevation below the height above terrain
+    ///         when it is known, at the altitude when the vehicle is disarmed, and otherwise from GeoZoneTerrain
+    static GeoZone::Position vehiclePosition(const QGeoCoordinate &coordinate, double altitudeAMSL, double heightAboveTerrain, bool armed, TerrainSource *terrainSource = nullptr);
 
     /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
     static QString fenceBreachText(int breachType, int breachCount);
@@ -128,6 +144,7 @@ signals:
     void verticalBandsChanged();
     void predictionChanged();
     void positionUnavailableChanged();
+    void terrainSourceChanged();
     void fenceStatusChanged();
     /// The vehicle started breaching its fence
     void fenceBreachStarted(const QString &text);
@@ -155,6 +172,7 @@ private:
     Velocity _reported;
     GeoZoneVelocityEstimator _estimator;
     bool _unavailable = false;              ///< Alerts are paused for lack of a current position
+    TerrainSource _terrainSource = TerrainSource::Unknown;
 
     bool _fenceStatusKnown = false;
     bool _fenceBreached = false;

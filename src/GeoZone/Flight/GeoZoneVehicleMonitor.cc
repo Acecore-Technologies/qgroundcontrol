@@ -173,7 +173,12 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::update(const Context &c
     if (unavailable) {
         return {};
     }
-    const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate());
+    TerrainSource terrainSource = TerrainSource::Unknown;
+    const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate(), &terrainSource);
+    if (terrainSource != _terrainSource) {
+        _terrainSource = terrainSource;
+        emit terrainSourceChanged();
+    }
     return evaluate(position, velocity(msecs, position), context);
 }
 
@@ -252,29 +257,41 @@ void GeoZoneVehicleMonitor::forgetZones(const QString &sourceKey)
     }
 }
 
-GeoZone::Position GeoZoneVehicleMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate)
+GeoZone::Position GeoZoneVehicleMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate, TerrainSource *terrainSource)
+{
+    if (!vehicle) {
+        if (terrainSource) {
+            *terrainSource = TerrainSource::Unknown;
+        }
+        return GeoZone::Position{ coordinate };
+    }
+    return vehiclePosition(coordinate, vehicle->altitudeAMSL()->rawValue().toDouble(), vehicle->altitudeAboveTerr()->rawValue().toDouble(),
+                           vehicle->armed(), terrainSource);
+}
+
+GeoZone::Position GeoZoneVehicleMonitor::vehiclePosition(const QGeoCoordinate &coordinate, double altitudeAMSL, double heightAboveTerrain, bool armed, TerrainSource *terrainSource)
 {
     GeoZone::Position position{ coordinate };
-    if (!vehicle) {
-        return position;
-    }
+    TerrainSource source = TerrainSource::Unknown;
+    if (!qIsNaN(altitudeAMSL)) {
+        position.altitudeAMSL = altitudeAMSL;
 
-    const double altitudeAMSL = vehicle->altitudeAMSL()->rawValue().toDouble();
-    if (qIsNaN(altitudeAMSL)) {
-        return position;
+        // Without terrain data limits above ground can't be excluded. The height above home is not used instead
+        // since it misses zones over rising ground. A disarmed vehicle is on the ground. The vehicle doesn't query
+        // the terrain again while it hovers, so tiles loaded since its last query are looked up.
+        if (!qIsNaN(heightAboveTerrain)) {
+            position.terrainAMSL = altitudeAMSL - heightAboveTerrain;
+            source = TerrainSource::Vehicle;
+        } else if (!armed) {
+            position.terrainAMSL = altitudeAMSL;
+            source = TerrainSource::Ground;
+        } else {
+            position.terrainAMSL = GeoZoneTerrain::elevationAt(coordinate);
+            source = qIsNaN(position.terrainAMSL) ? TerrainSource::Unknown : TerrainSource::Database;
+        }
     }
-    position.altitudeAMSL = altitudeAMSL;
-
-    // Without terrain data limits above ground can't be excluded. The height above home is not used instead
-    // since it misses zones over rising ground. A disarmed vehicle is on the ground. The vehicle doesn't query
-    // the terrain again while it hovers, so tiles loaded since its last query are looked up.
-    const double heightAboveTerrain = vehicle->altitudeAboveTerr()->rawValue().toDouble();
-    if (!qIsNaN(heightAboveTerrain)) {
-        position.terrainAMSL = altitudeAMSL - heightAboveTerrain;
-    } else if (!vehicle->armed()) {
-        position.terrainAMSL = altitudeAMSL;
-    } else {
-        position.terrainAMSL = GeoZoneTerrain::elevationAt(coordinate);
+    if (terrainSource) {
+        *terrainSource = source;
     }
     return position;
 }
