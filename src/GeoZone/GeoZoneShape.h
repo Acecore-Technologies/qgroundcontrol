@@ -17,15 +17,25 @@
 
 #include "GeoZone.h"
 
-/// Bounds in normalized Web Mercator coordinates: x and y in [0, 1], y increasing southwards
+/// Bounds in normalized Web Mercator coordinates: x and y in [0, 1], y increasing southwards. Shapes crossing the
+/// antimeridian extend past 0 or 1 in x.
 struct GeoZoneMercatorBounds {
     double minX = 0;
     double minY = 0;
     double maxX = 0;
     double maxY = 0;
 
+    /// x wraps around, one unit being 360 degrees of longitude
     bool intersects(const GeoZoneMercatorBounds &other) const {
-        return (minX <= other.maxX) && (maxX >= other.minX) && (minY <= other.maxY) && (maxY >= other.minY);
+        if ((minY > other.maxY) || (maxY < other.minY)) {
+            return false;
+        }
+        for (const double shift : { -1.0, 0.0, 1.0 }) {
+            if ((minX <= (other.maxX + shift)) && (maxX >= (other.minX + shift))) {
+                return true;
+            }
+        }
+        return false;
     }
     double width() const { return maxX - minX; }
     double height() const { return maxY - minY; }

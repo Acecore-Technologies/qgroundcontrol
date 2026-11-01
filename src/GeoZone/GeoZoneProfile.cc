@@ -10,7 +10,7 @@
 #include "GeoZoneProfile.h"
 #include "ComplexMissionItem.h"
 #include "FlightPathSegment.h"
-#include "GeoZoneGeometry.h"
+#include "GeoZoneIndex.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "MissionController.h"
@@ -228,14 +228,10 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
     }
     const double spacing = (std::max)(minSampleSpacing, totalLength / maxSamples);
 
-    // Zone volume near a segment with its bounds
+    // Zone volume near a segment
     struct Candidate {
         const GeoZone *zone = nullptr;
         int volumeIndex = 0;
-        double minLatitude = 0;
-        double maxLatitude = 0;
-        double minLongitude = 0;
-        double maxLongitude = 0;
     };
 
     double offset = 0;
@@ -250,8 +246,10 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
         const double azimuth = segment.from.azimuthTo(segment.to);
         const double segmentMinLatitude = (std::min)(segment.from.latitude(), segment.to.latitude());
         const double segmentMaxLatitude = (std::max)(segment.from.latitude(), segment.to.latitude());
-        const double segmentMinLongitude = (std::min)(segment.from.longitude(), segment.to.longitude());
-        const double segmentMaxLongitude = (std::max)(segment.from.longitude(), segment.to.longitude());
+        // Longitudes are continuous across the antimeridian, east past 180 degrees when crossing it
+        const auto continuousSpan = [](double west, double east) { return std::make_pair(west, (east < west) ? (east + 360) : east); };
+        const auto segmentSpan = GeoZoneIndex::longitudeSpan(segment.from.longitude(), segment.to.longitude());
+        const auto [segmentWest, segmentEast] = continuousSpan(segmentSpan.first, segmentSpan.second);
 
         QList<Candidate> candidates;
         for (const GeoZone *zone : manager->catalog().zonesInArea(QGeoRectangle(QList<QGeoCoordinate>{ segment.from, segment.to }), policy)) {
@@ -261,16 +259,15 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
                 if (!box.isValid()) {
                     continue;
                 }
-                Candidate candidate;
-                candidate.zone = zone;
-                candidate.volumeIndex = v;
-                candidate.minLatitude = box.bottomLeft().latitude();
-                candidate.maxLatitude = box.topLeft().latitude();
-                candidate.minLongitude = box.topLeft().longitude();
-                candidate.maxLongitude = box.bottomRight().longitude();
-                if ((candidate.maxLatitude >= segmentMinLatitude) && (candidate.minLatitude <= segmentMaxLatitude) &&
-                    (candidate.maxLongitude >= segmentMinLongitude) && (candidate.minLongitude <= segmentMaxLongitude)) {
-                    candidates.append(candidate);
+                if ((box.topLeft().latitude() < segmentMinLatitude) || (box.bottomLeft().latitude() > segmentMaxLatitude)) {
+                    continue;
+                }
+                const auto [boxWest, boxEast] = continuousSpan(box.topLeft().longitude(), box.bottomRight().longitude());
+                for (const double shift : { -360.0, 0.0, 360.0 }) {
+                    if ((boxWest <= (segmentEast + shift)) && ((segmentWest + shift) <= boxEast)) {
+                        candidates.append(Candidate{ zone, v });
+                        break;
+                    }
                 }
             }
         }
@@ -286,12 +283,6 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<Segment> &s
 
             QSet<std::pair<const GeoZone*, int>> inside;
             for (const Candidate &candidate : std::as_const(candidates)) {
-                const double latitude = position.coordinate.latitude();
-                const double longitude = position.coordinate.longitude();
-                if ((latitude < candidate.minLatitude) || (latitude > candidate.maxLatitude) ||
-                    (longitude < candidate.minLongitude) || (longitude > candidate.maxLongitude)) {
-                    continue;
-                }
                 if (!candidate.zone->volumeContains(candidate.volumeIndex, position.coordinate)) {
                     continue;
                 }

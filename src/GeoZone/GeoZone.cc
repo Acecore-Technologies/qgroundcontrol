@@ -63,26 +63,82 @@ bool hasCeiling(const GeoZone::Volume &volume)
     return !qIsNaN(volume.upperLimit) && (volume.upperLimit < kUnlimitedSentinel);
 }
 
-/// @return Longitude and latitude extent of the ring, x is longitude and y latitude
+constexpr double kLongitudeShifts[] = { -360.0, 0.0, 360.0 };
+
+/// @return Longitude and latitude extent of the ring, x is longitude and y latitude. The west edge is from -180 up
+///         to 180 degrees, the east edge can be past 180 degrees for rings crossing the antimeridian.
 QRectF ringBounds(const GeoZone::Ring &ring)
 {
     if (ring.isEmpty()) {
         return QRectF();
     }
-    double south = 90, north = -90, west = 180, east = -180;
+    double south = 90, north = -90;
+    double west = std::numeric_limits<double>::max();
+    double east = std::numeric_limits<double>::lowest();
     for (const QPointF &vertex : ring) {
         south = (std::min)(south, vertex.y());
         north = (std::max)(north, vertex.y());
         west = (std::min)(west, vertex.x());
         east = (std::max)(east, vertex.x());
     }
-    return QRectF(QPointF(west, south), QPointF(east, north));
+    const double shift = 360.0 * std::floor((west + 180.0) / 360.0);
+    return QRectF(QPointF(west - shift, south), QPointF(east - shift, north));
 }
 
 bool boxContains(const QRectF &box, const QGeoCoordinate &coordinate)
 {
-    return (coordinate.longitude() >= box.left()) && (coordinate.longitude() <= box.right()) &&
-           (coordinate.latitude() >= box.top()) && (coordinate.latitude() <= box.bottom());
+    if ((coordinate.latitude() < box.top()) || (coordinate.latitude() > box.bottom())) {
+        return false;
+    }
+    return std::any_of(std::cbegin(kLongitudeShifts), std::cend(kLongitudeShifts), [&box, &coordinate](double shift) {
+        const double longitude = coordinate.longitude() + shift;
+        return (longitude >= box.left()) && (longitude <= box.right());
+    });
+}
+
+/// @return true if the longitude ranges overlap, either may cross the antimeridian with an east edge past 180 degrees
+bool longitudesOverlap(double west1, double east1, double west2, double east2)
+{
+    return std::any_of(std::cbegin(kLongitudeShifts), std::cend(kLongitudeShifts), [=](double shift) {
+        return (west1 <= (east2 + shift)) && ((west2 + shift) <= east1);
+    });
+}
+
+/// @return The ring with each longitude moved by whole turns to within 180 degrees of the previous one, starting
+///         from the reference, so that edges crossing the antimeridian don't wrap around the world. Shared when
+///         unchanged.
+GeoZone::Ring continuousRing(const GeoZone::Ring &ring, double referenceLongitude)
+{
+    GeoZone::Ring result = ring;
+    double previous = referenceLongitude;
+    for (qsizetype i = 0; i < ring.count(); i++) {
+        const double longitude = ring[i].x();
+        const double continuous = longitude + (360.0 * std::round((previous - longitude) / 360.0));
+        if (continuous != longitude) {
+            result[i].setX(continuous);
+        }
+        previous = continuous;
+    }
+    return result;
+}
+
+GeoZone::Data continuousData(const GeoZone::Data &data)
+{
+    GeoZone::Data result = data;
+    for (qsizetype v = 0; v < data.volumes.count(); v++) {
+        const GeoZone::Volume &volume = data.volumes[v];
+        if (volume.isCircle || volume.rings.isEmpty() || volume.rings.first().isEmpty()) {
+            continue;
+        }
+        const double reference = volume.rings.first().first().x();
+        for (qsizetype r = 0; r < volume.rings.count(); r++) {
+            const GeoZone::Ring ring = continuousRing(volume.rings[r], reference);
+            if (!ring.isSharedWith(volume.rings[r])) {
+                result.volumes[v].rings[r] = ring;
+            }
+        }
+    }
+    return result;
 }
 
 } // namespace
@@ -96,7 +152,10 @@ QGeoRectangle GeoZone::Volume::boundingBox() const
         return QGeoRectangle();
     }
     const QRectF box = ringBounds(rings.first());
-    return QGeoRectangle(QGeoCoordinate(box.bottom(), box.left()), QGeoCoordinate(box.top(), box.right()));
+    if (box.width() >= 360) {
+        return QGeoRectangle(QGeoCoordinate(box.bottom(), -180), QGeoCoordinate(box.top(), 180));
+    }
+    return QGeoRectangle(QGeoCoordinate(box.bottom(), box.left()), QGeoCoordinate(box.top(), std::remainder(box.right(), 360.0)));
 }
 
 GeoZone::Ring GeoZone::toRing(const QList<QGeoCoordinate> &coordinates)
@@ -120,7 +179,7 @@ QList<QGeoCoordinate> GeoZone::toCoordinates(const Ring &ring)
 }
 
 GeoZone::GeoZone(const Data &data)
-    : _data(data)
+    : _data(continuousData(data))
 {
     _volumeBoxes.reserve(_data.volumes.count());
     for (const Volume &volume : _data.volumes) {
@@ -390,8 +449,8 @@ double GeoZone::distanceTo(const Position &position, double verticalMargin, doub
 double GeoZone::_boxDistance(const QRectF &box, const GeoZoneGeometry::LocalProjection &projection)
 {
     // Distance from the projection origin to the box corners projected around it, close enough to skip far volumes
-    const QPointF southWest = projection.toLocal(QGeoCoordinate(box.top(), box.left()));
-    const QPointF northEast = projection.toLocal(QGeoCoordinate(box.bottom(), box.right()));
+    const QPointF southWest = projection.lonLatToLocal(box.topLeft());
+    const QPointF northEast = projection.lonLatToLocal(box.bottomRight());
     const double dx = (std::max)({ southWest.x(), -northEast.x(), 0.0 });
     const double dy = (std::max)({ southWest.y(), -northEast.y(), 0.0 });
     return std::hypot(dx, dy);
@@ -471,10 +530,17 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
     const double north = _boundingBox.topLeft().latitude();
     const double south = _boundingBox.bottomLeft().latitude();
     const double west = _boundingBox.topLeft().longitude();
-    const double east = _boundingBox.bottomRight().longitude();
+    double east = _boundingBox.bottomRight().longitude();
+    if (east < west) {
+        east += 360;
+    }
     const auto overlapsBoundingBox = [north, south, west, east](const QGeoCoordinate &a, const QGeoCoordinate &b) {
-        return (std::max(a.latitude(), b.latitude()) >= south) && (std::min(a.latitude(), b.latitude()) <= north) &&
-               (std::max(a.longitude(), b.longitude()) >= west) && (std::min(a.longitude(), b.longitude()) <= east);
+        if ((std::max(a.latitude(), b.latitude()) < south) || (std::min(a.latitude(), b.latitude()) > north)) {
+            return false;
+        }
+        // The segment takes the shorter way, which may cross the antimeridian
+        const double bLongitude = b.longitude() + (360.0 * std::round((a.longitude() - b.longitude()) / 360.0));
+        return longitudesOverlap((std::min)(a.longitude(), bLongitude), (std::max)(a.longitude(), bLongitude), west, east);
     };
 
     // Only projected when a segment comes near, since most paths are far from the zone. The projection is affine in

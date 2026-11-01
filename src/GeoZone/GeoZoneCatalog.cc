@@ -164,8 +164,8 @@ QList<GeoZoneCatalog::PathHit> GeoZoneCatalog::pathHits(const QList<QList<GeoZon
             if (!from.isValid() || !to.isValid()) {
                 continue;
             }
-            const QList<int> candidates = _index.query((std::min)(from.latitude(), to.latitude()), (std::min)(from.longitude(), to.longitude()),
-                                                       (std::max)(from.latitude(), to.latitude()), (std::max)(from.longitude(), to.longitude()));
+            const auto [west, east] = GeoZoneIndex::longitudeSpan(from.longitude(), to.longitude());
+            const QList<int> candidates = _index.query((std::min)(from.latitude(), to.latitude()), west, (std::max)(from.latitude(), to.latitude()), east);
             for (const int index : candidates) {
                 QList<int> &candidatePathList = candidatePaths[index];
                 if (candidatePathList.isEmpty() || (candidatePathList.last() != pathIndex)) {

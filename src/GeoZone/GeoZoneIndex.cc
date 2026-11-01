@@ -15,27 +15,45 @@
 
 bool GeoZoneIndex::Box::intersects(const Box &other) const
 {
-    return (west <= other.east) && (other.west <= east) && (south <= other.north) && (other.south <= north);
+    if ((south > other.north) || (other.south > north)) {
+        return false;
+    }
+    // Either box may cross the antimeridian
+    for (const double shift : { -360.0, 0.0, 360.0 }) {
+        if ((west <= (other.east + shift)) && ((other.west + shift) <= east)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+GeoZoneIndex::Box GeoZoneIndex::_box(double south, double west, double north, double east)
+{
+    return Box{ north, south, west, (west > east) ? (east + 360) : east };
 }
 
 GeoZoneIndex::Box GeoZoneIndex::_box(const QGeoRectangle &rectangle)
 {
-    Box box;
-    box.north = rectangle.topLeft().latitude();
-    box.south = rectangle.bottomRight().latitude();
-    box.west = rectangle.topLeft().longitude();
-    box.east = rectangle.bottomRight().longitude();
-    // Boxes crossing the antimeridian are rare for geozones, cover all longitudes for them
-    if (box.west > box.east) {
-        box.west = -180;
-        box.east = 180;
-    }
-    return box;
+    return _box(rectangle.bottomRight().latitude(), rectangle.topLeft().longitude(), rectangle.topLeft().latitude(), rectangle.bottomRight().longitude());
+}
+
+std::pair<double, double> GeoZoneIndex::longitudeSpan(double longitude1, double longitude2)
+{
+    const double west = (std::min)(longitude1, longitude2);
+    const double east = (std::max)(longitude1, longitude2);
+    return ((east - west) > 180) ? std::make_pair(east, west) : std::make_pair(west, east);
 }
 
 int GeoZoneIndex::_cell(double degrees)
 {
     return static_cast<int>(std::floor(degrees / cellSizeDegrees));
+}
+
+int GeoZoneIndex::_wrappedLongitudeCell(int cell)
+{
+    const int cellCount = static_cast<int>(std::lround(360 / cellSizeDegrees));
+    const int first = _cell(-180);
+    return first + ((((cell - first) % cellCount) + cellCount) % cellCount);
 }
 
 quint64 GeoZoneIndex::_key(int latitudeCell, int longitudeCell)
@@ -75,7 +93,7 @@ void GeoZoneIndex::build(const QList<GeoZone*> &zones)
         }
         for (int latitudeCell = south; latitudeCell <= north; latitudeCell++) {
             for (int longitudeCell = west; longitudeCell <= east; longitudeCell++) {
-                _cells[_key(latitudeCell, longitudeCell)].append(i);
+                _cells[_key(latitudeCell, _wrappedLongitudeCell(longitudeCell))].append(i);
             }
         }
     }
@@ -88,8 +106,7 @@ QList<int> GeoZoneIndex::query(const QGeoRectangle &area) const
     if (!area.isValid()) {
         return QList<int>();
     }
-    const Box box = _box(area);
-    return query(box.south, box.west, box.north, box.east);
+    return query(area.bottomRight().latitude(), area.topLeft().longitude(), area.topLeft().latitude(), area.bottomRight().longitude());
 }
 
 QList<int> GeoZoneIndex::query(double south, double west, double north, double east) const
@@ -99,11 +116,11 @@ QList<int> GeoZoneIndex::query(double south, double west, double north, double e
         return result;
     }
 
-    const Box queryBox{ north, south, west, east };
-    const int southCell = _cell(south);
-    const int northCell = _cell(north);
-    const int westCell = _cell(west);
-    const int eastCell = _cell(east);
+    const Box queryBox = _box(south, west, north, east);
+    const int southCell = _cell(queryBox.south);
+    const int northCell = _cell(queryBox.north);
+    const int westCell = _cell(queryBox.west);
+    const int eastCell = _cell(queryBox.east);
     if ((static_cast<qint64>(northCell - southCell + 1) * (eastCell - westCell + 1)) > maxCellsPerQuery) {
         for (int i = 0; i < _boxes.count(); i++) {
             if (_boxes[i].intersects(queryBox)) {
@@ -131,7 +148,7 @@ QList<int> GeoZoneIndex::query(double south, double west, double north, double e
     }
     for (int latitudeCell = southCell; latitudeCell <= northCell; latitudeCell++) {
         for (int longitudeCell = westCell; longitudeCell <= eastCell; longitudeCell++) {
-            const auto it = _cells.constFind(_key(latitudeCell, longitudeCell));
+            const auto it = _cells.constFind(_key(latitudeCell, _wrappedLongitudeCell(longitudeCell)));
             if (it != _cells.constEnd()) {
                 for (const int index : it.value()) {
                     consider(index);

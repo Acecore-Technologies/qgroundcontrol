@@ -219,14 +219,16 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
             _boundingBox = _boundingBox.isValid() ? _boundingBox.united(zone->boundingBox()) : zone->boundingBox();
         }
 
-        // Volumes stacked at different altitudes often share the same footprint, only draw it once
+        // Volumes stacked at different altitudes often share the same footprint, only draw it once. The zone's rings
+        // are drawn, which are continuous across the antimeridian.
+        const QList<GeoZone::Volume> &volumes = zone->data().volumes;
         QMultiHash<size_t, qsizetype> drawnVolumes;
-        for (qsizetype i = 0; i < zoneData.volumes.count(); i++) {
-            const GeoZone::Volume &volume = zoneData.volumes[i];
+        for (qsizetype i = 0; i < volumes.count(); i++) {
+            const GeoZone::Volume &volume = volumes[i];
             const size_t hash = _footprintHash(volume);
             bool drawn = false;
             for (auto it = drawnVolumes.constFind(hash); !drawn && (it != drawnVolumes.cend()) && (it.key() == hash); ++it) {
-                drawn = _sameFootprint(zoneData.volumes[it.value()], volume);
+                drawn = _sameFootprint(volumes[it.value()], volume);
             }
             if (drawn) {
                 continue;

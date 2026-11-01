@@ -21,6 +21,7 @@
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -58,11 +59,12 @@ public:
     };
 
     /// Unclosed polygon boundary, x is longitude and y latitude in degrees. Much smaller than QGeoCoordinate vertices.
+    /// The rings of a zone are continuous across the antimeridian, so their longitudes can exceed 180 degrees.
     using Ring = QList<QPointF>;
 
     static Ring toRing(const QList<QGeoCoordinate> &coordinates);
     static QList<QGeoCoordinate> toCoordinates(const Ring &ring);
-    static QGeoCoordinate toCoordinate(const QPointF &vertex) { return QGeoCoordinate(vertex.y(), vertex.x()); }
+    static QGeoCoordinate toCoordinate(const QPointF &vertex) { return QGeoCoordinate(vertex.y(), std::remainder(vertex.x(), 360.0)); }
 
     /// Horizontal projection plus vertical limits of one airspace volume of a zone
     struct Volume {

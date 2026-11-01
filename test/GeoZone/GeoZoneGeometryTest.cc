@@ -684,3 +684,62 @@ void GeoZoneGeometryTest::_testMapLayerTriangulation()
     QTransform transform;
     QVERIFY(!GeoZoneMapLayer::mercatorTransform(QGeoCoordinate(), 13, [](const QGeoCoordinate &) { return QPointF(); }, transform));
 }
+
+void GeoZoneGeometryTest::_testAntimeridian()
+{
+    // A zone from 179.5 E to 179.5 W published with its longitudes jumping across the antimeridian
+    ZoneOwner owner;
+    GeoZone::Data crossingData;
+    crossingData.identifier = QStringLiteral("CROSSING");
+    crossingData.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing({ QGeoCoordinate(-17, 179.5), QGeoCoordinate(-16, 179.5),
+                                                                            QGeoCoordinate(-16, -179.5), QGeoCoordinate(-17, -179.5) }) } });
+    GeoZone *const crossing = owner.add(crossingData);
+    QVERIFY(crossing->boundingBox().width() < 1.01);
+    QVERIFY(crossing->contains(QGeoCoordinate(-16.5, 179.9)));
+    QVERIFY(crossing->contains(QGeoCoordinate(-16.5, -179.9)));
+    QVERIFY(crossing->contains(QGeoCoordinate(-16.5, 180)));
+    QVERIFY(!crossing->contains(QGeoCoordinate(-16.5, 0)));
+    QVERIFY(!crossing->contains(QGeoCoordinate(-16.5, 179)));
+    const double expectedDistance = QGeoCoordinate(-16.5, -179).distanceTo(QGeoCoordinate(-16.5, -179.5));
+    QVERIFY(qAbs(crossing->distanceTo(QGeoCoordinate(-16.5, -179)) - expectedDistance) < (expectedDistance * 0.005));
+    const QList<QList<QGeoCoordinate>> exclusionPolygons = crossing->exclusionPolygons();
+    QCOMPARE(exclusionPolygons.count(), 1);
+    for (const QGeoCoordinate &coordinate : exclusionPolygons.first()) {
+        QVERIFY(coordinate.isValid());
+    }
+
+    // A path crossing the antimeridian enters at the west edge of the zone
+    const std::optional<GeoZone::PathEntry> entry = crossing->pathEntry({ { QGeoCoordinate(-16.5, 179) }, { QGeoCoordinate(-16.5, -179) } });
+    QVERIFY(entry);
+    QVERIFY(qAbs(entry->position.coordinate.longitude() - 179.5) < 1e-6);
+    QVERIFY(!crossing->pathEntry({ { QGeoCoordinate(-16.5, 179) }, { QGeoCoordinate(-16.5, 0) } }));
+
+    // The index finds zones on both sides of the antimeridian without matching the rest of the world
+    GeoZone::Data circleData;
+    circleData.identifier = QStringLiteral("CIRCLE");
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = QGeoCoordinate(-16.5, 179.99);
+    circleVolume.radius = 5000;
+    circleData.volumes.append(circleVolume);
+    GeoZone::Data farData;
+    farData.identifier = QStringLiteral("FAR");
+    farData.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing({ QGeoCoordinate(-17, -0.5), QGeoCoordinate(-16, -0.5), QGeoCoordinate(-16, 0.5) }) } });
+    GeoZoneIndex index;
+    index.build({ crossing, owner.add(circleData), owner.add(farData) });
+    QCOMPARE(index.query(-16.5, -179.99, -16.5, -179.99), QList<int>({ 0, 1 }));
+    QCOMPARE(index.query(-16.5, 179.99, -16.5, 179.99), QList<int>({ 0, 1 }));
+    QCOMPARE(index.query(-16.5, 179.2, -16.5, 179.2), QList<int>());
+    QCOMPARE(index.query(QGeoRectangle(QGeoCoordinate(-16, 179), QGeoCoordinate(-17, -179))), QList<int>({ 0, 1 }));
+    QCOMPARE(index.query(-16.5, -0.1, -16.4, 0.1), QList<int>({ 2 }));
+    const auto [west, east] = GeoZoneIndex::longitudeSpan(179, -179);
+    QCOMPARE(index.query(-16.5, west, -16.5, east), QList<int>({ 0, 1 }));
+
+    // The map shape stays narrow and is found by views on either side of the antimeridian
+    const GeoZoneShape shape(crossing, crossing->data().volumes[0].rings);
+    QVERIFY(shape.mercatorBounds().width() < 0.01);
+    const double y = GeoZoneShape::toMercator(QGeoCoordinate(-16.5, 0)).y();
+    QVERIFY(shape.mercatorBounds().intersects({ 0.0, y - 0.001, 0.0005, y + 0.001 }));
+    QVERIFY(shape.mercatorBounds().intersects({ 0.9995, y - 0.001, 1.0, y + 0.001 }));
+    QVERIFY(!shape.mercatorBounds().intersects({ 0.5, y - 0.001, 0.6, y + 0.001 }));
+}

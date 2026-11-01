@@ -27,4 +27,5 @@ private slots:
     void _testAreaIntersection();
     void _testShapeSimplification();
     void _testMapLayerTriangulation();
+    void _testAntimeridian();
 };
