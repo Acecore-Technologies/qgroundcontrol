@@ -69,18 +69,14 @@ public:
     const QList<GeoZoneShape*> &shapes() const { return _shapes; }
     QGeoRectangle boundingBox() const { return _boundingBox; }
 
-    /// Name of the stored copy in the manager's storage directory
-    QString storedFileName() const { return _storedFileName; }
-    void setStoredFileName(const QString &storedFileName) { _storedFileName = storedFileName; }
-
     /// Sets the dates of the stored copy before it is loaded, or when a feed is confirmed unchanged
     void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate);
 
     GeoZoneParser::Format format() const { return _format; }
     QByteArray contentHash() const { return _contentHash; }
 
-    /// Records that a download had the same zones as loaded
-    void markCurrent(const QDateTime &loadedAt, const QDateTime &issued);
+    /// Records that a download had the same zones as loaded, updating the dataset metadata
+    void markCurrent(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate);
 
     /// HTTP validators of a feed for downloading it only when it changed
     QString etag() const { return _etag; }
@@ -113,7 +109,9 @@ signals:
 
 private:
     void _clearZones();
+    void _setMetadata(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate);
     QString _dateText() const;
+    QString _sourceText() const;
 
     const QString _key;
     const QString _url;
@@ -129,7 +127,6 @@ private:
     QString _validityText;
     bool _busy = false;
     QString _errorString;
-    QString _storedFileName;
     QByteArray _contentHash;
     QString _etag;
     QString _lastModified;

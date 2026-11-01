@@ -28,6 +28,7 @@ class GeoZone : public QObject
 
     Q_PROPERTY(QString          identifier              READ identifier             CONSTANT)
     Q_PROPERTY(QString          name                    READ name                   CONSTANT)
+    Q_PROPERTY(QString          displayName             READ displayName            CONSTANT)   ///< Name, or the identifier of unnamed zones
     Q_PROPERTY(QString          country                 READ country                CONSTANT)
     Q_PROPERTY(Restriction      restriction             READ restriction            CONSTANT)
     Q_PROPERTY(QString          restrictionText         READ restrictionText        CONSTANT)
@@ -39,7 +40,8 @@ class GeoZone : public QObject
     Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT)
     Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT)
     Q_PROPERTY(bool             active                  READ active                 NOTIFY activeChanged)
-    Q_PROPERTY(QString          sourceText              READ sourceText             CONSTANT)   ///< File or feed the zone was loaded from
+    Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT)   ///< Key of the GeoZoneSource
+    Q_PROPERTY(QString          sourceText              READ sourceText             NOTIFY sourceTextChanged)   ///< File or feed the zone was loaded from, with its date
 
 public:
     enum Restriction {
@@ -112,6 +114,7 @@ public:
 
     QString identifier() const { return _data.identifier; }
     QString name() const { return _data.name; }
+    QString displayName() const { return _data.name.isEmpty() ? _data.identifier : _data.name; }
     QString country() const { return _data.country; }
     Restriction restriction() const { return _data.restriction; }
     QString restrictionText() const { return restrictionToString(_data.restriction); }
@@ -124,9 +127,14 @@ public:
     QGeoCoordinate center() const { return _boundingBox.center(); }
     QGeoRectangle boundingBox() const { return _boundingBox; }
     bool active() const { return _active; }
+    QString sourceKey() const { return _sourceKey; }
     QString sourceText() const { return _sourceText; }
     /// Set by the source before the zone is published
-    void setSourceText(const QString &sourceText) { _sourceText = sourceText; }
+    void setSourceKey(const QString &sourceKey);
+    void setSourceText(const QString &sourceText);
+
+    /// @return Identifies the zone across reloads of its source, from the source key, identifier, name and restriction
+    const QString &key() const { return _key; }
 
     /// Re-evaluates the active state against the specified UTC time
     void updateActive(const QDateTime &now);
@@ -191,6 +199,7 @@ public:
 
 signals:
     void activeChanged(bool active);
+    void sourceTextChanged();
 
 private:
     static QString _limitToString(double limit, VerticalReference reference, const QString &referenceCode, bool feet);
@@ -198,6 +207,8 @@ private:
     const Data _data;
     QGeoRectangle _boundingBox;
     bool _active = true;
+    QString _sourceKey;
     QString _sourceText;
+    QString _key;
     mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance
 };

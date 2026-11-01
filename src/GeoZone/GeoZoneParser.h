@@ -46,7 +46,9 @@ public:
 
     static bool parseFile(const QString &fileName, Result &result, QString &errorString);
     /// @param formatHint FaaTfr accepts an empty feature list from the FAA as a valid TFR list
-    static bool parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint = Format::Unknown);
+    /// @param language Code of the preferred language of localized texts, English is used otherwise
+    static bool parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint = Format::Unknown,
+                      const QString &language = QString());
 
     static QString formatToString(Format format);
 };

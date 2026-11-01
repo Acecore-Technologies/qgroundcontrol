@@ -13,14 +13,36 @@
 #include "GeoZoneShape.h"
 #include "SettingsManager.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QUrl>
-#include <QtPositioning/QGeoCircle>
 
 namespace {
 
 QString _formatDate(const QDateTime &dateTime)
 {
     return dateTime.toUTC().toString(QStringLiteral("yyyy-MM-dd"));
+}
+
+size_t _footprintHash(const GeoZone::Volume &volume)
+{
+    if (volume.isCircle) {
+        return qHashMulti(0, volume.center.latitude(), volume.center.longitude(), volume.radius);
+    }
+    size_t hash = 0;
+    for (const QList<QGeoCoordinate> &ring : volume.rings) {
+        for (const QGeoCoordinate &coordinate : ring) {
+            hash = qHashMulti(hash, coordinate.latitude(), coordinate.longitude());
+        }
+    }
+    return hash;
+}
+
+bool _sameFootprint(const GeoZone::Volume &a, const GeoZone::Volume &b)
+{
+    if (a.isCircle != b.isCircle) {
+        return false;
+    }
+    return a.isCircle ? ((a.center == b.center) && (a.radius == b.radius)) : (a.rings == b.rings);
 }
 
 } // namespace
@@ -95,12 +117,31 @@ void GeoZoneSource::_clearZones()
     _boundingBox = QGeoRectangle();
 }
 
-void GeoZoneSource::markCurrent(const QDateTime &loadedAt, const QDateTime &issued)
+QString GeoZoneSource::_sourceText() const
 {
+    return _dateText().isEmpty() ? name() : QStringLiteral("%1 (%2)").arg(name(), _dateText());
+}
+
+void GeoZoneSource::_setMetadata(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate)
+{
+    _title = result.title;
+    _format = result.format;
+    _provider = result.provider;
+    _skippedCount = result.skippedFeatures;
+    _issued = result.issued;
+    _validFrom = result.validFrom;
+    _validTo = result.validTo;
     _loadedAt = loadedAt;
-    _fileDate = loadedAt;
-    if (issued.isValid()) {
-        _issued = issued;
+    _fileDate = fileDate;
+    _contentHash = result.contentHash;
+}
+
+void GeoZoneSource::markCurrent(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate)
+{
+    _setMetadata(result, loadedAt, fileDate);
+    const QString sourceText = _sourceText();
+    for (GeoZone *zone : std::as_const(_zones)) {
+        zone->setSourceText(sourceText);
     }
     updateValidity(QDateTime::currentDateTimeUtc());
     emit changed();
@@ -117,21 +158,12 @@ void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &f
 void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate)
 {
     _clearZones();
+    _setMetadata(result, loadedAt, fileDate);
 
-    _title = result.title;
-    _format = result.format;
-    _provider = result.provider;
-    _skippedCount = result.skippedFeatures;
-    _issued = result.issued;
-    _validFrom = result.validFrom;
-    _validTo = result.validTo;
-    _loadedAt = loadedAt;
-    _fileDate = fileDate;
-    _contentHash = result.contentHash;
-
-    const QString sourceText = _dateText().isEmpty() ? name() : QStringLiteral("%1 (%2)").arg(name(), _dateText());
+    const QString sourceText = _sourceText();
     for (const GeoZone::Data &zoneData : result.zones) {
         GeoZone *const zone = new GeoZone(zoneData, this);
+        zone->setSourceKey(_key);
         zone->setSourceText(sourceText);
         _zones.append(zone);
         if (zone->boundingBox().isValid()) {
@@ -139,19 +171,19 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
         }
 
         // Volumes stacked at different altitudes often share the same footprint, only draw it once
-        QList<QList<QList<QGeoCoordinate>>> drawnPolygons;
-        QList<QGeoCircle> drawnCircles;
-        for (const GeoZone::Volume &volume : zoneData.volumes) {
-            if (volume.isCircle) {
-                const QGeoCircle circle(volume.center, volume.radius);
-                if (!drawnCircles.contains(circle)) {
-                    drawnCircles.append(circle);
-                    _shapes.append(new GeoZoneShape(zone, volume.center, volume.radius));
-                }
-            } else if (!drawnPolygons.contains(volume.rings)) {
-                drawnPolygons.append(volume.rings);
-                _shapes.append(new GeoZoneShape(zone, volume.rings));
+        QMultiHash<size_t, qsizetype> drawnVolumes;
+        for (qsizetype i = 0; i < zoneData.volumes.count(); i++) {
+            const GeoZone::Volume &volume = zoneData.volumes[i];
+            const size_t hash = _footprintHash(volume);
+            bool drawn = false;
+            for (auto it = drawnVolumes.constFind(hash); !drawn && (it != drawnVolumes.cend()) && (it.key() == hash); ++it) {
+                drawn = _sameFootprint(zoneData.volumes[it.value()], volume);
             }
+            if (drawn) {
+                continue;
+            }
+            drawnVolumes.insert(hash, i);
+            _shapes.append(volume.isCircle ? new GeoZoneShape(zone, volume.center, volume.radius) : new GeoZoneShape(zone, volume.rings));
         }
     }
 

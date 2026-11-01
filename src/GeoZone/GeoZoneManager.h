@@ -21,7 +21,7 @@
 #include "GeoZone.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneIndex.h"
-#include "GeoZoneParser.h"
+#include "GeoZoneLoader.h"
 #include "GeoZoneStore.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
@@ -54,6 +54,11 @@ class GeoZoneManager : public QObject
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
 
+    enum class LoadMode : quint8 {
+        Synchronous,
+        Background,     ///< Parse files in a worker thread
+    };
+
     /// @param storageDir Directory in which copies of the sources are kept. Empty for the default application data location.
     explicit GeoZoneManager(const QString &storageDir = QString(), QObject *parent = nullptr);
     ~GeoZoneManager();
@@ -66,11 +71,11 @@ public:
     void init();
 
     /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from a file with the same name.
-    /// Errors are shown to the user and sourceAdded is emitted on success.
+    /// loadFailed is emitted on errors and sourceAdded on success.
     Q_INVOKABLE void addFile(const QString &fileName);
 
     /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the
-    /// source with the same URL. Errors are shown to the user and sourceAdded is emitted on success.
+    /// source with the same URL. loadFailed is emitted on errors and sourceAdded on success.
     Q_INVOKABLE void addUrl(const QString &url);
 
     /// Downloads all feeds again. Failures keep the previous data.
@@ -85,9 +90,12 @@ public:
     /// Synchronously loads a file, replacing the source loaded from a file with the same name
     bool loadFile(const QString &fileName, QString &errorString);
 
-    /// Loads the sources stored by a previous session
-    /// @param background Parse the files in a background thread
-    void loadStoredSources(bool background);
+    /// Loads the sources stored by a previous session. An unreadable index is moved to a backup folder with the stored
+    /// copies, a newer one leaves the store untouched for the session; storageFailed is emitted in both cases.
+    void loadStoredSources(LoadMode mode);
+
+    /// @return Name of the stored copy of a source in storageDir, empty when it has none
+    QString storedFileName(const QString &key) const { return _storedEntries.value(key).fileName; }
 
     /// @return Zones to label in the map region: those centered in it, limited to maxLabelCount
     ///         preferring the most restrictive
@@ -129,44 +137,27 @@ signals:
     void progressChanged();
     void validityWarningChanged();
     void sourceAdded(GeoZoneSource *source);    ///< A source added by addFile or addUrl was loaded, not emitted when feeds are refreshed
+    void loadFailed(const QString &key, const QString &message);   ///< Loading or downloading a source requested by the user failed
+    void storageFailed(const QString &message); ///< Stored copies can't be read or written, emitted once per session
+    void outdatedDataFound(const QString &message); ///< Some sources have outdated data after the startup refresh
 
 private slots:
     void _updateActive();
     void _refreshDueFeeds();
 
 private:
-    /// Loads a file into a source on a worker thread
-    struct LoadJob {
-        QString key;
-        QString url;
-        QString sourcePath;         ///< File to parse when there is no data
-        QByteArray data;            ///< Downloaded content to parse
-        QString storedFileName;     ///< Name of the copy to write in the storage directory, empty to not copy
-        QDateTime loadedAt;
-        QDateTime fileDate;
-        GeoZoneParser::Format formatHint = GeoZoneParser::Format::Unknown;
-        QString etag;               ///< HTTP validators of a downloaded feed
-        QString lastModified;
-        bool userInitiated = false;
-        bool added = false;         ///< Added by addFile or addUrl, not refreshed
-        int generation = 0;
-    };
-    struct LoadResult {
-        GeoZoneParser::Result result;
-        QString errorString;
-    };
-
-    static LoadResult _runLoad(const LoadJob &job, const GeoZoneStore &store);
-    void _startLoad(LoadJob job, bool background);
-    void _applyLoad(const LoadJob &job, const LoadResult &loadResult);
-    void _setStoredFileName(GeoZoneSource *source, const QString &storedFileName);
-    void _download(const QString &url, bool userInitiated, bool added = false);
-    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, bool userInitiated, bool added);
+    void _prepareJob(GeoZoneLoader::Job &job) const;
+    void _startLoad(GeoZoneLoader::Job job, LoadMode mode);
+    void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
+    void _updateStoredEntry(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
+    void _download(const QString &url, GeoZoneLoader::Request request);
+    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
     void _idle();
     void _setPending(int delta);
     void _beginZonesChange();
     void _endZonesChange();
-    void _saveIndex() const;
+    void _saveIndex();
+    void _reportStorageError(const QString &message);
     void _updateValidity();
 
     GeoZoneStore _store;
@@ -182,6 +173,9 @@ private:
     int _pendingCount = 0;
     bool _changingZones = false;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
+    QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
+    bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is
+    bool _storageErrorReported = false;
     QString _validityWarning;
     bool _startupRefreshPending = false;
     bool _startupCheckPending = false;

@@ -15,15 +15,23 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
-#include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimeZone>
+
+#include <cmath>
 
 QGC_LOGGING_CATEGORY(GeoZoneParserLog, "qgc.geozone.geozoneparser")
 
 namespace {
 
 constexpr double kMetersPerFoot = 0.3048;
+// Bounds keeping a broken or hostile file from stalling the application
+constexpr qsizetype kMaxRingVertices = 200000;
+constexpr qsizetype kMaxVolumesPerZone = 10000;
+constexpr double kMaxRadiusMeters = 1000000;
+
+/// Preferred language of localized texts for the parse running on this thread
+thread_local QString t_language;
 
 /// Returns text from either a plain string or an ED-318 localized text array ([{ "text": "...", "lang": "en-GB" }])
 QString _text(const QJsonValue &value)
@@ -41,8 +49,7 @@ QString _text(const QJsonValue &value)
         return QString();
     }
 
-    // The default locale follows the QGC language setting
-    const QString uiLanguage = QLocale().name().left(2).toLower();
+    const QString &uiLanguage = t_language;
     QString uiText;
     QString englishText;
     QString firstText;
@@ -58,7 +65,7 @@ QString _text(const QJsonValue &value)
             continue;
         }
         const QString language = textObject.value(QStringLiteral("lang")).toString().left(2).toLower();
-        if (uiText.isEmpty() && (language == uiLanguage)) {
+        if (uiText.isEmpty() && !uiLanguage.isEmpty() && (language == uiLanguage)) {
             uiText = text;
         }
         if (englishText.isEmpty() && (language == QStringLiteral("en"))) {
@@ -98,19 +105,20 @@ QStringList _stringList(const QJsonValue &value)
 
 double _number(const QJsonValue &value)
 {
+    double number = qQNaN();
     if (value.isDouble()) {
-        return value.toDouble();
-    }
-    if (value.isString()) {
+        number = value.toDouble();
+    } else if (value.isString()) {
         bool ok = false;
-        const double number = value.toString().toDouble(&ok);
-        if (ok) {
-            return number;
+        number = value.toString().toDouble(&ok);
+        if (!ok) {
+            number = qQNaN();
         }
     }
-    return qQNaN();
+    return std::isfinite(number) ? number : qQNaN();
 }
 
+/// Parses ISO 8601 dates and times. Times without an offset are UTC in both standards, dates start at midnight UTC.
 QDateTime _dateTime(const QJsonValue &value)
 {
     const QString string = value.toString().trimmed();
@@ -118,14 +126,23 @@ QDateTime _dateTime(const QJsonValue &value)
         return QDateTime();
     }
 
-    QDateTime dateTime = QDateTime::fromString(string, Qt::ISODateWithMs);
-    if (!dateTime.isValid()) {
-        dateTime = QDateTime::fromString(string, Qt::ISODate);
+    // The time follows a T or a space after the date
+    static const QRegularExpression timeSeparatorRegExp(QStringLiteral("^[^Tt ]{8,}[Tt ]"));
+    const QRegularExpressionMatch separatorMatch = timeSeparatorRegExp.match(string);
+    if (!separatorMatch.hasMatch()) {
+        const QDate date = QDate::fromString(string, Qt::ISODate);
+        return date.isValid() ? QDateTime(date, QTime(0, 0), QTimeZone::UTC) : QDateTime();
     }
-    if (dateTime.isValid() && (dateTime.timeSpec() == Qt::LocalTime)) {
-        // Times without an offset are UTC in both standards
-        dateTime.setTimeZone(QTimeZone::UTC);
+
+    // Parsed without an offset, Qt would use the local time zone and shift times in its daylight saving gap
+    static const QRegularExpression offsetRegExp(QStringLiteral("(Z|[+-]\\d{2}(:?\\d{2})?)$"), QRegularExpression::CaseInsensitiveOption);
+    QString isoString = string;
+    isoString[separatorMatch.capturedEnd() - 1] = QLatin1Char('T');
+    if (!offsetRegExp.match(isoString.mid(separatorMatch.capturedEnd())).hasMatch()) {
+        isoString += QLatin1Char('Z');
     }
+
+    const QDateTime dateTime = QDateTime::fromString(isoString, Qt::ISODateWithMs);
     return dateTime.isValid() ? dateTime.toUTC() : QDateTime();
 }
 
@@ -281,7 +298,13 @@ bool _position(const QJsonValue &value, QGeoCoordinate &coordinate)
 bool _ring(const QJsonValue &value, QList<QGeoCoordinate> &ring)
 {
     ring.clear();
-    for (const QJsonValue &positionValue : value.toArray()) {
+    const QJsonArray positions = value.toArray();
+    if (positions.count() > kMaxRingVertices) {
+        qCWarning(GeoZoneParserLog) << "Ignoring ring with" << positions.count() << "vertices";
+        return false;
+    }
+    ring.reserve(positions.count());
+    for (const QJsonValue &positionValue : positions) {
         QGeoCoordinate coordinate;
         if (!_position(positionValue, coordinate)) {
             return false;
@@ -312,6 +335,20 @@ bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume)
     return !volume.rings.isEmpty();
 }
 
+void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volumes)
+{
+    if (volumes.count() >= kMaxVolumesPerZone) {
+        qCDebug(GeoZoneParserLog) << "Ignoring volumes over" << kMaxVolumesPerZone;
+        return;
+    }
+    volumes.append(volume);
+}
+
+bool _validRadius(double radius)
+{
+    return (radius > 0) && (radius <= kMaxRadiusMeters);
+}
+
 /// Adds the volumes described by a GeoJSON-like horizontal geometry. Vertical limits are copied from volumeTemplate.
 void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes)
 {
@@ -320,13 +357,13 @@ void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volum
     if (type == QStringLiteral("Polygon")) {
         GeoZone::Volume volume = volumeTemplate;
         if (_polygonRings(geometry.value(QStringLiteral("coordinates")), volume)) {
-            volumes.append(volume);
+            _appendVolume(volume, volumes);
         }
     } else if (type == QStringLiteral("MultiPolygon")) {
         for (const QJsonValue &polygon : geometry.value(QStringLiteral("coordinates")).toArray()) {
             GeoZone::Volume volume = volumeTemplate;
             if (_polygonRings(polygon, volume)) {
-                volumes.append(volume);
+                _appendVolume(volume, volumes);
             }
         }
     } else if (type == QStringLiteral("Circle")) {
@@ -334,8 +371,8 @@ void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volum
         GeoZone::Volume volume = volumeTemplate;
         volume.isCircle = true;
         volume.radius = _number(geometry.value(QStringLiteral("radius"))) * radiusScale;
-        if (_position(geometry.value(QStringLiteral("center")), volume.center) && (volume.radius > 0)) {
-            volumes.append(volume);
+        if (_position(geometry.value(QStringLiteral("center")), volume.center) && _validRadius(volume.radius)) {
+            _appendVolume(volume, volumes);
         }
     } else if (type == QStringLiteral("Point")) {
         // ED-318: GeoJSON Point with { "extent": { "subType": "Circle", "radius": r } }
@@ -346,8 +383,8 @@ void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volum
         GeoZone::Volume volume = volumeTemplate;
         volume.isCircle = true;
         volume.radius = _number(extent.value(QStringLiteral("radius"))) * radiusScale;
-        if (_position(geometry.value(QStringLiteral("coordinates")), volume.center) && (volume.radius > 0)) {
-            volumes.append(volume);
+        if (_position(geometry.value(QStringLiteral("coordinates")), volume.center) && _validRadius(volume.radius)) {
+            _appendVolume(volume, volumes);
         }
     } else {
         qCDebug(GeoZoneParserLog) << "Ignoring unsupported geometry type" << type;
@@ -484,10 +521,15 @@ bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &
     return parse(file.readAll(), result, errorString);
 }
 
-bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint)
+bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint, const QString &language)
 {
     result = Result();
     errorString.clear();
+
+    const struct LanguageScope {
+        explicit LanguageScope(const QString &language) { t_language = language.left(2).toLower(); }
+        ~LanguageScope() { t_language.clear(); }
+    } languageScope(language);
 
     QByteArray json = bytes;
     // Several national feeds are published with a UTF-8 byte order mark which QJsonDocument rejects

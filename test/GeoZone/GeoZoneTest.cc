@@ -37,6 +37,7 @@
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -190,16 +191,15 @@ void GeoZoneTest::_testParseED269()
 
 void GeoZoneTest::_testParseED318()
 {
-    const QLocale savedLocale;
-    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedKingdom));
     GeoZoneParser::Result result;
     QString errorString;
-    const bool parsed = GeoZoneParser::parseFile(QStringLiteral(":/unittest/ed318_test.json"), result, errorString);
-    QLocale::setDefault(QLocale(QLocale::Swedish, QLocale::Sweden));
-    const GeoZoneParser::Result swedishResult = _parseResource(QStringLiteral("ed318_test.json"));
-    QLocale::setDefault(savedLocale);
+    QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/ed318_test.json"), result, errorString), qPrintable(errorString));
+    QFile file(QStringLiteral(":/unittest/ed318_test.json"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    GeoZoneParser::Result swedishResult;
+    QVERIFY2(GeoZoneParser::parse(file.readAll(), swedishResult, errorString, GeoZoneParser::Format::Unknown, QStringLiteral("sv-SE")), qPrintable(errorString));
+    QCOMPARE(swedishResult.zones.count(), 3);
 
-    QVERIFY2(parsed, qPrintable(errorString));
     QCOMPARE(result.format, GeoZoneParser::Format::ED318);
     QCOMPARE(result.provider, QStringLiteral("Test Authority"));
     QCOMPARE(result.issued, _utc(QDate(2026, 8, 13), QTime(0, 0)));
@@ -253,6 +253,16 @@ void GeoZoneTest::_testParseED318()
     QCOMPARE(collection.volumes[1].lowerLimit, 0.0);
     QCOMPARE(collection.volumes[1].upperLimit, 50.0);
     QVERIFY(!collection.volumes[1].feet);
+
+    // Times without an offset are UTC whatever the local time zone, also in its daylight saving gaps
+    const QByteArray offsetless = R"({ "type": "FeatureCollection",
+        "metadata": { "issued": "2026-03-08", "validFrom": "2026-03-08T02:30:00", "validTo": "2026-03-29 02:30:00.500" },
+        "features": [ { "type": "Feature", "properties": { "type": "PROHIBITED" },
+        "geometry": { "type": "Polygon", "coordinates": [ [ [0, 0], [1, 0], [1, 1], [0, 0] ] ] } } ] })";
+    QVERIFY2(GeoZoneParser::parse(offsetless, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.issued, _utc(QDate(2026, 3, 8), QTime(0, 0)));
+    QCOMPARE(result.validFrom, _utc(QDate(2026, 3, 8), QTime(2, 30)));
+    QCOMPARE(result.validTo, _utc(QDate(2026, 3, 29), QTime(2, 30, 0, 500)));
 }
 
 void GeoZoneTest::_testParseFaaTfr()
@@ -670,7 +680,7 @@ void GeoZoneTest::_testManagerLoadPersistClear()
 
     {
         GeoZoneManager manager(storageDir.path());
-        manager.loadStoredSources(false);
+        manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
         QCOMPARE(manager.zones()->count(), 0);
         QCOMPARE(manager.sources()->count(), 0);
 
@@ -692,7 +702,7 @@ void GeoZoneTest::_testManagerLoadPersistClear()
         QCOMPARE(ed318Source->dataDate(), _utc(QDate(2026, 8, 13), QTime(0, 0)));
         QVERIFY(ed318Source->detailsText().contains(QStringLiteral("issued 2026-08-13")));
         QCOMPARE(manager.zones()->value<GeoZone*>(0)->sourceText(), QStringLiteral("Test GeoZones (issued 2026-08-13)"));
-        QVERIFY(QFile::exists(QDir(storageDir.path()).filePath(ed318Source->storedFileName())));
+        QVERIFY(QFile::exists(QDir(storageDir.path()).filePath(manager.storedFileName(ed318Source->key()))));
 
         // A failed load keeps the current zones
         QVERIFY(!manager.loadFile(sourceDir.filePath(QStringLiteral("missing.json")), errorString));
@@ -710,11 +720,11 @@ void GeoZoneTest::_testManagerLoadPersistClear()
         QVERIFY2(manager.loadFile(ed269File, errorString), qPrintable(errorString));
         QCOMPARE(manager.sources()->count(), 2);
         QCOMPARE(manager.zones()->count(), 6);
-        const QString previousStoredFile = ed318Source->storedFileName();
+        const QString previousStoredFile = manager.storedFileName(ed318Source->key());
         QVERIFY2(manager.loadFile(ed318File, errorString), qPrintable(errorString));
         QCOMPARE(manager.sources()->count(), 2);
         QCOMPARE(manager.zones()->count(), 6);
-        QVERIFY(ed318Source->storedFileName() != previousStoredFile);
+        QVERIFY(manager.storedFileName(ed318Source->key()) != previousStoredFile);
         QCOMPARE(storedFiles().count(), 3);
     }
 
@@ -726,7 +736,7 @@ void GeoZoneTest::_testManagerLoadPersistClear()
     {
         // Stored copies are reloaded in order on startup
         GeoZoneManager manager(storageDir.path());
-        manager.loadStoredSources(false);
+        manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
         QCOMPARE(manager.sources()->count(), 2);
         QCOMPARE(manager.zones()->count(), 6);
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("zones.json"));
@@ -746,7 +756,7 @@ void GeoZoneTest::_testManagerLoadPersistClear()
     }
 
     GeoZoneManager manager(storageDir.path());
-    manager.loadStoredSources(false);
+    manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
     QCOMPARE(manager.sources()->count(), 0);
 
     // The single file kept by earlier versions is migrated
@@ -757,15 +767,94 @@ void GeoZoneTest::_testManagerLoadPersistClear()
     settings.setValue(QStringLiteral("GeoZoneManager/sourceName"), QStringLiteral("Legacy zones"));
     {
         GeoZoneManager legacyManager(legacyDir.path());
-        legacyManager.loadStoredSources(false);
+        legacyManager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
         QCOMPARE(legacyManager.sources()->count(), 1);
         QCOMPARE(legacyManager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("Legacy zones"));
         QCOMPARE(legacyManager.zones()->count(), 3);
         QVERIFY(!settings.contains(QStringLiteral("GeoZoneManager/sourceName")));
     }
     GeoZoneManager migratedManager(legacyDir.path());
-    migratedManager.loadStoredSources(false);
+    migratedManager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
     QCOMPARE(migratedManager.zones()->count(), 3);
+}
+
+void GeoZoneTest::_testManagerStoreFailures()
+{
+    const QTemporaryDir storageDir;
+    const QTemporaryDir sourceDir;
+    QVERIFY(storageDir.isValid() && sourceDir.isValid());
+    const QString ed318File = sourceDir.filePath(QStringLiteral("zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), ed318File));
+    const QDir dir(storageDir.path());
+    const QString key = QStringLiteral("zones.json");
+    const QString indexPath = dir.filePath(QStringLiteral("sources.json"));
+    QString errorString;
+    QString storedFile;
+    {
+        GeoZoneManager manager(storageDir.path());
+        QVERIFY2(manager.loadFile(ed318File, errorString), qPrintable(errorString));
+        storedFile = manager.storedFileName(key);
+        QVERIFY(dir.exists(storedFile));
+    }
+
+    // A copy which can't be written keeps the previous one, which is still loaded at the next start
+    const QFile::Permissions permissions = QFile::permissions(storageDir.path());
+    QVERIFY(QFile::setPermissions(storageDir.path(), QFile::ReadOwner | QFile::ExeOwner));
+    if (!QFileInfo(storageDir.path()).isWritable()) {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
+        manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+        QCOMPARE(manager.zones()->count(), 3);
+        QVERIFY2(manager.loadFile(ed318File, errorString), qPrintable(errorString));
+        QCOMPARE(storageSpy.count(), 1);
+        QCOMPARE(manager.storedFileName(key), storedFile);
+    }
+    QVERIFY(QFile::setPermissions(storageDir.path(), permissions));
+    QVERIFY(dir.exists(storedFile));
+
+    // An index from a newer version is kept as is and its sources aren't touched
+    QFile indexFile(indexPath);
+    QVERIFY(indexFile.open(QIODevice::ReadOnly));
+    QJsonObject index = QJsonDocument::fromJson(indexFile.readAll()).object();
+    indexFile.close();
+    index.insert(QStringLiteral("version"), 99);
+    const QByteArray newerIndex = QJsonDocument(index).toJson();
+    QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(indexFile.write(newerIndex), newerIndex.size());
+    indexFile.close();
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
+        manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+        QCOMPARE(storageSpy.count(), 1);
+        QCOMPARE(manager.sources()->count(), 0);
+        QVERIFY2(manager.loadFile(ed318File, errorString), qPrintable(errorString));
+        QVERIFY(manager.storedFileName(key).isEmpty());
+        manager.clear();
+    }
+    QVERIFY(indexFile.open(QIODevice::ReadOnly));
+    QCOMPARE(indexFile.readAll(), newerIndex);
+    indexFile.close();
+    QVERIFY(dir.exists(storedFile));
+    QCOMPARE(dir.entryList({ QStringLiteral("*.json") }, QDir::Files).count(), 2);
+
+    // An unreadable index is moved to a backup folder with the stored copies instead of losing them
+    QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(indexFile.write(R"({ "version": 1, "sources": [)") > 0);
+    indexFile.close();
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
+        manager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+        QCOMPARE(storageSpy.count(), 1);
+        QCOMPARE(manager.sources()->count(), 0);
+    }
+    QVERIFY(dir.entryList({ QStringLiteral("*.json") }, QDir::Files).isEmpty());
+    const QStringList backups = dir.entryList({ QStringLiteral("backup-*") }, QDir::Dirs);
+    QCOMPARE(backups.count(), 1);
+    const QDir backupDir(dir.filePath(backups.first()));
+    QVERIFY(backupDir.exists(storedFile));
+    QVERIFY(backupDir.exists(QStringLiteral("sources.json")));
 }
 
 void GeoZoneTest::_testManagerBackgroundLoad()
@@ -830,11 +919,12 @@ void GeoZoneTest::_testManagerBackgroundLoad()
 
     // Stored sources load in the background in their original order
     GeoZoneManager restarted(storageDir.path());
-    restarted.loadStoredSources(true);
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Background);
     QCOMPARE(restarted.sources()->count(), 1);
     QVERIFY(restarted.busy());
     QTRY_VERIFY(!restarted.busy());
     QCOMPARE(restarted.zones()->count(), 3);
+    QVERIFY(restarted.source(feedUrl));
     QVERIFY(restarted.source(feedUrl)->isFeed());
 }
 
@@ -908,6 +998,21 @@ void GeoZoneTest::_testFeedNotModified()
         QCOMPARE(aboutToChangeSpy.count(), 0);
         QCOMPARE(manager.zones()->count(), 3);
 
+        // Republished metadata is applied to the kept zones
+        QJsonObject root = QJsonDocument::fromJson(body).object();
+        QJsonObject metadata = root.value(QStringLiteral("metadata")).toObject();
+        QVERIFY(!metadata.isEmpty());
+        metadata.insert(QStringLiteral("validTo"), QStringLiteral("2026-09-01T00:00:00Z"));
+        metadata.insert(QStringLiteral("issued"), QStringLiteral("2026-08-20T00:00:00Z"));
+        root.insert(QStringLiteral("metadata"), metadata);
+        body = QJsonDocument(root).toJson();
+        feed->setValidators(QString(), QString());
+        manager.refreshFeeds();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(aboutToChangeSpy.count(), 0);
+        QCOMPARE(feed->validTo(), _utc(QDate(2026, 9, 1), QTime(0, 0)));
+        QCOMPARE(manager.zones()->value<GeoZone*>(0)->sourceText(), QStringLiteral("Test GeoZones (issued 2026-08-20)"));
+
         // Changed zones are reloaded, without signaling an added source which would move the maps
         QFile changed(QStringLiteral(":/unittest/ed269_test.json"));
         QVERIFY(changed.open(QIODevice::ReadOnly));
@@ -922,7 +1027,8 @@ void GeoZoneTest::_testFeedNotModified()
 
     // The validators are kept across restarts
     GeoZoneManager restarted(storageDir.path());
-    restarted.loadStoredSources(false);
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QVERIFY(restarted.source(url));
     QCOMPARE(restarted.source(url)->etag(), QStringLiteral("\"v1\""));
     restarted.refreshFeeds();
     QTRY_VERIFY(!restarted.busy());

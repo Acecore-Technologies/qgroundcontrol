@@ -61,6 +61,21 @@ GeoZone::GeoZone(const Data &data, QObject *parent)
     }
 
     _active = isActiveAt(QDateTime::currentDateTimeUtc());
+    setSourceKey(QString());
+}
+
+void GeoZone::setSourceKey(const QString &sourceKey)
+{
+    _sourceKey = sourceKey;
+    _key = QStringLiteral("%1\x1f%2\x1f%3\x1f%4").arg(sourceKey, _data.identifier, _data.name, QString::number(static_cast<int>(_data.restriction)));
+}
+
+void GeoZone::setSourceText(const QString &sourceText)
+{
+    if (sourceText != _sourceText) {
+        _sourceText = sourceText;
+        emit sourceTextChanged();
+    }
 }
 
 bool GeoZone::isActiveAt(const QDateTime &dateTime) const

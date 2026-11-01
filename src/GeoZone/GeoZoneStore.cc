@@ -61,16 +61,37 @@ QString GeoZoneStore::newFileName()
     return QStringLiteral("%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
 }
 
-QList<GeoZoneStore::Entry> GeoZoneStore::readIndex() const
+GeoZoneStore::Index GeoZoneStore::readIndex() const
 {
-    QList<Entry> entries;
+    Index index;
 
     QFile indexFile(path(indexFileName));
-    if (indexFile.open(QIODevice::ReadOnly)) {
-        const QJsonArray values = QJsonDocument::fromJson(indexFile.readAll()).object().value(sourcesKey).toArray();
-        for (const QJsonValue &value : values) {
+    if (indexFile.exists()) {
+        index.status = IndexStatus::Unreadable;
+        if (!indexFile.open(QIODevice::ReadOnly)) {
+            index.errorString = indexFile.errorString();
+            return index;
+        }
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(indexFile.readAll(), &parseError);
+        const QJsonObject root = document.object();
+        if (parseError.error != QJsonParseError::NoError) {
+            index.errorString = parseError.errorString();
+            return index;
+        }
+        if (!document.isObject() || !root.value(sourcesKey).isArray() || !root.value(versionKey).isDouble()) {
+            index.errorString = QStringLiteral("Unexpected content");
+            return index;
+        }
+        if (root.value(versionKey).toInt() > indexVersion) {
+            index.status = IndexStatus::Newer;
+            return index;
+        }
+
+        for (const QJsonValue &value : root.value(sourcesKey).toArray()) {
             const QJsonObject object = value.toObject();
-            entries.append(Entry{
+            index.entries.append(Entry{
                 object.value(keyKey).toString(),
                 object.value(urlKey).toString(),
                 object.value(fileKey).toString(),
@@ -80,7 +101,8 @@ QList<GeoZoneStore::Entry> GeoZoneStore::readIndex() const
                 object.value(lastModifiedKey).toString(),
             });
         }
-        return entries;
+        index.status = IndexStatus::Ok;
+        return index;
     }
 
     if (QFile::exists(path(legacyFileName))) {
@@ -97,17 +119,23 @@ QList<GeoZoneStore::Entry> GeoZoneStore::readIndex() const
         entry.fileName = legacyFileName;
         entry.loadedAt = fileDate;
         entry.fileDate = fileDate;
-        entries.append(entry);
+        index.entries.append(entry);
     }
 
-    return entries;
+    return index;
 }
 
-void GeoZoneStore::writeIndex(const QList<Entry> &entries) const
+bool GeoZoneStore::writeIndex(const QList<Entry> &entries, QString &errorString) const
 {
+    errorString.clear();
+
     if (entries.isEmpty()) {
-        (void) QFile::remove(path(indexFileName));
-        return;
+        QFile indexFile(path(indexFileName));
+        if (indexFile.exists() && !indexFile.remove()) {
+            errorString = indexFile.errorString();
+            return false;
+        }
+        return true;
     }
 
     QJsonArray values;
@@ -131,10 +159,22 @@ void GeoZoneStore::writeIndex(const QList<Entry> &entries) const
     }
 
     const QByteArray bytes = QJsonDocument(QJsonObject{ { versionKey, indexVersion }, { sourcesKey, values } }).toJson();
-    QString errorString;
-    if (!saveFile(path(indexFileName), bytes, errorString)) {
-        qCWarning(GeoZoneManagerLog) << "Unable to save geozone source index" << path(indexFileName) << errorString;
+    return saveFile(path(indexFileName), bytes, errorString);
+}
+
+QString GeoZoneStore::moveToBackup() const
+{
+    QDir dir(_dir);
+    const QString backupName = QStringLiteral("backup-%1").arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    if (!dir.mkpath(backupName)) {
+        return QString();
     }
+
+    bool moved = false;
+    for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
+        moved = dir.rename(fileName, QStringLiteral("%1/%2").arg(backupName, fileName)) || moved;
+    }
+    return moved ? dir.filePath(backupName) : QString();
 }
 
 bool GeoZoneStore::writeFile(const QString &fileName, const QByteArray &bytes, QString &errorString) const

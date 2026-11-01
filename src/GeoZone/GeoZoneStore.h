@@ -30,6 +30,19 @@ public:
         QString lastModified;
     };
 
+    enum class IndexStatus : quint8 {
+        Ok,
+        Missing,        ///< No index, entries has the single file kept by earlier versions if there is one
+        Unreadable,     ///< The index exists but isn't valid
+        Newer,          ///< Written by a newer version which may store sources differently
+    };
+
+    struct Index {
+        IndexStatus status = IndexStatus::Missing;
+        QList<Entry> entries;
+        QString errorString;
+    };
+
     explicit GeoZoneStore(const QString &dir);
 
     QString dir() const { return _dir; }
@@ -38,9 +51,12 @@ public:
 
     /// @return Index entries in source order. Without an index, the single file kept by earlier versions is
     ///         returned and its name setting is removed.
-    QList<Entry> readIndex() const;
+    Index readIndex() const;
     /// Writes the index, removing it when there are no entries
-    void writeIndex(const QList<Entry> &entries) const;
+    bool writeIndex(const QList<Entry> &entries, QString &errorString) const;
+    /// Moves the index and the stored copies to a new subdirectory, keeping them for the user when the index is unreadable
+    /// @return Path of the subdirectory, empty if nothing could be moved
+    QString moveToBackup() const;
 
     bool writeFile(const QString &fileName, const QByteArray &bytes, QString &errorString) const;
     void removeFile(const QString &fileName) const;

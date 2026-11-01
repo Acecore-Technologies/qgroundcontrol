@@ -28,6 +28,7 @@ private slots:
     void _testDisplayText();
     void _testExclusionShapes();
     void _testManagerLoadPersistClear();
+    void _testManagerStoreFailures();
     void _testManagerBackgroundLoad();
     void _testFeedNotModified();
     void _testSourceValidity();

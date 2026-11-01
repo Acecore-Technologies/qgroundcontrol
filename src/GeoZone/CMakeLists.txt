@@ -12,6 +12,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneGeometry.h
         GeoZoneIndex.cc
         GeoZoneIndex.h
+        GeoZoneLoader.cc
+        GeoZoneLoader.h
         GeoZoneManager.cc
         GeoZoneManager.h
         GeoZoneMapModel.cc

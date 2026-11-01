@@ -358,7 +358,11 @@ void QGCApplication::_initForNormalAppBoot()
 
     AudioOutput::instance()->init(SettingsManager::instance()->appSettings()->audioMuted());
     FollowMe::instance()->init();
-    GeoZoneManager::instance()->init();
+    GeoZoneManager *const geoZoneManager = GeoZoneManager::instance();
+    (void) connect(geoZoneManager, &GeoZoneManager::loadFailed, this, [this](const QString &, const QString &message) { showAppMessage(message); });
+    (void) connect(geoZoneManager, &GeoZoneManager::storageFailed, this, [this](const QString &message) { showAppMessage(message, tr("Geozones")); });
+    (void) connect(geoZoneManager, &GeoZoneManager::outdatedDataFound, this, [this](const QString &message) { showAppMessage(message, tr("Geozones")); });
+    geoZoneManager->init();
     (void) GeoZoneMonitor::instance();
     QGCPositionManager::instance()->init();
     LinkManager::instance()->init();
