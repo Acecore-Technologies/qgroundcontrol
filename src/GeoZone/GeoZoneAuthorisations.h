@@ -13,8 +13,11 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QJsonObject>
 #include <QtCore/QList>
+#include <QtCore/QLoggingCategory>
 
 #include <optional>
+
+Q_DECLARE_LOGGING_CATEGORY(GeoZoneAuthorisationsLog)
 
 class GeoZone;
 

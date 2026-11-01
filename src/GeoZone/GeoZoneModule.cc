@@ -8,8 +8,10 @@
  ****************************************************************************/
 
 #include "GeoZoneModule.h"
+#include "FactMetaData.h"
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
@@ -17,10 +19,15 @@
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZoneParser.h"
 #include "GeoZoneProfile.h"
 #include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneSource.h"
 #include "QGCApplication.h"
+#include "QGCFileDownload.h"
+#include "QGCLoggingCategory.h"
+#include "TerrainQuery.h"
 
 #include <QtQml/QQmlEngine>
 
@@ -29,6 +36,37 @@ namespace GeoZoneModule {
 namespace {
 
 constexpr const char *kUri = "QGroundControl.GeoZone";
+
+// The geozone core logs to plain categories, listed here with those of QGroundControl
+const QGCLoggingCategory qgcCategoryGeoZoneAuthorisationsLog(QString::fromLatin1(GeoZoneAuthorisationsLog().categoryName()));
+const QGCLoggingCategory qgcCategoryGeoZoneParserLog(QString::fromLatin1(GeoZoneParserLog().categoryName()));
+const QGCLoggingCategory qgcCategoryGeoZoneSourceLog(QString::fromLatin1(GeoZoneSourceLog().categoryName()));
+
+void installEnvironment()
+{
+    GeoZoneEnvironment::Hooks hooks;
+    hooks.sourceSettings = []() {
+        GeoZoneSettings *const settings = GeoZoneSettings::instance();
+        GeoZoneEnvironment::SourceSettings sourceSettings;
+        sourceSettings.feedRefreshHours = settings->feedRefreshHours()->rawValue().toInt();
+        sourceSettings.liveFeedRefreshMinutes = settings->liveFeedRefreshMinutes()->rawValue().toInt();
+        sourceSettings.staleDays = settings->staleDays()->rawValue().toInt();
+        sourceSettings.liveStaleHours = settings->liveStaleHours()->rawValue().toInt();
+        return sourceSettings;
+    };
+    hooks.verticalDistanceUnits = []() { return FactMetaData::appSettingsVerticalDistanceUnitsString(); };
+    hooks.metersToVerticalDistanceUnits = [](double meters) { return FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble(); };
+    hooks.terrainElevation = [](const QGeoCoordinate &coordinate) {
+        QList<double> altitudes;
+        bool error = false;
+        if (!TerrainAtCoordinateQuery::getAltitudesForCoordinates({ coordinate }, altitudes, error) || error || altitudes.isEmpty()) {
+            return qQNaN();
+        }
+        return altitudes.constFirst();
+    };
+    hooks.prepareDownload = [](QNetworkReply &reply) { QGCFileDownload::setIgnoreSSLErrorsIfNeeded(reply); };
+    GeoZoneEnvironment::setHooks(hooks);
+}
 
 template<typename T>
 QObject *singleton(T *instance)
@@ -41,6 +79,8 @@ QObject *singleton(T *instance)
 
 void registerQmlTypes()
 {
+    installEnvironment();
+
     (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, kUri, 1, 0, "GeoZone", "Enums only");
     (void) qmlRegisterSingletonType<GeoZoneManager>(kUri, 1, 0, "GeoZoneManager", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneManager::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneMonitor>(kUri, 1, 0, "GeoZoneMonitor", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneMonitor::instance()); });

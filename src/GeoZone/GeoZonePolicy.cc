@@ -9,6 +9,7 @@
 
 #include "GeoZonePolicy.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneEnvironment.h"
 
 namespace {
 
@@ -88,7 +89,7 @@ bool GeoZonePolicy::authorised(const GeoZone *zone) const
     if (!authorisation) {
         return false;
     }
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     switch (_schedule) {
     case Schedule::Any:
         return !authorisation->expired(now);

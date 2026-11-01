@@ -10,7 +10,6 @@
 #include "GeoZoneParser.h"
 #include "GeoZoneFormat.h"
 #include "GeoZoneParserUtils.h"
-#include "QGCLoggingCategory.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
@@ -23,7 +22,7 @@
 #include <cctype>
 #include <cmath>
 
-QGC_LOGGING_CATEGORY(GeoZoneParserLog, "qgc.geozone.geozoneparser")
+Q_LOGGING_CATEGORY(GeoZoneParserLog, "qgc.geozone.geozoneparser")
 
 namespace {
 

@@ -88,7 +88,7 @@ public:
     QString fenceText() const;
 
     /// @return true if exclusion fences of the controller cover the whole zone, like the fences GeoZoneFenceImporter
-    ///         adds for it with any simplification, see GeoZoneFenceImporter::fencesCover
+    ///         adds for it with any simplification, see GeoZoneFences::fencesCover
     static bool fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone);
 
     /// @return Start and end of the planned flight from the planned start of the manager and the mission duration,

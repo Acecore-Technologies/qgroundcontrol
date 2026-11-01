@@ -9,6 +9,7 @@
 
 #include "GeoZoneLoader.h"
 #include "GeoZoneDownloader.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneStore.h"
 #include "GeoZoneZip.h"
@@ -48,7 +49,7 @@ GeoZoneLoader::Job GeoZoneLoader::fileJob(const QString &fileName)
     job.key = fileKey(localFileName);
     job.sourcePath = localFileName;
     job.storedFileName = GeoZoneStore::newFileName();
-    job.loadedAt = QDateTime::currentDateTimeUtc();
+    job.loadedAt = GeoZoneEnvironment::currentDateTimeUtc();
     job.fileDate = info.lastModified().toUTC();
     return job;
 }
@@ -59,7 +60,7 @@ GeoZoneLoader::Job GeoZoneLoader::feedJob(const QString &url)
     job.key = url;
     job.url = url;
     job.storedFileName = GeoZoneStore::newFileName();
-    job.loadedAt = QDateTime::currentDateTimeUtc();
+    job.loadedAt = GeoZoneEnvironment::currentDateTimeUtc();
     job.fileDate = job.loadedAt;
     job.formatHint = GeoZoneProviders::formatHint(url);
 

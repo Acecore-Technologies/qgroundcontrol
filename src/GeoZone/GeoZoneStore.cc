@@ -9,7 +9,8 @@
 
 #include "GeoZoneStore.h"
 #include "GeoZoneAuthorisations.h"
-#include "GeoZoneManager.h"
+#include "GeoZoneEnvironment.h"
+#include "GeoZoneSource.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -176,7 +177,7 @@ bool GeoZoneStore::writeIndex(const QList<Entry> &entries, QString &errorString)
 QString GeoZoneStore::moveToBackup() const
 {
     QDir dir(_dir);
-    const QString backupName = QStringLiteral("backup-%1").arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    const QString backupName = QStringLiteral("backup-%1").arg(GeoZoneEnvironment::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss")));
     if (!dir.mkpath(backupName)) {
         return QString();
     }
@@ -261,7 +262,7 @@ void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) c
     const QDir dir(_dir);
     for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
         if ((fileName != QLatin1String(indexFileName)) && (fileName != QLatin1String(GeoZoneAuthorisations::fileName)) && !referencedFileNames.contains(fileName)) {
-            qCDebug(GeoZoneManagerLog) << "Removing unreferenced geozone file" << fileName;
+            qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
             (void) QFile::remove(dir.filePath(fileName));
         }
     }

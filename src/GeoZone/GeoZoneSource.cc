@@ -9,7 +9,7 @@
 
 #include "GeoZoneSource.h"
 #include "GeoZone.h"
-#include "GeoZoneSettings.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneShape.h"
 
 #include <QtCore/QFileInfo>
@@ -21,6 +21,8 @@
 
 #include <algorithm>
 #include <cmath>
+
+Q_LOGGING_CATEGORY(GeoZoneSourceLog, "qgc.geozone.geozonesource")
 
 namespace {
 
@@ -181,7 +183,7 @@ void GeoZoneSource::markCurrent(const GeoZoneParser::Result &result, const QDate
     for (GeoZone *zone : std::as_const(_zones)) {
         zone->setSourceText(sourceText);
     }
-    updateValidity(QDateTime::currentDateTimeUtc());
+    updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
     emit changed();
 }
 
@@ -189,7 +191,7 @@ void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &f
 {
     _loadedAt = loadedAt;
     _fileDate = fileDate;
-    updateValidity(QDateTime::currentDateTimeUtc());
+    updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
     emit changed();
 }
 
@@ -241,7 +243,7 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
     if (reload) {
         _summarizeChanges(previous, _zones);
     }
-    updateValidity(QDateTime::currentDateTimeUtc());
+    updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
     emit changed();
 }
 
@@ -313,7 +315,7 @@ void GeoZoneSource::_summarizeChanges(const QList<GeoZone::Data> &previous, cons
     if (!changedNames.isEmpty()) {
         parts.append(tr("changed %1").arg(list(changedNames)));
     }
-    _changesText = tr("Update of %1: %2").arg(QLocale().toString(QDateTime::currentDateTime(), QLocale::ShortFormat), parts.join(QStringLiteral("; ")));
+    _changesText = tr("Update of %1: %2").arg(QLocale().toString(GeoZoneEnvironment::currentDateTimeUtc().toLocalTime(), QLocale::ShortFormat), parts.join(QStringLiteral("; ")));
 }
 
 void GeoZoneSource::setBusy(bool busy)
@@ -335,7 +337,7 @@ void GeoZoneSource::setErrorString(const QString &errorString)
         const qint64 maxDelay = (std::max)(qint64{ minRetrySecs }, (std::min)(qint64{ maxRetrySecs }, qint64{ refreshIntervalSecs() }));
         const qint64 delay = (std::min)(maxDelay, qint64{ minRetrySecs } << (std::min)(_failureCount - 1, 16));
         const double jitter = 0.8 + (0.4 * QRandomGenerator::global()->generateDouble());
-        _retryAt = QDateTime::currentDateTimeUtc().addSecs(std::llround(delay * jitter));
+        _retryAt = GeoZoneEnvironment::currentDateTimeUtc().addSecs(std::llround(delay * jitter));
     }
     if (errorString != _errorString) {
         _errorString = errorString;
@@ -345,7 +347,7 @@ void GeoZoneSource::setErrorString(const QString &errorString)
 
 void GeoZoneSource::updateValidity(const QDateTime &now)
 {
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const GeoZoneEnvironment::SourceSettings settings = GeoZoneEnvironment::sourceSettings();
     QString text;
     if (loaded()) {
         const QDateTime date = dataDate();
@@ -353,9 +355,9 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
             text = tr("Expired on %1").arg(_formatDate(_validTo));
         } else if (_validFrom.isValid() && (_validFrom > now)) {
             text = tr("Not valid until %1").arg(_formatDate(_validFrom));
-        } else if (isLive() && date.isValid() && (date.secsTo(now) > (settings->liveStaleHours()->rawValue().toLongLong() * 3600))) {
+        } else if (isLive() && date.isValid() && (date.secsTo(now) > (qint64{ settings.liveStaleHours } * 3600))) {
             text = tr("Data is %1 hours old").arg(date.secsTo(now) / 3600);
-        } else if (!isLive() && date.isValid() && (date.daysTo(now) > settings->staleDays()->rawValue().toLongLong())) {
+        } else if (!isLive() && date.isValid() && (date.daysTo(now) > settings.staleDays)) {
             text = tr("Data is %1 days old").arg(date.daysTo(now));
         }
     }
@@ -368,8 +370,8 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
 
 int GeoZoneSource::refreshIntervalSecs() const
 {
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    return isLive() ? (settings->liveFeedRefreshMinutes()->rawValue().toInt() * 60) : (settings->feedRefreshHours()->rawValue().toInt() * 3600);
+    const GeoZoneEnvironment::SourceSettings settings = GeoZoneEnvironment::sourceSettings();
+    return isLive() ? (settings.liveFeedRefreshMinutes * 60) : (settings.feedRefreshHours * 3600);
 }
 
 bool GeoZoneSource::refreshDue(const QDateTime &now) const

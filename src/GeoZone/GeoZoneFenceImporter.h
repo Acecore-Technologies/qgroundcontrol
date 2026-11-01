@@ -20,6 +20,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoFenceController.h"
+#include "GeoZoneFences.h"
 
 #include <optional>
 
@@ -38,27 +39,9 @@ public:
 
     static constexpr int px4MaxFencePoints = 64;                ///< PX4 dataman fence storage (DM_KEY_FENCE_POINTS_MAX)
     static constexpr int arduPilotMaxPolygonVertices = 255;     ///< ArduPilot stores the polygon vertex count in 8 bits
-    static constexpr double fenceBoundaryTolerance = 1;         ///< Meters zones may extend past fences covering them, for rounding
 
-    /// Exclusion fences of a zone
-    struct ZoneFences {
-        QList<QList<QGeoCoordinate>> polygons;
-        QList<QGeoCircle> circles;
-
-        bool isEmpty() const { return polygons.isEmpty() && circles.isEmpty(); }
-    };
-
-    /// @return The exclusion fences importing the zone adds: the outer boundaries of its polygon volumes, simplified
-    ///         outward when the tolerance is positive, see GeoZone::exclusionPolygons, and its circles
-    static ZoneFences zoneFences(const GeoZone *zone, double simplifyTolerance = 0);
-
-    /// @return The exclusion polygons and circles of the GeoFence
-    static ZoneFences exclusionFences(GeoFenceController *geoFenceController);
-
-    /// @return true if each of the fences importing the zone without simplification adds lies within one of the fences,
-    ///         up to fenceBoundaryTolerance, so that the fences exclude the whole zone. Fences importing it with any
-    ///         simplification add enclose those. False for zones importing adds no fence for.
-    static bool fencesCover(const ZoneFences &fences, const GeoZone *zone);
+    /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
+    static GeoZoneFences::ZoneFences exclusionFences(GeoFenceController *geoFenceController);
 
     GeoFenceController *geoFenceController() const { return _geoFenceController; }
     void setGeoFenceController(GeoFenceController *geoFenceController);

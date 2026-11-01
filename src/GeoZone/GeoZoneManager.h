@@ -120,7 +120,7 @@ public:
     const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }
     /// Zones of all sources with their spatial index
     const GeoZoneCatalog &catalog() const { return _catalog; }
-    QmlObjectListModel *sources() const { return _repository->sources(); }
+    QmlObjectListModel *sources() const { return _sources; }
     GeoZoneSource *source(const QString &key) const { return _repository->source(key); }
     GeoZoneSourceRepository *repository() const { return _repository; }
     GeoZoneDisplay *display() const { return _display; }
@@ -172,6 +172,7 @@ private slots:
 private:
     void _endZonesChange(GeoZoneSource *source);
 
+    QmlObjectListModel *_sources = nullptr;     ///< The sources of the repository for QML, deleted before them
     GeoZoneSourceRepository *_repository = nullptr;
     GeoZoneDisplay *_display = nullptr;
     GeoZonePlanning *_planning = nullptr;

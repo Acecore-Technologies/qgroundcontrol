@@ -8,8 +8,8 @@
  ****************************************************************************/
 
 #include "GeoZoneTerrain.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZonePathEvaluator.h"
-#include "TerrainQuery.h"
 
 namespace GeoZoneTerrain {
 
@@ -31,12 +31,7 @@ double elevationAt(const QGeoCoordinate &coordinate)
     if (testLookup()) {
         return testLookup()(coordinate);
     }
-    QList<double> altitudes;
-    bool error = false;
-    if (!TerrainAtCoordinateQuery::getAltitudesForCoordinates({ coordinate }, altitudes, error) || error || altitudes.isEmpty()) {
-        return qQNaN();
-    }
-    return altitudes.constFirst();
+    return GeoZoneEnvironment::terrainElevation(coordinate);
 }
 
 void setLookup(const Lookup &lookup)

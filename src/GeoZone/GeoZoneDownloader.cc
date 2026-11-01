@@ -8,7 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneDownloader.h"
-#include "QGCFileDownload.h"
+#include "GeoZoneEnvironment.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -69,7 +69,7 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
     }
 
     QNetworkReply *const reply = _networkManager->get(request);
-    QGCFileDownload::setIgnoreSSLErrorsIfNeeded(*reply);
+    GeoZoneEnvironment::prepareDownload(*reply);
     Download download;
     download.url = url;
     download.tag = tag;

@@ -11,6 +11,7 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QList>
+#include <QtCore/QLoggingCategory>
 #include <QtCore/QObject>
 #include <QtCore/QSet>
 #include <QtPositioning/QGeoRectangle>
@@ -18,6 +19,9 @@
 #include "GeoZoneBox.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneProviders.h"
+
+/// Loading, downloading and storing sources
+Q_DECLARE_LOGGING_CATEGORY(GeoZoneSourceLog)
 
 class GeoZone;
 class GeoZoneShape;
@@ -108,13 +112,15 @@ public:
     void setBusy(bool busy);
     void setErrorString(const QString &errorString);
 
-    /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data ages of the settings
+    /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data ages of
+    /// GeoZoneEnvironment::sourceSettings
     void updateValidity(const QDateTime &now);
 
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
     bool isLive() const { return GeoZoneProviders::isLive(_format); }
 
-    /// @return Seconds after which a feed is downloaded again, from the refresh interval settings
+    /// @return Seconds after which a feed is downloaded again, from the refresh intervals of
+    ///         GeoZoneEnvironment::sourceSettings
     int refreshIntervalSecs() const;
 
     /// @return true if a feed should be downloaded again: when it is older than the refresh interval, or after a

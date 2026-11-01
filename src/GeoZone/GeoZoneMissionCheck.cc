@@ -141,7 +141,7 @@ QString GeoZoneMissionCheck::fenceText() const
 
 bool GeoZoneMissionCheck::fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone)
 {
-    return GeoZoneFenceImporter::fencesCover(GeoZoneFenceImporter::exclusionFences(geoFenceController), zone);
+    return GeoZoneFences::fencesCover(GeoZoneFenceImporter::exclusionFences(geoFenceController), zone);
 }
 
 QString GeoZoneMissionCheck::warningText() const

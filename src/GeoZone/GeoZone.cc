@@ -8,7 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZone.h"
-#include "FactMetaData.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneGeometry.h"
 
 #include <QtCore/QHash>
@@ -140,7 +140,7 @@ GeoZone::GeoZone(const Data &data)
         _box = _box.united(box);
     }
 
-    _active = isActiveAt(QDateTime::currentDateTimeUtc());
+    _active = isActiveAt(GeoZoneEnvironment::currentDateTimeUtc());
     setSourceKey(QString());
 }
 
@@ -643,14 +643,14 @@ QString GeoZone::_limitToString(double limit, VerticalReference reference, const
     }
 
     const QString publishedUnits = feet ? QStringLiteral("ft") : QStringLiteral("m");
-    const QString userUnits = FactMetaData::appSettingsVerticalDistanceUnitsString();
+    const QString userUnits = GeoZoneEnvironment::verticalDistanceUnits();
     if (userUnits == publishedUnits) {
         return QStringLiteral("%1 %2 %3").arg(limit).arg(publishedUnits, referenceCode);
     }
 
     // Show the published value too since the converted value is rounded
     const double meters = feet ? (limit * kMetersPerFoot) : limit;
-    const double converted = FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble();
+    const double converted = GeoZoneEnvironment::metersToVerticalDistanceUnits(meters);
     return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, referenceCode).arg(limit).arg(publishedUnits);
 }
 

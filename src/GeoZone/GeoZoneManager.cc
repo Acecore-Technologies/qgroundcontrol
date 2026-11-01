@@ -43,11 +43,19 @@ QString defaultStorageDir()
 
 GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     : QObject(parent)
+    , _sources(new QmlObjectListModel(this))
     , _repository(new GeoZoneSourceRepository(storageDir.isEmpty() ? defaultStorageDir() : storageDir, this))
     , _display(new GeoZoneDisplay(this))
     , _planning(new GeoZonePlanning(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
     , _activeTimer(new QTimer(this))
 {
+    (void) connect(_repository, &GeoZoneSourceRepository::sourceAppended, _sources, [this](GeoZoneSource *source) { _sources->append(source); });
+    (void) connect(_repository, &GeoZoneSourceRepository::sourceRemoved, _sources, [this](int index) { (void) _sources->removeAt(index); });
+
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    // The age at which data is outdated may have changed
+    (void) connect(settings->staleDays(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
+    (void) connect(settings->liveStaleHours(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);

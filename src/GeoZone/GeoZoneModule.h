@@ -30,7 +30,9 @@
 /// the terrain query fails.
 namespace GeoZoneModule {
 
-/// Registers the C++ types of the QGroundControl.GeoZone QML module, with GeoZoneManager and GeoZoneMonitor as singletons
+/// Connects the geozone core to the settings, units, terrain and downloads of QGroundControl, see GeoZoneEnvironment,
+/// and registers the C++ types of the QGroundControl.GeoZone QML module, with GeoZoneManager and GeoZoneMonitor as
+/// singletons. Called first, also when running unit tests.
 void registerQmlTypes();
 
 /// Loads the stored sources, starts monitoring the vehicles and shows the module's messages to the user

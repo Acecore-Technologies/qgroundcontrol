@@ -18,8 +18,12 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneDisplay.h
         GeoZoneDownloader.cc
         GeoZoneDownloader.h
+        GeoZoneEnvironment.cc
+        GeoZoneEnvironment.h
         GeoZoneFenceImporter.cc
         GeoZoneFenceImporter.h
+        GeoZoneFences.cc
+        GeoZoneFences.h
         GeoZoneFormat.cc
         GeoZoneFormat.h
         GeoZoneGeometry.cc

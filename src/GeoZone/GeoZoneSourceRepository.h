@@ -19,7 +19,6 @@
 #include "GeoZoneStore.h"
 
 class GeoZoneSource;
-class QmlObjectListModel;
 class QTimer;
 
 /// The geozone sources: adds, downloads, loads and removes them, keeps a copy of each for the next start,
@@ -56,8 +55,8 @@ public:
     /// See GeoZoneManager::loadStoredSources
     void loadStoredSources(LoadMode mode);
 
-    /// GeoZoneSource objects, in the order they were added
-    QmlObjectListModel *sources() const { return _sources; }
+    /// The sources, in the order they were added
+    const QList<GeoZoneSource*> &sources() const { return _sources; }
     QList<const GeoZoneSource*> sourceList() const;
     GeoZoneSource *source(const QString &key) const;
     /// @return Name of the stored copy of a source in storageDir, empty when it has none
@@ -69,7 +68,7 @@ public:
     QString progressText() const;
     /// Sources with outdated data, one per line
     QString validityWarning() const { return _validityWarning; }
-    /// Re-evaluates the age of the sources' data
+    /// Re-evaluates the age of the sources' data, also when GeoZoneEnvironment::sourceSettings changed
     void updateValidity();
 
 signals:
@@ -78,6 +77,8 @@ signals:
     /// The zones of the source were replaced, or the source was removed from sources()
     void sourceChanged(GeoZoneSource *source);
     void sourceAdded(GeoZoneSource *source);    ///< A source added by addFile or addUrl was loaded, not emitted when feeds are refreshed
+    void sourceAppended(GeoZoneSource *source); ///< The source was appended to sources(), before it is loaded
+    void sourceRemoved(int index);              ///< The source at the index was removed from sources(), it is deleted later
     /// A source the user added or refreshed was loaded, its zones should be shown
     void userLoaded();
     void loadFailed(const QString &key, const QString &message);
@@ -117,7 +118,7 @@ private:
 
     GeoZoneStore _store;
     GeoZoneDownloader *_downloader = nullptr;
-    QmlObjectListModel *_sources = nullptr;
+    QList<GeoZoneSource*> _sources;
     QTimer *_refreshTimer = nullptr;
     int _pendingCount = 0;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped

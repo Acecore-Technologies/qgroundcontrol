@@ -9,8 +9,8 @@
 
 #include "GeoZoneAuthorisations.h"
 #include "GeoZone.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneInfo.h"
-#include "QGCLoggingCategory.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -21,7 +21,7 @@
 
 #include <algorithm>
 
-QGC_LOGGING_CATEGORY(GeoZoneAuthorisationsLog, "qgc.geozone.geozoneauthorisations")
+Q_LOGGING_CATEGORY(GeoZoneAuthorisationsLog, "qgc.geozone.geozoneauthorisations")
 
 namespace {
 
@@ -165,7 +165,7 @@ void GeoZoneAuthorisations::offer(const QList<GeoZoneAuthorisation> &authorisati
 
 QVariantList GeoZoneAuthorisations::pendingAuthorisations() const
 {
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     QVariantList list;
     for (const GeoZoneAuthorisation &authorisation : _pending) {
         list.append(QVariantMap{
@@ -246,7 +246,7 @@ QVariantMap GeoZoneAuthorisations::authorisationOf(const QVariant &zone) const
         { QStringLiteral("permit"), authorisation->permit },
         { QStringLiteral("validFrom"), firstDayText(authorisation->validFrom) },
         { QStringLiteral("validTo"), lastDayText(authorisation->validTo) },
-        { QStringLiteral("statusText"), statusText(*authorisation, QDateTime::currentDateTimeUtc()) },
+        { QStringLiteral("statusText"), statusText(*authorisation, GeoZoneEnvironment::currentDateTimeUtc()) },
     };
 }
 
@@ -281,7 +281,7 @@ QVariant GeoZoneAuthorisations::data(const QModelIndex &index, int role) const
     case PermitRole:
         return authorisation.permit;
     case StatusTextRole:
-        return statusText(authorisation, QDateTime::currentDateTimeUtc());
+        return statusText(authorisation, GeoZoneEnvironment::currentDateTimeUtc());
     default:
         return QVariant();
     }

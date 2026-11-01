@@ -393,7 +393,7 @@ void GeoZonePlanningTest::_testFenceExcludes()
         QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, round));
         QCOMPARE(importer.addExclusions({ round, circle }, tolerance), 2);
         const QList<QGeoCoordinate> fence = geoFenceController->polygons()->value<QGCFencePolygon*>(0)->coordinateList();
-        QCOMPARE(fence, GeoZoneFenceImporter::zoneFences(round, tolerance).polygons.constFirst());
+        QCOMPARE(fence, GeoZoneFences::zoneFences(round, tolerance).polygons.constFirst());
         QVERIFY((tolerance > 0) == (fence.count() < 40));
         QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, round));
         QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, circle));
@@ -404,7 +404,7 @@ void GeoZonePlanningTest::_testFenceExcludes()
     geoFenceController->addInclusionCircle(local(-5000, 5000), local(5000, -5000));
     QCOMPARE(importer.addExclusions({ round }, 0), 1);
     const GeoZone *const line = polygonZone({ { local(-10, 0), local(10, 0) } });
-    QVERIFY(GeoZoneFenceImporter::zoneFences(line).isEmpty());
+    QVERIFY(GeoZoneFences::zoneFences(line).isEmpty());
     QCOMPARE(importer.addExclusions({ line }), 0);
     QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, line));
     QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, owner.add(GeoZone::Data())));
