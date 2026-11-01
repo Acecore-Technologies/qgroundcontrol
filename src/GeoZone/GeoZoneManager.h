@@ -42,7 +42,7 @@ class GeoZoneManager : public QObject
 
     Q_PROPERTY(QmlObjectListModel*  zones               READ zones              CONSTANT FINAL)                           ///< GeoZone objects of all sources
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
-    Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY zonesChanged FINAL)                ///< Bounding box of all zones
+    Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
     Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged FINAL)
     Q_PROPERTY(bool                 busy                READ busy               NOTIFY busyChanged FINAL)                 ///< Sources are being loaded or downloaded
     Q_PROPERTY(double               progress            READ progress           NOTIFY progressChanged FINAL)             ///< Fraction of the downloads received, negative when unknown
@@ -117,6 +117,8 @@ public:
     GeoZoneSource *source(const QString &key) const;
     /// Polygons and circles of all zones for map display
     const QList<GeoZoneShape*> &shapes() const { return _shapes; }
+    /// @return Shapes of the zones whose bounding box intersects the bounds in degrees
+    QList<const GeoZoneShape*> shapesInArea(double south, double west, double north, double east) const;
     QGeoRectangle boundingBox() const { return _boundingBox; }
     bool visible() const;
     void setVisible(bool visible);
@@ -130,8 +132,11 @@ public:
     QString storageDir() const { return _store.dir(); }
 
 signals:
-    void zonesAboutToChange();  ///< Zones and shapes are about to be deleted
-    void zonesChanged();
+    /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
+    void zonesAboutToChange(GeoZoneSource *source);
+    /// The zones of the source changed, zones() and the queries include them unless it was removed
+    void zonesChanged(GeoZoneSource *source);
+    void boundingBoxChanged();
     void visibleChanged(bool visible);
     void busyChanged(bool busy);
     void progressChanged();
@@ -154,8 +159,8 @@ private:
     void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request);
     void _idle();
     void _setPending(int delta);
-    void _beginZonesChange();
-    void _endZonesChange();
+    void _beginZonesChange(GeoZoneSource *source);
+    void _endZonesChange(GeoZoneSource *source);
     void _saveIndex();
     void _reportStorageError(const QString &message);
     void _updateValidity();
@@ -166,12 +171,12 @@ private:
     QmlObjectListModel *_sources = nullptr;
     QList<GeoZoneShape*> _shapes;
     QList<GeoZone*> _zoneList;          ///< Same as _zones, indexed by _index
+    QList<QList<const GeoZoneShape*>> _zoneShapes;  ///< Shapes of each zone of _zoneList
     GeoZoneIndex _index;
     QTimer *_activeTimer = nullptr;
     QTimer *_refreshTimer = nullptr;
     QGeoRectangle _boundingBox;
     int _pendingCount = 0;
-    bool _changingZones = false;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
     QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
     bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is

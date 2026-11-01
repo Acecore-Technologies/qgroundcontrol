@@ -65,6 +65,7 @@ private:
 
 class GeoZoneAlertLog;
 class GeoZoneManager;
+class GeoZoneSource;
 class Vehicle;
 
 /// Alerts the user once when a vehicle approaches or enters an active restricted geozone or U-space airspace,
@@ -146,7 +147,7 @@ private slots:
     void _activeVehicleChanged(Vehicle *vehicle);
     void _evaluateVehicles();
     void _updateEvaluateTimer();
-    void _forgetZones();
+    void _forgetZones(GeoZoneSource *source);
     void _alertsEnabledChanged();
 
 private:

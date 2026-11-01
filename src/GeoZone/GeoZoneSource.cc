@@ -15,6 +15,7 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QUrl>
+#include <QtQml/QQmlEngine>
 
 namespace {
 
@@ -163,6 +164,7 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
     const QString sourceText = _sourceText();
     for (const GeoZone::Data &zoneData : result.zones) {
         GeoZone *const zone = new GeoZone(zoneData, this);
+        QQmlEngine::setObjectOwnership(zone, QQmlEngine::CppOwnership);
         zone->setSourceKey(_key);
         zone->setSourceText(sourceText);
         _zones.append(zone);

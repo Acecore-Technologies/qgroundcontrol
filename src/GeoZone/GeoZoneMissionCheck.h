@@ -19,6 +19,7 @@
 #include "GeoZone.h"
 
 class GeoZoneManager;
+class GeoZoneSource;
 class MissionController;
 
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
@@ -80,7 +81,7 @@ signals:
 
 private:
     void _scheduleUpdate();
-    void _clearZones();
+    void _clearZones(GeoZoneSource *source);
     QList<Segment> _missionSegments() const;
     /// Survey, corridor and structure scan areas
     QList<GeoZone::Area> _missionAreas() const;

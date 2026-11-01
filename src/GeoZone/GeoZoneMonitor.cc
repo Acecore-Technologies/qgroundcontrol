@@ -12,6 +12,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneSource.h"
 #include "GeoZoneSettings.h"
 #include "MultiVehicleManager.h"
 #include "QmlObjectListModel.h"
@@ -116,7 +117,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
     , _nearbyModel(new GeoZoneNearbyModel(this))
 {
-    // Zones are about to be deleted. Their alert states are kept so reloading a source doesn't repeat alerts.
+    // Zones of a source are about to be deleted. Their alert states are kept so reloading the source doesn't repeat alerts.
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::monitoringChanged);
 }
@@ -274,13 +275,15 @@ void GeoZoneMonitor::_resetTrackers()
     }
 }
 
-void GeoZoneMonitor::_forgetZones()
+void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
 {
-    const bool hadNearby = !_activeNearby().isEmpty();
-    for (Tracker &tracker : _trackers) {
-        tracker.nearby.clear();
+    bool activeChanged = false;
+    for (auto it = _trackers.begin(); it != _trackers.end(); ++it) {
+        if (it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->parent() == source; }) > 0) {
+            activeChanged = activeChanged || (it.key() == _activeVehicleId);
+        }
     }
-    if (hadNearby) {
+    if (activeChanged) {
         _publishNearby();
     }
 }

@@ -11,6 +11,7 @@
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneShape.h"
+#include "GeoZoneSource.h"
 #include "QmlObjectListModel.h"
 
 #include <QtCore/QSet>
@@ -21,28 +22,17 @@
 GeoZoneMapItem::GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent)
     : QObject(parent)
     , _shape(shape)
+    , _zone(shape->zone())
+    , _center(shape->center())
+    , _radius(shape->radius())
+    , _isCircle(shape->isCircle())
 {
-
-}
-
-GeoZone *GeoZoneMapItem::zone() const
-{
-    return _shape->zone();
-}
-
-QGeoCoordinate GeoZoneMapItem::center() const
-{
-    return _shape->center();
-}
-
-double GeoZoneMapItem::radius() const
-{
-    return _shape->radius();
 }
 
 void GeoZoneMapItem::setZoomLevel(int zoomLevel)
 {
-    if (_shape->isCircle() || (zoomLevel == _zoomLevel)) {
+    // Only called while the shape exists, the item is removed before its zone's shapes are deleted
+    if (_isCircle || (zoomLevel == _zoomLevel)) {
         return;
     }
 
@@ -64,7 +54,7 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     , _labelZones(new QmlObjectListModel(this))
 {
     // Shapes are deleted when zones change, so items referencing them must go first
-    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_clear);
+    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_removeSource);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_refresh);
 }
 
@@ -102,8 +92,23 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     const double marginX = viewWidth * viewMargin;
     const double marginY = views.first().height() * viewMargin;
     QList<GeoZoneMercatorBounds> nearViews;
+    QList<const GeoZoneShape*> nearShapes;
+    QSet<const GeoZoneShape*> nearShapeSet;
     for (const GeoZoneMercatorBounds &view : views) {
-        nearViews.append({ view.minX - marginX, view.minY - marginY, view.maxX + marginX, view.maxY + marginY });
+        const GeoZoneMercatorBounds nearView{ view.minX - marginX, view.minY - marginY, view.maxX + marginX, view.maxY + marginY };
+        nearViews.append(nearView);
+
+        // Mercator y grows southward, the edges of the projection include the poles
+        const QGeoCoordinate northWest = GeoZoneShape::fromMercator(QPointF(std::clamp(nearView.minX, 0.0, 1.0), nearView.minY));
+        const QGeoCoordinate southEast = GeoZoneShape::fromMercator(QPointF(std::clamp(nearView.maxX, 0.0, 1.0), nearView.maxY));
+        const double north = (nearView.minY <= 0) ? 90.0 : northWest.latitude();
+        const double south = (nearView.maxY >= 1) ? -90.0 : southEast.latitude();
+        for (const GeoZoneShape *shape : _manager->shapesInArea(south, northWest.longitude(), north, southEast.longitude())) {
+            if (!nearShapeSet.contains(shape)) {
+                nearShapeSet.insert(shape);
+                nearShapes.append(shape);
+            }
+        }
     }
 
     const auto intersectsAny = [](const QList<GeoZoneMercatorBounds> &bounds, const GeoZoneMercatorBounds &shapeBounds) {
@@ -118,7 +123,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     QList<Candidate> candidates;
     QSet<GeoZone*> zonesInView;
     const double pixels = GeoZoneShape::mercatorPixels(zoomLevel);
-    for (const GeoZoneShape *shape : _manager->shapes()) {
+    for (const GeoZoneShape *shape : std::as_const(nearShapes)) {
         const GeoZoneMercatorBounds &bounds = shape->mercatorBounds();
         if (!intersectsAny(nearViews, bounds)) {
             continue;
@@ -127,7 +132,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         if (inView) {
             zonesInView.insert(shape->zone());
         }
-        candidates.append({ shape, qMax(bounds.width(), bounds.height()) * pixels, inView });
+        candidates.append({ shape, (std::max)(bounds.width(), bounds.height()) * pixels, inView });
     }
 
     if (candidates.count() > maxShapeCount) {
@@ -238,6 +243,28 @@ void GeoZoneMapModel::_clear()
     }
     _items.clear();
     _setHiddenZoneCount(0);
+}
+
+void GeoZoneMapModel::_removeSource(GeoZoneSource *source)
+{
+    const auto fromSource = [source](const QObject *object) {
+        const GeoZone *const zone = qobject_cast<const GeoZoneMapItem*>(object) ? qobject_cast<const GeoZoneMapItem*>(object)->zone() : qobject_cast<const GeoZone*>(object);
+        return !zone || (zone->parent() == source);
+    };
+    for (QmlObjectListModel *model : { _labelZones, _polygons, _circles }) {
+        QList<QObject*> kept = *model->objectList();
+        if (kept.removeIf(fromSource) > 0) {
+            (void) model->swapObjectList(kept);
+        }
+    }
+    for (auto it = _items.begin(); it != _items.end();) {
+        if (fromSource(it.value())) {
+            it.value()->deleteLater();
+            it = _items.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void GeoZoneMapModel::_refresh()

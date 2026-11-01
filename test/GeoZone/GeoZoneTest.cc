@@ -1729,6 +1729,12 @@ void GeoZoneTest::_testMapModel()
         { _circleFeature(QStringLiteral("OTHER"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 1000) }), errorString), qPrintable(errorString));
     QCOMPARE(model.polygons()->count(), 1);
     QVERIFY(identifiers(model.circles()).contains(QStringLiteral("OTHER")));
+    // Items of the other sources are kept when a source reloads
+    QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("other.json"),
+        { _circleFeature(QStringLiteral("OTHER"), QStringLiteral("CONDITIONAL"), QGeoCoordinate(47.0, 8.0), 1000) }), errorString), qPrintable(errorString));
+    QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
+    QVERIFY(identifiers(model.circles()).contains(QStringLiteral("OTHER")));
     manager.removeSource(0);
     QCOMPARE(model.polygons()->count(), 0);
     QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));

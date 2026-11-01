@@ -12,6 +12,7 @@
 #include "FlightPathSegment.h"
 #include "GeoZone.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneSource.h"
 #include "MissionController.h"
 #include "QGCMapPolygon.h"
 #include "QmlObjectListModel.h"
@@ -124,13 +125,12 @@ void GeoZoneMissionCheck::_scheduleUpdate()
     _updateTimer.start();
 }
 
-void GeoZoneMissionCheck::_clearZones()
+void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 {
-    _updateTimer.stop();
-    if (!_crossedZones.isEmpty() || !_uSpaceZones.isEmpty() || !_permittedZones.isEmpty()) {
-        _crossedZones.clear();
-        _uSpaceZones.clear();
-        _permittedZones.clear();
+    // The other zones stay listed until the check runs again
+    const auto fromSource = [source](const GeoZone *zone) { return zone->parent() == source; };
+    const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource);
+    if (removed > 0) {
         emit crossedZonesChanged();
     }
 }

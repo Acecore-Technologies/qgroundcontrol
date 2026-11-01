@@ -11,13 +11,16 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 #include <QtPositioning/QGeoShape>
 
-class GeoZone;
+#include "GeoZone.h"
+
 class GeoZoneManager;
 class GeoZoneShape;
+class GeoZoneSource;
 class QmlObjectListModel;
 
 /// A GeoZoneShape displayed on one map, at that map's level of detail
@@ -34,11 +37,12 @@ class GeoZoneMapItem : public QObject
 public:
     GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent = nullptr);
 
+    /// Identifies the item, only valid until the zones of its source change
     const GeoZoneShape *shape() const { return _shape; }
-    GeoZone *zone() const;
+    GeoZone *zone() const { return _zone; }
     QGeoShape geoShape() const { return _geoShape; }
-    QGeoCoordinate center() const;
-    double radius() const;
+    QGeoCoordinate center() const { return _center; }
+    double radius() const { return _radius; }
 
     void setZoomLevel(int zoomLevel);
 
@@ -47,6 +51,10 @@ signals:
 
 private:
     const GeoZoneShape *_shape = nullptr;
+    QPointer<GeoZone> _zone;
+    QGeoCoordinate _center;
+    double _radius = 0;
+    bool _isCircle = false;
     int _zoomLevel = -1;
     QGeoShape _geoShape;
 };
@@ -85,6 +93,7 @@ signals:
 
 private slots:
     void _clear();
+    void _removeSource(GeoZoneSource *source);
     void _refresh();
 
 private:

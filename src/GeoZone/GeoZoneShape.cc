@@ -78,6 +78,12 @@ QPointF GeoZoneShape::toMercator(const QGeoCoordinate &coordinate)
     return QPointF(x, y);
 }
 
+QGeoCoordinate GeoZoneShape::fromMercator(const QPointF &point)
+{
+    const double latitude = qRadiansToDegrees((2.0 * std::atan(std::exp((0.5 - point.y()) * 2.0 * M_PI))) - (M_PI / 2.0));
+    return QGeoCoordinate(latitude, (point.x() * 360.0) - 180.0);
+}
+
 double GeoZoneShape::mercatorPixels(double zoomLevel)
 {
     return kTilePixels * std::exp2(zoomLevel);

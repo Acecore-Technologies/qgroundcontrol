@@ -53,6 +53,7 @@ public:
     static constexpr int fullDetailZoomLevel = 17;
 
     static QPointF toMercator(const QGeoCoordinate &coordinate);
+    static QGeoCoordinate fromMercator(const QPointF &point);
 
     /// Size in pixels of one normalized mercator unit at the zoom level, for 256 pixel map tiles
     static double mercatorPixels(double zoomLevel);

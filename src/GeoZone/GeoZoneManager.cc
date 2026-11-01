@@ -365,13 +365,13 @@ void GeoZoneManager::_applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoad
         source->markCurrent(loadResult.result, job.loadedAt, job.fileDate);
         qCDebug(GeoZoneManagerLog) << "Zones unchanged" << job.key;
     } else {
-        _beginZonesChange();
         if (!source) {
             source = new GeoZoneSource(job.key, job.url, this);
             _sources->append(source);
         }
+        _beginZonesChange(source);
         source->setResult(loadResult.result, job.loadedAt, job.fileDate);
-        _endZonesChange();
+        _endZonesChange(source);
         qCDebug(GeoZoneManagerLog) << "Loaded" << source->zoneCount() << source->formatName() << "zones from" << job.key;
     }
     source->setErrorString(QString());
@@ -478,10 +478,10 @@ void GeoZoneManager::removeSource(int index)
         source->setBusy(false);
     }
 
-    _beginZonesChange();
+    _beginZonesChange(source);
     (void) _sources->removeAt(index);
+    _endZonesChange(source);
     source->deleteLater();
-    _endZonesChange();
 
     if (!_storeReadOnly) {
         _store.removeFile(_storedEntries.take(source->key()).fileName);
@@ -501,44 +501,59 @@ void GeoZoneManager::clear()
     }
 }
 
-void GeoZoneManager::_beginZonesChange()
+void GeoZoneManager::_beginZonesChange(GeoZoneSource *source)
 {
-    if (_changingZones) {
-        return;
-    }
-    _changingZones = true;
-    emit zonesAboutToChange();
-    _activeTimer->stop();
-    _zones->clear();
-    _zoneList.clear();
-    _index.clear();
-    _shapes.clear();
-    _boundingBox = QGeoRectangle();
+    emit zonesAboutToChange(source);
 }
 
-void GeoZoneManager::_endZonesChange()
+void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
 {
-    QList<QObject*> zones;
+    _zoneList.clear();
+    _shapes.clear();
+    QGeoRectangle boundingBox;
     for (int i = 0; i < _sources->count(); i++) {
-        const GeoZoneSource *const source = _sources->value<GeoZoneSource*>(i);
-        zones.append(QList<QObject*>(source->zones().cbegin(), source->zones().cend()));
-        _zoneList.append(source->zones());
-        _shapes.append(source->shapes());
-        if (source->boundingBox().isValid()) {
-            _boundingBox = _boundingBox.isValid() ? _boundingBox.united(source->boundingBox()) : source->boundingBox();
+        const GeoZoneSource *const zoneSource = _sources->value<GeoZoneSource*>(i);
+        _zoneList.append(zoneSource->zones());
+        _shapes.append(zoneSource->shapes());
+        if (zoneSource->boundingBox().isValid()) {
+            boundingBox = boundingBox.isValid() ? boundingBox.united(zoneSource->boundingBox()) : zoneSource->boundingBox();
         }
     }
+    const bool boundingBoxChanged = (boundingBox != _boundingBox);
+    _boundingBox = boundingBox;
 
+    QHash<const GeoZone*, qsizetype> zoneIndexes;
+    zoneIndexes.reserve(_zoneList.count());
+    for (qsizetype i = 0; i < _zoneList.count(); i++) {
+        zoneIndexes.insert(_zoneList[i], i);
+    }
+    _zoneShapes = QList<QList<const GeoZoneShape*>>(_zoneList.count());
+    for (const GeoZoneShape *shape : std::as_const(_shapes)) {
+        _zoneShapes[zoneIndexes.value(shape->zone())].append(shape);
+    }
     _index.build(_zoneList);
 
-    // Appending an empty list would insert an invalid row range
-    if (!zones.isEmpty()) {
-        _zones->append(zones);
+    // A single reset, so bindings to the count don't see the zones of other sources disappear
+    (void) _zones->swapObjectList(QList<QObject*>(_zoneList.cbegin(), _zoneList.cend()));
+    if (_zoneList.isEmpty()) {
+        _activeTimer->stop();
+    } else if (!_activeTimer->isActive()) {
         _activeTimer->start();
     }
 
-    _changingZones = false;
-    emit zonesChanged();
+    emit zonesChanged(source);
+    if (boundingBoxChanged) {
+        emit this->boundingBoxChanged();
+    }
+}
+
+QList<const GeoZoneShape*> GeoZoneManager::shapesInArea(double south, double west, double north, double east) const
+{
+    QList<const GeoZoneShape*> shapes;
+    for (const int index : _index.query(south, west, north, east)) {
+        shapes.append(_zoneShapes[index]);
+    }
+    return shapes;
 }
 
 void GeoZoneManager::loadStoredSources(LoadMode mode)
