@@ -67,7 +67,8 @@ public:
     };
 
     /// Extracts the sources of a pack into the directory. A pack whose signature doesn't match its manifest can't be
-    /// read; its signature is recorded in the provenance of its sources otherwise.
+    /// read; its signature is recorded in the provenance of its sources otherwise. Builds which can't check
+    /// signatures import signed packs as unverified, like unsigned ones.
     /// @param isKnown Tells whether a source with the key is known
     /// @param importedAt Time of the import, recorded in the provenance of the sources
     /// @param publishers Whose signatures are trusted

@@ -158,7 +158,7 @@ QString GeoZoneProvenance::packSignatureText() const
     case PackSignature::Unsigned:
         return tr("unsigned");
     case PackSignature::Unverified:
-        return tr("signature not checked");
+        return tr("signature not checked, taken as unsigned");
     case PackSignature::Untrusted:
         return packSigner.isEmpty() ? tr("untrusted signature") : tr("untrusted signature of \"%1\"").arg(packSigner);
     case PackSignature::Signed:

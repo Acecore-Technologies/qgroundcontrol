@@ -10,13 +10,15 @@
 #pragma once
 
 #include <QtCore/QByteArray>
+#include <QtCore/QtGlobal>
 #include <QtCore/QList>
 #include <QtCore/QString>
 
 /// Ed25519 signatures of offline packs, see GeoZonePack. The publisher of a pack signs its manifest, which holds the
 /// SHA-256 of each file, with a private key; importers check the signature with the public keys of the publishers
-/// they trust. Uses OpenSSL's libcrypto when the build found it (GEOZONE_HAVE_OPENSSL), otherwise packs can't be
-/// signed and their signatures can't be checked.
+/// they trust. Uses OpenSSL's libcrypto when the build found it (GEOZONE_HAVE_OPENSSL, see the GEOZONE_PACK_SIGNING
+/// CMake option). Otherwise available() is false: no key is generated or read, nothing is signed and no signature is
+/// valid, so that signed packs are imported as if unsigned.
 namespace GeoZonePackSignature {
 
 /// A publisher whose packs are trusted
@@ -27,6 +29,19 @@ struct Publisher {
 
 /// @return true when the build can sign and check signatures
 bool available();
+
+/// Makes available() false while in scope, so that tests of builds with OpenSSL run the code of builds without it.
+/// Not thread safe.
+class ScopedUnavailable
+{
+public:
+    ScopedUnavailable();
+    ~ScopedUnavailable();
+    Q_DISABLE_COPY_MOVE(ScopedUnavailable)
+
+private:
+    bool _previous = false;
+};
 
 /// @return A new Ed25519 private key in PEM (PKCS #8), empty when unavailable
 QByteArray generatePrivateKey();

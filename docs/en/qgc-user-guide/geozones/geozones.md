@@ -98,7 +98,7 @@ Packs can be signed, so that those importing them know who made them and that th
 - To sign the packs you export, select an Ed25519 private key file (unencrypted PEM) with **Browse...**, or create one with **New Key...**, and enter your name as **Publisher**. Keep the key file private. The public key shown below the text lets others trust your packs: give it to them by a channel they trust. Keys can also be made with OpenSSL: `openssl genpkey -algorithm ed25519 -out geozones.pem`, whose public key `openssl pkey -in geozones.pem -pubout` prints.
 - To trust the packs of a publisher, enter a name for them and their public key (base64, or PEM as OpenSSL prints it) and press **Trust**. Their keys are shown by a short id, like `681b 5d7f 40bf 39d2`, to compare with the publisher's.
 
-When a pack is imported, the message and the provenance of its sources tell how it is signed: _signed by_ the name you gave a trusted publisher, _untrusted signature_ when it is signed by a key you don't trust (the source then has **Trust Publisher**, which trusts that key with the name the pack gives), or _unsigned_. A pack whose signature doesn't match its content, because it was changed after it was signed, isn't imported, nor are copies which don't match the SHA-256 the signed manifest gives. Unsigned and untrusted packs are imported too: check where they come from. Builds of _QGroundControl_ without OpenSSL can't sign packs or check signatures.
+When a pack is imported, the message and the provenance of its sources tell how it is signed: _signed by_ the name you gave a trusted publisher, _untrusted signature_ when it is signed by a key you don't trust (the source then has **Trust Publisher**, which trusts that key with the name the pack gives), or _unsigned_. A pack whose signature doesn't match its content, because it was changed after it was signed, isn't imported, nor are copies which don't match the SHA-256 the signed manifest gives. Unsigned and untrusted packs are imported too: check where they come from. Builds of _QGroundControl_ without OpenSSL (by default all but desktop Linux) can't sign packs or check signatures, and say so under **Pack Signatures...**: they export unsigned packs and import signed packs as unsigned (_signature not checked_), never as trusted.
 
 ## Format Support Matrix {#format-support-matrix}
 
@@ -371,6 +371,6 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 - Schedules with unknown days are taken as every day, which isn't marked as approximate; the zone details show the problem.
 - Return and contingency paths are estimates, see [Return and Contingency Paths](#return-and-contingency-paths).
 - GeoFences made from zones have no altitude limits and no holes, and the ArduPilot fence storage is estimated.
-- Secrets of services are stored unencrypted in the settings. Feeds are only checked by SHA-256, not signatures; offline packs are signed only in builds with OpenSSL.
+- Secrets of services are stored unencrypted in the settings. Feeds are only checked by SHA-256, not signatures; offline packs are signed only in builds with OpenSSL, by default desktop Linux builds.
 
 Developers can find the architecture of the geozone module in the [Geozones developer guide](../../qgc-dev-guide/geozones.md).

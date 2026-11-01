@@ -25,6 +25,9 @@ namespace GeoZonePackSignature {
 
 namespace {
 
+/// See ScopedUnavailable, only used from the GUI thread of tests
+bool unavailableForTest = false;
+
 QString tr(const char *text)
 {
     return QCoreApplication::translate("GeoZonePackSignature", text);
@@ -65,14 +68,31 @@ QByteArray rawPublicKey(EVP_PKEY *key)
 bool available()
 {
 #ifdef GEOZONE_HAVE_OPENSSL
-    return true;
+    return !unavailableForTest;
 #else
     return false;
 #endif
 }
 
+ScopedUnavailable::ScopedUnavailable()
+    : _previous(unavailableForTest)
+{
+    unavailableForTest = true;
+}
+
+ScopedUnavailable::~ScopedUnavailable()
+{
+    unavailableForTest = _previous;
+}
+
+// Without OpenSSL, each function returns what it returns when signing is unavailable, the same code which
+// ScopedUnavailable runs in builds with OpenSSL
+
 QByteArray generatePrivateKey()
 {
+    if (!available()) {
+        return QByteArray();
+    }
 #ifdef GEOZONE_HAVE_OPENSSL
     EVP_PKEY_CTX *const context = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, nullptr);
     EVP_PKEY *key = nullptr;
@@ -99,6 +119,10 @@ QByteArray generatePrivateKey()
 
 QByteArray publicKey(const QByteArray &privateKeyPem, QString &errorString)
 {
+    if (!available()) {
+        errorString = tr("This build of QGroundControl can't sign packs.");
+        return QByteArray();
+    }
 #ifdef GEOZONE_HAVE_OPENSSL
     EVP_PKEY *const key = readPrivateKey(privateKeyPem);
     if (!key) {
@@ -110,13 +134,16 @@ QByteArray publicKey(const QByteArray &privateKeyPem, QString &errorString)
     return raw;
 #else
     Q_UNUSED(privateKeyPem);
-    errorString = tr("This build of QGroundControl can't sign packs.");
     return QByteArray();
 #endif
 }
 
 QByteArray sign(const QByteArray &privateKeyPem, const QByteArray &data, QString &errorString)
 {
+    if (!available()) {
+        errorString = tr("This build of QGroundControl can't sign packs.");
+        return QByteArray();
+    }
 #ifdef GEOZONE_HAVE_OPENSSL
     EVP_PKEY *const key = readPrivateKey(privateKeyPem);
     if (!key) {
@@ -139,17 +166,16 @@ QByteArray sign(const QByteArray &privateKeyPem, const QByteArray &data, QString
 #else
     Q_UNUSED(privateKeyPem);
     Q_UNUSED(data);
-    errorString = tr("This build of QGroundControl can't sign packs.");
     return QByteArray();
 #endif
 }
 
 bool verify(const QByteArray &publicKey, const QByteArray &data, const QByteArray &signature)
 {
-#ifdef GEOZONE_HAVE_OPENSSL
-    if ((publicKey.size() != publicKeySize) || (signature.size() != signatureSize)) {
+    if (!available() || (publicKey.size() != publicKeySize) || (signature.size() != signatureSize)) {
         return false;
     }
+#ifdef GEOZONE_HAVE_OPENSSL
     EVP_PKEY *const key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr, reinterpret_cast<const unsigned char*>(publicKey.constData()),
                                                       static_cast<size_t>(publicKey.size()));
     EVP_MD_CTX *const context = EVP_MD_CTX_new();
@@ -158,9 +184,7 @@ bool verify(const QByteArray &publicKey, const QByteArray &data, const QByteArra
            (EVP_DigestVerify(context, reinterpret_cast<const unsigned char*>(signature.constData()), static_cast<size_t>(signature.size()),
                              reinterpret_cast<const unsigned char*>(data.constData()), static_cast<size_t>(data.size())) == 1);
 #else
-    Q_UNUSED(publicKey);
     Q_UNUSED(data);
-    Q_UNUSED(signature);
     return false;
 #endif
 }

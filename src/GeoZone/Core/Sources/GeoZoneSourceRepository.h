@@ -95,7 +95,7 @@ public:
     QJsonObject provenanceReport() const;
 
     /// Writes an offline pack of the stored copies of the sources with the keys, see GeoZonePack. Secrets are left out.
-    /// The pack is signed with the key of setPackSigner.
+    /// The pack is signed with the key of setPackSigner, unless the build can't sign, see GeoZonePackSignature.
     /// @return false when it can't be written, errorString tells why
     bool exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const;
     /// Signs the packs exported with an Ed25519 private key, see GeoZonePackSignature

@@ -147,15 +147,28 @@ if(WIN32)
     target_compile_definitions(GeoZoneCore PRIVATE _USE_MATH_DEFINES)
 endif()
 
-# Ed25519 signatures of offline packs use the libcrypto of OpenSSL, which Qt Network loads too. Without it packs are
-# exported unsigned and the signatures of imported packs aren't checked, see GeoZonePackSignature.
-find_package(OpenSSL QUIET COMPONENTS Crypto)
-if(OpenSSL_FOUND AND TARGET OpenSSL::Crypto AND (OPENSSL_VERSION VERSION_GREATER_EQUAL 1.1.1))
+# Ed25519 signatures of offline packs use the libcrypto of OpenSSL (Qt has no Ed25519). QGroundControl doesn't link
+# OpenSSL otherwise: Qt loads it at run time, Android bundles the libraries of android_openssl for Qt. So signing is
+# on by default for desktop Linux only, which has the system libcrypto, and opt-in elsewhere. Without libcrypto 1.1.1
+# or later the build goes on: packs are exported unsigned and signed imports are taken as unsigned, see
+# GeoZonePackSignature.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    set(GEOZONE_PACK_SIGNING_DEFAULT ON)
+else()
+    set(GEOZONE_PACK_SIGNING_DEFAULT OFF)
+endif()
+option(GEOZONE_PACK_SIGNING "Sign geozone offline packs and check their signatures with OpenSSL's libcrypto, when found" ${GEOZONE_PACK_SIGNING_DEFAULT})
+if(GEOZONE_PACK_SIGNING)
+    find_package(OpenSSL QUIET COMPONENTS Crypto)
+endif()
+if(GEOZONE_PACK_SIGNING AND TARGET OpenSSL::Crypto AND (OPENSSL_VERSION VERSION_GREATER_EQUAL 1.1.1))
     target_link_libraries(GeoZoneCore PRIVATE OpenSSL::Crypto)
     target_compile_definitions(GeoZoneCore PRIVATE GEOZONE_HAVE_OPENSSL)
     message(STATUS "GeoZone: signing offline packs with OpenSSL ${OPENSSL_VERSION}")
+elseif(GEOZONE_PACK_SIGNING)
+    message(STATUS "GeoZone: OpenSSL libcrypto 1.1.1 or later not found, offline packs can't be signed")
 else()
-    message(STATUS "GeoZone: OpenSSL libcrypto not found, offline packs can't be signed")
+    message(STATUS "GeoZone: signing offline packs is off (GEOZONE_PACK_SIGNING)")
 endif()
 
 # The EGM96 geoid for heights above the WGS84 ellipsoid

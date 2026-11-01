@@ -45,6 +45,7 @@ private slots:
     void _testStoredFileNames();
     void _testCredentialStores();
     void _testSignedPacks();
+    void _testPacksWithoutSigning();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();

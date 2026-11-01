@@ -281,8 +281,9 @@ void GeoZoneManager::distrustPublisher(const QString &publicKey)
 
 bool GeoZoneManager::trustSourcePublisher(const QString &sourceKey)
 {
+    // Only keys whose signature was checked
     const GeoZoneSource *const source = this->source(sourceKey);
-    if (!source || source->provenance().packPublicKey.isEmpty()) {
+    if (!source || !source->untrustedPack() || source->provenance().packPublicKey.isEmpty()) {
         return false;
     }
     return trustPublisher(source->provenance().packSigner, QString::fromLatin1(source->provenance().packPublicKey.toBase64()));

@@ -567,7 +567,6 @@ ColumnLayout {
         text:               qsTr("Pack Signatures...")
         checkable:          true
         checked:            packSignatures.visible
-        visible:            _geoZoneManager.packSigningAvailable
         onClicked:          packSignatures.visible = !packSignatures.visible
     }
 
@@ -577,10 +576,21 @@ ColumnLayout {
         spacing:            _margin
         visible:            false
 
+        // Builds without OpenSSL
         QGCLabel {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
+            color:              qgcPal.warningText
+            text:               qsTr("This build of QGroundControl can't sign packs or check their signatures: packs are exported unsigned, and signed packs are imported as unsigned.")
+            visible:            !_geoZoneManager.packSigningAvailable
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            visible:            _geoZoneManager.packSigningAvailable
             text:               _geoZoneManager.packPublicKey === "" ?
                                     qsTr("Exported packs are not signed. Select or create an Ed25519 private key to sign them.") :
                                     qsTr("Exported packs are signed with the key %1. Give its public key to those importing them:").arg(_geoZoneManager.packKeyId)
@@ -598,6 +608,7 @@ ColumnLayout {
             columns:            2
             columnSpacing:      _margin
             rowSpacing:         _margin / 2
+            enabled:            _geoZoneManager.packSigningAvailable
 
             QGCLabel { text: qsTr("Signing key") }
             RowLayout {
@@ -633,6 +644,7 @@ ColumnLayout {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
+            visible:            _geoZoneManager.packSigningAvailable || _geoZoneManager.trustedPublishers.length > 0
             text:               _geoZoneManager.trustedPublishers.length === 0 ?
                                     qsTr("No trusted publishers. Imported packs are marked unsigned, or untrusted when signed.") :
                                     qsTr("Packs signed by these publishers are marked as signed by them:")
@@ -662,6 +674,7 @@ ColumnLayout {
         RowLayout {
             Layout.fillWidth:   true
             spacing:            _margin
+            enabled:            _geoZoneManager.packSigningAvailable
 
             QGCTextField {
                 id:                 publisherNameField

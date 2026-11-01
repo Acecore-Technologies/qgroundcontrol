@@ -137,7 +137,10 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
         import.publicKey = QByteArray::fromBase64(signature.value(QStringLiteral("publicKey")).toString().toLatin1());
         import.signer = signature.value(QStringLiteral("publisher")).toString().trimmed();
         if (!GeoZonePackSignature::available()) {
+            // Taken as unsigned: the publisher and key it gives aren't recorded, and are never trusted
             import.signature = GeoZoneProvenance::PackSignature::Unverified;
+            import.signer.clear();
+            import.publicKey.clear();
         } else if ((signature.value(QStringLiteral("algorithm")).toString() != QLatin1String(GeoZonePackSignature::algorithm)) ||
                    !GeoZonePackSignature::verify(import.publicKey, contents.manifestData,
                                                  QByteArray::fromBase64(signature.value(QStringLiteral("signature")).toString().toLatin1()))) {

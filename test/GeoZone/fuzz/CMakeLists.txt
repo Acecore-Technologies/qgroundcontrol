@@ -36,6 +36,8 @@ if(GEOZONE_FUZZ_STANDALONE)
         # The library is instrumented too, so that libFuzzer follows the coverage of the parsers
         add_compile_options(-fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
     endif()
+    # The parsers don't sign, and the library builds without OpenSSL like on platforms without it
+    set(GEOZONE_PACK_SIGNING OFF)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../src/GeoZone/Core ${CMAKE_CURRENT_BINARY_DIR}/GeoZoneCore)
 endif()
 

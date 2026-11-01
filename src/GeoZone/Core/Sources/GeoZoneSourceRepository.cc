@@ -864,8 +864,9 @@ bool GeoZoneSourceRepository::exportPack(const QStringList &keys, const QString 
             sources.append(GeoZonePackExchange::ExportSource{ sourceReport(*source), entry, source->service(), _store.path(entry.fileName) });
         }
     }
+    // Builds which can't sign export unsigned packs, also when the settings they share with others name a key
     GeoZonePackExchange::Signer signer;
-    if (!_packSigningKeyFile.isEmpty()) {
+    if (!_packSigningKeyFile.isEmpty() && GeoZonePackSignature::available()) {
         QFile keyFile(_packSigningKeyFile);
         if (!keyFile.open(QIODevice::ReadOnly)) {
             errorString = tr("The pack signing key %1 could not be read: %2").arg(_packSigningKeyFile, keyFile.errorString());
@@ -939,7 +940,7 @@ int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorS
             *signatureText = tr("The pack is not signed.");
             break;
         case GeoZoneProvenance::PackSignature::Unverified:
-            *signatureText = tr("The pack is signed, but this build can't check signatures.");
+            *signatureText = tr("The pack is signed, but its signature can't be checked in this build, so it is taken as unsigned.");
             break;
         case GeoZoneProvenance::PackSignature::Untrusted:
             *signatureText = tr("The pack is signed by \"%1\" with the key %2, which is not trusted.")

@@ -36,7 +36,7 @@ public:
     enum class PackSignature : quint8 {
         None,           ///< Not imported, or imported by an earlier version
         Unsigned,
-        Unverified,     ///< Signed, but this build can't check signatures
+        Unverified,     ///< Signed, but the build which imported it couldn't check signatures: taken as unsigned, never trusted
         Untrusted,      ///< Signed with a valid signature of a key which isn't trusted
         Signed,         ///< Signed by a trusted publisher
     };

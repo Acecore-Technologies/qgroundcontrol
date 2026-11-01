@@ -130,6 +130,7 @@ public:
     /// No longer trusts the publisher with the base64 public key
     Q_INVOKABLE void distrustPublisher(const QString &publicKey);
     /// Trusts the publisher of the pack a source was imported from, with the name the pack gives
+    /// @return false unless the source has an untrusted pack signature, see GeoZoneSource::untrustedPack
     Q_INVOKABLE bool trustSourcePublisher(const QString &sourceKey);
     /// Writes a new Ed25519 private key to sign packs with, and selects it. fileOperationFinished tells the outcome.
     Q_INVOKABLE bool createSigningKey(const QString &fileName);
