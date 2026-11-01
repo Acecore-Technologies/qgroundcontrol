@@ -20,6 +20,7 @@ private slots:
     void _testMonitorAlertOrder();
     void _testMonitorTimeToEntry();
     void _testTerrainAhead();
+    void _testVehicleTelemetry();
     void _testMonitorMultipleVehicles();
     void _testAlertLog();
 };

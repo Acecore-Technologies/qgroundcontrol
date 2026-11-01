@@ -279,6 +279,12 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
     QVERIFY(logLines.last().section(QLatin1Char(','), 1, 1) == QString::number(vehicle->id()));
 
+    // Alerts pause while the link is lost, since the last position isn't where the vehicle is
+    _mockLink->setCommLost(true);
+    QTRY_VERIFY_WITH_TIMEOUT(monitor.positionUnavailable(), 10000);
+    _mockLink->setCommLost(false);
+    QTRY_VERIFY_WITH_TIMEOUT(!monitor.positionUnavailable(), 10000);
+
     // Alerts can be turned off in flight
     settings->alertsEnabled()->setRawValue(false);
     QVERIFY(!monitor.monitoring());

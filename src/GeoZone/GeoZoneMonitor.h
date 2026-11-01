@@ -22,6 +22,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneNearbyModel.h"
+#include "QGCMAVLink.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneMonitorLog)
 
@@ -52,6 +53,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
     Q_PROPERTY(double       altitudeAMSL        READ altitudeAMSL       NOTIFY verticalBandsChanged FINAL)    ///< Of the active vehicle, NaN when unknown
     Q_PROPERTY(double       terrainAMSL         READ terrainAMSL        NOTIFY verticalBandsChanged FINAL)    ///< Below the active vehicle, NaN when unknown
+    Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)    ///< The active vehicle has no current position, its alerts are paused
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance() and logs the alerts
@@ -63,6 +65,8 @@ public:
     static GeoZoneMonitor *instance();
 
     static constexpr int evaluateIntervalMSecs = 1000;
+    static constexpr int positionTimeoutMSecs = 5000;       ///< Positions are stale after this, or three times their usual interval
+    static constexpr int reportedVelocityMaxAgeMSecs = 2000;    ///< Velocities reported by vehicles are used up to this age
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
 
     /// An approach or entry alert
@@ -92,6 +96,17 @@ public:
     ///         altitude above terrain or GeoZoneTerrain, which is unknown without terrain data
     static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate);
 
+    /// Records when a vehicle sent its position, and the velocity sent with it
+    /// @param msecs Time of the monitor's clock
+    void handleVehicleMessage(int vehicleId, const mavlink_message_t &message, qint64 msecs);
+
+    /// @return Velocity the vehicle reported with its position when recent, otherwise estimated from its positions,
+    ///         after adding the position to the estimate
+    Velocity vehicleVelocity(int vehicleId, qint64 msecs, const GeoZone::Position &position);
+
+    /// @return true if the vehicle sent no position for longer than its timeout
+    bool positionStale(int vehicleId, qint64 msecs) const;
+
     GeoZoneManager *manager() const { return _manager; }
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
 
@@ -103,6 +118,7 @@ public:
     QVariantList verticalBands() const;
     double altitudeAMSL() const;
     double terrainAMSL() const;
+    bool positionUnavailable() const { return _telemetry.value(_activeVehicleId).unavailable; }
 
     /// Vehicle whose nearby zones are published, noVehicle by default
     int activeVehicleId() const { return _activeVehicleId; }
@@ -123,6 +139,7 @@ signals:
     void monitoringChanged();
     void nearbyZonesChanged();
     void verticalBandsChanged();
+    void positionUnavailableChanged();
 
 private slots:
     void _vehicleAdded(Vehicle *vehicle);
@@ -137,15 +154,25 @@ private:
     using Nearby = GeoZoneAlertTracker::Nearby;
 
     /// Monitoring state of one vehicle
+    /// Position messages of one vehicle
+    struct Telemetry {
+        qint64 positionMSecs = -1;          ///< Last position message, -1 without
+        qint64 positionIntervalMSecs = 0;   ///< Between the last two position messages
+        qint64 velocityMSecs = -1;
+        Velocity reported;
+        GeoZoneVelocityEstimator estimator;
+        bool unavailable = false;           ///< Alerts are paused for lack of a current position
+    };
+
     struct Tracker {
         GeoZoneAlertTracker alerts;
-        GeoZoneVelocityEstimator velocity;
         QList<Nearby> nearby;
         QList<GeoZoneVerticalBand> bands;
         GeoZone::Position position;     ///< Last evaluated position
     };
 
     const Tracker *_activeTracker() const;
+    void _setPositionUnavailable(int vehicleId, bool unavailable);
     AlertEvent _alertEvent(const GeoZoneAlertTracker::Alert &alert, const GeoZone::Position &position, int vehicleId) const;
 
     static void _speak(const QString &message);
@@ -156,6 +183,7 @@ private:
 
     GeoZoneManager *_manager = nullptr;
     QHash<int, Tracker> _trackers;              ///< By vehicle id
+    QHash<int, Telemetry> _telemetry;           ///< By vehicle id
     QList<QPointer<Vehicle>> _vehicles;         ///< Monitored vehicles of MultiVehicleManager
     int _activeVehicleId = noVehicle;
     QTimer _evaluateTimer;

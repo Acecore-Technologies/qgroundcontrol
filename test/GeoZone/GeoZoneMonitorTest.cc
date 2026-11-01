@@ -297,6 +297,50 @@ void GeoZoneMonitorTest::_testTerrainAhead()
     QCOMPARE(noTerrainSpy.count(), 0);
 }
 
+void GeoZoneMonitorTest::_testVehicleTelemetry()
+{
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneMonitor monitor(&manager);
+    const int vehicleId = 1;
+    const QGeoCoordinate start(47, 8);
+    const auto globalPosition = [](int16_t vx, int16_t vy, int16_t vz) {
+        mavlink_message_t message{};
+        (void) mavlink_msg_global_position_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, 470000000, 80000000, 500000, 100000, vx, vy, vz, UINT16_MAX);
+        return message;
+    };
+
+    // The velocity sent with the position is used while recent, north east up from north east down
+    monitor.handleVehicleMessage(vehicleId, globalPosition(2500, -500, 300), 1000);
+    GeoZoneMonitor::Velocity velocity = monitor.vehicleVelocity(vehicleId, 1500, { start, 500 });
+    QVERIFY(velocity.valid);
+    QCOMPARE(velocity.north, 25.0);
+    QCOMPARE(velocity.east, -5.0);
+    QCOMPARE(velocity.up, -3.0);
+
+    // Old velocities give way to the positions, which haven't moved
+    velocity = monitor.vehicleVelocity(vehicleId, 1000 + GeoZoneMonitor::reportedVelocityMaxAgeMSecs + 1500, { start, 500 });
+    QVERIFY(velocity.valid);
+    QCOMPARE(velocity.groundSpeed(), 0.0);
+
+    // Vehicles sending zero velocities while their positions move are estimated
+    GeoZoneMonitor estimating(&manager);
+    estimating.handleVehicleMessage(vehicleId, globalPosition(0, 0, 0), 0);
+    (void) estimating.vehicleVelocity(vehicleId, 0, { start, 500 });
+    estimating.handleVehicleMessage(vehicleId, globalPosition(0, 0, 0), 1000);
+    velocity = estimating.vehicleVelocity(vehicleId, 1000, { start.atDistanceAndAzimuth(20, 90), 500 });
+    QVERIFY(qAbs(velocity.east - 20) < 0.1);
+
+    // Positions are stale after the timeout, or three of their usual intervals on slow links
+    QVERIFY(!monitor.positionStale(vehicleId, 1000 + GeoZoneMonitor::positionTimeoutMSecs));
+    QVERIFY(monitor.positionStale(vehicleId, 1000 + GeoZoneMonitor::positionTimeoutMSecs + 1));
+    monitor.handleVehicleMessage(vehicleId, globalPosition(0, 0, 0), 21000);
+    QVERIFY(!monitor.positionStale(vehicleId, 21000 + 50000));
+    QVERIFY(monitor.positionStale(vehicleId, 21000 + 60001));
+    QVERIFY(!monitor.positionStale(2, 100000));
+}
+
 void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
 {
     const QGeoCoordinate center(47, 8);

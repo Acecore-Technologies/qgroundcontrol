@@ -52,7 +52,7 @@ Item {
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
         color:              control._restrictionColor(control._monitor.monitoring ? control._monitor.alertRestriction : -1)
-        opacity:            control._monitor.monitoring ? 1 : 0.5
+        opacity:            (control._monitor.monitoring && !control._monitor.positionUnavailable) ? 1 : 0.5
     }
 
     MouseArea {
@@ -77,7 +77,16 @@ Item {
                         QGCLabel {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
                                       (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
-                            visible: !control._monitor.monitoring || control._monitor.nearbyModel.count === 0
+                            visible: (!control._monitor.monitoring || control._monitor.nearbyModel.count === 0) && !_pausedLabel.visible
+                        }
+
+                        QGCLabel {
+                            id:                 _pausedLabel
+                            Layout.fillWidth:   true
+                            wrapMode:           Text.WordWrap
+                            color:              qgcPal.warningText
+                            text:               qsTr("No current position from the vehicle, its alerts are paused. The zones below are from its last position.")
+                            visible:            control._monitor.monitoring && control._monitor.positionUnavailable
                         }
 
                         Repeater {

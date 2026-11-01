@@ -21,6 +21,7 @@
 #include "QmlObjectListModel.h"
 #include "QGCLoggingCategory.h"
 #include "Vehicle.h"
+#include "VehicleLinkManager.h"
 
 #include <QtCore/qapplicationstatic.h>
 
@@ -79,6 +80,10 @@ void GeoZoneMonitor::_vehicleAdded(Vehicle *vehicle)
     }
     _vehicles.append(vehicle);
     _trackers.insert(vehicle->id(), Tracker());
+    _telemetry.insert(vehicle->id(), Telemetry());
+    (void) connect(vehicle, &Vehicle::mavlinkMessageReceived, this, [this, vehicleId = vehicle->id()](const mavlink_message_t &message) {
+        handleVehicleMessage(vehicleId, message, _clock.elapsed());
+    });
     emit monitoringChanged();
 }
 
@@ -101,11 +106,16 @@ void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
     if (vehicleId != _activeVehicleId) {
         _activeVehicleId = vehicleId;
         _publishNearby();
+        emit positionUnavailableChanged();
     }
 }
 
 void GeoZoneMonitor::removeVehicle(int vehicleId)
 {
+    const bool wasUnavailable = _telemetry.take(vehicleId).unavailable;
+    if (wasUnavailable && (vehicleId == _activeVehicleId)) {
+        emit positionUnavailableChanged();
+    }
     const auto it = _trackers.find(vehicleId);
     if (it == _trackers.end()) {
         return;
@@ -133,11 +143,94 @@ void GeoZoneMonitor::_evaluateVehicles()
 {
     const qint64 msecs = _clock.elapsed();
     for (const QPointer<Vehicle> &vehicle : std::as_const(_vehicles)) {
-        if (vehicle && vehicle->coordinate().isValid()) {
-            const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate());
-            const Velocity velocity = _trackers[vehicle->id()].velocity.add(msecs, position);
-            evaluate(position, vehicle->id(), velocity);
+        if (!vehicle) {
+            continue;
         }
+        // The last known position of a vehicle which lost its link or position isn't where it is
+        const bool unavailable = !vehicle->coordinate().isValid() || vehicle->vehicleLinkManager()->communicationLost() || positionStale(vehicle->id(), msecs);
+        _setPositionUnavailable(vehicle->id(), unavailable);
+        if (unavailable) {
+            continue;
+        }
+        const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate());
+        evaluate(position, vehicle->id(), vehicleVelocity(vehicle->id(), msecs, position));
+    }
+}
+
+void GeoZoneMonitor::handleVehicleMessage(int vehicleId, const mavlink_message_t &message, qint64 msecs)
+{
+    Telemetry &telemetry = _telemetry[vehicleId];
+    const auto positionReceived = [&telemetry, msecs]() {
+        if (telemetry.positionMSecs >= 0) {
+            telemetry.positionIntervalMSecs = msecs - telemetry.positionMSecs;
+        }
+        telemetry.positionMSecs = msecs;
+    };
+    switch (message.msgid) {
+    case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
+        mavlink_global_position_int_t globalPosition{};
+        mavlink_msg_global_position_int_decode(&message, &globalPosition);
+        positionReceived();
+        // Ground velocity in centimeters per second, down positive
+        telemetry.reported = Velocity{ globalPosition.vx / 100.0, globalPosition.vy / 100.0, -globalPosition.vz / 100.0, true };
+        telemetry.velocityMSecs = msecs;
+        break;
+    }
+    case MAVLINK_MSG_ID_GPS_RAW_INT: {
+        mavlink_gps_raw_int_t gps{};
+        mavlink_msg_gps_raw_int_decode(&message, &gps);
+        if (gps.fix_type >= GPS_FIX_TYPE_2D_FIX) {
+            positionReceived();
+        }
+        break;
+    }
+    case MAVLINK_MSG_ID_HIGH_LATENCY2:
+        positionReceived();
+        break;
+    default:
+        break;
+    }
+}
+
+bool GeoZoneMonitor::positionStale(int vehicleId, qint64 msecs) const
+{
+    const auto it = _telemetry.constFind(vehicleId);
+    if ((it == _telemetry.cend()) || (it->positionMSecs < 0)) {
+        // Vehicles which never sent a position message, like those of tests, keep their coordinate
+        return false;
+    }
+    // Links like satellite ones send positions less often
+    const qint64 timeout = (std::max)(qint64{ positionTimeoutMSecs }, 3 * it->positionIntervalMSecs);
+    return (msecs - it->positionMSecs) > timeout;
+}
+
+GeoZoneMonitor::Velocity GeoZoneMonitor::vehicleVelocity(int vehicleId, qint64 msecs, const GeoZone::Position &position)
+{
+    Telemetry &telemetry = _telemetry[vehicleId];
+    const Velocity estimated = telemetry.estimator.add(msecs, position);
+    const bool fresh = (telemetry.velocityMSecs >= 0) && ((msecs - telemetry.velocityMSecs) <= reportedVelocityMaxAgeMSecs);
+    // Some vehicles and simulators report no velocity as zero while moving, which their positions show
+    const Velocity &reported = telemetry.reported;
+    const bool reportedZero = (reported.north == 0) && (reported.east == 0) && (reported.up == 0);
+    const bool estimatedMoving = estimated.valid && ((estimated.groundSpeed() >= GeoZoneAlertTracker::minPredictionSpeed) ||
+                                                     (std::abs(estimated.up) >= GeoZoneAlertTracker::minPredictionSpeed));
+    return (fresh && !(reportedZero && estimatedMoving)) ? reported : estimated;
+}
+
+void GeoZoneMonitor::_setPositionUnavailable(int vehicleId, bool unavailable)
+{
+    Telemetry &telemetry = _telemetry[vehicleId];
+    if (unavailable == telemetry.unavailable) {
+        return;
+    }
+    telemetry.unavailable = unavailable;
+    if (unavailable) {
+        // Positions from before the gap would distort the estimated velocity
+        telemetry.estimator = GeoZoneVelocityEstimator();
+        qCDebug(GeoZoneMonitorLog) << "Alerts paused, no current position of vehicle" << vehicleId;
+    }
+    if (vehicleId == _activeVehicleId) {
+        emit positionUnavailableChanged();
     }
 }
 
