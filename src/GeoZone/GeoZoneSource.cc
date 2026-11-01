@@ -13,8 +13,12 @@
 #include "GeoZoneShape.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QRandomGenerator>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
+
+#include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -227,6 +231,17 @@ void GeoZoneSource::setBusy(bool busy)
 
 void GeoZoneSource::setErrorString(const QString &errorString)
 {
+    // Failed refreshes are retried later and later, so an unavailable service isn't asked every few minutes
+    if (errorString.isEmpty()) {
+        _failureCount = 0;
+        _retryAt = QDateTime();
+    } else {
+        _failureCount++;
+        const qint64 maxDelay = (std::max)(qint64{ minRetrySecs }, (std::min)(qint64{ maxRetrySecs }, qint64{ refreshIntervalSecs() }));
+        const qint64 delay = (std::min)(maxDelay, qint64{ minRetrySecs } << (std::min)(_failureCount - 1, 16));
+        const double jitter = 0.8 + (0.4 * QRandomGenerator::global()->generateDouble());
+        _retryAt = QDateTime::currentDateTimeUtc().addSecs(std::llround(delay * jitter));
+    }
     if (errorString != _errorString) {
         _errorString = errorString;
         emit errorStringChanged();
@@ -264,5 +279,8 @@ int GeoZoneSource::refreshIntervalSecs() const
 
 bool GeoZoneSource::refreshDue(const QDateTime &now) const
 {
-    return isFeed() && (!_loadedAt.isValid() || (_loadedAt.secsTo(now) >= refreshIntervalSecs()));
+    if (_retryAt.isValid() && (now < _retryAt)) {
+        return false;
+    }
+    return isFeed() && (_retryAt.isValid() || !_loadedAt.isValid() || (_loadedAt.secsTo(now) >= refreshIntervalSecs()));
 }

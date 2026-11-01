@@ -434,6 +434,28 @@ void GeoZoneManagerTest::_testSourceValidity()
     QString errorString;
     QVERIFY2(manager.loadFile(QStringLiteral(":/unittest/ed318_test.json"), errorString), qPrintable(errorString));
     QVERIFY(manager.validityWarning().startsWith(QStringLiteral("Test GeoZones: Data is")));
+
+    // Failed refreshes of a feed are retried after 5 minutes, then twice as long after each failure, within 20 %
+    GeoZoneSource feed(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));
+    feed.setStoredDates(now, now);
+    QVERIFY(!feed.refreshDue(now.addSecs(60)));
+    feed.setErrorString(QStringLiteral("Server unavailable"));
+    QVERIFY(!feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 0.79)));
+    QVERIFY(feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 1.21)));
+    for (int failure = 2; failure <= 3; failure++) {
+        feed.setErrorString(QStringLiteral("Server unavailable"));
+    }
+    QVERIFY(!feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 4 * 0.79)));
+    QVERIFY(feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::minRetrySecs * 4 * 1.21)));
+    // Up to the maximum, or the refresh interval when shorter
+    for (int failure = 4; failure <= 20; failure++) {
+        feed.setErrorString(QStringLiteral("Server unavailable"));
+    }
+    QVERIFY(feed.refreshDue(QDateTime::currentDateTimeUtc().addSecs(GeoZoneSource::maxRetrySecs * 1.21)));
+    // A successful refresh follows the refresh interval again
+    feed.setErrorString(QString());
+    QVERIFY(!feed.retryAt().isValid());
+    QVERIFY(!feed.refreshDue(now.addSecs(60)));
 }
 
 void GeoZoneManagerTest::_testDownloadSizeLimit()
