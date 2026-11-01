@@ -434,6 +434,94 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QTRY_VERIFY_WITH_TIMEOUT(check.crossedZones().isEmpty(), 5000);
     QTRY_VERIFY(planner.suggestions().isEmpty());
     QVERIFY(!planner.applySuggestion(0));
+
+    // Zones on either side of a leg are passed between instead of around both
+    ZoneOwner owner;
+    const auto circleZone = [&owner](const QGeoCoordinate &zoneCenter, double radius) {
+        GeoZone::Volume volume;
+        volume.isCircle = true;
+        volume.center = zoneCenter;
+        volume.radius = radius;
+        GeoZone::Data data;
+        data.restriction = GeoZone::Prohibited;
+        data.volumes.append(volume);
+        return static_cast<const GeoZone*>(owner.add(data));
+    };
+    const QList<const GeoZone*> sides = { circleZone(center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(300, 0), 400),
+                                          circleZone(center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(300, 180), 400) };
+    const std::optional<QList<QGeoCoordinate>> weave = GeoZoneRoutePlanner::detourAround(west, east, sides);
+    QVERIFY(weave && !weave->isEmpty());
+    QList<QGeoCoordinate> weavePath = { west };
+    weavePath.append(*weave);
+    weavePath.append(east);
+    for (qsizetype i = 1; i < weavePath.count(); i++) {
+        QVERIFY2(weavePath[i].distanceTo(QGeoCoordinate(center.latitude(), weavePath[i].longitude())) < 400, qPrintable(QString::number(i)));
+        for (int step = 0; step <= 20; step++) {
+            const QGeoCoordinate point = weavePath[i - 1].atDistanceAndAzimuth(weavePath[i - 1].distanceTo(weavePath[i]) * step / 20, weavePath[i - 1].azimuthTo(weavePath[i]));
+            for (const GeoZone *side : sides) {
+                QVERIFY(side->distanceTo(point) > (GeoZoneRoutePlanner::detourMargin / 2));
+            }
+        }
+    }
+
+    // A leg through a zone above the sea can be lowered below its floor, where the terrain is known whether or not
+    // the terrain tiles are received
+    GeoZoneTerrain::setLookup([](const QGeoCoordinate &) { return 0.0; });
+    const QGeoCoordinate seaCenter(0.5, -25);
+    const auto seaZone = [&seaCenter](const QString &identifier, double floor) {
+        QJsonObject feature = _circleFeature(identifier, QStringLiteral("REQ_AUTHORISATION"), seaCenter, 200);
+        QJsonArray seaGeometry = feature[QStringLiteral("geometry")].toArray();
+        QJsonObject seaLayer = seaGeometry[0].toObject();
+        seaLayer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+        seaLayer[QStringLiteral("lowerLimit")] = floor;
+        seaLayer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
+        seaGeometry[0] = seaLayer;
+        feature[QStringLiteral("geometry")] = seaGeometry;
+        return feature;
+    };
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("sea.json"), QJsonArray{ seaZone(QStringLiteral("S"), 40) }), errorString), qPrintable(errorString));
+    PlanMasterController lowerController;
+    lowerController.setFlyView(false);
+    lowerController.start();
+    MissionController *const lowerMission = lowerController.missionController();
+    const QGeoCoordinate legStart = seaCenter.atDistanceAndAzimuth(800, 270);
+    lowerMission->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(legStart.latitude(), legStart.longitude(), 0));
+    QList<SimpleMissionItem*> legItems;
+    for (const QGeoCoordinate &coordinate : { legStart, seaCenter.atDistanceAndAzimuth(800, 90) }) {
+        legItems.append(qobject_cast<SimpleMissionItem*>(lowerMission->insertSimpleMissionItem(coordinate, lowerMission->visualItems()->count())));
+        legItems.last()->altitude()->setRawValue(50);
+    }
+    GeoZoneRoutePlanner lowerPlanner(&manager);
+    lowerPlanner.setMissionController(lowerMission);
+    const auto floorSuggestion = [&lowerPlanner]() {
+        lowerPlanner.update();
+        for (int i = 0; i < lowerPlanner.suggestions().count(); i++) {
+            const QVariantMap suggestion = lowerPlanner.suggestions()[i].toMap();
+            if (suggestion[QStringLiteral("canApply")].toBool() && (suggestion[QStringLiteral("applyText")].toString() == QStringLiteral("Apply"))) {
+                return i;
+            }
+        }
+        return -1;
+    };
+    const auto suggestionTexts = [&lowerPlanner]() {
+        QStringList texts;
+        for (const QVariant &suggestion : lowerPlanner.suggestions()) {
+            texts.append(suggestion.toMap()[QStringLiteral("text")].toString());
+        }
+        return texts.join(QStringLiteral(" | "));
+    };
+    QTRY_VERIFY2(floorSuggestion() >= 0, qPrintable(suggestionTexts()));
+    QVERIFY(suggestionTexts().contains(QStringLiteral("Apply lowers 2 waypoint(s) to 10 m below it.")));
+    QVERIFY(lowerPlanner.applySuggestion(floorSuggestion()));
+    QCOMPARE(legItems[0]->altitude()->rawValue().toDouble(), 30.0);
+    QCOMPARE(legItems[1]->altitude()->rawValue().toDouble(), 30.0);
+    QTRY_VERIFY2((lowerPlanner.update(), lowerPlanner.suggestions().isEmpty()), qPrintable(suggestionTexts()));
+
+    // Not when the lowered leg would come too close to the sea
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("sea_low.json"), QJsonArray{ seaZone(QStringLiteral("T"), 15) }), errorString), qPrintable(errorString));
+    QTRY_VERIFY((lowerPlanner.update(), suggestionTexts().contains(QStringLiteral("floor of T"))));
+    QCOMPARE(floorSuggestion(), -1);
+    GeoZoneTerrain::setLookup({});
 }
 
 void GeoZonePlanningTest::_testProfileBands()

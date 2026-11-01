@@ -15,8 +15,12 @@
 #include "GeoZoneMissionPath.h"
 #include "GeoZoneTerrain.h"
 #include "MissionController.h"
+#include "QGroundControlQmlGlobal.h"
+#include "QmlObjectListModel.h"
+#include "SimpleMissionItem.h"
 
 #include <QtCore/QtMath>
+#include <QtGui/QPolygonF>
 
 #include <algorithm>
 #include <cmath>
@@ -179,7 +183,8 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
     for (const Suggestion &suggestion : _suggestions) {
         suggestions.append(QVariantMap{
             { QStringLiteral("text"), suggestion.text },
-            { QStringLiteral("canApply"), suggestion.insertIndex >= 0 },
+            { QStringLiteral("canApply"), (suggestion.insertIndex >= 0) || !suggestion.altitudes.isEmpty() },
+            { QStringLiteral("applyText"), suggestion.altitudes.isEmpty() ? tr("Insert") : tr("Apply") },
         });
     }
     return suggestions;
@@ -188,66 +193,103 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
 std::optional<QList<QGeoCoordinate>> GeoZoneRoutePlanner::detourAround(const QGeoCoordinate &from, const QGeoCoordinate &to, const QList<const GeoZone*> &zones,
                                                                        double margin)
 {
+    // One convex obstacle per zone polygon and circle grown by the margin, so that the path can pass between zones
     const GeoZoneGeometry::LocalProjection projection(from);
-    QList<QPointF> zonePoints;
+    struct Obstacle {
+        QList<QPointF> boundary;    ///< Grown by the margin
+        QList<QPointF> clearance;   ///< Grown by half the margin, which straightened paths keep
+        QRectF bounds;              ///< Of the boundary
+    };
+    QList<Obstacle> obstacles;
+    const auto addShape = [&obstacles, margin](const QList<QPointF> &points) {
+        const QList<QPointF> hull = _convexHull(points);
+        if (hull.count() < 3) {
+            return;
+        }
+        Obstacle obstacle{ _grow(hull, margin), _grow(hull, margin / 2), QRectF() };
+        obstacle.bounds = QPolygonF(obstacle.boundary).boundingRect();
+        obstacles.append(obstacle);
+    };
     for (const GeoZone *zone : zones) {
-        for (const QList<QGeoCoordinate> &polygon : zone->exclusionPolygons()) {
-            zonePoints.append(projection.toLocal(polygon));
+        // Simplified outwards, a quarter of the margin is enough detail for the path around
+        for (const QList<QGeoCoordinate> &polygon : zone->exclusionPolygons(margin / 4)) {
+            addShape(projection.toLocal(polygon));
         }
         for (const QGeoCircle &circle : zone->exclusionCircles()) {
             constexpr int circlePoints = 24;
             const QPointF center = projection.toLocal(circle.center());
             const double radius = circle.radius() / std::cos(M_PI / circlePoints);
+            QList<QPointF> points;
             for (int i = 0; i < circlePoints; i++) {
                 const double angle = (2 * M_PI * i) / circlePoints;
-                zonePoints.append(center + QPointF(radius * std::cos(angle), radius * std::sin(angle)));
+                points.append(center + QPointF(radius * std::cos(angle), radius * std::sin(angle)));
             }
+            addShape(points);
         }
     }
-    const QList<QPointF> zoneHull = _convexHull(zonePoints);
-    if (zoneHull.count() < 3) {
+    if (obstacles.isEmpty()) {
         return std::nullopt;
     }
 
-    // The path follows the hull grown by the margin, then is straightened where it keeps half the margin
-    const QList<QPointF> obstacle = _grow(zoneHull, margin);
-    const QList<QPointF> clearance = _grow(zoneHull, margin / 2);
     const QPointF start = projection.toLocal(from);
     const QPointF end = projection.toLocal(to);
-    if (GeoZoneGeometry::ringContains(obstacle, start) || GeoZoneGeometry::ringContains(obstacle, end)) {
+    const auto inside = [&obstacles](const QPointF &point, qsizetype except = -1) {
+        for (qsizetype i = 0; i < obstacles.count(); i++) {
+            if ((i != except) && obstacles[i].bounds.contains(point) && GeoZoneGeometry::ringContains(obstacles[i].boundary, point) &&
+                (GeoZoneGeometry::distanceToRing(point, obstacles[i].boundary) > 0.01)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto crosses = [&obstacles](const QPointF &a, const QPointF &b, bool clearance) {
+        const QRectF segmentBounds = QRectF(a, b).normalized();
+        return std::any_of(obstacles.cbegin(), obstacles.cend(), [&](const Obstacle &obstacle) {
+            return obstacle.bounds.intersects(segmentBounds.adjusted(-0.01, -0.01, 0.01, 0.01)) &&
+                   _crossesInterior(a, b, clearance ? obstacle.clearance : obstacle.boundary);
+        });
+    };
+    if (inside(start) || inside(end)) {
         return std::nullopt;
     }
-    if (!_crossesInterior(start, end, obstacle)) {
+    if (!crosses(start, end, false)) {
         return QList<QGeoCoordinate>();
     }
 
-    // Shortest path from start (0) to end (1) through the hull vertices
+    // Shortest path from start (0) to end (1) through the obstacle vertices outside the other obstacles, by A*
     QList<QPointF> nodes = { start, end };
-    nodes.append(obstacle);
+    for (qsizetype i = 0; i < obstacles.count(); i++) {
+        for (const QPointF &vertex : std::as_const(obstacles[i].boundary)) {
+            if (!inside(vertex, i)) {
+                nodes.append(vertex);
+            }
+        }
+    }
     QList<double> distances(nodes.count(), std::numeric_limits<double>::infinity());
     QList<qsizetype> previous(nodes.count(), -1);
     QList<bool> done(nodes.count(), false);
     distances[0] = 0;
     for (qsizetype round = 0; round < nodes.count(); round++) {
         qsizetype current = -1;
+        double currentEstimate = std::numeric_limits<double>::infinity();
         for (qsizetype i = 0; i < nodes.count(); i++) {
-            if (!done[i] && ((current < 0) || (distances[i] < distances[current]))) {
+            const double estimate = distances[i] + _length(nodes[i], end);
+            if (!done[i] && (estimate < currentEstimate)) {
                 current = i;
+                currentEstimate = estimate;
             }
         }
-        if ((current < 0) || std::isinf(distances[current]) || (current == 1)) {
+        if ((current < 0) || (current == 1)) {
             break;
         }
         done[current] = true;
         for (qsizetype next = 0; next < nodes.count(); next++) {
-            if (done[next] || _crossesInterior(nodes[current], nodes[next], obstacle)) {
+            const double distance = distances[current] + _length(nodes[current], nodes[next]);
+            if (done[next] || (distance >= distances[next]) || crosses(nodes[current], nodes[next], false)) {
                 continue;
             }
-            const double distance = distances[current] + _length(nodes[current], nodes[next]);
-            if (distance < distances[next]) {
-                distances[next] = distance;
-                previous[next] = current;
-            }
+            distances[next] = distance;
+            previous[next] = current;
         }
     }
     if (previous[1] < 0) {
@@ -264,7 +306,7 @@ std::optional<QList<QGeoCoordinate>> GeoZoneRoutePlanner::detourAround(const QGe
     for (qsizetype i = 0; i < (path.count() - 1);) {
         qsizetype farthest = i + 1;
         for (qsizetype j = path.count() - 1; j > (i + 1); j--) {
-            if (!_crossesInterior(path[i], path[j], clearance)) {
+            if (!crosses(path[i], path[j], true)) {
                 farthest = j;
                 break;
             }
@@ -278,6 +320,79 @@ std::optional<QList<QGeoCoordinate>> GeoZoneRoutePlanner::detourAround(const QGe
         waypoints.append(projection.toGeo(straightened[i]));
     }
     return waypoints;
+}
+
+QList<std::pair<int, double>> GeoZoneRoutePlanner::_altitudesBelowFloor(const GeoZoneMissionPath::Leg &leg, const GeoZone *zone) const
+{
+    const GeoZoneMissionPath::Segment &segment = leg.segment;
+    if (!_missionController || qIsNaN(segment.fromAltitudeAMSL) || qIsNaN(segment.toAltitudeAMSL)) {
+        return {};
+    }
+
+    // Lowest floor where the leg is inside the zone, and the terrain along the leg
+    const double length = segment.from.distanceTo(segment.to);
+    const int sampleCount = std::clamp(static_cast<int>(std::ceil(length / floorSampleSpacing)), 1, maxFloorSamples);
+    const QList<GeoZone::Volume> &volumes = zone->data().volumes;
+    QList<double> terrain;
+    double floor = std::numeric_limits<double>::infinity();
+    for (int i = 0; i <= sampleCount; i++) {
+        GeoZone::Position position = segment.positionAt((length * i) / sampleCount);
+        if (qIsNaN(position.terrainAMSL)) {
+            position.terrainAMSL = GeoZoneTerrain::elevationAt(position.coordinate);
+        }
+        terrain.append(position.terrainAMSL);
+        for (qsizetype v = 0; v < volumes.count(); v++) {
+            if (zone->volumeContains(v, position.coordinate)) {
+                const double volumeFloor = GeoZone::limitAMSL(volumes[v], false, position);
+                if (qIsNaN(volumeFloor)) {
+                    return {};
+                }
+                floor = (std::min)(floor, volumeFloor);
+            }
+        }
+    }
+    if (std::isinf(floor)) {
+        return {};
+    }
+
+    // Waypoints above the target are lowered to it, in their altitude mode
+    const double target = floor - floorMargin;
+    const double homeAltitude = _missionController->plannedHomePosition().altitude();
+    QList<std::pair<int, double>> altitudes;
+    double fromAltitude = segment.fromAltitudeAMSL;
+    double toAltitude = segment.toAltitudeAMSL;
+    for (const auto &[itemIndex, altitude] : { std::make_pair(leg.fromItemIndex, &fromAltitude), std::make_pair(leg.toItemIndex, &toAltitude) }) {
+        if (*altitude <= target) {
+            continue;
+        }
+        const SimpleMissionItem *const item = _missionController->visualItems()->value<const SimpleMissionItem*>(itemIndex);
+        if (!item) {
+            return {};
+        }
+        switch (item->altitudeMode()) {
+        case QGroundControlQmlGlobal::AltitudeModeRelative:
+            if (qIsNaN(homeAltitude)) {
+                return {};
+            }
+            altitudes.append({ itemIndex, target - homeAltitude });
+            break;
+        case QGroundControlQmlGlobal::AltitudeModeAbsolute:
+            altitudes.append({ itemIndex, target });
+            break;
+        default:
+            return {};
+        }
+        *altitude = target;
+    }
+
+    // The lowered leg must stay clear of the terrain
+    for (int i = 0; i <= sampleCount; i++) {
+        const double altitude = fromAltitude + (((toAltitude - fromAltitude) * i) / sampleCount);
+        if (qIsNaN(terrain[i]) || ((altitude - terrain[i]) < minGroundClearance)) {
+            return {};
+        }
+    }
+    return altitudes;
 }
 
 QList<GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path) const
@@ -310,7 +425,8 @@ void GeoZoneRoutePlanner::update()
         }
         QList<GeoZone*> crossed;
         for (const GeoZoneMissionPath::Path &path : GeoZoneMissionPath::pathsFromSegments({ segment })) {
-            for (GeoZone *zone : _zonesOnPath(path.positions)) {
+            // Like detours, with the terrain of the loaded tiles where the leg has no terrain samples
+            for (GeoZone *zone : _zonesOnPath(GeoZoneTerrain::withTerrain(path.positions))) {
                 if (!crossed.contains(zone)) {
                     crossed.append(zone);
                 }
@@ -329,7 +445,14 @@ void GeoZoneRoutePlanner::update()
                 return !std::isnan(volume.lowerLimit) && (volume.lowerLimit > 0) && (volume.lowerReference != GeoZone::VerticalReference::Unknown);
             });
             if (raised) {
-                suggestions.append(Suggestion{ tr("%1: fly below the floor of %2 (%3).").arg(leg, zone->displayName(), zone->verticalLimitsText()) });
+                Suggestion suggestion{ tr("%1: fly below the floor of %2 (%3).").arg(leg, zone->displayName(), zone->verticalLimitsText()) };
+                suggestion.altitudes = _altitudesBelowFloor(missionLeg, zone);
+                if (!suggestion.altitudes.isEmpty()) {
+                    const QString marginText = QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsVerticalDistanceUnits(floorMargin).toDouble()))
+                                                                     .arg(FactMetaData::appSettingsVerticalDistanceUnitsString());
+                    suggestion.text += QStringLiteral(" ") + tr("Apply lowers %n waypoint(s) to %1 below it.", nullptr, static_cast<int>(suggestion.altitudes.count())).arg(marginText);
+                }
+                suggestions.append(suggestion);
             }
         }
 
@@ -414,10 +537,22 @@ void GeoZoneRoutePlanner::update()
 
 bool GeoZoneRoutePlanner::applySuggestion(int index)
 {
-    if (!_missionController || (index < 0) || (index >= _suggestions.count()) || (_suggestions[index].insertIndex < 0)) {
+    if (!_missionController || (index < 0) || (index >= _suggestions.count())) {
         return false;
     }
     const Suggestion suggestion = _suggestions[index];
+    if (!suggestion.altitudes.isEmpty()) {
+        for (const auto &[itemIndex, altitude] : suggestion.altitudes) {
+            if (SimpleMissionItem *const item = _missionController->visualItems()->value<SimpleMissionItem*>(itemIndex)) {
+                item->altitude()->setRawValue(altitude);
+            }
+        }
+        update();
+        return true;
+    }
+    if (suggestion.insertIndex < 0) {
+        return false;
+    }
     // The new waypoints take the altitude of the previous item
     for (qsizetype i = 0; i < suggestion.waypoints.count(); i++) {
         (void) _missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i));

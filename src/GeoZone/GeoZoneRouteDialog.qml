@@ -67,7 +67,7 @@ QGCPopupDialog {
                 }
 
                 QGCButton {
-                    text:       qsTr("Insert")
+                    text:       suggestionRow.modelData.applyText
                     visible:    suggestionRow.modelData.canApply
                     onClicked:  planner.applySuggestion(suggestionRow.index)
                 }
