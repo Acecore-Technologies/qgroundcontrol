@@ -11,6 +11,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneBriefing.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneEnvironment.h"
@@ -29,6 +30,8 @@
 #include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneSourceRepository.h"
+#include "GeoZoneSourceVersion.h"
 #include "GeoZoneStore.h"
 #include "GeoZoneTerrain.h"
 #include "GeoZoneZip.h"
@@ -284,6 +287,59 @@ inline double _distanceToRing(const QPointF &point, const QList<QPointF> &ring)
     return minDistance;
 }
 
+/// @return The ED-269 feature with limits in meters of its first layer
+inline QJsonObject _withLimits(QJsonObject feature, double lower, const QString &lowerReference, double upper, const QString &upperReference)
+{
+    QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = lower;
+    layer[QStringLiteral("lowerVerticalReference")] = lowerReference;
+    layer[QStringLiteral("upperLimit")] = upper;
+    layer[QStringLiteral("upperVerticalReference")] = upperReference;
+    geometry[0] = layer;
+    feature[QStringLiteral("geometry")] = geometry;
+    return feature;
+}
+
+/// @return Path through the coordinates at the altitudes AMSL, unknown where not given
+inline GeoZonePathEvaluator::Path _evaluatorPath(const QList<QGeoCoordinate> &coordinates, const QList<double> &altitudes = {}, const QString &label = QString())
+{
+    GeoZonePathEvaluator::Path path;
+    path.label = label;
+    for (qsizetype i = 0; i < coordinates.count(); i++) {
+        path.vertices.append(GeoZonePathEvaluator::Vertex{ coordinates[i], altitudes.value(i, qQNaN()), qQNaN(), QDateTime() });
+    }
+    return path;
+}
+
+/// @return Smallest horizontal distance from the path, sampled every few meters, to the zones
+inline double _pathClearance(const QList<QGeoCoordinate> &path, const QList<const GeoZone*> &zones, double step = 5)
+{
+    double clearance = std::numeric_limits<double>::infinity();
+    for (qsizetype i = 1; i < path.count(); i++) {
+        const double length = path[i - 1].distanceTo(path[i]);
+        const double azimuth = path[i - 1].azimuthTo(path[i]);
+        for (double along = 0; along <= length; along += step) {
+            const QGeoCoordinate point = path[i - 1].atDistanceAndAzimuth(along, azimuth);
+            for (const GeoZone *zone : zones) {
+                clearance = (std::min)(clearance, zone->distanceTo(point));
+            }
+        }
+    }
+    return clearance;
+}
+
+/// @return true if the value is within the tolerance of the expected one, which is logged otherwise
+inline bool _near(double value, double expected, double tolerance = 1)
+{
+    if (qAbs(value - expected) <= tolerance) {
+        return true;
+    }
+    qWarning() << "Expected" << expected << "got" << value;
+    return false;
+}
+
 /// Shows heights in feet or in meters until the returned guard restores the previous units: those of the
 /// QGroundControl settings, or of GeoZoneEnvironment without the application
 inline QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
@@ -303,6 +359,113 @@ inline QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
 #endif
 }
 
+
+/// Loads files into the sources of a repository and indexes the enabled ones in a catalog, like GeoZoneManager, with
+/// the GeoZoneCore library only
+class ZoneCatalog
+{
+public:
+    /// @param storageDir Directory in which the repository keeps the copies of the sources
+    explicit ZoneCatalog(const QString &storageDir)
+        : _repository(storageDir)
+    {
+    }
+
+    /// Loads the file as a source, or reloads it, see GeoZoneSourceRepository::loadFile
+    bool loadFile(const QString &fileName, QString &errorString)
+    {
+        const bool loaded = _repository.loadFile(fileName, errorString);
+        QList<const GeoZoneSource*> sources = _repository.sourceList();
+        (void) sources.removeIf([](const GeoZoneSource *source) { return !source->enabled(); });
+        _catalog.rebuild(sources);
+        return loaded;
+    }
+
+    const GeoZoneCatalog &catalog() const { return _catalog; }
+    const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }
+    const GeoZoneSourceRepository *repository() const { return &_repository; }
+
+private:
+    GeoZoneSourceRepository _repository;
+    GeoZoneCatalog _catalog;
+};
+
+/// The mission of the briefing tests and its zones: ten minutes 4 km east of 47 N 8 E at 100 m from 2027-01-01 10:30
+/// UTC, entering a control zone (CTR-1) with its authority, message, schedule, limits, a name with markup and an
+/// authorisation, then a prison (P-1). A return from halfway enters RET, a restricted zone is near the path (NEAR) and
+/// one far from it (FAR), a zone without restriction is near it too (INFO).
+class BriefingMission
+{
+public:
+    explicit BriefingMission(const QTemporaryDir &dir)
+        : zones(dir.filePath(QStringLiteral("storage")))
+        , _dir(dir)
+    {
+    }
+
+    /// Loads the zones and authorises the control zone
+    bool load(QString &errorString)
+    {
+        QJsonObject controlZone = _circleFeature(QStringLiteral("CTR-1"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1000, 90), 200);
+        controlZone[QStringLiteral("name")] = QStringLiteral("CTR <script>alert(1)</script>");
+        controlZone[QStringLiteral("country")] = QStringLiteral("CHE");
+        controlZone[QStringLiteral("message")] = QStringLiteral("Call the tower");
+        controlZone[QStringLiteral("zoneAuthority")] = QJsonArray{ QJsonObject{ { "name", "Skyguide" }, { "email", "ops@example.org" }, { "phone", "+41 43 931 61 11" } } };
+        controlZone[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:45:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
+        QJsonObject geometry = controlZone[QStringLiteral("geometry")].toArray()[0].toObject();
+        geometry[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+        geometry[QStringLiteral("lowerLimit")] = 0;
+        geometry[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
+        geometry[QStringLiteral("upperLimit")] = 500;
+        geometry[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
+        controlZone[QStringLiteral("geometry")] = QJsonArray{ geometry };
+        QJsonObject prison = _circleFeature(QStringLiteral("P-1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2500, 90), 200);
+        prison[QStringLiteral("name")] = QStringLiteral("Prison");
+        if (!zones.loadFile(_writeFeatures(_dir, QStringLiteral("zones.json"), QJsonArray{
+                controlZone, prison,
+                _circleFeature(QStringLiteral("NEAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 0), 150),
+                _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 150),
+                _circleFeature(QStringLiteral("RET"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 90).atDistanceAndAzimuth(1000, 180), 200),
+                _circleFeature(QStringLiteral("INFO"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 180), 100),
+            }), errorString)) {
+            return false;
+        }
+        const GeoZone *const ctr = zones.zoneList().constFirst();
+        authorisations.set(GeoZoneAuthorisation{ GeoZoneAuthorisations::zoneKey(ctr), ctr->name(), QStringLiteral("P-77"), QDateTime(), QDateTime() });
+        return true;
+    }
+
+    GeoZoneBriefing build() const
+    {
+        GeoZonePathEvaluator::Path path = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center, 100 }, GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90), 100 } });
+        path.setTimes(start, start.addSecs(600));
+        const QGeoCoordinate halfway = center.atDistanceAndAzimuth(2000, 90);
+        GeoZonePathEvaluator::Path contingency = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ halfway, 100 },
+                                                                                             GeoZone::Position{ halfway.atDistanceAndAzimuth(1000, 180), 100 } },
+                                                                                           QStringLiteral("a return to rally point 1"));
+        contingency.setTimes(start.addSecs(300), QDateTime());
+        GeoZoneBriefing::Input input;
+        input.mission.name = QStringLiteral("Survey");
+        input.mission.plannedStart = start;
+        input.mission.plannedEnd = start.addSecs(600);
+        input.paths = { path };
+        input.contingencyPaths = { contingency };
+        input.items = { { 1, 0 }, { 2, 4000 } };
+        input.start = start;
+        input.end = start.addSecs(600);
+        input.authorisations = &authorisations;
+        input.sources = GeoZoneSourceVersion::covering(zones.repository()->sourceList(), GeoZoneBox());
+        return GeoZoneBriefing::build(zones.catalog(), input);
+    }
+
+    const QGeoCoordinate center{ 47, 8 };
+    const QDateTime start = _utc(QDate(2027, 1, 1), QTime(10, 30));
+    ZoneCatalog zones;
+    GeoZoneAuthorisations authorisations{ QString() };
+
+private:
+    const QTemporaryDir &_dir;
+};
 
 #ifndef GEOZONE_CORE_TEST
 /// Answers requests by path: /ok with the ED-318 test file, /missing 404, /broken 500, /empty an empty 200 and

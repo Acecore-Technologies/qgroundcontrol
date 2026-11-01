@@ -72,5 +72,5 @@ foreach(target IN ITEMS Json Xml Zip)
     set_target_properties(${name} PROPERTIES MACOSX_BUNDLE FALSE WIN32_EXECUTABLE FALSE)
     # Runs the seeds once, without fuzzing
     add_test(NAME ${name} COMMAND ${name} -runs=0 ${GEOZONE_FUZZ_CORPUS}/${corpus})
-    set_tests_properties(${name} PROPERTIES LABELS fuzz)
+    set_tests_properties(${name} PROPERTIES LABELS "geozone;fuzz")
 endforeach()

@@ -1,15 +1,36 @@
 # Geozone tests
 
-The application tests run with `QGroundControl --unittest:<Class>` (GeoZoneParserTest, GeoZoneGeometryTest,
-GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest, GeoZoneReturnTest). They are
-registered in `GeoZoneUnitTests.cc` and `CMakeLists.txt` here, not in QGroundControl's `UnitTestList.cc`. The parser,
-geometry and return tests also run headless in `GeoZoneCoreTest`, which only links the GeoZoneCore library
-(`ctest -R GeoZoneCore`).
+The test classes are listed once, in `CMakeLists.txt`:
+
+- `GEOZONE_SHARED_TESTS` (GeoZoneParserTest, GeoZoneGeometryTest, GeoZoneReturnTest) run in QGroundControl and
+  headless in `GeoZoneCoreTest`, which only links the GeoZoneCore library and leaves out their parts needing the
+  application (`GEOZONE_CORE_TEST`, see `GeoZoneTestBase.h`).
+- `GEOZONE_CORE_TESTS` (GeoZoneEvaluatorTest, GeoZoneRouteTest, GeoZoneBriefingTest) test the path evaluator, the
+  route search and the briefing of the core, and only run headless.
+- `GEOZONE_APP_TESTS` (GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest) need the
+  application, like its mission controller, MockLink or the map models, and only run in QGroundControl.
+
+A class `<Class>` is `<Class>.cc` and `<Class>.h`. The lists generate the headers which register the classes with
+QGroundControl's UnitTest (`GeoZoneUnitTests.cc`, not QGroundControl's `UnitTestList.cc`) and run them in
+`GeoZoneCoreTest` (`GeoZoneCoreTestMain.cc`), and a CTest test for each: the application tests are named after their
+class and labeled `geozone` and `app`, the headless ones `GeoZoneCore.<Class>` and labeled `geozone` and `core`. A new
+class only needs its files and its name in a list. Test helpers shared by the suites, like the fixtures of zones and
+the catalog `ZoneCatalog` which loads files like GeoZoneManager without the application, are in
+`GeoZoneTestHelpers.h`.
+
+QGroundControl defines its tests in the `test` directory of the build, where CTest runs:
+
+```sh
+ctest --test-dir build/test -L geozone -LE "benchmark|fuzz"   # all geozone tests but the benchmark and the fuzzers
+ctest --test-dir build/test -L core                           # the headless tests, without the application
+build/Debug/QGroundControl --unittest:GeoZonePlanningTest     # an application test
+build/Debug/GeoZoneCoreTest GeoZoneRouteTest _testMaze        # a headless test class, or a function of it
+```
 
 Tests which depend on the time or the terrain set them with `GeoZoneTestHelpers::ScopedEnvironment`, whose clock
 stands still until the test advances it and whose terrain is unknown until set.
 
-`tst_geozone_qml` runs the Qt Quick tests of `qml/` with the offscreen platform (`ctest -R tst_geozone_qml`). It
+`tst_geozone_qml` runs the Qt Quick tests of `qml/` with the offscreen platform (labeled `geozone` and `qml`). It
 registers the GeoZone enums and loads the components from their sources, without QGroundControl. Only GeoZoneStyle is
 tested: the other components use the singletons of the application, like ScreenTools, QGCPalette, the controls of
 QGroundControl.Controls and GeoZoneManager or GeoZoneMonitor, which need the application or a large set of mocks.
@@ -33,6 +54,7 @@ fixtures to this list with their source, terms and tests.
 | `uk_aixm_test.xml` | 3 UK airspaces in an AIXM 5.1 basic message: the Blackbushe FRZ (`EGR1U021A`, arcs and geodesic strings), Springfields (`EGR312`, a circle) and the Raasay danger area (`EGD710`, line strings and geodesic strings) | Apparently an excerpt of the NATS UAS AIXM 5.1 dataset (snapshot of 2026-10-29); not recorded. Added in 94ecc5dff. | unknown — verify before redistributing | GeoZoneParserTest (`_testParseFixtures`, `_testParseNationalFormats`, `_testRejectedAixmGeometry`, `_testXmlAndPackages`, `_testParseCancel`), GeoZoneManagerTest (`_testFeedDatasetLink`) |
 
 GeoZoneParserTest and GeoZoneGeometryTest also run in `GeoZoneCoreTest`, without the parts which need the application.
+The other tests make their zones with the helpers of `GeoZoneTestHelpers.h`.
 `GeoZoneBenchmark` doesn't use these files, it generates its zones.
 
 The seeds of `fuzz/seeds/` are synthetic: `json/wfs_empty.json` (an empty WFS response), `json/faa_tfr_composite.json`
@@ -64,7 +86,7 @@ a GCC installation without its C++ library, pass `--gcc-install-dir=/usr/lib/gcc
 `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS`.
 
 In the QGroundControl build, `-DGEOZONE_FUZZ=ON` adds the targets too. With compilers other than clang they are built
-with a driver which runs each file of a corpus once instead of fuzzing. `ctest -L fuzz` runs the seed corpora
+with a driver which runs each file of a corpus once instead of fuzzing. `ctest --test-dir build/test -L fuzz` runs the seed corpora
 through the targets in both cases.
 
 ## Benchmarks
@@ -78,8 +100,7 @@ mission of 500 waypoints over 1000 km, searching the routes around the zones of 
 `GeoZoneTestHelpers.h`), the worst case of the search. It takes a few seconds and is a test of its own, labeled `benchmark`, which the sanitizer workflow doesn't run:
 
 ```sh
-ctest -L benchmark -V          # or ./GeoZoneBenchmark, with QtTest options like -iterations 20
-ctest -LE "benchmark|fuzz"     # the other tests
+ctest --test-dir build/test -L benchmark -V        # or ./GeoZoneBenchmark, with QtTest options like -iterations 20
 ```
 
 Debug builds of the core are several times slower than release builds, compare measurements of the same build type.

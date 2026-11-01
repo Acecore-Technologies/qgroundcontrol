@@ -14,9 +14,7 @@
 #include "GeoZoneMissionJumps.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanAudit.h"
-#include "GeoZoneRouteSearch.h"
 #include "GeoZoneSourceRepository.h"
-#include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoFenceManager.h"
 #include "MockLink.h"
@@ -26,13 +24,11 @@
 #include "RallyPointController.h"
 #include "Vehicle.h"
 
-#include <QtCore/QElapsedTimer>
-
 #include <numeric>
 
 using namespace GeoZoneTestHelpers;
 
-void GeoZonePlanningTest::_testPathHits()
+void GeoZonePlanningTest::_testGuidedPathWarning()
 {
     const QGeoCoordinate center(47, 8);
     const QGeoCoordinate square = center.atDistanceAndAzimuth(3000, 90);
@@ -49,367 +45,20 @@ void GeoZonePlanningTest::_testPathHits()
         _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(500, 90), 100),
     }), errorString), qPrintable(errorString));
 
-    // Each zone once, in the order the path enters them, with the distance to the entry
+    // Restricted zones and unknown restrictions are warned about, others are information
     const QList<GeoZone::Position> east = { GeoZone::Position{ center }, GeoZone::Position{ center.atDistanceAndAzimuth(2000, 90) },
                                             GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90) }, GeoZone::Position{ center } };
-    const QList<GeoZonePathEvaluator::ZoneResult> hits = GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::alerts())
-                                                             .evaluate({ GeoZonePathEvaluator::Path::fromPositions(east) }).zones;
-    QCOMPARE(hits.count(), 3);
-    QCOMPARE(hits[0].zone->identifier(), QStringLiteral("A"));
-    QCOMPARE(hits[1].zone->identifier(), QStringLiteral("X"));
-    QCOMPARE(hits[2].zone->identifier(), QStringLiteral("B"));
-    QVERIFY(qAbs(hits[0].crossings.constFirst().entry.distance - 800) < 1);
-    QVERIFY(qAbs(hits[1].crossings.constFirst().entry.distance - 1900) < 1);
-    QCOMPARE(hits[1].crossings.constFirst().entry.segment, 0);
-    QVERIFY(qAbs(hits[2].crossings.constFirst().entry.distance - 2800) < 1);
-    QCOMPARE(hits[2].crossings.constFirst().entry.segment, 1);
-    QVERIFY(qAbs(center.distanceTo(hits[2].crossings.constFirst().entry.position.coordinate) - 2800) < 1);
-
-    // The first path entering a zone reports it
-    const QList<GeoZonePathEvaluator::ZoneResult> pathHits = GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited })).evaluate({
-        GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center.atDistanceAndAzimuth(1000, 0) },
-                                                    GeoZone::Position{ center.atDistanceAndAzimuth(1000, 0).atDistanceAndAzimuth(4000, 90) } }),
-        GeoZonePathEvaluator::Path::fromPositions(east) }).zones;
-    QCOMPARE(pathHits.count(), 1);
-    QCOMPARE(pathHits[0].crossings.constFirst().entry.path, 1);
-
-    // Restricted zones and unknown restrictions are warned about, others are information
     GeoZoneMonitor monitor(&manager);
     const QString warning = monitor.guidedCheck()->pathWarning(east);
     QVERIFY(warning.contains(QStringLiteral("A (Prohibited)")));
     QVERIFY(warning.contains(QStringLiteral("X (Unknown)")));
     QVERIFY(!warning.contains(QStringLiteral("N (")));
-    QVERIFY(GeoZonePolicy::isRestricted(GeoZone::Unknown));
-    QVERIFY(!GeoZonePolicy::isRestricted(GeoZone::USpace));
 }
 
-namespace {
-
-QJsonObject _withLimits(QJsonObject feature, double lower, const QString &lowerReference, double upper, const QString &upperReference)
-{
-    QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
-    QJsonObject layer = geometry[0].toObject();
-    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
-    layer[QStringLiteral("lowerLimit")] = lower;
-    layer[QStringLiteral("lowerVerticalReference")] = lowerReference;
-    layer[QStringLiteral("upperLimit")] = upper;
-    layer[QStringLiteral("upperVerticalReference")] = upperReference;
-    geometry[0] = layer;
-    feature[QStringLiteral("geometry")] = geometry;
-    return feature;
-}
-
-GeoZonePathEvaluator::Path _evaluatorPath(const QList<QGeoCoordinate> &coordinates, const QList<double> &altitudes = {}, const QString &label = QString())
-{
-    GeoZonePathEvaluator::Path path;
-    path.label = label;
-    for (qsizetype i = 0; i < coordinates.count(); i++) {
-        path.vertices.append(GeoZonePathEvaluator::Vertex{ coordinates[i], altitudes.value(i, qQNaN()), qQNaN(), QDateTime() });
-    }
-    return path;
-}
-
-/// @return Smallest horizontal distance from the path, sampled every few meters, to the zones
-double _pathClearance(const QList<QGeoCoordinate> &path, const QList<const GeoZone*> &zones, double step = 5)
-{
-    double clearance = std::numeric_limits<double>::infinity();
-    for (qsizetype i = 1; i < path.count(); i++) {
-        const double length = path[i - 1].distanceTo(path[i]);
-        const double azimuth = path[i - 1].azimuthTo(path[i]);
-        for (double along = 0; along <= length; along += step) {
-            const QGeoCoordinate point = path[i - 1].atDistanceAndAzimuth(along, azimuth);
-            for (const GeoZone *zone : zones) {
-                clearance = (std::min)(clearance, zone->distanceTo(point));
-            }
-        }
-    }
-    return clearance;
-}
-
-bool _near(double value, double expected, double tolerance = 1)
-{
-    if (qAbs(value - expected) <= tolerance) {
-        return true;
-    }
-    qWarning() << "Expected" << expected << "got" << value;
-    return false;
-}
-
-} // namespace
-
-void GeoZonePlanningTest::_testEvaluatorCrossings()
-{
-    // A square 400 m wide 1000 m east of the start and a circle of 100 m radius 2000 m east of it
-    const QGeoCoordinate start(47, 8);
-    const QGeoCoordinate squareCenter = start.atDistanceAndAzimuth(1000, 90);
-    const QGeoCoordinate circleCenter = start.atDistanceAndAzimuth(2000, 90);
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        _polygonFeature(QStringLiteral("SQ"), QStringLiteral("PROHIBITED"), { squareCenter.atDistanceAndAzimuth(282.84, 315), squareCenter.atDistanceAndAzimuth(282.84, 45),
-                                                                              squareCenter.atDistanceAndAzimuth(282.84, 135), squareCenter.atDistanceAndAzimuth(282.84, 225) }),
-        _circleFeature(QStringLiteral("CI"), QStringLiteral("CONDITIONAL"), circleCenter, 100),
-        _circleFeature(QStringLiteral("N"), QStringLiteral("NO_RESTRICTION"), circleCenter, 500),
-    }), errorString), qPrintable(errorString));
-    const GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited, GeoZone::Conditional }));
-
-    // East through both, with a vertex inside the square, a labelled path across the circle, and one through the
-    // square and back
-    const GeoZonePathEvaluator::Path east = _evaluatorPath({ start, squareCenter, start.atDistanceAndAzimuth(3000, 90) });
-    const GeoZonePathEvaluator::Path loiter = _evaluatorPath({ circleCenter.atDistanceAndAzimuth(500, 0), circleCenter.atDistanceAndAzimuth(500, 180) }, {},
-                                                             QStringLiteral("the loiter"));
-    const GeoZonePathEvaluator::Path back = _evaluatorPath({ squareCenter.atDistanceAndAzimuth(400, 270), squareCenter.atDistanceAndAzimuth(400, 90),
-                                                             squareCenter.atDistanceAndAzimuth(400, 270) });
-    const GeoZonePathEvaluator::Result result = evaluator.evaluate({ east, loiter, back });
-    QCOMPARE(result.zones.count(), 2);
-    QCOMPARE(result.activeEnteredZones(), QList<const GeoZone*>({ result.zones[0].zone, result.zones[1].zone }));
-
-    // Continuous across the vertex inside the square, entering and leaving it twice on the way back
-    const GeoZonePathEvaluator::ZoneResult &square = result.zones[0];
-    QCOMPARE(square.zone->identifier(), QStringLiteral("SQ"));
-    QCOMPARE(square.severity, 0);
-    QCOMPARE(square.crossings.count(), 3);
-    const GeoZonePathEvaluator::Crossing &squareCrossing = square.crossings[0];
-    QCOMPARE(squareCrossing.entry.path, 0);
-    QVERIFY(_near(squareCrossing.entry.distance, 800));
-    QVERIFY(_near(squareCrossing.exit.distance, 1200));
-    QCOMPARE(squareCrossing.entry.segment, 0);
-    QVERIFY(_near(squareCrossing.entry.fraction, 0.8, 0.001));
-    QCOMPARE(squareCrossing.exit.segment, 1);
-    QVERIFY(_near(squareCrossing.exit.fraction, 0.1, 0.001));
-    QVERIFY(_near(start.distanceTo(squareCrossing.entry.position.coordinate), 800));
-    QVERIFY(_near(start.distanceTo(squareCrossing.exit.position.coordinate), 1200));
-    QCOMPARE(square.crossings[1].entry.path, 2);
-    QVERIFY(_near(square.crossings[1].entry.distance, 200));
-    QVERIFY(_near(square.crossings[1].exit.distance, 600));
-    QVERIFY(_near(square.crossings[2].entry.distance, 1000));
-    QVERIFY(_near(square.crossings[2].exit.distance, 1400));
-    // Without altitudes the path is inside the vertical limits wherever it is inside horizontally
-    QCOMPARE(square.stretches.count(), 3);
-    QCOMPARE(square.stretches[0].parts.count(), 1);
-    QCOMPARE(square.stretches[0].parts[0].position, GeoZone::VerticalPosition::Inside);
-    QVERIFY(_near(square.stretches[0].exit.distance, 1200));
-    QVERIFY(square.labels.isEmpty());
-
-    // Entered by the main path and by the labelled one
-    const GeoZonePathEvaluator::ZoneResult &circle = result.zones[1];
-    QCOMPARE(circle.zone->identifier(), QStringLiteral("CI"));
-    QCOMPARE(circle.crossings.count(), 2);
-    QVERIFY(_near(circle.crossings[0].entry.distance, 1900));
-    QVERIFY(_near(circle.crossings[0].exit.distance, 2100));
-    QCOMPARE(circle.crossings[1].entry.path, 1);
-    QVERIFY(_near(circle.crossings[1].entry.distance, 400));
-    QVERIFY(circle.labels.isEmpty());
-    QCOMPARE(result.find(circle.zone), &circle);
-
-    // Only entered by the labelled path, whose label tells why
-    const GeoZonePathEvaluator::Result loiterResult = evaluator.evaluate({ _evaluatorPath({ start, start.atDistanceAndAzimuth(1000, 0) }), loiter });
-    QCOMPARE(loiterResult.zones.count(), 1);
-    QCOMPARE(loiterResult.zones[0].labels, QStringList({ QStringLiteral("the loiter") }));
-
-    // A single position inside, and paths away from the zones
-    const GeoZonePathEvaluator::Result single = evaluator.evaluate({ _evaluatorPath({ squareCenter }) });
-    QCOMPARE(single.zones.count(), 1);
-    QCOMPARE(single.zones[0].crossings.count(), 1);
-    QCOMPARE(single.zones[0].crossings[0].entry.distance, 0.0);
-    QCOMPARE(single.zones[0].crossings[0].exit.distance, 0.0);
-    QVERIFY(evaluator.evaluate({ _evaluatorPath({ start, start.atDistanceAndAzimuth(3000, 0) }), GeoZonePathEvaluator::Path() }).zones.isEmpty());
-
-    // One zone whatever the policy
-    const auto permittedZone = std::find_if(manager.zoneList().cbegin(), manager.zoneList().cend(), [](const GeoZone *zone) { return zone->identifier() == QStringLiteral("N"); });
-    QVERIFY(permittedZone != manager.zoneList().cend());
-    const GeoZonePathEvaluator::ZoneResult permitted = GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy()).evaluateZone(*permittedZone, { east });
-    QCOMPARE(permitted.zone, *permittedZone);
-    QCOMPARE(permitted.crossings.count(), 1);
-    QVERIFY(_near(permitted.crossings[0].entry.distance, 1500));
-}
-
-void GeoZonePlanningTest::_testEvaluatorAltitudes()
-{
-    // From 100 to 200 m above mean sea level, and from 50 to 150 m above the ground
-    const QGeoCoordinate center(47, 8);
-    const QGeoCoordinate groundCenter = center.atDistanceAndAzimuth(5000, 0);
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        _withLimits(_circleFeature(QStringLiteral("BAND"), QStringLiteral("PROHIBITED"), center, 300), 100, QStringLiteral("AMSL"), 200, QStringLiteral("AMSL")),
-        _withLimits(_circleFeature(QStringLiteral("AGL"), QStringLiteral("PROHIBITED"), groundCenter, 300), 50, QStringLiteral("AGL"), 150, QStringLiteral("AGL")),
-    }), errorString), qPrintable(errorString));
-    GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }));
-    const QGeoCoordinate west = center.atDistanceAndAzimuth(1000, 270);
-    const QGeoCoordinate east = center.atDistanceAndAzimuth(1000, 90);
-
-    // Level above, below and inside the band
-    const auto levelResult = [&](double altitude) { return evaluator.evaluate({ _evaluatorPath({ west, east }, { altitude, altitude }) }); };
-    for (const auto &[altitude, position] : { std::make_pair(300.0, GeoZone::VerticalPosition::Above), std::make_pair(50.0, GeoZone::VerticalPosition::Below) }) {
-        const GeoZonePathEvaluator::Result result = levelResult(altitude);
-        QCOMPARE(result.zones.count(), 1);
-        QVERIFY(!result.zones[0].entered());
-        QVERIFY(result.activeEnteredZones().isEmpty());
-        QCOMPARE(result.zones[0].stretches.count(), 1);
-        QCOMPARE(result.zones[0].stretches[0].parts.count(), 1);
-        QCOMPARE(result.zones[0].stretches[0].parts[0].position, position);
-        QVERIFY(_near(result.zones[0].stretches[0].entry.distance, 700));
-    }
-    QCOMPARE(levelResult(150).zones[0].crossings.count(), 1);
-
-    // Climbing from below the floor through the band to above the ceiling: -400 m at the west end to 600 m at the east end
-    const GeoZonePathEvaluator::Result climb = evaluator.evaluate({ _evaluatorPath({ west, east }, { -400, 600 }) });
-    QCOMPARE(climb.zones.count(), 1);
-    const GeoZonePathEvaluator::Stretch &stretch = climb.zones[0].stretches.constFirst();
-    QCOMPARE(stretch.parts.count(), 3);
-    QCOMPARE(stretch.parts[0].position, GeoZone::VerticalPosition::Below);
-    QVERIFY(_near(stretch.parts[0].from.distance, 700));
-    QVERIFY(_near(stretch.parts[0].to.distance, 1000));
-    QCOMPARE(stretch.parts[1].position, GeoZone::VerticalPosition::Inside);
-    QVERIFY(_near(stretch.parts[1].to.distance, 1200));
-    QVERIFY(_near(stretch.parts[1].to.position.altitudeAMSL, 200));
-    QCOMPARE(stretch.parts[2].position, GeoZone::VerticalPosition::Above);
-    QVERIFY(_near(stretch.parts[2].to.distance, 1300));
-    QCOMPARE(climb.zones[0].crossings.count(), 1);
-    QVERIFY(_near(climb.zones[0].crossings[0].entry.distance, 1000));
-    QVERIFY(_near(climb.zones[0].crossings[0].exit.distance, 1200));
-
-    // Relative altitudes, which are unknown without the reference
-    GeoZonePathEvaluator::Path relative = _evaluatorPath({ west, east }, { 120, 120 });
-    relative.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Relative;
-    relative.referenceAltitudeAMSL = 100;
-    QCOMPARE(evaluator.evaluate({ relative }).zones[0].stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
-    relative.referenceAltitudeAMSL = 0;
-    QCOMPARE(evaluator.evaluate({ relative }).activeEnteredZones().count(), 1);
-    relative.referenceAltitudeAMSL = qQNaN();
-    QCOMPARE(evaluator.evaluate({ relative }).activeEnteredZones().count(), 1);
-
-    // Limits above unknown ground are inside, the terrain lookup gives the ground and positions along the path
-    const QGeoCoordinate groundWest = groundCenter.atDistanceAndAzimuth(1000, 270);
-    const QGeoCoordinate groundEast = groundCenter.atDistanceAndAzimuth(1000, 90);
-    const GeoZonePathEvaluator::Path high = _evaluatorPath({ groundWest, groundEast }, { 600, 600 });
-    QCOMPARE(evaluator.evaluate({ high }).activeEnteredZones().count(), 1);
-    int lookups = 0;
-    evaluator.setTerrainLookup([&lookups](const QGeoCoordinate &) { lookups++; return 400.0; });
-    const GeoZonePathEvaluator::Result overGround = evaluator.evaluate({ high });
-    QVERIFY(lookups > 2);
-    QCOMPARE(overGround.zones.count(), 1);
-    QVERIFY(!overGround.zones[0].entered());
-    QCOMPARE(overGround.zones[0].stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
-    // Above the terrain, with vertexes of the input path despite the added positions
-    GeoZonePathEvaluator::Path aboveGround = _evaluatorPath({ groundWest, groundEast }, { 100, 100 });
-    aboveGround.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Terrain;
-    const GeoZonePathEvaluator::Result following = evaluator.evaluate({ aboveGround });
-    QCOMPARE(following.activeEnteredZones().count(), 1);
-    const GeoZonePathEvaluator::Crossing &crossing = following.zones[0].crossings[0];
-    QCOMPARE(crossing.entry.segment, 0);
-    QVERIFY(_near(crossing.entry.fraction, 0.35, 0.001));
-    QVERIFY(_near(crossing.entry.position.altitudeAMSL, 500));
-    QVERIFY(_near(crossing.entry.position.terrainAMSL, 400));
-}
-
-void GeoZonePlanningTest::_testEvaluatorUnknownTerrain()
-{
-    // From 50 to 150 m above the ground, which is at 400 m except in a gap without terrain data around the zone center
-    const QGeoCoordinate center(47, 8);
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        _withLimits(_circleFeature(QStringLiteral("AGL"), QStringLiteral("PROHIBITED"), center, 300), 50, QStringLiteral("AGL"), 150, QStringLiteral("AGL")),
-    }), errorString), qPrintable(errorString));
-    GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }));
-    evaluator.setTerrainLookup([center](const QGeoCoordinate &coordinate) { return (center.distanceTo(coordinate) < 150) ? qQNaN() : 400.0; });
-    const QGeoCoordinate west = center.atDistanceAndAzimuth(1000, 270);
-    const QGeoCoordinate east = center.atDistanceAndAzimuth(1000, 90);
-
-    // 200 m above the known ground, over the ceiling. The gap isn't bridged with the terrain on its sides, so the
-    // ceiling is unknown from the last position with terrain before it to the first after it, which enter the zone.
-    const GeoZonePathEvaluator::Result across = evaluator.evaluate({ _evaluatorPath({ west, east }, { 600, 600 }) });
-    QCOMPARE(across.activeEnteredZones().count(), 1);
-    const GeoZonePathEvaluator::ZoneResult &zone = across.zones[0];
-    QCOMPARE(zone.crossings.count(), 1);
-    QVERIFY(_near(zone.crossings[0].entry.distance, 800));
-    QVERIFY(_near(zone.crossings[0].exit.distance, 1200));
-    QVERIFY(zone.crossings[0].approximations.testFlag(GeoZonePathEvaluator::TerrainUnknown));
-    QCOMPARE(zone.stretches.count(), 1);
-    QCOMPARE(zone.stretches[0].parts.count(), 3);
-    QCOMPARE(zone.stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
-    QVERIFY(zone.stretches[0].approximations.testFlag(GeoZonePathEvaluator::TerrainUnknown));
-    QVERIFY(across.approximations().testFlag(GeoZonePathEvaluator::TerrainUnknown));
-
-    // A vertex in the gap doesn't take the terrain of the previous position
-    QCOMPARE(evaluator.evaluate({ _evaluatorPath({ west, center }, { 600, 600 }) }).activeEnteredZones().count(), 1);
-
-    // With the terrain known along the path the zone is below it, and the result is exact
-    evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; });
-    const GeoZonePathEvaluator::Result known = evaluator.evaluate({ _evaluatorPath({ west, east }, { 600, 600 }) });
-    QCOMPARE(known.zones.count(), 1);
-    QVERIFY(!known.zones[0].entered());
-    QCOMPARE(known.approximations(), GeoZonePathEvaluator::Approximations());
-}
-
-void GeoZonePlanningTest::_testEvaluatorGreatCircles()
-{
-    // A leg along the 60th parallel over one degree of longitude, whose great circle passes about 105 m north of the
-    // parallel halfway, with a small zone on each, and a zone 50 to 150 m above the ground near its start
-    const QPointF west(0, 60);
-    const QPointF east(1, 60);
-    const QGeoCoordinate start = GeoZone::toCoordinate(west);
-    const QGeoCoordinate end = GeoZone::toCoordinate(east);
-    const QGeoCoordinate onGreatCircle = GeoZone::toCoordinate(GeoZoneGeometry::greatCircleInterpolate(west, east, 0.5));
-    const QGeoCoordinate onParallel(60, 0.5);
-    const QGeoCoordinate groundCenter = start.atDistanceAndAzimuth(2000, 90);
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        _circleFeature(QStringLiteral("CIRCLE"), QStringLiteral("PROHIBITED"), onGreatCircle, 30),
-        _circleFeature(QStringLiteral("PARALLEL"), QStringLiteral("PROHIBITED"), onParallel, 30),
-        _withLimits(_circleFeature(QStringLiteral("AGL"), QStringLiteral("PROHIBITED"), groundCenter, 300), 50, QStringLiteral("AGL"), 150, QStringLiteral("AGL")),
-    }), errorString), qPrintable(errorString));
-    GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }));
-
-    // The vehicle flies the great circle, entering the zone on it about halfway and passing the one on the parallel.
-    // Without terrain the zone above ground counts as entered.
-    const GeoZonePathEvaluator::Result result = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
-    QStringList entered;
-    for (const GeoZone *zone : result.activeEnteredZones()) {
-        entered.append(zone->identifier());
-    }
-    QCOMPARE(entered, QStringList({ QStringLiteral("AGL"), QStringLiteral("CIRCLE") }));
-    const GeoZonePathEvaluator::Crossing &crossing = result.zones[1].crossings[0];
-    QCOMPARE(crossing.entry.segment, 0);
-    QVERIFY(_near(crossing.entry.fraction, 0.4995, 0.0005));
-    QVERIFY(_near((crossing.entry.distance + crossing.exit.distance) / 2, start.distanceTo(end) / 2, 2));
-    QVERIFY(onGreatCircle.distanceTo(crossing.entry.position.coordinate) < 35);
-    QCOMPARE(crossing.approximations, GeoZonePathEvaluator::Approximations());
-    QCOMPARE(result.pathApproximations, GeoZonePathEvaluator::Approximations());
-
-    // The terrain is sampled at the spacing up to the maximum positions, farther apart beyond, which is approximate
-    // for limits above ground
-    const auto groundZone = std::find_if(manager.zoneList().cbegin(), manager.zoneList().cend(), [](const GeoZone *zone) { return zone->identifier() == QStringLiteral("AGL"); });
-    QVERIFY(groundZone != manager.zoneList().cend());
-    evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; }, 100, 1000);
-    const GeoZonePathEvaluator::Result sampled = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
-    const GeoZonePathEvaluator::ZoneResult *const ground = sampled.find(*groundZone);
-    QVERIFY(ground);
-    QVERIFY(!ground->entered());
-    QCOMPARE(sampled.approximations(), GeoZonePathEvaluator::Approximations());
-    evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; }, 100, 100);
-    const GeoZonePathEvaluator::Result coarse = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
-    QVERIFY(coarse.find(*groundZone)->approximations().testFlag(GeoZonePathEvaluator::TerrainCoarse));
-    QVERIFY(coarse.approximations().testFlag(GeoZonePathEvaluator::TerrainCoarse));
-    // Only zones with limits above ground are affected
-    QCOMPARE(coarse.find(result.zones[1].zone)->approximations(), GeoZonePathEvaluator::Approximations());
-}
-
-void GeoZonePlanningTest::_testEvaluatorApproximations()
+void GeoZonePlanningTest::_testApproximationReports()
 {
     // East through a zone above a flight level, one with limits in an unknown reference, and one active from an unknown
-    // daylight event to sunset
+    // daylight event to sunset, see GeoZoneEvaluatorTest::_testApproximations
     const QGeoCoordinate start(47, 8);
     QJsonObject scheduled = _circleFeature(QStringLiteral("SCHEDULED"), QStringLiteral("PROHIBITED"), start.atDistanceAndAzimuth(3000, 90), 200);
     scheduled[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "schedule", QJsonArray{ QJsonObject{
@@ -427,51 +76,22 @@ void GeoZonePlanningTest::_testEvaluatorApproximations()
         const auto it = std::find_if(manager.zoneList().cbegin(), manager.zoneList().cend(), [&identifier](const GeoZone *zone) { return zone->identifier() == identifier; });
         return (it == manager.zoneList().cend()) ? nullptr : *it;
     };
-    QVERIFY(zoneNamed(QStringLiteral("SCHEDULED"))->scheduleAssumed());
-    QVERIFY(!zoneNamed(QStringLiteral("LEVEL"))->scheduleAssumed());
 
+    // The briefing documents have them per crossing, per zone and overall, in the JSON and with a note in the web page
     const QDateTime flightStart = _utc(QDate(2027, 6, 1), QTime(10, 0));
     const QDateTime flightEnd = flightStart.addSecs(600);
-    const GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }).activeDuring(flightStart, flightEnd), flightStart);
     GeoZonePathEvaluator::Path path = _evaluatorPath({ start, start.atDistanceAndAzimuth(4000, 90) }, { 500, 500 });
     path.setTimes(flightStart, flightEnd);
-    const GeoZonePathEvaluator::Result result = evaluator.evaluate({ path });
-    QCOMPARE(result.activeEnteredZones().count(), 3);
-    QCOMPARE(result.find(zoneNamed(QStringLiteral("LEVEL")))->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
-    QCOMPARE(result.find(zoneNamed(QStringLiteral("UNKNOWN")))->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::AltitudeReferenceUnknown));
-    QCOMPARE(result.find(zoneNamed(QStringLiteral("SCHEDULED")))->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::ScheduleAssumed));
-    QCOMPARE(result.approximations(), GeoZonePathEvaluator::FlightLevel | GeoZonePathEvaluator::AltitudeReferenceUnknown | GeoZonePathEvaluator::ScheduleAssumed);
-    // Whatever the schedule, it isn't assumed
-    QCOMPARE(GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited })).evaluate({ path }).find(zoneNamed(QStringLiteral("SCHEDULED")))->approximations(),
-             GeoZonePathEvaluator::Approximations());
-
-    // Relative altitudes without their reference are unknown
-    GeoZonePathEvaluator::Path relative = _evaluatorPath({ start, start.atDistanceAndAzimuth(1500, 90) }, { 100, 100 });
-    relative.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Relative;
-    QVERIFY(evaluator.evaluate({ relative }).zones[0].crossings[0].approximations.testFlag(GeoZonePathEvaluator::AltitudeReferenceUnknown));
-
-    // Codes for exports and texts for the pilot
-    QCOMPARE(GeoZonePathEvaluator::approximationCodes(result.approximations()),
-             QStringList({ QStringLiteral("flight_level"), QStringLiteral("schedule_assumed"), QStringLiteral("altitude_reference_unknown") }));
-    QCOMPARE(GeoZonePathEvaluator::approximationTexts(GeoZonePathEvaluator::TerrainUnknown | GeoZonePathEvaluator::TerrainCoarse).count(), 2);
-    QVERIFY(GeoZonePathEvaluator::approximationCodes(GeoZonePathEvaluator::Approximations()).isEmpty());
-
-    // The briefing has them per crossing, per zone and overall, in the JSON and with a note in the web page
     GeoZoneBriefing::Input input;
     input.mission.name = QStringLiteral("Approximate");
     input.paths = { path };
     input.start = flightStart;
     input.end = flightEnd;
     const GeoZoneBriefing briefing = GeoZoneBriefing::build(manager.catalog(), input);
-    QCOMPARE(briefing.approximations, result.approximations());
-    const QList<const GeoZoneBriefing::Zone*> entered = briefing.zonesWith(GeoZoneBriefing::Involvement::Entered);
-    QCOMPARE(entered.count(), 3);
-    QCOMPARE(entered[0]->identifier, QStringLiteral("LEVEL"));
-    QCOMPARE(entered[0]->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
-    QCOMPARE(entered[0]->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
     const QJsonObject json = GeoZoneBriefingExport::toJson(briefing);
     QCOMPARE(json[QStringLiteral("approximations")].toArray().count(), 3);
     const QJsonObject levelJson = json[QStringLiteral("zones")].toArray()[0].toObject();
+    QCOMPARE(levelJson[QStringLiteral("identifier")].toString(), QStringLiteral("LEVEL"));
     QCOMPARE(levelJson[QStringLiteral("approximations")].toArray(), QJsonArray({ QStringLiteral("flight_level") }));
     QCOMPARE(levelJson[QStringLiteral("crossings")].toArray()[0].toObject()[QStringLiteral("approximations")].toArray(), QJsonArray({ QStringLiteral("flight_level") }));
     const QString html = GeoZoneBriefingExport::toHtml(briefing);
@@ -494,74 +114,11 @@ void GeoZonePlanningTest::_testEvaluatorApproximations()
     QVERIFY(check.warningText().contains(QStringLiteral("Flight level limits converted with the QNH setting")));
 }
 
-void GeoZonePlanningTest::_testEvaluatorSchedules()
+void GeoZonePlanningTest::_testMissionPathTimes()
 {
-    // Active on 1 January 2027 from 10:00 to 12:00 UTC, 1900 to 2100 m along a path of 4000 m
-    const QGeoCoordinate start(47, 8);
-    QJsonObject temporary = _circleFeature(QStringLiteral("T"), QStringLiteral("PROHIBITED"), start.atDistanceAndAzimuth(2000, 90), 100);
-    temporary[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:00:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ temporary }), errorString), qPrintable(errorString));
-    const QDate day(2027, 1, 1);
-    GeoZonePathEvaluator::Path path = _evaluatorPath({ start, start.atDistanceAndAzimuth(4000, 90) });
-
-    // A minute per 100 m, from the start time
-    const auto evaluateFrom = [&](const QTime &time) {
-        const QDateTime flightStart = _utc(day, time);
-        const QDateTime flightEnd = flightStart.addSecs(40 * 60);
-        path.setTimes(flightStart, flightEnd);
-        return GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::mission(flightStart, flightEnd), flightStart).evaluate({ path });
-    };
-
-    // Entering after the zone becomes active
-    GeoZonePathEvaluator::Result result = evaluateFrom(QTime(10, 0));
-    QCOMPARE(result.zones.count(), 1);
-    const GeoZonePathEvaluator::Crossing *crossing = result.zones[0].firstCrossing();
-    QVERIFY(crossing);
-    QVERIFY(qAbs(crossing->entry.time.secsTo(_utc(day, QTime(10, 19)))) <= 2);
-    QVERIFY(crossing->active);
-    QCOMPARE(result.activeEnteredZones().count(), 1);
-
-    // Entering just before and leaving after it becomes active
-    result = evaluateFrom(QTime(9, 40));
-    QVERIFY(qAbs(result.zones[0].crossings[0].entry.time.secsTo(_utc(day, QTime(9, 59)))) <= 2);
-    QVERIFY(result.zones[0].crossings[0].active);
-
-    // Leaving 10 minutes before it becomes active counts, since the take-off or the pace may differ from the estimate
-    QCOMPARE(GeoZonePathEvaluator::defaultScheduleToleranceSecs, 15 * 60);
-    result = evaluateFrom(QTime(9, 29));
-    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 50)))) <= 2);
-    QVERIFY(result.zones[0].crossings[0].active);
-    QCOMPARE(result.activeEnteredZones().count(), 1);
-    // Like entering 10 minutes after it ends
-    result = evaluateFrom(QTime(11, 51));
-    QVERIFY(qAbs(result.zones[0].crossings[0].entry.time.secsTo(_utc(day, QTime(12, 10)))) <= 2);
-    QVERIFY(result.zones[0].crossings[0].active);
-
-    // Leaving 30 minutes before it becomes active doesn't, although it is active during the flight
-    result = evaluateFrom(QTime(9, 9));
-    QCOMPARE(result.zones.count(), 1);
-    QVERIFY(result.zones[0].entered());
-    QVERIFY(!result.zones[0].active());
-    QVERIFY(!result.zones[0].crossings[0].active);
-    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 30)))) <= 2);
-    QVERIFY(result.activeEnteredZones().isEmpty());
-
-    // Without times the zone applies when active at some time of the flight, or whatever its schedule without one
-    path.setTimes(QDateTime(), QDateTime());
-    QVERIFY(GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::mission(_utc(day, QTime(9, 30)), _utc(day, QTime(10, 30))))
-                .evaluate({ path }).zones[0].active());
-    QVERIFY(!GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::mission(_utc(day, QTime(8, 0)), _utc(day, QTime(9, 0))))
-                .evaluate({ path }).zones[0].active());
-    QVERIFY(GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::mission(QDateTime(), QDateTime())).evaluate({ path }).zones[0].active());
-    // Zones active now are those active at the evaluation time
-    QVERIFY(GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::alerts(), _utc(day, QTime(11, 0))).evaluate({ path }).zones[0].active());
-    QVERIFY(!GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy::alerts(), _utc(day, QTime(13, 0))).evaluate({ path }).zones[0].active());
-
     // Mission paths estimate the times in proportion to the distance along the mission
+    const QGeoCoordinate start(47, 8);
+    const QDate day(2027, 1, 1);
     GeoZoneMissionPath::Segment segment;
     segment.from = start;
     segment.to = start.atDistanceAndAzimuth(4000, 90);
@@ -648,83 +205,31 @@ void GeoZonePlanningTest::_testFenceExcludes()
     GeoZoneFenceTags::deleteFences(geoFenceController, false);
 }
 
-void GeoZonePlanningTest::_testAntimeridianQueries()
+void GeoZonePlanningTest::_testAntimeridianProfile()
 {
-    // A zone from 179.9 E to 179.9 W, one on the other side of the world and one along the equator from 0 to 160 W,
-    // spanning more than 180 degrees of longitude
+    // A zone from 179.9 E to 179.9 W, see GeoZoneEvaluatorTest::_testAntimeridianQueries
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         _polygonFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), { QGeoCoordinate(-16.6, 179.9), QGeoCoordinate(-16.4, 179.9),
                                                                              QGeoCoordinate(-16.4, -179.9), QGeoCoordinate(-16.6, -179.9) }),
-        _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(-16.5, 0), 5000),
-        _polygonFeature(QStringLiteral("WIDE"), QStringLiteral("PROHIBITED"), { QGeoCoordinate(-1, 0), QGeoCoordinate(-1, 50), QGeoCoordinate(-1, 100),
-                                                                                QGeoCoordinate(-1, 150), QGeoCoordinate(-1, -160), QGeoCoordinate(1, -160),
-                                                                                QGeoCoordinate(1, 150), QGeoCoordinate(1, 100), QGeoCoordinate(1, 50),
-                                                                                QGeoCoordinate(1, 0) }),
     }), errorString), qPrintable(errorString));
-    const GeoZoneCatalog &catalog = manager.catalog();
-    const GeoZonePolicy policy({ GeoZone::Prohibited });
-    const auto identifiers = [](const QList<const GeoZone*> &zones) {
-        QStringList result;
-        for (const GeoZone *zone : zones) {
-            result.append(zone->identifier());
-        }
-        return result;
-    };
 
-    // Points on both sides of the antimeridian
-    QCOMPARE(identifiers(catalog.zonesAt(QGeoCoordinate(-16.5, 179.95))), QStringList({ QStringLiteral("X") }));
-    QCOMPARE(identifiers(catalog.zonesAt(QGeoCoordinate(-16.5, -179.95))), QStringList({ QStringLiteral("X") }));
-    QCOMPARE(identifiers(catalog.zonesAt(QGeoCoordinate(-16.5, 180))), QStringList({ QStringLiteral("X") }));
-    QVERIFY(catalog.zonesAt(QGeoCoordinate(-16.5, 179.8)).isEmpty());
-
-    // Areas across the antimeridian, and the rest of the world between the same longitudes
-    QCOMPARE(identifiers(catalog.zonesInArea(GeoZoneBox(-17, 179.8, -16, -179.8), policy)), QStringList({ QStringLiteral("X") }));
-    QCOMPARE(identifiers(catalog.zonesInArea(QGeoRectangle(QGeoCoordinate(-16, 179.8), QGeoCoordinate(-17, -179.8)), policy)), QStringList({ QStringLiteral("X") }));
-    QCOMPARE(identifiers(catalog.zonesInArea(GeoZoneBox(-17, -179.8, -16, 179.8), policy)), QStringList({ QStringLiteral("FAR") }));
-
-    // Survey areas across the antimeridian and on the other side of the world
-    const GeoZone::Area area{ { QGeoCoordinate(-16.6, 179.8), QGeoCoordinate(-16.4, 179.8), QGeoCoordinate(-16.4, -179.8), QGeoCoordinate(-16.6, -179.8) }, {}, {} };
-    QCOMPARE(identifiers(catalog.zonesIntersectingAreas({ area }, policy)), QStringList({ QStringLiteral("X") }));
-    const GeoZone::Area farArea{ { QGeoCoordinate(-16.6, -0.1), QGeoCoordinate(-16.4, -0.1), QGeoCoordinate(-16.4, 0.1), QGeoCoordinate(-16.6, 0.1) }, {}, {} };
-    QCOMPARE(identifiers(catalog.zonesIntersectingAreas({ farArea }, policy)), QStringList({ QStringLiteral("FAR") }));
-
-    // A mission path across the antimeridian enters the zone at its west edge
+    // The profile of a segment across the antimeridian passes through the zone
     const QGeoCoordinate from(-16.5, 179.8);
     const QGeoCoordinate to(-16.5, -179.8);
     const double entryDistance = from.distanceTo(QGeoCoordinate(-16.5, 179.9));
-    const QList<GeoZonePathEvaluator::ZoneResult> hits = GeoZonePathEvaluator(catalog, policy).evaluate({ GeoZonePathEvaluator::Path::fromPositions({ { from }, { to } }) }).zones;
-    QCOMPARE(hits.count(), 1);
-    QCOMPARE(hits[0].zone->identifier(), QStringLiteral("X"));
-    QVERIFY(qAbs(hits[0].crossings.constFirst().entry.distance - entryDistance) < (entryDistance * 0.01));
-
-    // The profile of a segment across the antimeridian passes through the zone
     GeoZoneMissionPath::Segment segment;
     segment.from = from;
     segment.to = to;
     segment.distance = from.distanceTo(to);
-    const QList<GeoZoneProfile::Band> bands = GeoZoneProfile::computeBands({ segment }, catalog);
+    const QList<GeoZoneProfile::Band> bands = GeoZoneProfile::computeBands({ segment }, zones.catalog());
     QCOMPARE(bands.count(), 1);
     QCOMPARE(bands[0].name, QStringLiteral("X"));
     QVERIFY(qAbs(bands[0].points.constFirst().distance - entryDistance) < 20);
     QVERIFY(qAbs(bands[0].points.constLast().distance - (segment.distance - entryDistance)) < 20);
-
-    // Vehicles past the antimeridian more than 180 degrees from the west end of the wide zone are alerted inside it
-    // and near its east end
-    const GeoZoneAlertTracker::Limits limits{ 100, 100, 0 };
-    GeoZoneAlertTracker::Update update = GeoZoneAlertTracker().update(catalog, policy, GeoZone::Position{ QGeoCoordinate(0, -170) }, {}, limits);
-    QCOMPARE(update.alerts.count(), 1);
-    QCOMPARE(update.alerts[0].zone->identifier(), QStringLiteral("WIDE"));
-    QVERIFY(update.alerts[0].inside);
-    const QGeoCoordinate nearEastEnd(0, -159.9995);
-    update = GeoZoneAlertTracker().update(catalog, policy, GeoZone::Position{ nearEastEnd }, {}, limits);
-    QCOMPARE(update.alerts.count(), 1);
-    QCOMPARE(update.alerts[0].zone->identifier(), QStringLiteral("WIDE"));
-    QVERIFY(!update.alerts[0].inside);
-    QVERIFY(qAbs(update.alerts[0].distance - nearEastEnd.distanceTo(QGeoCoordinate(0, -160))) < 1);
 }
 
 void GeoZonePlanningTest::_testMissionCheck()
@@ -1585,118 +1090,18 @@ void GeoZonePlanningTest::_testAuthorisations()
     manager.planning()->clearPlannedStart();
 }
 
-void GeoZonePlanningTest::_testBriefing()
+void GeoZonePlanningTest::_testBriefingDocuments()
 {
+    // The briefing of GeoZoneBriefingTest::_testBriefing
     ScopedEnvironment environment;
     environment.setNow(_utc(QDate(2027, 1, 1), QTime(8, 0)));
-    const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-
-    // A control zone with its authority, message, schedule and limits, a prison, and zones near the path
-    QJsonObject controlZone = _circleFeature(QStringLiteral("CTR-1"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1000, 90), 200);
-    controlZone[QStringLiteral("name")] = QStringLiteral("CTR <script>alert(1)</script>");
-    controlZone[QStringLiteral("country")] = QStringLiteral("CHE");
-    controlZone[QStringLiteral("message")] = QStringLiteral("Call the tower");
-    controlZone[QStringLiteral("zoneAuthority")] = QJsonArray{ QJsonObject{ { "name", "Skyguide" }, { "email", "ops@example.org" }, { "phone", "+41 43 931 61 11" } } };
-    controlZone[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:45:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
-    QJsonObject geometry = controlZone[QStringLiteral("geometry")].toArray()[0].toObject();
-    geometry[QStringLiteral("uomDimensions")] = QStringLiteral("M");
-    geometry[QStringLiteral("lowerLimit")] = 0;
-    geometry[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
-    geometry[QStringLiteral("upperLimit")] = 500;
-    geometry[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
-    controlZone[QStringLiteral("geometry")] = QJsonArray{ geometry };
-    QJsonObject prison = _circleFeature(QStringLiteral("P-1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2500, 90), 200);
-    prison[QStringLiteral("name")] = QStringLiteral("Prison");
+    BriefingMission mission(dir);
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        controlZone, prison,
-        _circleFeature(QStringLiteral("NEAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 0), 150),
-        _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 150),
-        _circleFeature(QStringLiteral("RET"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 90).atDistanceAndAzimuth(1000, 180), 200),
-        // Zones without restriction near the path aren't briefed
-        _circleFeature(QStringLiteral("INFO"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 180), 100),
-    }), errorString), qPrintable(errorString));
-    const GeoZone *const ctr = manager.zoneList().constFirst();
-
-    GeoZoneAuthorisations authorisations{ QString() };
-    authorisations.set(GeoZoneAuthorisation{ GeoZoneAuthorisations::zoneKey(ctr), ctr->name(), QStringLiteral("P-77"), QDateTime(), QDateTime() });
-
-    // Ten minutes east at 100 m, a return from halfway would enter RET
-    const QDateTime start = _utc(QDate(2027, 1, 1), QTime(10, 30));
-    GeoZonePathEvaluator::Path path = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center, 100 }, GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90), 100 } });
-    path.setTimes(start, start.addSecs(600));
-    GeoZonePathEvaluator::Path contingency = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center.atDistanceAndAzimuth(2000, 90), 100 },
-                                                                                         GeoZone::Position{ center.atDistanceAndAzimuth(2000, 90).atDistanceAndAzimuth(1000, 180), 100 } },
-                                                                                       QStringLiteral("a return to rally point 1"));
-    contingency.setTimes(start.addSecs(300), QDateTime());
-    GeoZoneBriefing::Input input;
-    input.mission.name = QStringLiteral("Survey");
-    input.mission.plannedStart = start;
-    input.mission.plannedEnd = start.addSecs(600);
-    input.paths = { path };
-    input.contingencyPaths = { contingency };
-    input.items = { { 1, 0 }, { 2, 4000 } };
-    input.start = start;
-    input.end = start.addSecs(600);
-    input.authorisations = &authorisations;
-    input.sources = GeoZoneSourceVersion::covering(manager.repository()->sourceList(), GeoZoneBox());
-    const GeoZoneBriefing briefing = GeoZoneBriefing::build(manager.catalog(), input);
-
-    // The zones entered in the order the path enters them, where, when and at which altitudes
-    const QList<const GeoZoneBriefing::Zone*> entered = briefing.zonesWith(GeoZoneBriefing::Involvement::Entered);
-    QCOMPARE(entered.count(), 2);
-    const GeoZoneBriefing::Zone &briefedCtr = *entered[0];
-    QCOMPARE(briefedCtr.identifier, QStringLiteral("CTR-1"));
-    QCOMPARE(briefedCtr.restriction, GeoZone::ReqAuthorisation);
-    QCOMPARE(briefedCtr.country, QStringLiteral("CHE"));
-    QCOMPARE(briefedCtr.crossings.count(), 1);
-    const GeoZoneBriefing::Crossing &crossing = briefedCtr.crossings.constFirst();
-    QCOMPARE(crossing.entryItem, 1);
-    QVERIFY(qAbs(crossing.entryDistance - 800) < 2);
-    QVERIFY(qAbs(crossing.exitDistance - 1200) < 2);
-    QVERIFY(qAbs(crossing.entryTime.secsTo(start.addSecs(120))) <= 1);
-    QCOMPARE(crossing.pathAltitudeMin, 100.0);
-    QCOMPARE(crossing.pathAltitudeMax, 100.0);
-    QVERIFY(qIsNaN(crossing.zoneFloor));
-    QCOMPARE(crossing.zoneCeiling, 500.0);
-    QVERIFY(briefedCtr.authorities.join(QChar(u'\n')).contains(QStringLiteral("Skyguide")));
-    QVERIFY(briefedCtr.authorities.join(QChar(u'\n')).contains(QStringLiteral("ops@example.org")));
-    QCOMPARE(briefedCtr.message, QStringLiteral("Call the tower"));
-    QVERIFY(!briefedCtr.schedule.isEmpty());
-    // Active from 10:45 within the flight widened by the tolerance, 10:15 to 10:55
-    QVERIFY(briefedCtr.activeDuringFlight);
-    QCOMPARE(briefedCtr.activePeriods.count(), 1);
-    QCOMPARE(briefedCtr.activePeriods[0].start, _utc(QDate(2027, 1, 1), QTime(10, 45)));
-    QCOMPARE(briefedCtr.activePeriods[0].end, _utc(QDate(2027, 1, 1), QTime(10, 55)));
-    QVERIFY(briefedCtr.authorisation.has_value());
-    QCOMPARE(briefedCtr.authorisation->permit, QStringLiteral("P-77"));
-    QVERIFY(briefedCtr.authorisation->coversFlight);
-    QCOMPARE(briefedCtr.contentHash, ctr->data().contentHash);
-    QCOMPARE(entered[1]->displayName(), QStringLiteral("Prison"));
-    QCOMPARE(entered[1]->activePeriods, (QList<GeoZoneBriefing::Interval>{ { start.addSecs(-15 * 60), start.addSecs(25 * 60) } }));
-    QVERIFY(!entered[1]->authorisation);
-
-    // The zone only the return enters, and the restricted zone near the path
-    const QList<const GeoZoneBriefing::Zone*> contingencyZones = briefing.zonesWith(GeoZoneBriefing::Involvement::Contingency);
-    QCOMPARE(contingencyZones.count(), 1);
-    QCOMPARE(contingencyZones[0]->identifier, QStringLiteral("RET"));
-    QCOMPARE(contingencyZones[0]->contingencies, QStringList{ QStringLiteral("a return to rally point 1") });
-    const QList<const GeoZoneBriefing::Zone*> nearby = briefing.zonesWith(GeoZoneBriefing::Involvement::Nearby);
-    QCOMPARE(nearby.count(), 1);
-    QCOMPARE(nearby[0]->identifier, QStringLiteral("NEAR"));
-    QVERIFY(qAbs(nearby[0]->distance - 250) < 5);
-
-    // The version of the data
-    QCOMPARE(briefing.sources.count(), 1);
-    QVERIFY(!briefing.sources[0].contentHash.isEmpty());
-    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2026, 1, 22)), QStringLiteral("2601"));
-    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2026, 1, 21)), QStringLiteral("2513"));
-    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2020, 12, 31)), QStringLiteral("2014"));
-    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2021, 1, 28)), QStringLiteral("2101"));
-    QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2019, 12, 31)), QStringLiteral("1913"));
+    QVERIFY2(mission.load(errorString), qPrintable(errorString));
+    const GeoZone *const ctr = mission.zones.zoneList().constFirst();
+    const GeoZoneBriefing briefing = mission.build();
 
     // JSON with its schema and version
     const QJsonObject json = GeoZoneBriefingExport::toJson(briefing);
@@ -2289,360 +1694,6 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QTRY_VERIFY2((lowerPlanner.update(), suggestionTexts().contains(QStringLiteral("No descent: flying under T leaves 5 m above the terrain, less than 10 m."))),
                  qPrintable(suggestionTexts()));
     QCOMPARE(floorSuggestion(), -1);
-}
-
-namespace {
-
-/// Prohibited zone with a polygon volume given in meters around the origin, with an optional hole
-const GeoZone *_localPolygonZone(ZoneOwner &owner, const GeoZoneGeometry::LocalProjection &projection, const QString &name, const QList<QPointF> &ring,
-                                 const QList<QPointF> &hole = {})
-{
-    const auto toRing = [&projection](const QList<QPointF> &points) {
-        QList<QGeoCoordinate> coordinates;
-        for (const QPointF &point : points) {
-            coordinates.append(projection.toGeo(point));
-        }
-        return GeoZone::toRing(coordinates);
-    };
-    GeoZone::Volume volume;
-    volume.rings.append(toRing(ring));
-    if (!hole.isEmpty()) {
-        volume.rings.append(toRing(hole));
-    }
-    GeoZone::Data data;
-    data.identifier = name;
-    data.restriction = GeoZone::Prohibited;
-    data.volumes.append(volume);
-    return owner.add(data);
-}
-
-/// U open to the north, width by height meters, with a notch of the width and depth
-QList<QPointF> _uShape(double width, double height, double notchWidth, double notchDepth)
-{
-    const double w = width / 2;
-    const double h = height / 2;
-    const double n = notchWidth / 2;
-    return { { -w, -h }, { w, -h }, { w, h }, { n, h }, { n, h - notchDepth }, { -n, h - notchDepth }, { -n, h }, { -w, h } };
-}
-
-QList<QPointF> _square(double halfSize)
-{
-    return { { -halfSize, -halfSize }, { halfSize, -halfSize }, { halfSize, halfSize }, { -halfSize, halfSize } };
-}
-
-/// @return The path from the start to the end through the waypoints of the route
-QList<QGeoCoordinate> _routePath(const QGeoCoordinate &from, const GeoZoneRouteSearch::Route &route, const QGeoCoordinate &to)
-{
-    QList<QGeoCoordinate> path = { from };
-    path.append(route.waypoints);
-    path.append(to);
-    return path;
-}
-
-} // namespace
-
-void GeoZonePlanningTest::_testRouteConcave_data()
-{
-    QTest::addColumn<QList<QPointF>>("ring");
-    QTest::addColumn<QList<QPointF>>("hole");
-    QTest::addColumn<QPointF>("start");
-    QTest::addColumn<QPointF>("end");
-    QTest::addColumn<int>("failure");
-    QTest::addColumn<int>("minWaypoints");
-    QTest::addColumn<double>("maxLength");   ///< Meters, 0 for no limit
-    QTest::addColumn<double>("clearance");   ///< Meters the path keeps from the zone at least
-
-    using Failure = GeoZoneRouteSearch::Failure;
-    // A notch wider than twice the margin can be entered, the corner of the U's arm is passed at the margin. Convex
-    // hulls would block it.
-    QTest::newRow("into wide notch") << _uShape(1500, 1500, 600, 1000) << QList<QPointF>() << QPointF(1500, 2500) << QPointF(0, 0)
-                                     << int(Failure::None) << 1 << 3000.0 << 99.0;
-    // A notch narrower than twice the margin is passed around, not through
-    QTest::newRow("across narrow notch") << _uShape(1500, 1500, 120, 1000) << QList<QPointF>() << QPointF(-2000, 300) << QPointF(2000, 300)
-                                         << int(Failure::None) << 2 << 5200.0 << 99.0;
-    // Around the closed side of a U opening towards the start, not into the notch
-    QTest::newRow("around U") << _uShape(1500, 1500, 600, 1000) << QList<QPointF>() << QPointF(0, 2000) << QPointF(0, -2000)
-                              << int(Failure::None) << 2 << 5200.0 << 99.0;
-    // Inside a hole the zone is open, so the leg needs no detour, but it surrounds the hole
-    QTest::newRow("within hole") << _square(2000) << _square(1500) << QPointF(-1000, -1000) << QPointF(1000, 1000) << int(Failure::None) << 0 << 0.0
-                                 << 99.0;
-    QTest::newRow("into hole") << _square(2000) << _square(1500) << QPointF(-3000, 0) << QPointF(0, 0) << int(Failure::Enclosed) << 0 << 0.0 << 0.0;
-    QTest::newRow("start inside") << _square(500) << QList<QPointF>() << QPointF(0, 0) << QPointF(2000, 0) << int(Failure::StartInside) << 0 << 0.0 << 0.0;
-    QTest::newRow("end inside") << _square(500) << QList<QPointF>() << QPointF(-2000, 0) << QPointF(100, 100) << int(Failure::EndInside) << 0 << 0.0 << 0.0;
-    // Detailed outlines are simplified outward, but not near the ends: the start is outside the bay of the east side,
-    // which the simplified outline closes
-    QList<QPointF> bay = { { -500, -500 } };
-    for (int i = 0; i <= 30; i++) {
-        bay.append(QPointF(500 - (20 * std::sin(i * M_PI / 30)), -500 + (i * 1000.0 / 30)));
-    }
-    bay.append(QPointF(-500, 500));
-    QTest::newRow("start near detailed") << bay << QList<QPointF>() << QPointF(490, 0) << QPointF(-2000, 0) << int(Failure::None) << 1 << 0.0 << 8.0;
-}
-
-void GeoZonePlanningTest::_testRouteConcave()
-{
-    QFETCH(QList<QPointF>, ring);
-    QFETCH(QList<QPointF>, hole);
-    QFETCH(QPointF, start);
-    QFETCH(QPointF, end);
-    QFETCH(int, failure);
-    QFETCH(int, minWaypoints);
-    QFETCH(double, maxLength);
-    QFETCH(double, clearance);
-
-    const GeoZoneGeometry::LocalProjection projection(QGeoCoordinate(47, 8));
-    ZoneOwner owner;
-    const GeoZone *const zone = _localPolygonZone(owner, projection, QStringLiteral("U"), ring, hole);
-    const QGeoCoordinate from = projection.toGeo(start);
-    const QGeoCoordinate to = projection.toGeo(end);
-    const GeoZoneRouteSearch::Settings settings;
-    const GeoZoneRouteSearch::Route route = GeoZoneRouteSearch::detourAround(from, to, { zone }, settings);
-    QCOMPARE(int(route.failure), failure);
-    if (!route.isValid()) {
-        QCOMPARE(route.zones, QStringList{ QStringLiteral("U") });
-        return;
-    }
-    QVERIFY2(route.waypoints.count() >= minWaypoints, qPrintable(QString::number(route.waypoints.count())));
-    const QList<QGeoCoordinate> path = _routePath(from, route, to);
-    QVERIFY(!zone->intersectsPath(path));
-    // The margin from the concave outline, not only from its corners
-    const double pathClearance = _pathClearance(path, { zone });
-    QVERIFY2(pathClearance > clearance, qPrintable(QString::number(pathClearance)));
-    QVERIFY(_pathClearance(path.mid(1, path.count() - 2), { zone }) > (settings.margin - 1));
-    if (maxLength > 0) {
-        QVERIFY2(route.length < maxLength, qPrintable(QString::number(route.length)));
-    }
-    QVERIFY(route.statistics.rounds >= 1);
-}
-
-void GeoZonePlanningTest::_testRouteVertical_data()
-{
-    QTest::addColumn<double>("radius");
-    QTest::addColumn<double>("floor");          ///< Meters AMSL, NaN for the ground
-    QTest::addColumn<double>("ceiling");        ///< Meters AMSL, NaN without
-    QTest::addColumn<double>("terrain");        ///< Meters AMSL, of a hill of 600 m radius at the zone center with hill
-    QTest::addColumn<bool>("hill");             ///< The terrain is 0 elsewhere
-    QTest::addColumn<int>("best");              ///< Kind, -1 without
-    QTest::addColumn<int>("climbFailure");
-    QTest::addColumn<int>("descentFailure");
-    QTest::addColumn<double>("climbLimit");     ///< Height above ground of the failed climb, NaN to skip
-    QTest::addColumn<double>("descentLimit");   ///< Height above ground of the failed descent, NaN to skip
-
-    using Failure = GeoZoneRouteSearch::Failure;
-    using Kind = GeoZoneRouteSearch::Kind;
-    const double nan = qQNaN();
-    // The leg flies at 50 m AMSL from 6 km west to 6 km east of the zone center
-    QTest::newRow("climb cheaper") << 3000.0 << nan << 100.0 << 0.0 << false << int(Kind::Climb) << int(Failure::None) << int(Failure::ReachesGround)
-                                   << nan << nan;
-    QTest::newRow("ceiling too high") << 3000.0 << nan << 500.0 << 0.0 << false << int(Kind::Detour) << int(Failure::AboveMaxAltitude)
-                                      << int(Failure::ReachesGround) << 510.0 << nan;
-    QTest::newRow("detour cheaper") << 300.0 << nan << 100.0 << 0.0 << false << int(Kind::Detour) << int(Failure::None) << int(Failure::ReachesGround)
-                                    << nan << nan;
-    QTest::newRow("descent") << 3000.0 << 40.0 << 1000.0 << 0.0 << false << int(Kind::Descent) << int(Failure::AboveMaxAltitude) << int(Failure::None)
-                             << 1010.0 << nan;
-    QTest::newRow("descent too low") << 3000.0 << 40.0 << 1000.0 << 25.0 << false << int(Kind::Detour) << int(Failure::AboveMaxAltitude)
-                                     << int(Failure::BelowMinClearance) << 985.0 << 5.0;
-    QTest::newRow("descent over hill") << 3000.0 << 40.0 << 1000.0 << 25.0 << true << int(Kind::Detour) << int(Failure::AboveMaxAltitude)
-                                       << int(Failure::BelowMinClearance) << 1010.0 << 5.0;
-    QTest::newRow("descent terrain unknown") << 3000.0 << 40.0 << 1000.0 << nan << false << int(Kind::Detour) << int(Failure::TerrainUnknown)
-                                             << int(Failure::TerrainUnknown) << nan << nan;
-}
-
-void GeoZonePlanningTest::_testRouteVertical()
-{
-    QFETCH(double, radius);
-    QFETCH(double, floor);
-    QFETCH(double, ceiling);
-    QFETCH(double, terrain);
-    QFETCH(bool, hill);
-    QFETCH(int, best);
-    QFETCH(int, climbFailure);
-    QFETCH(int, descentFailure);
-    QFETCH(double, climbLimit);
-    QFETCH(double, descentLimit);
-
-    const QGeoCoordinate center(47, 8);
-    QJsonObject feature = _circleFeature(QStringLiteral("Z"), QStringLiteral("PROHIBITED"), center, radius);
-    if (!qIsNaN(floor) || !qIsNaN(ceiling)) {
-        feature = _withLimits(feature, qIsNaN(floor) ? 0 : floor, qIsNaN(floor) ? QStringLiteral("AGL") : QStringLiteral("AMSL"), ceiling, QStringLiteral("AMSL"));
-    }
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
-
-    const GeoZonePathEvaluator::TerrainLookup lookup = [&center, terrain, hill](const QGeoCoordinate &coordinate) {
-        return (!hill || (coordinate.distanceTo(center) < 600)) ? terrain : 0.0;
-    };
-    const GeoZonePolicy policy = GeoZonePolicy::routing(QDateTime(), QDateTime());
-    GeoZoneRouteSearch search(manager.catalog(), policy);
-    search.setTerrainLookup(lookup);
-    GeoZoneRouteSearch::Leg leg;
-    leg.from = GeoZone::Position{ center.atDistanceAndAzimuth(6000, 270), 50 };
-    leg.to = GeoZone::Position{ center.atDistanceAndAzimuth(6000, 90), 50 };
-    const GeoZoneRouteSearch::Result result = search.plan(leg);
-    QCOMPARE(result.crossedZones, QStringList{ QStringLiteral("Z") });
-    QCOMPARE(result.routes.count(), 3);
-    const GeoZoneRouteSearch::Route *const bestRoute = result.best();
-    QVERIFY(bestRoute);
-    QCOMPARE(int(bestRoute->kind), best);
-    for (const GeoZoneRouteSearch::Route &route : result.routes) {
-        if (route.kind == GeoZoneRouteSearch::Kind::Detour) {
-            QVERIFY(route.isValid());
-        } else {
-            const bool climb = (route.kind == GeoZoneRouteSearch::Kind::Climb);
-            QVERIFY2(int(route.failure) == (climb ? climbFailure : descentFailure), qPrintable(QStringLiteral("%1 %2").arg(int(route.kind)).arg(int(route.failure))));
-            const double limit = climb ? climbLimit : descentLimit;
-            if (!qIsNaN(limit)) {
-                QVERIFY2(_near(route.limit, limit), qPrintable(QString::number(route.limit)));
-            }
-        }
-        if (!route.isValid()) {
-            QCOMPARE(route.zones, QStringList{ QStringLiteral("Z") });
-            continue;
-        }
-        // Valid routes keep out of the zone, as the evaluator finds
-        GeoZonePathEvaluator evaluator(manager.catalog(), policy);
-        evaluator.setTerrainLookup(lookup);
-        QList<GeoZone::Position> positions;
-        if (route.kind == GeoZoneRouteSearch::Kind::Detour) {
-            for (const QGeoCoordinate &coordinate : _routePath(leg.from.coordinate, route, leg.to.coordinate)) {
-                positions.append(GeoZone::Position{ coordinate, 50 });
-            }
-            QVERIFY(_pathClearance(_routePath(leg.from.coordinate, route, leg.to.coordinate), manager.catalog().search(QStringLiteral("Z"), 1), 20) > 99);
-            QVERIFY(_near(route.cost, route.length - leg.from.coordinate.distanceTo(leg.to.coordinate), 5));
-        } else {
-            const double target = (route.kind == GeoZoneRouteSearch::Kind::Climb) ? (ceiling + 10) : (floor - 10);
-            QVERIFY(_near(route.altitude, target, 0.01));
-            QVERIFY(_near(route.fromAltitude, target, 0.01));
-            QVERIFY(_near(route.toAltitude, target, 0.01));
-            QVERIFY(_near(route.cost, std::abs(target - 50) * (search.settings().climbWeight + search.settings().descentWeight), 0.1));
-            positions = { GeoZone::Position{ leg.from.coordinate, route.fromAltitude }, GeoZone::Position{ leg.to.coordinate, route.toAltitude } };
-        }
-        QVERIFY(evaluator.evaluate({ GeoZonePathEvaluator::Path::fromPositions(positions) }).activeEnteredZones().isEmpty());
-    }
-}
-
-void GeoZonePlanningTest::_testRouteFailures()
-{
-    const QGeoCoordinate center(47, 8);
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    // A wall of 20 km across the leg, and a zone around the start
-    const GeoZoneGeometry::LocalProjection projection(center);
-    QList<QGeoCoordinate> wall;
-    for (const QPointF &point : { QPointF(-100, -10000), QPointF(100, -10000), QPointF(100, 10000), QPointF(-100, 10000) }) {
-        wall.append(projection.toGeo(point));
-    }
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
-        _polygonFeature(QStringLiteral("Wall"), QStringLiteral("PROHIBITED"), wall),
-        _circleFeature(QStringLiteral("Start"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 90), 300) }), errorString), qPrintable(errorString));
-    GeoZoneRouteSearch search(manager.catalog(), GeoZonePolicy::routing(QDateTime(), QDateTime()));
-    search.setTerrainLookup([](const QGeoCoordinate &) { return 0.0; });
-    const auto failureOf = [](const GeoZoneRouteSearch::Result &result, GeoZoneRouteSearch::Kind kind) {
-        for (const GeoZoneRouteSearch::Route &route : result.routes) {
-            if (route.kind == kind) {
-                return route;
-            }
-        }
-        return GeoZoneRouteSearch::Route();
-    };
-
-    // Going around the wall is longer than the limit, three times the leg or 3 km more
-    GeoZoneRouteSearch::Leg leg{ GeoZone::Position{ projection.toGeo(QPointF(-500, 0)), 50 }, GeoZone::Position{ projection.toGeo(QPointF(500, 0)), 50 } };
-    GeoZoneRouteSearch::Result result = search.plan(leg);
-    QVERIFY(!result.best());
-    GeoZoneRouteSearch::Route detour = failureOf(result, GeoZoneRouteSearch::Kind::Detour);
-    QCOMPARE(detour.failure, GeoZoneRouteSearch::Failure::TooLong);
-    QCOMPARE(detour.zones, QStringList{ QStringLiteral("Wall") });
-    QVERIFY(_near(detour.limit, 4000, 1));
-    QVERIFY2(detour.length > 20000, qPrintable(QString::number(detour.length)));
-    QCOMPARE(failureOf(result, GeoZoneRouteSearch::Kind::Climb).failure, GeoZoneRouteSearch::Failure::NoCeiling);
-    QCOMPARE(failureOf(result, GeoZoneRouteSearch::Kind::Descent).failure, GeoZoneRouteSearch::Failure::ReachesGround);
-    // Unless the leg is long enough
-    GeoZoneRouteSearch::Settings settings;
-    settings.maxDetourFactor = 30;
-    search.setSettings(settings);
-    QVERIFY(search.plan(leg).best());
-    search.setSettings(GeoZoneRouteSearch::Settings());
-
-    // From inside a zone
-    leg.from = GeoZone::Position{ center.atDistanceAndAzimuth(5000, 90), 50 };
-    leg.to = GeoZone::Position{ center.atDistanceAndAzimuth(5000, 90).atDistanceAndAzimuth(2000, 0), 50 };
-    detour = failureOf(search.plan(leg), GeoZoneRouteSearch::Kind::Detour);
-    QCOMPARE(detour.failure, GeoZoneRouteSearch::Failure::StartInside);
-    QCOMPARE(detour.zones, QStringList{ QStringLiteral("Start") });
-    std::swap(leg.from, leg.to);
-    QCOMPARE(failureOf(search.plan(leg), GeoZoneRouteSearch::Kind::Detour).failure, GeoZoneRouteSearch::Failure::EndInside);
-
-    // Without altitudes, only a detour
-    leg = GeoZoneRouteSearch::Leg{ GeoZone::Position{ center.atDistanceAndAzimuth(5000, 270) }, GeoZone::Position{ center.atDistanceAndAzimuth(5000, 90) } };
-    leg.from.coordinate = leg.from.coordinate.atDistanceAndAzimuth(3000, 0);
-    leg.to.coordinate = leg.to.coordinate.atDistanceAndAzimuth(3000, 0);
-    result = search.plan(leg);
-    QCOMPARE(failureOf(result, GeoZoneRouteSearch::Kind::Climb).failure, GeoZoneRouteSearch::Failure::AltitudeUnknown);
-
-    // Cancelled before or during the search
-    GeoZoneCancelToken cancel;
-    cancel.cancel();
-    search.setCancelToken(cancel);
-    result = search.plan(leg);
-    QVERIFY(result.cancelled);
-    QVERIFY(result.routes.isEmpty());
-    QCOMPARE(GeoZoneRouteSearch::detourAround(leg.from.coordinate, leg.to.coordinate, manager.catalog().search(QStringLiteral("Wall"), 1), settings, cancel).failure,
-             GeoZoneRouteSearch::Failure::Cancelled);
-}
-
-void GeoZonePlanningTest::_testRouteMaze()
-{
-    // A leg of 20 km through a row of a maze of 1200 zones, whose detour took a minute of a debug build when A* tested the
-    // edges from each node to all others, with 4 million visibility tests
-    const QGeoCoordinate southWest(46.5, 7.5);
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("maze.json"), _mazeFeatures(southWest, 40, 30, 420, 7)), errorString), qPrintable(errorString));
-    QCOMPARE(manager.catalog().zones().count(), 1200);
-    const GeoZoneGeometry::LocalProjection projection(southWest);
-    const GeoZoneRouteSearch::Leg leg{ GeoZone::Position{ projection.toGeo(QPointF(-1000, 6090)), 50 },
-                                       GeoZone::Position{ projection.toGeo(QPointF(19000, 6090)), 50 } };
-    const GeoZonePolicy policy = GeoZonePolicy::routing(QDateTime(), QDateTime());
-    GeoZoneRouteSearch search(manager.catalog(), policy);
-    search.setTerrainLookup([](const QGeoCoordinate &) { return 0.0; });
-
-    QElapsedTimer timer;
-    timer.start();
-    const GeoZoneRouteSearch::Route detour = search.detour(leg);
-    const qint64 elapsed = timer.elapsed();
-    QVERIFY2(detour.isValid(), qPrintable(QString::number(int(detour.failure))));
-    // Generous for debug builds with sanitizers on a busy machine
-    QVERIFY2(elapsed < 30000, qPrintable(QString::number(elapsed)));
-    QVERIFY2(detour.statistics.visibilityTests < 1000000, qPrintable(QString::number(detour.statistics.visibilityTests)));
-    QVERIFY2(detour.statistics.work < search.settings().maxSearchWork, qPrintable(QString::number(detour.statistics.work)));
-    // Through the maze, within 2% of the shortest detour, 24672 m, which a search of all edges finds
-    QVERIFY2(detour.length < (24672 * 1.02), qPrintable(QString::number(detour.length)));
-    QVERIFY(detour.zones.count() > 10);
-    const QList<QGeoCoordinate> path = _routePath(leg.from.coordinate, detour, leg.to.coordinate);
-    QList<GeoZone::Position> positions;
-    for (const QGeoCoordinate &coordinate : path) {
-        positions.append(GeoZone::Position{ coordinate, 50 });
-    }
-    GeoZonePathEvaluator evaluator(manager.catalog(), policy);
-    QVERIFY(evaluator.evaluate({ GeoZonePathEvaluator::Path::fromPositions(positions) }).activeEnteredZones().isEmpty());
-
-    // Searches stop at the limit of their work
-    GeoZoneRouteSearch::Settings settings;
-    settings.maxSearchWork = 100000;
-    search.setSettings(settings);
-    const GeoZoneRouteSearch::Route limited = search.detour(leg);
-    QCOMPARE(limited.failure, GeoZoneRouteSearch::Failure::SearchLimit);
-    QCOMPARE(limited.zones, detour.zones);
-    QVERIFY(limited.waypoints.isEmpty());
-    QVERIFY2(limited.statistics.work < (2 * (settings.maxSearchWork + 100000)), qPrintable(QString::number(limited.statistics.work)));
 }
 
 void GeoZonePlanningTest::_testRoutePlannerWorker()

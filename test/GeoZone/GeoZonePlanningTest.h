@@ -16,15 +16,11 @@ class GeoZonePlanningTest : public UnitTest
     Q_OBJECT
 
 private slots:
-    void _testPathHits();
-    void _testEvaluatorCrossings();
-    void _testEvaluatorAltitudes();
-    void _testEvaluatorUnknownTerrain();
-    void _testEvaluatorGreatCircles();
-    void _testEvaluatorApproximations();
-    void _testEvaluatorSchedules();
+    void _testGuidedPathWarning();
+    void _testApproximationReports();
+    void _testMissionPathTimes();
     void _testFenceExcludes();
-    void _testAntimeridianQueries();
+    void _testAntimeridianProfile();
     void _testMissionCheck();
     void _testMissionControllerSwitch();
     void _testMissionCoverage();
@@ -33,19 +29,13 @@ private slots:
     void _testMissionContingencies();
     void _testMissionReturnParameters();
     void _testAuthorisations();
-    void _testBriefing();
+    void _testBriefingDocuments();
     void _testBriefingExport();
     void _testPlanAudit();
     void _testPlanSave();
     void _testUploadReasons();
     void _testPlannedStartPerPlan();
     void _testRoutePlanner();
-    void _testRouteConcave_data();
-    void _testRouteConcave();
-    void _testRouteVertical_data();
-    void _testRouteVertical();
-    void _testRouteFailures();
-    void _testRouteMaze();
     void _testRoutePlannerWorker();
     void _testProfileBands();
     void _testGeoFenceImport();
