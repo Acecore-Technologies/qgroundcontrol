@@ -25,7 +25,9 @@
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QSaveFile>
 #include <QtCore/QLocale>
 #include <QtCore/QStandardPaths>
@@ -43,6 +45,34 @@ namespace {
 QString defaultStorageDir()
 {
     return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("GeoZones"));
+}
+
+QString toLocalFileName(const QString &fileName)
+{
+    return fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+}
+
+/// @return The publishers of the trustedPackPublishers setting, a JSON array of objects with name and publicKey
+QList<GeoZonePackSignature::Publisher> parsePublishers(const QString &json)
+{
+    QList<GeoZonePackSignature::Publisher> publishers;
+    for (const QJsonValue &value : QJsonDocument::fromJson(json.toUtf8()).array()) {
+        const QJsonObject object = value.toObject();
+        const QByteArray publicKey = GeoZonePackSignature::parsePublicKey(object.value(QStringLiteral("publicKey")).toString());
+        if (!publicKey.isEmpty()) {
+            publishers.append(GeoZonePackSignature::Publisher{ object.value(QStringLiteral("name")).toString(), publicKey });
+        }
+    }
+    return publishers;
+}
+
+QString publishersJson(const QList<GeoZonePackSignature::Publisher> &publishers)
+{
+    QJsonArray array;
+    for (const GeoZonePackSignature::Publisher &publisher : publishers) {
+        array.append(QJsonObject{ { QStringLiteral("name"), publisher.name }, { QStringLiteral("publicKey"), QString::fromLatin1(publisher.publicKey.toBase64()) } });
+    }
+    return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
 }
 
 } // namespace
@@ -68,6 +98,11 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     _repository->setFollowArea(settings->followAreaOfInterest()->rawValue().toBool());
     (void) connect(settings->areaOfInterestMargin(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setAreaMargin(value.toDouble()); });
     (void) connect(settings->followAreaOfInterest(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowArea(value.toBool()); });
+    _updatePackSigning();
+    _updateTrustedPublishers();
+    (void) connect(settings->packSigningKeyFile(), &Fact::rawValueChanged, this, &GeoZoneManager::_updatePackSigning);
+    (void) connect(settings->packPublisherName(), &Fact::rawValueChanged, this, &GeoZoneManager::_updatePackSigning);
+    (void) connect(settings->trustedPackPublishers(), &Fact::rawValueChanged, this, &GeoZoneManager::_updateTrustedPublishers);
 
     _activeTimer->setInterval(_activeUpdateIntervalMSecs);
     (void) connect(_activeTimer, &QTimer::timeout, this, &GeoZoneManager::_updateActive);
@@ -150,7 +185,9 @@ bool GeoZoneManager::exportPack(const QString &fileName, const QStringList &keys
         emit fileOperationFinished(false, tr("The geozone pack could not be saved to %1: %2").arg(localFileName, errorString));
         return false;
     }
-    emit fileOperationFinished(true, tr("The geozone pack was saved to %1.").arg(localFileName));
+    const QString keyId = packKeyId();
+    emit fileOperationFinished(true, keyId.isEmpty() ? tr("The geozone pack was saved to %1, unsigned.").arg(localFileName)
+                                                     : tr("The geozone pack was saved to %1, signed with the key %2.").arg(localFileName, keyId));
     return true;
 }
 
@@ -158,16 +195,111 @@ bool GeoZoneManager::importPack(const QString &fileName)
 {
     const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
     QString errorString;
-    const int count = _repository->importPack(localFileName, errorString);
+    QString signatureText;
+    const int count = _repository->importPack(localFileName, errorString, &signatureText);
     if (count < 0) {
         emit fileOperationFinished(false, errorString);
         return false;
     }
-    QString message = tr("%n geozone source(s) imported from %1.", nullptr, count).arg(QFileInfo(localFileName).fileName());
+    QString message = tr("%n geozone source(s) imported from %1.", nullptr, count).arg(QFileInfo(localFileName).fileName()) + QLatin1Char(' ') + signatureText;
     if (!errorString.isEmpty()) {
         message += QStringLiteral("\n") + tr("Left out:") + QStringLiteral("\n") + errorString;
     }
     emit fileOperationFinished(errorString.isEmpty(), message);
+    return true;
+}
+
+void GeoZoneManager::_updatePackSigning()
+{
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    _repository->setPackSigner(toLocalFileName(settings->packSigningKeyFile()->rawValue().toString().trimmed()), settings->packPublisherName()->rawValue().toString());
+    emit packSigningChanged();
+}
+
+void GeoZoneManager::_updateTrustedPublishers()
+{
+    _repository->setTrustedPublishers(parsePublishers(GeoZoneSettings::instance()->trustedPackPublishers()->rawValue().toString()));
+    emit trustedPublishersChanged();
+}
+
+QByteArray GeoZoneManager::_packPublicKey() const
+{
+    QFile keyFile(toLocalFileName(GeoZoneSettings::instance()->packSigningKeyFile()->rawValue().toString().trimmed()));
+    if (keyFile.fileName().isEmpty() || !keyFile.open(QIODevice::ReadOnly)) {
+        return QByteArray();
+    }
+    QString errorString;
+    return GeoZonePackSignature::publicKey(keyFile.readAll(), errorString);
+}
+
+QString GeoZoneManager::packPublicKey() const
+{
+    return QString::fromLatin1(_packPublicKey().toBase64());
+}
+
+QString GeoZoneManager::packKeyId() const
+{
+    const QByteArray publicKey = _packPublicKey();
+    return publicKey.isEmpty() ? QString() : GeoZonePackSignature::keyId(publicKey);
+}
+
+QVariantList GeoZoneManager::trustedPublishers() const
+{
+    QVariantList publishers;
+    for (const GeoZonePackSignature::Publisher &publisher : _repository->trustedPublishers()) {
+        publishers.append(QVariantMap{
+            { QStringLiteral("name"), publisher.name },
+            { QStringLiteral("publicKey"), QString::fromLatin1(publisher.publicKey.toBase64()) },
+            { QStringLiteral("keyId"), GeoZonePackSignature::keyId(publisher.publicKey) },
+        });
+    }
+    return publishers;
+}
+
+bool GeoZoneManager::trustPublisher(const QString &name, const QString &publicKey)
+{
+    const QByteArray key = GeoZonePackSignature::parsePublicKey(publicKey);
+    if (key.isEmpty()) {
+        emit fileOperationFinished(false, tr("The public key is not an Ed25519 public key in base64 or PEM."));
+        return false;
+    }
+    QList<GeoZonePackSignature::Publisher> publishers = _repository->trustedPublishers();
+    (void) publishers.removeIf([&key](const GeoZonePackSignature::Publisher &publisher) { return publisher.publicKey == key; });
+    publishers.append(GeoZonePackSignature::Publisher{ name.trimmed().isEmpty() ? GeoZonePackSignature::keyId(key) : name.trimmed(), key });
+    GeoZoneSettings::instance()->trustedPackPublishers()->setRawValue(publishersJson(publishers));
+    return true;
+}
+
+void GeoZoneManager::distrustPublisher(const QString &publicKey)
+{
+    const QByteArray key = GeoZonePackSignature::parsePublicKey(publicKey);
+    QList<GeoZonePackSignature::Publisher> publishers = _repository->trustedPublishers();
+    if (publishers.removeIf([&key](const GeoZonePackSignature::Publisher &publisher) { return publisher.publicKey == key; }) > 0) {
+        GeoZoneSettings::instance()->trustedPackPublishers()->setRawValue(publishersJson(publishers));
+    }
+}
+
+bool GeoZoneManager::trustSourcePublisher(const QString &sourceKey)
+{
+    const GeoZoneSource *const source = this->source(sourceKey);
+    if (!source || source->provenance().packPublicKey.isEmpty()) {
+        return false;
+    }
+    return trustPublisher(source->provenance().packSigner, QString::fromLatin1(source->provenance().packPublicKey.toBase64()));
+}
+
+bool GeoZoneManager::createSigningKey(const QString &fileName)
+{
+    const QString localName = toLocalFileName(fileName);
+    const QByteArray privateKey = GeoZonePackSignature::generatePrivateKey();
+    QSaveFile file(localName);
+    if (privateKey.isEmpty() || !file.open(QIODevice::WriteOnly) || (file.write(privateKey) != privateKey.size()) || !file.commit()) {
+        emit fileOperationFinished(false, tr("The pack signing key could not be saved to %1: %2").arg(localName, privateKey.isEmpty() ? tr("signing isn't available") : file.errorString()));
+        return false;
+    }
+    (void) QFile::setPermissions(localName, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    GeoZoneSettings::instance()->packSigningKeyFile()->setRawValue(localName);
+    emit fileOperationFinished(true, tr("A new pack signing key was saved to %1. Keep it private; the public key shown below lets others trust your packs.").arg(localName));
     return true;
 }
 

@@ -20,10 +20,13 @@ class QIODevice;
 /// Offline packs of geozone sources, to take their zones to a computer without network access: a zip archive with
 /// the stored copy of each source in "sources/", and "manifest.json" describing them. The manifest has the format
 /// name and version, when the pack was made, and per source GeoZoneSourceRepository::sourceReport with the file of
-/// its copy and the index entry fields needed to restore it, like its validators and area. Packs hold no secrets.
+/// its copy, the SHA-256 of that file and the index entry fields needed to restore it, like its validators and area.
+/// "signature.json", when the pack is signed, has the Ed25519 signature of the manifest, see GeoZonePackSignature.
+/// Packs hold no secrets. GeoZonePackExchange writes and imports them.
 namespace GeoZonePack {
 
 constexpr const char *manifestName = "manifest.json";
+constexpr const char *signatureName = "signature.json";
 constexpr const char *sourcesDir = "sources/";
 constexpr const char *formatName = "qgc-geozone-pack";
 constexpr int version = 1;
@@ -65,12 +68,15 @@ struct Source {
 };
 
 struct Contents {
+    QByteArray manifestData;    ///< The manifest as in the pack, which the signature signs
+    QByteArray signatureData;   ///< The signature file, empty when the pack isn't signed
     QList<Source> sources;
     QStringList errors;     ///< Of the sources which were left out, like when their copy is damaged
     QString errorString;    ///< Why the pack can't be read, empty when it can
 };
 
-/// Extracts the stored copies of a pack into the directory, checking them against the hashes of their provenance
+/// Extracts the stored copies of a pack into the directory, checking them against their SHA-256 in the manifest and
+/// the hashes of their provenance
 Contents read(const QString &packPath, const QString &directory);
 
 } // namespace GeoZonePack

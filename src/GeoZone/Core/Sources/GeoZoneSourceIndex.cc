@@ -227,6 +227,16 @@ bool GeoZoneSourceIndex::setService(const QString &key, const QJsonObject &servi
     return true;
 }
 
+bool GeoZoneSourceIndex::setProvenance(const QString &key, const QJsonObject &provenance)
+{
+    const auto it = _entries.find(key);
+    if ((it == _entries.end()) || _readOnly || (it->provenance == provenance)) {
+        return false;
+    }
+    it->provenance = provenance;
+    return true;
+}
+
 bool GeoZoneSourceIndex::confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt, qint64 maxAgeSecs)
 {
     // The stored copy is only confirmed current when it is the version the validators belong to

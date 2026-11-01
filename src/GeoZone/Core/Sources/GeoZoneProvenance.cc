@@ -32,6 +32,9 @@ constexpr const char *integrityTextKey = "integrityCheck";
 constexpr const char *importedKey = "imported";
 constexpr const char *packKey = "pack";
 constexpr const char *importedAtKey = "importedAt";
+constexpr const char *packSignatureKey = "packSignature";
+constexpr const char *packSignerKey = "packSigner";
+constexpr const char *packPublicKeyKey = "packKey";
 
 QString shortHash(const QByteArray &hash)
 {
@@ -86,6 +89,11 @@ QJsonObject GeoZoneProvenance::toJson() const
         if (importedAt.isValid()) {
             object.insert(QLatin1String(importedAtKey), importedAt.toUTC().toString(Qt::ISODate));
         }
+        if (packSignature != PackSignature::None) {
+            object.insert(QLatin1String(packSignatureKey), packSignatureToString(packSignature));
+            insert(packSignerKey, packSigner);
+            insert(packPublicKeyKey, QString::fromLatin1(packPublicKey.toBase64()));
+        }
     }
     return object;
 }
@@ -119,7 +127,44 @@ GeoZoneProvenance GeoZoneProvenance::fromJson(const QJsonObject &object)
     provenance.imported = object.value(QLatin1String(importedKey)).toBool();
     provenance.packName = object.value(QLatin1String(packKey)).toString();
     provenance.importedAt = QDateTime::fromString(object.value(QLatin1String(importedAtKey)).toString(), Qt::ISODate);
+    const QString signature = object.value(QLatin1String(packSignatureKey)).toString();
+    for (const PackSignature candidate : { PackSignature::Unsigned, PackSignature::Unverified, PackSignature::Untrusted, PackSignature::Signed }) {
+        if (signature == packSignatureToString(candidate)) {
+            provenance.packSignature = candidate;
+        }
+    }
+    provenance.packSigner = object.value(QLatin1String(packSignerKey)).toString();
+    provenance.packPublicKey = QByteArray::fromBase64(object.value(QLatin1String(packPublicKeyKey)).toString().toLatin1());
     return provenance;
+}
+
+QString GeoZoneProvenance::packSignatureToString(PackSignature signature)
+{
+    switch (signature) {
+    case PackSignature::None: return QString();
+    case PackSignature::Unsigned: return QStringLiteral("unsigned");
+    case PackSignature::Unverified: return QStringLiteral("unverified");
+    case PackSignature::Untrusted: return QStringLiteral("untrusted");
+    case PackSignature::Signed: return QStringLiteral("signed");
+    }
+    return QString();
+}
+
+QString GeoZoneProvenance::packSignatureText() const
+{
+    switch (packSignature) {
+    case PackSignature::None:
+        return QString();
+    case PackSignature::Unsigned:
+        return tr("unsigned");
+    case PackSignature::Unverified:
+        return tr("signature not checked");
+    case PackSignature::Untrusted:
+        return packSigner.isEmpty() ? tr("untrusted signature") : tr("untrusted signature of \"%1\"").arg(packSigner);
+    case PackSignature::Signed:
+        return tr("signed by %1").arg(packSigner);
+    }
+    return QString();
 }
 
 QString GeoZoneProvenance::summary() const
@@ -131,6 +176,9 @@ QString GeoZoneProvenance::summary() const
     QStringList parts;
     if (imported) {
         parts.append(tr("imported from %1 on %2").arg(packName, locale.toString(importedAt.toLocalTime(), QLocale::ShortFormat)));
+        if (const QString signature = packSignatureText(); !signature.isEmpty()) {
+            parts.append(signature);
+        }
     }
     const QUrl url(finalUrl.isEmpty() ? requestUrl : finalUrl);
     if (url.isLocalFile() || url.scheme().isEmpty()) {

@@ -91,6 +91,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(bool         verified        READ verified       NOTIFY changed FINAL)               ///< The data matches the SHA-256 its publisher gave
     Q_PROPERTY(bool         integrityFailed READ integrityFailed NOTIFY changed FINAL)              ///< The last download didn't match the SHA-256 its publisher gave, and wasn't loaded
     Q_PROPERTY(bool         imported        READ imported       NOTIFY changed FINAL)               ///< The data was imported from an offline pack
+    Q_PROPERTY(bool         untrustedPack   READ untrustedPack  NOTIFY changed FINAL)               ///< The pack it was imported from has a valid signature of a publisher who isn't trusted
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
@@ -195,6 +196,7 @@ public:
     QString provenanceText() const { return _provenance.summary(); }
     bool verified() const { return _provenance.integrity == GeoZoneProvenance::Integrity::Verified; }
     bool imported() const { return _provenance.imported; }
+    bool untrustedPack() const { return _provenance.imported && (_provenance.packSignature == GeoZoneProvenance::PackSignature::Untrusted); }
     bool integrityFailed() const { return _integrityFailed; }
     void setIntegrityFailed(bool failed);
 

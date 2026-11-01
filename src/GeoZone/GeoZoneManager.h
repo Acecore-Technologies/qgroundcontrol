@@ -60,6 +60,10 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
     Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< See GeoZoneProviders::serviceTemplateList
     Q_PROPERTY(QString              credentialStoreName READ credentialStoreName CONSTANT FINAL)    ///< Where the secrets of the services are kept, see GeoZoneCredentials
+    Q_PROPERTY(bool                 packSigningAvailable READ packSigningAvailable CONSTANT FINAL)  ///< The build can sign packs and check their signatures
+    Q_PROPERTY(QString              packPublicKey       READ packPublicKey      NOTIFY packSigningChanged FINAL)   ///< Base64 public key of the pack signing key, empty without
+    Q_PROPERTY(QString              packKeyId           READ packKeyId          NOTIFY packSigningChanged FINAL)   ///< See GeoZonePackSignature::keyId
+    Q_PROPERTY(QVariantList         trustedPublishers   READ trustedPublishers  NOTIFY trustedPublishersChanged FINAL) ///< Maps with name, publicKey (base64) and keyId
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
@@ -115,8 +119,20 @@ public:
     /// Writes an offline pack of the sources, see GeoZonePack. fileOperationFinished tells the outcome.
     /// @param keys Of the sources, those turned on when empty
     Q_INVOKABLE bool exportPack(const QString &fileName, const QStringList &keys = QStringList());
-    /// Imports the sources of an offline pack, loaded in the background. fileOperationFinished tells the outcome.
+    /// Imports the sources of an offline pack, loaded in the background. fileOperationFinished tells the outcome and
+    /// how the pack is signed.
     Q_INVOKABLE bool importPack(const QString &fileName);
+
+    /// Trusts the signed packs of a publisher, see GeoZoneSettings::trustedPackPublishers
+    /// @param publicKey Ed25519 public key, see GeoZonePackSignature::parsePublicKey
+    /// @return false when the key isn't valid, fileOperationFinished then tells why
+    Q_INVOKABLE bool trustPublisher(const QString &name, const QString &publicKey);
+    /// No longer trusts the publisher with the base64 public key
+    Q_INVOKABLE void distrustPublisher(const QString &publicKey);
+    /// Trusts the publisher of the pack a source was imported from, with the name the pack gives
+    Q_INVOKABLE bool trustSourcePublisher(const QString &sourceKey);
+    /// Writes a new Ed25519 private key to sign packs with, and selects it. fileOperationFinished tells the outcome.
+    Q_INVOKABLE bool createSigningKey(const QString &fileName);
 
     /// Removes a source, its zones and its stored copy
     Q_INVOKABLE void removeSource(int index) { _repository->removeSource(index); }
@@ -176,6 +192,10 @@ public:
     static QVariantList areaProviders() { return GeoZoneProviders::areaProviders(); }
     static QVariantList serviceTemplates() { return GeoZoneProviders::serviceTemplateList(); }
     static QString credentialStoreName() { return GeoZoneCredentials::storeName(); }
+    static bool packSigningAvailable() { return GeoZonePackSignature::available(); }
+    QString packPublicKey() const;
+    QString packKeyId() const;
+    QVariantList trustedPublishers() const;
     /// See GeoZoneProviders::areaFeedUrl
     Q_INVOKABLE QString areaFeedUrl(const QString &provider, const QGeoRectangle &area) const { return GeoZoneProviders::areaFeedUrl(provider, area); }
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for
@@ -208,12 +228,19 @@ signals:
     void storageFailed(const QString &message); ///< Stored copies can't be read or written, emitted once per session
     void outdatedDataFound(const QString &message); ///< Some sources have outdated data after the startup refresh
     void fileOperationFinished(bool success, const QString &message);  ///< An export or import the user asked for finished
+    void packSigningChanged();
+    void trustedPublishersChanged();
 
 private slots:
     void _updateActive();
 
 private:
     void _endZonesChange(GeoZoneSource *source);
+    /// Applies the pack signing settings to the repository
+    void _updatePackSigning();
+    void _updateTrustedPublishers();
+    /// @return The public key of the pack signing key, empty without
+    QByteArray _packPublicKey() const;
     void _activeVehicleChanged(Vehicle *vehicle);
 
     QmlObjectListModel *_sources = nullptr;     ///< The sources of the repository for QML, deleted before them

@@ -12,6 +12,7 @@ import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
+import QGroundControl.FactControls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.GeoZone
@@ -94,6 +95,26 @@ ColumnLayout {
                 color:              qgcPal.warningText
                 text:               qsTr("The last download did not match the SHA-256 its publisher gave and was not loaded.")
                 visible:            object.integrityFailed
+            }
+
+            // A pack signed by a publisher the user may trust
+            RowLayout {
+                Layout.fillWidth:   true
+                spacing:            _margin
+                visible:            object.untrustedPack
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    wrapMode:           Text.WordWrap
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    color:              qgcPal.warningText
+                    text:               qsTr("The pack it was imported from is signed by a publisher who is not trusted.")
+                }
+
+                QGCButton {
+                    text:       qsTr("Trust Publisher")
+                    onClicked:  _geoZoneManager.trustSourcePublisher(object.key)
+                }
             }
 
             // The secret of a service, like after importing a pack on another computer
@@ -540,6 +561,132 @@ ColumnLayout {
         }
     }
 
+    // Signatures of offline packs: the key signing the packs exported, and the publishers whose packs are trusted
+    QGCButton {
+        Layout.fillWidth:   true
+        text:               qsTr("Pack Signatures...")
+        checkable:          true
+        checked:            packSignatures.visible
+        visible:            _geoZoneManager.packSigningAvailable
+        onClicked:          packSignatures.visible = !packSignatures.visible
+    }
+
+    ColumnLayout {
+        id:                 packSignatures
+        Layout.fillWidth:   true
+        spacing:            _margin
+        visible:            false
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               _geoZoneManager.packPublicKey === "" ?
+                                    qsTr("Exported packs are not signed. Select or create an Ed25519 private key to sign them.") :
+                                    qsTr("Exported packs are signed with the key %1. Give its public key to those importing them:").arg(_geoZoneManager.packKeyId)
+        }
+
+        QGCTextField {
+            Layout.fillWidth:   true
+            readOnly:           true
+            text:               _geoZoneManager.packPublicKey
+            visible:            text !== ""
+        }
+
+        GridLayout {
+            Layout.fillWidth:   true
+            columns:            2
+            columnSpacing:      _margin
+            rowSpacing:         _margin / 2
+
+            QGCLabel { text: qsTr("Signing key") }
+            RowLayout {
+                Layout.fillWidth:   true
+                spacing:            _margin
+
+                FactTextField {
+                    Layout.fillWidth:   true
+                    fact:               _geoZoneSettings.packSigningKeyFile
+                    placeholderText:    qsTr("Private key file (PEM)")
+                }
+
+                QGCButton {
+                    text:       qsTr("Browse...")
+                    onClicked:  signingKeyDialog.openForLoad()
+                }
+
+                QGCButton {
+                    text:       qsTr("New Key...")
+                    onClicked:  newSigningKeyDialog.openForSave()
+                }
+            }
+
+            QGCLabel { text: qsTr("Publisher") }
+            FactTextField {
+                Layout.fillWidth:   true
+                fact:               _geoZoneSettings.packPublisherName
+                placeholderText:    qsTr("Name given in the packs")
+            }
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               _geoZoneManager.trustedPublishers.length === 0 ?
+                                    qsTr("No trusted publishers. Imported packs are marked unsigned, or untrusted when signed.") :
+                                    qsTr("Packs signed by these publishers are marked as signed by them:")
+        }
+
+        Repeater {
+            model: _geoZoneManager.trustedPublishers
+
+            RowLayout {
+                Layout.fillWidth:   true
+                spacing:            _margin
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    elide:              Text.ElideRight
+                    text:               qsTr("%1 (key %2)").arg(modelData.name).arg(modelData.keyId)
+                    textFormat:         Text.PlainText
+                }
+
+                QGCButton {
+                    text:       qsTr("Remove")
+                    onClicked:  _geoZoneManager.distrustPublisher(modelData.publicKey)
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth:   true
+            spacing:            _margin
+
+            QGCTextField {
+                id:                 publisherNameField
+                placeholderText:    qsTr("Name")
+            }
+
+            QGCTextField {
+                id:                 publisherKeyField
+                Layout.fillWidth:   true
+                placeholderText:    qsTr("Public key (base64 or PEM)")
+            }
+
+            QGCButton {
+                text:       qsTr("Trust")
+                enabled:    publisherNameField.text.trim() !== "" && publisherKeyField.text.trim() !== ""
+                onClicked: {
+                    if (_geoZoneManager.trustPublisher(publisherNameField.text, publisherKeyField.text)) {
+                        publisherNameField.text = ""
+                        publisherKeyField.text = ""
+                    }
+                }
+            }
+        }
+    }
+
     RowLayout {
         Layout.fillWidth:   true
         spacing:            _margin
@@ -602,6 +749,31 @@ ColumnLayout {
 
         onAcceptedForSave: (file) => {
             _geoZoneManager.exportPack(file)
+            close()
+        }
+    }
+
+    QGCFileDialog {
+        id:             signingKeyDialog
+        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
+        title:          qsTr("Select Pack Signing Key")
+        nameFilters:    [ qsTr("PEM Files (*.pem)"), qsTr("All Files (*)") ]
+
+        onAcceptedForLoad: (file) => {
+            _geoZoneSettings.packSigningKeyFile.rawValue = file
+            close()
+        }
+    }
+
+    QGCFileDialog {
+        id:             newSigningKeyDialog
+        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
+        title:          qsTr("Save New Pack Signing Key")
+        nameFilters:    [ qsTr("PEM Files (*.pem)") ]
+        defaultSuffix:  "pem"
+
+        onAcceptedForSave: (file) => {
+            _geoZoneManager.createSigningKey(file)
             close()
         }
     }

@@ -87,6 +87,8 @@ public:
     bool setEnabled(const QString &key, bool enabled);
     /// @return true if the source has an entry, which was changed
     bool setService(const QString &key, const QJsonObject &service);
+    /// @return true if the source has an entry, which was changed
+    bool setProvenance(const QString &key, const QJsonObject &provenance);
     /// Records that the server confirmed the stored copy current, when the validators are those of the copy
     /// @return true if the entry was changed
     bool confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt, qint64 maxAgeSecs);

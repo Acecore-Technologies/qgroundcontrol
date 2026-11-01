@@ -217,6 +217,27 @@
     "min":          1,
     "max":          72,
     "default":      2
+},
+{
+    "name":         "packSigningKeyFile",
+    "shortDesc":    "Pack signing key",
+    "longDesc":     "Ed25519 private key file (PEM) signing the exported offline packs. Packs are exported unsigned without one.",
+    "type":         "string",
+    "default":      ""
+},
+{
+    "name":         "packPublisherName",
+    "shortDesc":    "Pack publisher",
+    "longDesc":     "Name given as the publisher of the signed offline packs.",
+    "type":         "string",
+    "default":      ""
+},
+{
+    "name":         "trustedPackPublishers",
+    "shortDesc":    "Trusted pack publishers",
+    "longDesc":     "Publishers whose signed offline packs are trusted: a JSON array of objects with their name and Ed25519 public key in base64.",
+    "type":         "string",
+    "default":      ""
 }
 ]
 }

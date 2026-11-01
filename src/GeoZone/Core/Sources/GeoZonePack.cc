@@ -13,6 +13,7 @@
 #include "GeoZoneZip.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QHash>
@@ -194,6 +195,8 @@ Contents read(const QString &packPath, const QString &directory)
     const bool readOk = GeoZoneZip::forEachFile(archive, suffixes, maxBytes, zipError, [&](const GeoZoneZip::File &file) {
         if (file.name == QLatin1String(manifestName)) {
             manifestData = file.data;
+        } else if (file.name == QLatin1String(signatureName)) {
+            contents.signatureData = file.data;
         } else if (file.name.startsWith(QLatin1String(sourcesDir)) && !file.name.contains(QStringLiteral(".."))) {
             QFile copy(QDir(directory).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".part")));
             if (!copy.open(QIODevice::WriteOnly) || (copy.write(file.data) != file.data.size())) {
@@ -212,6 +215,7 @@ Contents read(const QString &packPath, const QString &directory)
         return contents;
     }
 
+    contents.manifestData = manifestData;
     const QJsonObject manifest = QJsonDocument::fromJson(manifestData).object();
     if (manifest.value(QStringLiteral("format")).toString() != QLatin1String(formatName)) {
         contents.errorString = tr("The file is not a geozone pack.");
@@ -230,13 +234,14 @@ Contents read(const QString &packPath, const QString &directory)
             contents.errors.append(tr("%1: the pack has no data of the source.").arg(name));
             continue;
         }
-        // The copy is the one whose provenance the pack records
+        // The copy is the one the manifest, which the signature covers, and its provenance record
         const QByteArray expectedHash = QByteArray::fromHex(source.value(QStringLiteral("provenance")).toObject().value(QStringLiteral("blake2b256")).toString().toLatin1());
+        const QByteArray expectedSha256 = QByteArray::fromHex(source.value(QStringLiteral("fileSha256")).toString().toLatin1());
         QFile file(filePath);
-        const bool readable = file.open(QIODevice::ReadOnly);
-        const QByteArray hash = readable ? GeoZoneParseCache::hash(file.readAll()) : QByteArray();
+        const QByteArray data = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
         file.close();
-        if (!expectedHash.isEmpty() && (hash != expectedHash)) {
+        if ((!expectedHash.isEmpty() && (GeoZoneParseCache::hash(data) != expectedHash)) ||
+            (!expectedSha256.isEmpty() && (QCryptographicHash::hash(data, QCryptographicHash::Sha256) != expectedSha256))) {
             (void) QFile::remove(filePath);
             contents.errors.append(tr("%1: the data in the pack is damaged.").arg(name));
             continue;

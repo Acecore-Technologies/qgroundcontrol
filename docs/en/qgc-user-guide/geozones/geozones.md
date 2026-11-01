@@ -74,7 +74,7 @@ With **Download the zones around the mission and the vehicle**, a service is req
 
 ### Integrity Checks {#integrity-checks}
 
-If a server sends the SHA-256 of its data in a `Repr-Digest`, `Content-Digest` or `Digest` header, or a service publishes it in a file whose address is given in **SHA-256 URL** (like `{url}.sha256`, in the format `sha256sum` writes), the data is checked against it (the headers of compressed responses are not checked, since they give the SHA-256 of the compressed data). Verified sources say so. Data which doesn't match, or whose SHA-256 can't be downloaded, isn't loaded: the previous data is kept and the source shows that the integrity check failed. Only SHA-256 hashes are checked, not signatures.
+If a server sends the SHA-256 of its data in a `Repr-Digest`, `Content-Digest` or `Digest` header, or a service publishes it in a file whose address is given in **SHA-256 URL** (like `{url}.sha256`, in the format `sha256sum` writes), the data is checked against it (the headers of compressed responses are not checked, since they give the SHA-256 of the compressed data). Verified sources say so. Data which doesn't match, or whose SHA-256 can't be downloaded, isn't loaded: the previous data is kept and the source shows that the integrity check failed. Feeds are checked by SHA-256 only; offline packs can be signed, see [Signed Packs](#signed-packs).
 
 ### Managing Sources {#managing-sources}
 
@@ -90,6 +90,15 @@ Problems found while reading a source are shown below it and in the details of t
 Below each source, _QGroundControl_ shows where and when its data was obtained: the server which answered after redirects, its ETag or modification date, the beginning of the SHA-256 of the data received and whether it was verified or imported from a pack. **Export Provenance...** saves the provenance of all sources as JSON for briefings: per source its name, format, zone count, dates, service (without user or secrets) and provenance, which holds the provider, the address requested and the one which answered with the redirects, the validators, the time of the download, the SHA-256 of the data received, the BLAKE2b-256 hash and size of the stored copy, the area downloaded and the integrity check, the zones added, changed and removed by its last update (`lastChanges`: when, the counts and up to 200 names of each) and, for AIRAC datasets, the cycle (`airac`: its name, effective date and end).
 
 To use the zones on a computer without network access, press **Export Pack...** to save the sources turned on in a zip file, then **Import Pack...** on the other computer. A pack holds the stored copy of each source in `sources/` and `manifest.json` with the provenance of the sources, their dates, validators, areas and services, without secrets. Imported sources replace the sources with the same address or file, keep the dates and provenance of their data, marked as imported from the pack, and are refreshed like other sources when the network is available. Data in the pack which doesn't match the hash of its provenance is left out. A pack can't change how a source already loaded is requested: such sources keep their service and secret and only take the data of the pack. New sources take the service of the pack without its custom headers, and their secret has to be entered; sources whose service would send requests to another server than their feed are left out.
+
+### Signed Packs {#signed-packs}
+
+Packs can be signed, so that those importing them know who made them and that they weren't changed. Press **Pack Signatures...** below the pack buttons:
+
+- To sign the packs you export, select an Ed25519 private key file with **Browse...**, or create one with **New Key...**, and enter your name as **Publisher**. Keep the key file private. The public key shown below the text lets others trust your packs: give it to them by a channel they trust. Keys can also be made with OpenSSL: `openssl genpkey -algorithm ed25519 -out geozones.pem`, whose public key `openssl pkey -in geozones.pem -pubout` prints.
+- To trust the packs of a publisher, enter a name for them and their public key (base64, or PEM as OpenSSL prints it) and press **Trust**. Their keys are shown by a short id, like `681b 5d7f 40bf 39d2`, to compare with the publisher's.
+
+When a pack is imported, the message and the provenance of its sources tell how it is signed: _signed by_ the name you gave a trusted publisher, _untrusted signature_ when it is signed by a key you don't trust (the source then has **Trust Publisher**, which trusts that key with the name the pack gives), or _unsigned_. A pack whose signature doesn't match its content, because it was changed after it was signed, isn't imported, nor are copies which don't match the SHA-256 the signed manifest gives. Unsigned and untrusted packs are imported too: check where they come from. Builds of _QGroundControl_ without OpenSSL can't sign packs or check signatures.
 
 ## Format Support Matrix {#format-support-matrix}
 
@@ -349,6 +358,9 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 | Data Updates | **Outdated live restrictions warning** | 2 hours | 1–72 hours | The data age at which a TFR feed is reported as outdated. |
 | Data Updates | **Download services around the mission and vehicle** | On | | Whether services taking an area download the zones of a new area when the mission or the vehicle leaves the one downloaded. |
 | Data Updates | **Service download margin** | 5000 m | 500–50000 m | The distance around the mission and the vehicle downloaded from services taking an area. |
+| Sources > Pack Signatures | **Signing key** | None | | The Ed25519 private key file (PEM) signing exported packs. |
+| Sources > Pack Signatures | **Publisher** | None | | The name signed packs give for their publisher. |
+| Sources > Pack Signatures | Trusted publishers | None | | The publishers, with their public keys, whose signed packs are trusted. |
 
 ## Limitations {#limitations}
 
@@ -359,6 +371,6 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 - Schedules with unknown days are taken as every day, which isn't marked as approximate; the zone details show the problem.
 - Return and contingency paths are estimates, see [Return and Contingency Paths](#return-and-contingency-paths).
 - GeoFences made from zones have no altitude limits and no holes, and the ArduPilot fence storage is estimated.
-- Secrets of services are stored unencrypted in the settings, and only SHA-256 hashes are checked, not signatures.
+- Secrets of services are stored unencrypted in the settings. Feeds are only checked by SHA-256, not signatures; offline packs are signed only in builds with OpenSSL.
 
 Developers can find the architecture of the geozone module in the [Geozones developer guide](../../qgc-dev-guide/geozones.md).

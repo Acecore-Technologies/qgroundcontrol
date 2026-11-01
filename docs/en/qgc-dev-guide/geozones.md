@@ -9,7 +9,7 @@ The module has two layers:
 
 | Directory | Contents |
 | --------- | -------- |
-| `src/GeoZone/Core` | `GeoZoneCore`, a static library which only depends on Qt (Core and Positioning, privately Concurrent, Network and zlib), so it can be tested and fuzzed without _QGroundControl_. |
+| `src/GeoZone/Core` | `GeoZoneCore`, a static library which only depends on Qt (Core and Positioning, privately Concurrent, Network and zlib, and OpenSSL's libcrypto when found, see [Pack Signatures](#pack-signatures)), so it can be tested and fuzzed without _QGroundControl_. |
 | `src/GeoZone/Core/Model` | The zones (`GeoZone`, its `Data`, `Volume` and schedule in `GeoZoneSchedule`), the vertical datums of their limits (`GeoZoneVertical`), their translated display texts in the units of the application (`GeoZoneText`, so that the model has no translations or units), their geometry (`GeoZoneGeometry`, see [Geometry](#geometry), `GeoZoneBox`, `GeoZoneShape` for the maps), the spatial index (`GeoZoneIndex`), the `GeoZoneCatalog` of all zones, `GeoZonePolicy` (which zones a check applies to) and `GeoZoneInfo`, the value QML gets. |
 | `src/GeoZone/Core/Formats` | `GeoZoneParser`, the `GeoZoneFormat` interface with one class per format, the helpers shared by the formats (`GeoZoneParserUtils`) and the zip reader (`GeoZoneZip`). |
 | `src/GeoZone/Core/Sources` | The sources and how they are obtained: `GeoZoneSourceRepository`, `GeoZoneSource`, `GeoZoneFeedFetch`, `GeoZoneDownloader`, `GeoZoneRefreshScheduler`, `GeoZoneLoader`, `GeoZoneStore`, `GeoZoneSourceIndex`, `GeoZoneParseCache`, the known services (`GeoZoneProviders`, `GeoZoneService`), `GeoZoneServiceRegistry` (the services of the sources with their secrets in `GeoZoneCredentials` and their OAuth2 tokens), `GeoZoneProvenance` and offline packs (`GeoZonePack`, `GeoZonePackExchange`). |
@@ -174,8 +174,19 @@ The services _QGroundControl_ knows are listed in `GeoZoneProviders` (`src/GeoZo
 | ---- | -------- |
 | `manifest.json` | `format` (`qgc-geozone-pack`), `version` (1), `createdAt`, `generator` and `sources`: per source the fields of its index entry (`GeoZoneSourceIndex::entryToJson()`) and of `GeoZoneSourceRepository::sourceReport()`, `file` naming its copy in the pack, and its `service` without custom headers (`GeoZoneService::shareableJson()`). |
 | `sources/<name>` | The stored copy of each source, under its name in the store. Packs of earlier versions name all copies `.json`; the content decides how they are read. |
+| `signature.json` | In signed packs: `algorithm` (`Ed25519`), `publisher` (the name the publisher gives), `publicKey` (the raw 32 byte key in base64) and `signature` (base64) of the bytes of `manifest.json`. |
 
-Imported copies are checked against the BLAKE2b-256 hash of their provenance, and their services follow the rules of [Origins and Credentials](#origins-and-credentials). `GeoZoneManagerTest::_testOfflinePack()` and `_testStoredFileNames()` test them.
+The manifest gives the SHA-256 of each copy (`fileSha256`), so the signature of the manifest covers the copies too. Imported copies are checked against it and against the BLAKE2b-256 hash of their provenance, and their services follow the rules of [Origins and Credentials](#origins-and-credentials). `GeoZoneManagerTest::_testOfflinePack()` and `_testStoredFileNames()` test them.
+
+### Pack Signatures {#pack-signatures}
+
+`GeoZonePackSignature` signs and checks with the Ed25519 implementation of OpenSSL's libcrypto, which `src/GeoZone/Core/CMakeLists.txt` links when `find_package(OpenSSL COMPONENTS Crypto)` finds version 1.1.1 or later (defining `GEOZONE_HAVE_OPENSSL`); Qt has no Ed25519. Builds without it export unsigned packs, mark signed imports as `unverified` and hide the signature settings (`GeoZoneManager::packSigningAvailable`). Linux builds then need `libcrypto.so.3` at run time, which Qt Network loads anyway for https.
+
+- **Export**: the repository signs with the PEM private key of the **packSigningKeyFile** setting and gives **packPublisherName** as publisher (`GeoZoneSourceRepository::setPackSigner()`). `GeoZoneManager::createSigningKey()` writes a new key, readable by its owner only.
+- **Import**: `GeoZonePackExchange::read()` checks the signature of a signed pack. A signature which doesn't match the manifest makes the whole pack unreadable. Otherwise the provenance of the imported sources records `packSignature` (`unsigned`, `unverified`, `untrusted` or `signed`), `packSigner` (the trusted name, or the name the pack gives) and `packKey`.
+- **Trust**: **trustedPackPublishers** holds a JSON array of `{ "name", "publicKey" }`, the key in base64 (raw or SubjectPublicKeyInfo) or PEM, see `GeoZonePackSignature::parsePublicKey()`. Changing it re-evaluates the sources imported from signed packs (`GeoZoneSourceRepository::setTrustedPublishers()`), whose signatures were checked at import. Keys are shown by `GeoZonePackSignature::keyId()`, the first 16 hexadecimal digits of their SHA-256.
+
+`GeoZoneManagerTest::_testSignedPacks()` generates keys and tests signing, the three trust states, trusting a publisher from a source, tampered manifests and replaced copies.
 
 ## Origins and Credentials {#origins-and-credentials}
 
@@ -186,6 +197,8 @@ The secrets of the services, their custom headers and the area of interest only 
 - A secret is kept for the authentication target of its service (`GeoZoneService::sameAuthTarget()`: the authentication and, for OAuth2, the token URL). Setting a service with another target forgets the secret and the token.
 - Imported packs never replace the service of a source already known. A new source takes the service of the pack without its `headers`, forgets any secret kept for its URL, and is left out when `otherOrigins()` isn't empty.
 - Packs and provenance reports write `GeoZoneService::shareableJson()`, without the headers; the index of the sources keeps them locally.
+
+`GeoZoneManagerTest::_testPackServiceTrust()` and `_testDownloadRedirects()` test these rules with two `TestFeedServer`s, whose different ports make different origins.
 
 ### Credentials Backend {#credentials-backend}
 
@@ -198,10 +211,6 @@ _QGroundControl_ doesn't install a secure store yet. [QtKeychain](https://github
 1. Install it in `GeoZoneModule` before `GeoZoneManager::init()`, falling back to the settings when the keychain doesn't answer.
 
 `GeoZoneManagerTest::_testCredentialStores()` tests the migration and the fallback with a store in memory.
-
-### Tests {#origins-tests}
-
-`GeoZoneManagerTest::_testPackServiceTrust()` and `_testDownloadRedirects()` test these rules with two `TestFeedServer`s, whose different ports make different origins.
 
 ## Testing {#testing}
 

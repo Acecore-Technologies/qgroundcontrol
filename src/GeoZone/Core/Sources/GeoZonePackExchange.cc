@@ -12,13 +12,14 @@
 #include "GeoZonePack.h"
 #include "GeoZoneSource.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSaveFile>
 
-bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QString &packPath, QString &errorString)
+bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QString &packPath, QString &errorString, const Signer &signer)
 {
     QSaveFile file(packPath);
     if (!file.open(QIODevice::WriteOnly)) {
@@ -34,7 +35,8 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
             return false;
         }
         const QString name = QLatin1String(GeoZonePack::sourcesDir) + source.entry.fileName;
-        if (!writer.add(name, stored.readAll())) {
+        const QByteArray data = stored.readAll();
+        if (!writer.add(name, data)) {
             errorString = writer.errorString();
             return false;
         }
@@ -45,6 +47,8 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
             object.insert(it.key(), it.value());
         }
         object.insert(QStringLiteral("file"), name);
+        // In the manifest the signature covers
+        object.insert(QStringLiteral("fileSha256"), QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()));
         // The report has them as lastChanges
         (void) object.remove(QStringLiteral("changes"));
         if (source.service.isEmpty()) {
@@ -67,7 +71,29 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
         { QStringLiteral("generator"), QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion()).trimmed() },
         { QStringLiteral("sources"), manifestSources },
     };
-    if (!writer.add(QLatin1String(GeoZonePack::manifestName), QJsonDocument(manifest).toJson()) || !writer.finish()) {
+    const QByteArray manifestData = QJsonDocument(manifest).toJson();
+    if (!writer.add(QLatin1String(GeoZonePack::manifestName), manifestData)) {
+        errorString = writer.errorString();
+        return false;
+    }
+    if (!signer.privateKeyPem.isEmpty()) {
+        const QByteArray publicKey = GeoZonePackSignature::publicKey(signer.privateKeyPem, errorString);
+        const QByteArray signature = publicKey.isEmpty() ? QByteArray() : GeoZonePackSignature::sign(signer.privateKeyPem, manifestData, errorString);
+        if (signature.isEmpty()) {
+            return false;
+        }
+        const QJsonObject signatureObject{
+            { QStringLiteral("algorithm"), QLatin1String(GeoZonePackSignature::algorithm) },
+            { QStringLiteral("publisher"), signer.publisher },
+            { QStringLiteral("publicKey"), QString::fromLatin1(publicKey.toBase64()) },
+            { QStringLiteral("signature"), QString::fromLatin1(signature.toBase64()) },
+        };
+        if (!writer.add(QLatin1String(GeoZonePack::signatureName), QJsonDocument(signatureObject).toJson())) {
+            errorString = writer.errorString();
+            return false;
+        }
+    }
+    if (!writer.finish()) {
         errorString = writer.errorString();
         return false;
     }
@@ -96,13 +122,37 @@ GeoZoneService GeoZonePackExchange::importedService(const QString &url, const QJ
 }
 
 GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, const QString &directory,
-                                                      const std::function<bool(const QString &key)> &isKnown, const QDateTime &importedAt)
+                                                      const std::function<bool(const QString &key)> &isKnown, const QDateTime &importedAt,
+                                                      const QList<GeoZonePackSignature::Publisher> &publishers)
 {
     Import import;
     const GeoZonePack::Contents contents = GeoZonePack::read(packPath, directory);
     if (!contents.errorString.isEmpty()) {
         import.errorString = tr("The geozone pack could not be read. %1").arg(contents.errorString);
         return import;
+    }
+
+    if (!contents.signatureData.isEmpty()) {
+        const QJsonObject signature = QJsonDocument::fromJson(contents.signatureData).object();
+        import.publicKey = QByteArray::fromBase64(signature.value(QStringLiteral("publicKey")).toString().toLatin1());
+        import.signer = signature.value(QStringLiteral("publisher")).toString().trimmed();
+        if (!GeoZonePackSignature::available()) {
+            import.signature = GeoZoneProvenance::PackSignature::Unverified;
+        } else if ((signature.value(QStringLiteral("algorithm")).toString() != QLatin1String(GeoZonePackSignature::algorithm)) ||
+                   !GeoZonePackSignature::verify(import.publicKey, contents.manifestData,
+                                                 QByteArray::fromBase64(signature.value(QStringLiteral("signature")).toString().toLatin1()))) {
+            // The pack was changed after it was signed
+            for (const GeoZonePack::Source &packSource : contents.sources) {
+                (void) QFile::remove(packSource.filePath);
+            }
+            import.errorString = tr("The geozone pack could not be read. Its signature doesn't match its content, it was changed after it was signed.");
+            return import;
+        } else if (const GeoZonePackSignature::Publisher *const publisher = GeoZonePackSignature::find(publishers, import.publicKey)) {
+            import.signature = GeoZoneProvenance::PackSignature::Signed;
+            import.signer = publisher->name;
+        } else {
+            import.signature = GeoZoneProvenance::PackSignature::Untrusted;
+        }
     }
 
     import.errors = contents.errors;
@@ -121,6 +171,9 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
             }
         }
         source.job = GeoZoneLoader::importedJob(entry, packSource.filePath, packName, importedAt);
+        source.job.provenance.packSignature = import.signature;
+        source.job.provenance.packSigner = (import.signature == GeoZoneProvenance::PackSignature::Unsigned) ? QString() : import.signer;
+        source.job.provenance.packPublicKey = import.publicKey;
         import.sources.append(source);
     }
     return import;

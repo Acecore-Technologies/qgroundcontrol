@@ -11,6 +11,7 @@
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneAirac.h"
 #include "GeoZoneCredentials.h"
+#include "GeoZonePackSignature.h"
 #include "GeoZoneSourceVersion.h"
 
 #include <QtCore/QCryptographicHash>
@@ -2008,7 +2009,7 @@ void GeoZoneManagerTest::_testOfflinePack()
     QSignalSpy importSpy(&imported, &GeoZoneManager::fileOperationFinished);
     QVERIFY(imported.importPack(packPath));
     QVERIFY(importSpy.last()[0].toBool());
-    QCOMPARE(importSpy.last()[1].toString(), QStringLiteral("3 geozone source(s) imported from field.zip."));
+    QCOMPARE(importSpy.last()[1].toString(), QStringLiteral("3 geozone source(s) imported from field.zip. The pack is not signed."));
     QTRY_VERIFY(!imported.busy());
     QCOMPARE(imported.sources()->count(), 3);
     QVERIFY(!imported.source(GeoZoneLoader::fileKey(fileName)));
@@ -2205,6 +2206,144 @@ void GeoZoneManagerTest::_testPackServiceTrust()
     QVERIFY(hostile.requests.isEmpty());
     other.clear();
     manager.clear();
+}
+
+void GeoZoneManagerTest::_testSignedPacks()
+{
+    if (!GeoZonePackSignature::available()) {
+        QSKIP("This build can't sign packs");
+    }
+    const ScopedEnvironment environment;
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restore = qScopeGuard([settings]() {
+        settings->packSigningKeyFile()->setRawValue(QString());
+        settings->packPublisherName()->setRawValue(QString());
+        settings->trustedPackPublishers()->setRawValue(QString());
+    });
+
+    // Keys made for the test
+    const QByteArray privateKey = GeoZonePackSignature::generatePrivateKey();
+    QVERIFY(privateKey.startsWith("-----BEGIN PRIVATE KEY-----"));
+    QString errorString;
+    const QByteArray publicKey = GeoZonePackSignature::publicKey(privateKey, errorString);
+    QCOMPARE(publicKey.size(), GeoZonePackSignature::publicKeySize);
+    const QByteArray otherPublicKey = GeoZonePackSignature::publicKey(GeoZonePackSignature::generatePrivateKey(), errorString);
+    QVERIFY(!otherPublicKey.isEmpty() && (otherPublicKey != publicKey));
+    const QByteArray signature = GeoZonePackSignature::sign(privateKey, "manifest", errorString);
+    QCOMPARE(signature.size(), GeoZonePackSignature::signatureSize);
+    QVERIFY(GeoZonePackSignature::verify(publicKey, "manifest", signature));
+    QVERIFY(!GeoZonePackSignature::verify(publicKey, "manifest!", signature));
+    QVERIFY(!GeoZonePackSignature::verify(otherPublicKey, "manifest", signature));
+    QVERIFY(GeoZonePackSignature::publicKey("not a key", errorString).isEmpty());
+    QVERIFY(!errorString.isEmpty());
+
+    // Public keys are given in base64 or PEM, as openssl pkey -pubout writes them
+    const QByteArray spki = QByteArray::fromHex("302a300506032b6570032100") + publicKey;
+    QCOMPARE(GeoZonePackSignature::parsePublicKey(QString::fromLatin1(publicKey.toBase64())), publicKey);
+    QCOMPARE(GeoZonePackSignature::parsePublicKey(QStringLiteral("-----BEGIN PUBLIC KEY-----\n%1\n-----END PUBLIC KEY-----\n").arg(QString::fromLatin1(spki.toBase64()))), publicKey);
+    QVERIFY(GeoZonePackSignature::parsePublicKey(QStringLiteral("c2hvcnQ=")).isEmpty());
+
+    const QTemporaryDir storageDir;
+    const QTemporaryDir importDir;
+    const QTemporaryDir packDir;
+    QVERIFY(storageDir.isValid() && importDir.isValid() && packDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QVERIFY2(manager.loadFile(_writeFeatures(packDir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("S1"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 500) }), errorString), qPrintable(errorString));
+    const QString key = manager.sources()->value<GeoZoneSource*>(0)->key();
+
+    // Packs are unsigned without a key, their manifest holds the SHA-256 of the copies
+    const QString unsignedPath = packDir.filePath(QStringLiteral("unsigned.zip"));
+    QVERIFY(manager.exportPack(unsignedPath));
+    QHash<QString, QByteArray> files = _packFiles(unsignedPath);
+    QVERIFY(!files.contains(QStringLiteral("signature.json")));
+    const QJsonObject manifestSource = QJsonDocument::fromJson(files.value(QStringLiteral("manifest.json"))).object().value(QStringLiteral("sources")).toArray().first().toObject();
+    QCOMPARE(manifestSource.value(QStringLiteral("fileSha256")).toString(),
+             QString::fromLatin1(QCryptographicHash::hash(files.value(manifestSource.value(QStringLiteral("file")).toString()), QCryptographicHash::Sha256).toHex()));
+
+    // and signed with one
+    const QString keyPath = packDir.filePath(QStringLiteral("publisher.pem"));
+    {
+        QFile keyFile(keyPath);
+        QVERIFY(keyFile.open(QIODevice::WriteOnly) && (keyFile.write(privateKey) == privateKey.size()));
+    }
+    settings->packSigningKeyFile()->setRawValue(keyPath);
+    settings->packPublisherName()->setRawValue(QStringLiteral("Survey Team"));
+    QCOMPARE(manager.packPublicKey(), QString::fromLatin1(publicKey.toBase64()));
+    QCOMPARE(manager.packKeyId(), GeoZonePackSignature::keyId(publicKey));
+    const QString signedPath = packDir.filePath(QStringLiteral("signed.zip"));
+    QVERIFY(manager.exportPack(signedPath));
+    files = _packFiles(signedPath);
+    const QJsonObject signatureObject = QJsonDocument::fromJson(files.value(QStringLiteral("signature.json"))).object();
+    QCOMPARE(signatureObject.value(QStringLiteral("algorithm")).toString(), QStringLiteral("Ed25519"));
+    QCOMPARE(signatureObject.value(QStringLiteral("publisher")).toString(), QStringLiteral("Survey Team"));
+    QCOMPARE(signatureObject.value(QStringLiteral("publicKey")).toString(), QString::fromLatin1(publicKey.toBase64()));
+    QVERIFY(GeoZonePackSignature::verify(publicKey, files.value(QStringLiteral("manifest.json")),
+                                         QByteArray::fromBase64(signatureObject.value(QStringLiteral("signature")).toString().toLatin1())));
+
+    // Imported packs are marked unsigned
+    GeoZoneManager imported(importDir.path());
+    QSignalSpy importSpy(&imported, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(imported.importPack(unsignedPath));
+    QVERIFY2(importSpy.last()[1].toString().endsWith(QStringLiteral("The pack is not signed.")), qPrintable(importSpy.last()[1].toString()));
+    QTRY_VERIFY(!imported.busy());
+    GeoZoneSource *const source = imported.source(key);
+    QVERIFY(source);
+    QCOMPARE(source->provenance().packSignature, GeoZoneProvenance::PackSignature::Unsigned);
+    QVERIFY2(source->provenanceText().contains(QStringLiteral("unsigned")), qPrintable(source->provenanceText()));
+
+    // untrusted when signed by a publisher who isn't trusted
+    QVERIFY(imported.importPack(signedPath));
+    QVERIFY2(importSpy.last()[1].toString().endsWith(QStringLiteral("The pack is signed by \"Survey Team\" with the key %1, which is not trusted.").arg(GeoZonePackSignature::keyId(publicKey))),
+             qPrintable(importSpy.last()[1].toString()));
+    QTRY_VERIFY(!imported.busy());
+    QVERIFY(source->untrustedPack());
+    QVERIFY2(source->provenanceText().contains(QStringLiteral("untrusted signature of \"Survey Team\"")), qPrintable(source->provenanceText()));
+
+    // and signed by the publisher once trusted
+    QVERIFY(imported.trustSourcePublisher(key));
+    QCOMPARE(imported.trustedPublishers().count(), 1);
+    QCOMPARE(source->provenance().packSignature, GeoZoneProvenance::PackSignature::Signed);
+    QVERIFY(!source->untrustedPack());
+    QVERIFY(imported.trustPublisher(QStringLiteral("Field survey"), QString::fromLatin1(publicKey.toBase64())));
+    QCOMPARE(imported.trustedPublishers().count(), 1);
+    QVERIFY(imported.importPack(signedPath));
+    QVERIFY2(importSpy.last()[1].toString().endsWith(QStringLiteral("The pack is signed by Field survey.")), qPrintable(importSpy.last()[1].toString()));
+    QTRY_VERIFY(!imported.busy());
+    QVERIFY2(source->provenanceText().contains(QStringLiteral("signed by Field survey")), qPrintable(source->provenanceText()));
+    {
+        GeoZoneManager restarted(importDir.path());
+        restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+        QCOMPARE(restarted.source(key)->provenance().packSignature, GeoZoneProvenance::PackSignature::Signed);
+        QCOMPARE(restarted.source(key)->provenance().packPublicKey, publicKey);
+    }
+
+    // A pack changed after it was signed isn't imported
+    const QString changedPath = packDir.filePath(QStringLiteral("changed.zip"));
+    QVERIFY(_rewritePack(signedPath, changedPath, [](QJsonObject &packSource) { packSource.insert(QStringLiteral("name"), QStringLiteral("Changed")); }));
+    QVERIFY(!imported.importPack(changedPath));
+    QVERIFY2(importSpy.last()[1].toString().contains(QStringLiteral("changed after it was signed")), qPrintable(importSpy.last()[1].toString()));
+    QCOMPARE(QDir(QDir(importDir.path()).filePath(QStringLiteral("downloads"))).entryList(QDir::Files).count(), 0);
+
+    // nor are copies which don't match the SHA-256 of the manifest
+    const QString replacedPath = packDir.filePath(QStringLiteral("replaced.zip"));
+    {
+        QFile replaced(replacedPath);
+        QVERIFY(replaced.open(QIODevice::WriteOnly));
+        GeoZonePack::ZipWriter writer(&replaced);
+        for (auto it = files.cbegin(); it != files.cend(); ++it) {
+            QVERIFY(writer.add(it.key(), it.key().startsWith(QStringLiteral("sources/")) ? (it.value() + " ") : it.value()));
+        }
+        QVERIFY(writer.finish());
+    }
+    QVERIFY(imported.importPack(replacedPath));
+    QVERIFY(!importSpy.last()[0].toBool());
+    QVERIFY2(importSpy.last()[1].toString().contains(QStringLiteral("the data in the pack is damaged")), qPrintable(importSpy.last()[1].toString()));
+
+    // A publisher no longer trusted makes the source untrusted again
+    imported.distrustPublisher(QString::fromLatin1(publicKey.toBase64()));
+    QVERIFY(imported.trustedPublishers().isEmpty());
+    QVERIFY(source->untrustedPack());
 }
 
 void GeoZoneManagerTest::_testCredentialStores()

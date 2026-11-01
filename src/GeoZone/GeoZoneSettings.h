@@ -45,4 +45,7 @@ public:
     DEFINE_SETTINGFACT(liveStaleHours)
     DEFINE_SETTINGFACT(followAreaOfInterest)
     DEFINE_SETTINGFACT(areaOfInterestMargin)
+    DEFINE_SETTINGFACT(packSigningKeyFile)
+    DEFINE_SETTINGFACT(packPublisherName)
+    DEFINE_SETTINGFACT(trustedPackPublishers)
 };

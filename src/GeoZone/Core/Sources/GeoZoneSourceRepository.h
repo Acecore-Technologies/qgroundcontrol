@@ -21,6 +21,7 @@
 #include "GeoZoneDownloader.h"
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneLoader.h"
+#include "GeoZonePackSignature.h"
 #include "GeoZoneService.h"
 #include "GeoZoneServiceRegistry.h"
 #include "GeoZoneSourceIndex.h"
@@ -94,8 +95,16 @@ public:
     QJsonObject provenanceReport() const;
 
     /// Writes an offline pack of the stored copies of the sources with the keys, see GeoZonePack. Secrets are left out.
+    /// The pack is signed with the key of setPackSigner.
     /// @return false when it can't be written, errorString tells why
     bool exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const;
+    /// Signs the packs exported with an Ed25519 private key, see GeoZonePackSignature
+    /// @param privateKeyFile PEM file, empty to export unsigned packs
+    /// @param publisher Name the packs give for their publisher
+    void setPackSigner(const QString &privateKeyFile, const QString &publisher);
+    /// Publishers whose signed packs are trusted. Sources imported from signed packs are trusted or not accordingly.
+    void setTrustedPublishers(const QList<GeoZonePackSignature::Publisher> &publishers);
+    const QList<GeoZonePackSignature::Publisher> &trustedPublishers() const { return _trustedPublishers; }
     /// Imports the sources of an offline pack, replacing those with the same keys. They are loaded in the background,
     /// keep their dates, validators and provenance, marked as imported, and are refreshed like other sources. Sources
     /// already here keep their service and secret. New sources take the service of the pack without its custom
@@ -103,7 +112,8 @@ public:
     /// out.
     /// @return Number of sources imported, negative when the pack can't be read. errorString tells why, or which
     ///         sources were left out.
-    int importPack(const QString &packPath, QString &errorString);
+    /// @param signatureText Set to a sentence telling how the pack is signed
+    int importPack(const QString &packPath, QString &errorString, QString *signatureText = nullptr);
     /// Downloads all feeds again. Failures keep the previous data.
     void refreshFeeds();
     /// Removes a source, its stored copy, and cancels its downloads
@@ -197,4 +207,7 @@ private:
     QString _validityWarning;
     bool _startupRefreshPending = false;
     bool _startupCheckPending = false;
+    QString _packSigningKeyFile;
+    QString _packPublisher;
+    QList<GeoZonePackSignature::Publisher> _trustedPublishers;
 };

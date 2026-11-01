@@ -32,6 +32,15 @@ public:
         Failed,         ///< It doesn't, or the one the publisher gave couldn't be read
     };
 
+    /// Signature of the offline pack the data was imported from, see GeoZonePackSignature
+    enum class PackSignature : quint8 {
+        None,           ///< Not imported, or imported by an earlier version
+        Unsigned,
+        Unverified,     ///< Signed, but this build can't check signatures
+        Untrusted,      ///< Signed with a valid signature of a key which isn't trusted
+        Signed,         ///< Signed by a trusted publisher
+    };
+
     QString providerId;         ///< Service template or known service, see GeoZoneService::id and GeoZoneProviders::Service::id
     QString requestUrl;         ///< URL requested, the URL template filled with the area and time, or the local file
     QString finalUrl;           ///< URL which answered after the redirects
@@ -48,6 +57,9 @@ public:
     bool imported = false;      ///< The source was imported from an offline pack
     QString packName;           ///< File name of the pack
     QDateTime importedAt;
+    PackSignature packSignature = PackSignature::None;
+    QString packSigner;         ///< Name of the trusted publisher when Signed, the name the pack gives when Untrusted
+    QByteArray packPublicKey;   ///< Raw public key of the signature of the pack
 
     bool isEmpty() const { return !fetchedAt.isValid() && requestUrl.isEmpty() && contentHash.isEmpty(); }
 
@@ -58,6 +70,9 @@ public:
     QString summary() const;
 
     static QString integrityToString(Integrity integrity);
+    static QString packSignatureToString(PackSignature signature);
+    /// @return How the pack was signed, like "signed by Alice", empty when not imported
+    QString packSignatureText() const;
 
     /// @return The SHA-256 a response's Repr-Digest, Content-Digest or Digest header gives, empty without or when the
     ///         content was encoded, like compressed, since the digests are of the encoded content

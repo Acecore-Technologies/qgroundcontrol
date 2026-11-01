@@ -69,6 +69,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZonePack.h
     Sources/GeoZonePackExchange.cc
     Sources/GeoZonePackExchange.h
+    Sources/GeoZonePackSignature.cc
+    Sources/GeoZonePackSignature.h
     Sources/GeoZoneParseCache.cc
     Sources/GeoZoneParseCache.h
     Sources/GeoZoneProvenance.cc
@@ -143,6 +145,17 @@ target_link_libraries(GeoZoneCore
 
 if(WIN32)
     target_compile_definitions(GeoZoneCore PRIVATE _USE_MATH_DEFINES)
+endif()
+
+# Ed25519 signatures of offline packs use the libcrypto of OpenSSL, which Qt Network loads too. Without it packs are
+# exported unsigned and the signatures of imported packs aren't checked, see GeoZonePackSignature.
+find_package(OpenSSL QUIET COMPONENTS Crypto)
+if(OpenSSL_FOUND AND TARGET OpenSSL::Crypto AND (OPENSSL_VERSION VERSION_GREATER_EQUAL 1.1.1))
+    target_link_libraries(GeoZoneCore PRIVATE OpenSSL::Crypto)
+    target_compile_definitions(GeoZoneCore PRIVATE GEOZONE_HAVE_OPENSSL)
+    message(STATUS "GeoZone: signing offline packs with OpenSSL ${OPENSSL_VERSION}")
+else()
+    message(STATUS "GeoZone: OpenSSL libcrypto not found, offline packs can't be signed")
 endif()
 
 # The EGM96 geoid for heights above the WGS84 ellipsoid

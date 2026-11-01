@@ -864,15 +864,57 @@ bool GeoZoneSourceRepository::exportPack(const QStringList &keys, const QString 
             sources.append(GeoZonePackExchange::ExportSource{ sourceReport(*source), entry, source->service(), _store.path(entry.fileName) });
         }
     }
-    return GeoZonePackExchange::write(sources, packPath, errorString);
+    GeoZonePackExchange::Signer signer;
+    if (!_packSigningKeyFile.isEmpty()) {
+        QFile keyFile(_packSigningKeyFile);
+        if (!keyFile.open(QIODevice::ReadOnly)) {
+            errorString = tr("The pack signing key %1 could not be read: %2").arg(_packSigningKeyFile, keyFile.errorString());
+            return false;
+        }
+        signer.privateKeyPem = keyFile.readAll();
+        signer.publisher = _packPublisher;
+    }
+    return GeoZonePackExchange::write(sources, packPath, errorString, signer);
 }
 
-int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorString)
+void GeoZoneSourceRepository::setPackSigner(const QString &privateKeyFile, const QString &publisher)
+{
+    _packSigningKeyFile = privateKeyFile;
+    _packPublisher = publisher.trimmed();
+}
+
+void GeoZoneSourceRepository::setTrustedPublishers(const QList<GeoZonePackSignature::Publisher> &publishers)
+{
+    _trustedPublishers = publishers;
+    // The signatures were checked when the packs were imported
+    bool indexChanged = false;
+    for (GeoZoneSource *const source : std::as_const(_sources)) {
+        GeoZoneProvenance provenance = source->provenance();
+        if (!provenance.imported || ((provenance.packSignature != GeoZoneProvenance::PackSignature::Untrusted) &&
+                                     (provenance.packSignature != GeoZoneProvenance::PackSignature::Signed))) {
+            continue;
+        }
+        const GeoZonePackSignature::Publisher *const publisher = GeoZonePackSignature::find(publishers, provenance.packPublicKey);
+        const GeoZoneProvenance::PackSignature signature = publisher ? GeoZoneProvenance::PackSignature::Signed : GeoZoneProvenance::PackSignature::Untrusted;
+        const QString signer = publisher ? publisher->name : provenance.packSigner;
+        if ((signature != provenance.packSignature) || (signer != provenance.packSigner)) {
+            provenance.packSignature = signature;
+            provenance.packSigner = signer;
+            source->setProvenance(provenance);
+            indexChanged = _index.setProvenance(source->key(), provenance.toJson()) || indexChanged;
+        }
+    }
+    if (indexChanged) {
+        _saveIndex();
+    }
+}
+
+int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorString, QString *signatureText)
 {
     // Sources already here, or being added, keep their service
     const GeoZonePackExchange::Import import = GeoZonePackExchange::read(packPath, _store.downloadDir(), [this](const QString &key) {
         return source(key) || _services.contains(key);
-    }, GeoZoneEnvironment::currentDateTimeUtc());
+    }, GeoZoneEnvironment::currentDateTimeUtc(), _trustedPublishers);
     if (!import.errorString.isEmpty()) {
         errorString = import.errorString;
         return -1;
@@ -888,7 +930,26 @@ int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorS
         job.cancelToken = _beginOperation(job.key);
         _startLoad(job, LoadMode::Background);
     }
-    qCDebug(GeoZoneSourceLog) << "Importing" << import.sources.count() << "sources from" << packPath;
+    qCDebug(GeoZoneSourceLog) << "Importing" << import.sources.count() << "sources from" << packPath
+                              << GeoZoneProvenance::packSignatureToString(import.signature) << import.signer;
+    if (signatureText) {
+        switch (import.signature) {
+        case GeoZoneProvenance::PackSignature::None:
+        case GeoZoneProvenance::PackSignature::Unsigned:
+            *signatureText = tr("The pack is not signed.");
+            break;
+        case GeoZoneProvenance::PackSignature::Unverified:
+            *signatureText = tr("The pack is signed, but this build can't check signatures.");
+            break;
+        case GeoZoneProvenance::PackSignature::Untrusted:
+            *signatureText = tr("The pack is signed by \"%1\" with the key %2, which is not trusted.")
+                                 .arg(import.signer, GeoZonePackSignature::keyId(import.publicKey));
+            break;
+        case GeoZoneProvenance::PackSignature::Signed:
+            *signatureText = tr("The pack is signed by %1.").arg(import.signer);
+            break;
+        }
+    }
     errorString = import.errors.join(QLatin1Char('\n'));
     return static_cast<int>(import.sources.count());
 }
