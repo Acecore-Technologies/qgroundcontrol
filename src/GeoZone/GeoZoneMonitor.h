@@ -40,7 +40,7 @@ public:
         friend bool operator==(const Item &, const Item &) = default;
     };
 
-    enum Roles {
+    enum Roles : int {
         ZoneRole = Qt::UserRole + 1,
         InsideRole,
         DistanceRole,
