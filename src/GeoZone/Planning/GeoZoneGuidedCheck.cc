@@ -11,17 +11,15 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
+#include "GeoZoneReturnDestinations.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneTerrain.h"
-#include "LandingComplexItem.h"
 #include "MissionController.h"
-#include "QmlObjectListModel.h"
 #include "RallyPointManager.h"
-#include "SimpleMissionItem.h"
 #include "Vehicle.h"
-#include "VisualMissionItem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -209,91 +207,23 @@ QString GeoZoneGuidedCheck::missionWarning(QObject *vehicle, QObject *missionCon
 
 GeoZoneReturnModel::Destinations GeoZoneGuidedCheck::returnDestinations(Vehicle *vehicle, MissionController *missionController)
 {
-    GeoZoneReturnModel::Destinations destinations;
-    QGeoCoordinate home = vehicle ? vehicle->homePosition() : QGeoCoordinate();
-    if (!home.isValid() && missionController) {
-        home = missionController->plannedHomePosition();
+    QGeoCoordinate homeCoordinate = vehicle ? vehicle->homePosition() : QGeoCoordinate();
+    if (!homeCoordinate.isValid() && missionController) {
+        homeCoordinate = missionController->plannedHomePosition();
     }
-    const double homeAltitude = home.isValid() ? home.altitude() : qQNaN();
-    if (home.isValid()) {
-        destinations.home = positionOf(home, homeAltitude);
-    }
-    // Rally points are above home
+    const double homeAltitude = homeCoordinate.isValid() ? homeCoordinate.altitude() : qQNaN();
+    const GeoZone::Position home = homeCoordinate.isValid() ? positionOf(homeCoordinate, homeAltitude) : GeoZone::Position();
+    // The vehicle's rally points, above home
+    QList<GeoZone::Position> rallyPoints;
     if (vehicle && vehicle->rallyPointManager()) {
         for (const QGeoCoordinate &rallyPoint : vehicle->rallyPointManager()->points()) {
             if (rallyPoint.isValid()) {
-                destinations.rallyPoints.append(positionOf(rallyPoint, homeAltitude + rallyPoint.altitude()));
+                rallyPoints.append(positionOf(rallyPoint, homeAltitude + rallyPoint.altitude()));
             }
         }
     }
-    if (!missionController) {
-        return destinations;
-    }
-
-    // The first waypoint, the landing sequences from their DO_LAND_START and the return path after a
-    // DO_RETURN_PATH_START, like GeoZoneMissionPath
-    const QmlObjectListModel *const visualItems = missionController->visualItems();
-    const auto isCoordinateItem = [](const VisualMissionItem *item) { return item && item->specifiesCoordinate() && !item->isStandaloneCoordinate(); };
-    bool onReturnPath = false;
-    for (int i = 1; i < visualItems->count(); i++) {
-        const VisualMissionItem *const visualItem = visualItems->value<const VisualMissionItem*>(i);
-        if (!destinations.firstWaypoint.coordinate.isValid() && isCoordinateItem(visualItem)) {
-            destinations.firstWaypoint = positionOf(visualItem->coordinate(), visualItem->amslEntryAlt());
-        }
-        if (const LandingComplexItem *const landingItem = qobject_cast<const LandingComplexItem*>(visualItem)) {
-            GeoZoneReturnModel::Landing landing;
-            landing.entry = positionOf(landingItem->finalApproachCoordinate(), landingItem->amslEntryAlt());
-            landing.touchdown = positionOf(landingItem->landingCoordinate(), landingItem->amslExitAlt());
-            landing.marker = landing.entry.coordinate;
-            landing.sequenceNumber = landingItem->sequenceNumber();
-            if (landing.entry.coordinate.isValid() && landing.touchdown.coordinate.isValid()) {
-                destinations.landings.append(landing);
-            }
-            onReturnPath = false;
-            continue;
-        }
-        const SimpleMissionItem *const simpleItem = qobject_cast<const SimpleMissionItem*>(visualItem);
-        if (!simpleItem) {
-            continue;
-        }
-        if (simpleItem->command() == MAV_CMD_DO_LAND_START) {
-            GeoZoneReturnModel::Landing landing;
-            landing.sequenceNumber = simpleItem->sequenceNumber();
-            const QGeoCoordinate marker = simpleItem->coordinate();
-            if (simpleItem->specifiesCoordinate() && marker.isValid() && ((marker.latitude() != 0) || (marker.longitude() != 0))) {
-                landing.marker = positionOf(marker, qQNaN()).coordinate;
-            }
-            for (int j = i + 1; j < visualItems->count(); j++) {
-                const VisualMissionItem *const item = visualItems->value<const VisualMissionItem*>(j);
-                if (!isCoordinateItem(item)) {
-                    continue;
-                }
-                if (!landing.entry.coordinate.isValid()) {
-                    landing.entry = positionOf(item->coordinate(), item->amslEntryAlt());
-                }
-                if (item->isLandCommand()) {
-                    landing.touchdown = positionOf(item->exitCoordinate(), item->amslExitAlt());
-                    break;
-                }
-            }
-            if (landing.entry.coordinate.isValid() && landing.touchdown.coordinate.isValid()) {
-                if (!landing.marker.isValid()) {
-                    landing.marker = landing.entry.coordinate;
-                }
-                destinations.landings.append(landing);
-            }
-            onReturnPath = false;
-        } else if (simpleItem->command() == MAV_CMD_DO_RETURN_PATH_START) {
-            onReturnPath = true;
-        } else if (onReturnPath && isCoordinateItem(simpleItem)) {
-            if (simpleItem->isLandCommand()) {
-                onReturnPath = false;
-            } else {
-                destinations.returnPath.append(positionOf(simpleItem->coordinate(), simpleItem->amslEntryAlt()));
-            }
-        }
-    }
-    return destinations;
+    const QList<GeoZoneMissionItem> items = missionController ? GeoZoneMissionReader::items(missionController).mid(1) : QList<GeoZoneMissionItem>();
+    return GeoZoneReturnDestinations::fromMission(items, home, rallyPoints);
 }
 
 QList<GeoZonePathEvaluator::Path> GeoZoneGuidedCheck::returnPaths(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Start &start,
