@@ -1024,6 +1024,82 @@ void GeoZoneManagerTest::_testDownloadFailures()
     QCOMPARE(QDir(downloadDir).entryList(QDir::Files).count(), 0);
 }
 
+void GeoZoneManagerTest::_testDownloadRedirects()
+{
+    TestFeedServer server;
+    TestFeedServer otherServer;
+    QVERIFY(server.listen(QHostAddress::LocalHost) && otherServer.listen(QHostAddress::LocalHost));
+    server.redirects.insert("/old", "/moved");
+    server.redirects.insert("/moved", server.url(QStringLiteral("/new")).toUtf8());
+    server.files.insert("/new", server.body);
+    server.redirects.insert("/away", otherServer.url(QStringLiteral("/data")).toUtf8());
+    otherServer.files.insert("/data", server.body);
+    server.redirects.insert("/loop", "/loop");
+    server.redirects.insert("/form", "/new");
+
+    GeoZoneDownloader downloader;
+    GeoZoneDownloader::Options options;
+    options.headers.append(GeoZoneDownloader::Header("Accept", "application/json"));
+    options.authHeaders.append(GeoZoneDownloader::Header("X-Api-Key", "s3cret key"));
+    options.secrets.append(QStringLiteral("s3cret key"));
+    const auto download = [&downloader](const QString &url, const GeoZoneDownloader::Options &requestOptions) {
+        GeoZoneDownloader::Result result;
+        bool done = false;
+        downloader.get(url, QString(), QString(), [&result, &done](const GeoZoneDownloader::Result &downloadResult) { result = downloadResult; done = true; }, QString(), requestOptions);
+        if (!QTest::qWaitFor([&done]() { return done; }, 10000)) {
+            result.errorString = QStringLiteral("no callback");
+        }
+        if (!result.filePath.isEmpty()) {
+            (void) QFile::remove(result.filePath);
+        }
+        return result;
+    };
+
+    // The redirects are followed and recorded, the credentials go to the same server
+    GeoZoneDownloader::Result result = download(server.url(QStringLiteral("/old?key=s3cret%20key")), options);
+    QVERIFY2(result.status == GeoZoneDownloader::Result::Status::Ok, qPrintable(result.errorString));
+    QCOMPARE(result.finalUrl, server.url(QStringLiteral("/new")));
+    QCOMPARE(result.redirects, QStringList({ server.url(QStringLiteral("/old?key=***")), server.url(QStringLiteral("/moved")) }));
+    QCOMPARE(result.sha256, QCryptographicHash::hash(server.body, QCryptographicHash::Sha256));
+    QCOMPARE(result.statusCode, 200);
+    QCOMPARE(server.requests.count(), 3);
+    for (const QByteArray &request : std::as_const(server.requests)) {
+        QCOMPARE(TestFeedServer::header(request, "X-Api-Key"), QByteArray("s3cret key"));
+        QCOMPARE(TestFeedServer::header(request, "Accept"), QByteArray("application/json"));
+    }
+
+    // Another server doesn't get them
+    result = download(server.url(QStringLiteral("/away")), options);
+    QVERIFY2(result.status == GeoZoneDownloader::Result::Status::Ok, qPrintable(result.errorString));
+    QCOMPARE(result.finalUrl, otherServer.url(QStringLiteral("/data")));
+    QCOMPARE(otherServer.requests.count(), 1);
+    QVERIFY(TestFeedServer::header(otherServer.requests.first(), "X-Api-Key").isEmpty());
+    QCOMPARE(TestFeedServer::header(otherServer.requests.first(), "Accept"), QByteArray("application/json"));
+
+    result = download(server.url(QStringLiteral("/loop")), options);
+    QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
+    QCOMPARE(result.errorString, QStringLiteral("The server redirected more than %1 times.").arg(GeoZoneDownloader::maxRedirects));
+    QCOMPARE(result.redirects.count(), GeoZoneDownloader::maxRedirects);
+
+    // A POST redirected by 302 continues with a GET, errors don't show the secrets
+    GeoZoneDownloader::Options post = options;
+    post.post = true;
+    post.body = R"({ "query": true })";
+    post.contentType = "application/json";
+    server.requests.clear();
+    result = download(server.url(QStringLiteral("/form")), post);
+    QVERIFY2(result.status == GeoZoneDownloader::Result::Status::Ok, qPrintable(result.errorString));
+    QCOMPARE(server.requests.count(), 2);
+    QVERIFY(server.requests[0].startsWith("POST /form"));
+    QCOMPARE(TestFeedServer::requestBody(server.requests[0]), post.body);
+    QCOMPARE(TestFeedServer::header(server.requests[0], "Content-Type"), QByteArray("application/json"));
+    QVERIFY(server.requests[1].startsWith("GET /new"));
+    result = download(server.url(QStringLiteral("/missing?key=s3cret%20key")), options);
+    QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
+    QVERIFY2(!result.errorString.contains(QStringLiteral("s3cret")) && result.errorString.contains(QStringLiteral("key=***")), qPrintable(result.errorString));
+    QCOMPARE(GeoZoneDownloader::redacted(QStringLiteral("a s3cret key b s3cret%20key"), options.secrets), QStringLiteral("a *** b ***"));
+}
+
 void GeoZoneManagerTest::_testManagerStartup()
 {
     const ScopedEnvironment environment;

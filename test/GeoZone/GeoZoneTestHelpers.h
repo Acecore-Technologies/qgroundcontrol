@@ -261,10 +261,13 @@ inline QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
 
 #ifndef GEOZONE_CORE_TEST
 /// Answers requests by path: /ok with the ED-318 test file, /missing 404, /broken 500, /empty an empty 200 and
-/// /hang never. Counts the requests.
+/// /hang never. Counts the requests and keeps them with their headers and bodies.
 class TestFeedServer : public QTcpServer
 {
 public:
+    /// Answers a request instead of the defaults when it returns true
+    using Handler = std::function<bool(const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &headers)>;
+
     TestFeedServer()
     {
         QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));
@@ -276,10 +279,12 @@ public:
                 (void) connect(socket, &QTcpSocket::readyRead, socket, [this, socket]() {
                     const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
                     socket->setProperty("request", request);
-                    if (!request.contains("\r\n\r\n")) {
+                    const qsizetype headerEnd = request.indexOf("\r\n\r\n");
+                    if ((headerEnd < 0) || ((request.size() - headerEnd - 4) < header(request, "Content-Length").toLongLong())) {
                         return;
                     }
                     requestCount++;
+                    requests.append(request);
                     const QByteArray path = request.split(' ').value(1);
                     requestedPaths.append(path);
                     if (delays.value(path) > 0) {
@@ -295,21 +300,46 @@ public:
 
     QString url(const QString &path) const { return QStringLiteral("http://127.0.0.1:%1%2").arg(serverPort()).arg(path); }
 
+    /// @return Value of the header of a request, empty without
+    static QByteArray header(const QByteArray &request, const QByteArray &name)
+    {
+        for (const QByteArray &line : request.left(request.indexOf("\r\n\r\n")).split('\n')) {
+            const qsizetype colon = line.indexOf(':');
+            if ((colon > 0) && (line.left(colon).trimmed().compare(name, Qt::CaseInsensitive) == 0)) {
+                return line.mid(colon + 1).trimmed();
+            }
+        }
+        return QByteArray();
+    }
+    static QByteArray requestBody(const QByteArray &request) { return request.mid(request.indexOf("\r\n\r\n") + 4); }
+
     QByteArray body;
     int requestCount = 0;
     QByteArray okPathStatus = "200 OK";     ///< Status of /ok, to make a feed fail later
-    QHash<QByteArray, QByteArray> files;    ///< Content served by path
+    QHash<QByteArray, QByteArray> files;    ///< Content served by path, with or without the query
     QHash<QByteArray, QByteArray> headers;  ///< Further response headers by path, each ending with CRLF
     QHash<QByteArray, QByteArray> etags;    ///< ETag of the content by path, conditional requests matching it get 304
     QHash<QByteArray, int> delays;          ///< Milliseconds before answering, by path
-    QList<QByteArray> requestedPaths;
+    QHash<QByteArray, QByteArray> redirects;    ///< Location a path redirects to with 302 Found
+    Handler handler;
+    QList<QByteArray> requestedPaths;       ///< With the query
+    QList<QByteArray> requests;             ///< Request line, headers and body
 
 private:
-    void _respond(QTcpSocket *socket, const QByteArray &path, const QByteArray &request)
+    void _respond(QTcpSocket *socket, const QByteArray &target, const QByteArray &request)
     {
+        const QByteArray path = files.contains(target) ? target : target.split('?').first();
         QByteArray status = "200 OK";
         QByteArray content;
         QByteArray extraHeaders = headers.value(path);
+        if (handler && handler(request, status, content, extraHeaders)) {
+            _write(socket, status, content, extraHeaders);
+            return;
+        }
+        if (const QByteArray location = redirects.value(path); !location.isEmpty()) {
+            _write(socket, "302 Found", QByteArray(), extraHeaders + "Location: " + location + "\r\n");
+            return;
+        }
         if (const QByteArray etag = etags.value(path); !etag.isEmpty()) {
             extraHeaders += "ETag: " + etag + "\r\n";
             // Header names are case insensitive, Qt sends them in lower case
@@ -331,6 +361,11 @@ private:
         } else if (path == "/hang") {
             return;
         }
+        _write(socket, status, content, extraHeaders);
+    }
+
+    static void _write(QTcpSocket *socket, const QByteArray &status, const QByteArray &content, const QByteArray &extraHeaders)
+    {
         (void) socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\n" + extraHeaders + "Content-Length: " +
                              QByteArray::number(content.size()) + "\r\n\r\n" + content);
         socket->disconnectFromHost();

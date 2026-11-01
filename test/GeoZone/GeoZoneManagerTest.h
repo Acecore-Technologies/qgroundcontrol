@@ -30,6 +30,7 @@ private slots:
     void _testSourceValidity();
     void _testDownloadSizeLimit();
     void _testDownloadFailures();
+    void _testDownloadRedirects();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();
