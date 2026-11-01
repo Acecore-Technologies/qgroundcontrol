@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneReturnTest.h"
+#include "GeoZoneReturnDestinations.h"
 #include "GeoZoneReturnModel.h"
 
 #include <QtCore/QVariantMap>
@@ -559,4 +560,79 @@ void GeoZoneReturnTest::_testBreachPath()
                                     (path.destination == Model::Destination::RallyPoint) ? destinations.rallyPoints.first().coordinate : kHome;
     QVERIFY(near(path.positions.last().coordinate, expected));
     QVERIFY(!path.loiter.isEmpty());
+}
+
+void GeoZoneReturnTest::_testMissionDestinations()
+{
+    using Kind = GeoZoneMissionItem::Kind;
+    const auto item = [](Kind kind, int sequenceNumber, const GeoZone::Position &entry, bool flies = true) {
+        GeoZoneMissionItem missionItem;
+        missionItem.kind = kind;
+        missionItem.sequenceNumber = sequenceNumber;
+        missionItem.lastSequenceNumber = sequenceNumber;
+        missionItem.flies = flies;
+        // Coordinates of mission items have the altitude of their altitude mode
+        missionItem.entry = GeoZone::Position{ QGeoCoordinate(entry.coordinate.latitude(), entry.coordinate.longitude(), 50), entry.altitudeAMSL };
+        missionItem.exit = missionItem.entry;
+        return missionItem;
+    };
+    const auto land = [&item](int sequenceNumber, const GeoZone::Position &touchdown) {
+        GeoZoneMissionItem landItem = item(Kind::Other, sequenceNumber, touchdown);
+        landItem.land = true;
+        return landItem;
+    };
+    const auto near = [](const GeoZone::Position &a, const GeoZone::Position &b) {
+        return a.coordinate.isValid() && (a.coordinate.distanceTo(b.coordinate) < 0.01) && qIsNaN(a.coordinate.altitude()) && (a.altitudeAMSL == b.altitudeAMSL);
+    };
+
+    // Without items there is nowhere to return to besides those of the plan
+    const Model::Destinations empty = GeoZoneReturnDestinations::fromMission({});
+    QVERIFY(!empty.firstWaypoint.coordinate.isValid());
+    QVERIFY(empty.landings.isEmpty());
+    QVERIFY(empty.returnPath.isEmpty());
+    QVERIFY(!empty.home.coordinate.isValid());
+
+    // A waypoint, a landing sequence after a DO_LAND_START with a marker of its own, then a return path
+    GeoZoneMissionItem landStart = item(Kind::LandStart, 3, position(0, 0, 0), false);
+    landStart.marker = offset(2000, 0);
+    GeoZoneMissionItem returnPathStart = item(Kind::ReturnPathStart, 6, position(0, 0, 0), false);
+    const QList<GeoZoneMissionItem> items = {
+        item(Kind::Other, 1, position(1000, 0, 50)),
+        item(Kind::Other, 2, position(1000, 1000, 50)),
+        landStart,
+        item(Kind::Other, 4, position(1500, 0, 40)),
+        land(5, position(1800, 0, 0)),
+        returnPathStart,
+        item(Kind::Other, 7, position(500, 500, 60)),
+        item(Kind::Other, 8, position(200, 200, 30)),
+        land(9, position(0, 0, 0)),
+        item(Kind::Other, 10, position(300, 300, 30)),
+    };
+    const Model::Destinations destinations = GeoZoneReturnDestinations::fromMission(items);
+    QVERIFY(near(destinations.firstWaypoint, position(1000, 0, 50)));
+    QCOMPARE(destinations.landings.count(), 1);
+    QCOMPARE(destinations.landings[0].sequenceNumber, 3);
+    QVERIFY(destinations.landings[0].marker.distanceTo(offset(2000, 0)) < 0.01);
+    QVERIFY(qIsNaN(destinations.landings[0].marker.altitude()));
+    QVERIFY(near(destinations.landings[0].entry, position(1500, 0, 40)));
+    QVERIFY(near(destinations.landings[0].touchdown, position(1800, 0, 0)));
+    QCOMPARE(destinations.returnPath.count(), 2);
+    QVERIFY(near(destinations.returnPath[0], position(500, 500, 60)));
+    QVERIFY(near(destinations.returnPath[1], position(200, 200, 30)));
+
+    // A DO_LAND_START without a coordinate is marked by its first position, a landing pattern is a sequence of its own
+    landStart.marker = QGeoCoordinate();
+    GeoZoneMissionItem pattern = item(Kind::LandingPattern, 6, position(-1000, 0, 80));
+    pattern.land = true;
+    pattern.exit = position(-1500, 0, 0);
+    const Model::Destinations landings = GeoZoneReturnDestinations::fromMission({ item(Kind::Other, 1, position(1000, 0, 50)), landStart,
+                                                                                  item(Kind::Other, 4, position(1500, 0, 40)), land(5, position(1800, 0, 0)), pattern });
+    QCOMPARE(landings.landings.count(), 2);
+    QVERIFY(landings.landings[0].marker.distanceTo(offset(1500, 0)) < 0.01);
+    QCOMPARE(landings.landings[1].sequenceNumber, 6);
+    QVERIFY(near(landings.landings[1].entry, position(-1000, 0, 80)));
+    QVERIFY(near(landings.landings[1].touchdown, position(-1500, 0, 0)));
+    QVERIFY(landings.landings[1].marker.distanceTo(offset(-1000, 0)) < 0.01);
+    // A DO_LAND_START without a landing after it isn't a landing sequence
+    QVERIFY(GeoZoneReturnDestinations::fromMission({ landStart, item(Kind::Other, 4, position(1500, 0, 40)) }).landings.isEmpty());
 }

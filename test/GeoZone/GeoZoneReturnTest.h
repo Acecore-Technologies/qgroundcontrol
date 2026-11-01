@@ -11,7 +11,8 @@
 
 #include "GeoZoneTestBase.h"
 
-/// Tests of GeoZoneReturnModel, the return paths of PX4 and ArduPilot from their parameters
+/// Tests of GeoZoneReturnModel, the return paths of PX4 and ArduPilot from their parameters, and of the destinations
+/// of missions, GeoZoneReturnDestinations
 class GeoZoneReturnTest : public GeoZoneTestBase
 {
     Q_OBJECT
@@ -32,4 +33,5 @@ private slots:
     void _testArduPlaneReturn();
     void _testBreachPath_data();
     void _testBreachPath();
+    void _testMissionDestinations();
 };

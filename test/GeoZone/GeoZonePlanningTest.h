@@ -26,6 +26,7 @@ private slots:
     void _testMissionControllerSwitch();
     void _testMissionCoverage();
     void _testMissionJumps();
+    void _testMissionJumpWalk();
     void _testMissionContingencies();
     void _testMissionReturnParameters();
     void _testAuthorisations();

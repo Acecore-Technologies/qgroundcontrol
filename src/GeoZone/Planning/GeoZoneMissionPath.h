@@ -28,7 +28,8 @@ class Vehicle;
 /// controller draws, it covers loiter circles, the loiter of landing patterns, the distance VTOL transitions
 /// overshoot, the loops of DO_JUMP items and the return to launch the vehicle flies, see GeoZoneReturnModel. The
 /// contingency paths are the returns the vehicle would fly from along the mission after a failsafe or a fence breach.
-/// Built on the GUI thread from the MissionController, then only read, so that zone checks can run on other threads.
+/// Built on the GUI thread from the MissionController by GeoZoneMissionReader, then only read, so that zone checks can
+/// run on other threads.
 class GeoZoneMissionPath
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionPath)
@@ -170,22 +171,12 @@ public:
     static QList<Path> pathsFromSegments(const QList<Segment> &segments);
 
 private:
-    /// Segments of a visual item
-    struct ItemSegments {
-        QList<int> segments;            ///< Of the item itself, like the flight lines of a pattern
-        int outgoing = -1;              ///< To the next item of the drawn flight path, -1 without
-    };
+    friend class GeoZoneMissionReader;
 
-    /// Sets the paths flown, following the DO_JUMP items of the mission
-    void _setFlightPaths(MissionController *missionController, const QList<int> &coordinateItems, const QList<ItemSegments> &itemSegments);
-    /// Adds the paths the drawn flight path leaves out
-    void _appendCoverage(MissionController *missionController, const QList<int> &coordinateItems, const GeoZoneReturnModel::Parameters &returnParameters,
-                         const GeoZoneReturnModel::Destinations &destinations);
     /// Adds the returns from along the mission
-    void _appendContingencies(const QList<int> &coordinateItems, const QList<ItemSegments> &itemSegments, const GeoZoneReturnModel::Parameters &returnParameters,
+    /// @param outgoingSequenceNumbers Of the items the drawn segments to the next item lead to, by segment
+    void _appendContingencies(const QHash<int, int> &outgoingSequenceNumbers, const GeoZoneReturnModel::Parameters &returnParameters,
                               const GeoZoneReturnModel::Destinations &destinations);
-    /// @return Where the vehicle can return to in the mission's plan
-    static GeoZoneReturnModel::Destinations _destinations(MissionController *missionController, const QList<int> &coordinateItems);
     /// @return Positions along the model's path for zone checks, with terrain
     static QList<GeoZone::Position> _modelPositions(const QList<GeoZone::Position> &positions, double terrainSpacing);
 

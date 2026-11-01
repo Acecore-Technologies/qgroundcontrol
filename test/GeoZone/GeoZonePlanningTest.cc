@@ -11,6 +11,7 @@
 #include "GeoZoneBriefing.h"
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneFenceTags.h"
+#include "GeoZoneMissionJumps.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneRouteSearch.h"
@@ -24,6 +25,8 @@
 #include "RallyPoint.h"
 #include "RallyPointController.h"
 #include "Vehicle.h"
+
+#include <numeric>
 
 using namespace GeoZoneTestHelpers;
 
@@ -933,6 +936,131 @@ void GeoZonePlanningTest::_testMissionJumps()
     const GeoZoneMissionPath capped = GeoZoneMissionPath::fromMission(missionController);
     QVERIFY(capped.flightDistance() > (capped.totalDistance() + (100 * loop)));
     QVERIFY(capped.flightDistance() < (capped.totalDistance() + (((GeoZoneMissionPath::maxFlightSegments / 3) + 2) * loop)));
+}
+
+namespace {
+
+/// Mission items for GeoZoneMissionJumps, with the drawn segments between consecutive items with a coordinate
+struct JumpMission {
+    QList<GeoZoneMissionItem> items;
+    QList<GeoZoneMissionJumps::ItemSegments> itemSegments;
+    QList<double> segmentDistances;
+
+    /// Adds an item flown to, with the drawn segment from the previous one
+    void addWaypoint(const QGeoCoordinate &coordinate, bool drawn = true)
+    {
+        GeoZoneMissionItem item;
+        item.sequenceNumber = static_cast<int>(items.count());
+        item.lastSequenceNumber = item.sequenceNumber;
+        item.flies = true;
+        item.entry = GeoZone::Position{ coordinate, 450 };
+        item.exit = item.entry;
+        const auto previous = std::find_if(items.crbegin(), items.crend(), [](const GeoZoneMissionItem &other) { return other.flies; });
+        if (drawn && (previous != items.crend())) {
+            itemSegments[std::distance(previous, items.crend()) - 1].outgoing = static_cast<int>(segmentDistances.count());
+            segmentDistances.append(previous->exit.coordinate.distanceTo(coordinate));
+        }
+        items.append(item);
+        itemSegments.append(GeoZoneMissionJumps::ItemSegments());
+    }
+
+    void addCommand(GeoZoneMissionItem::Kind kind, int jumpSequence = -1, int jumpRepeat = 0)
+    {
+        GeoZoneMissionItem item;
+        item.kind = kind;
+        item.sequenceNumber = static_cast<int>(items.count());
+        item.lastSequenceNumber = item.sequenceNumber;
+        item.jumpSequence = jumpSequence;
+        item.jumpRepeat = jumpRepeat;
+        items.append(item);
+        itemSegments.append(GeoZoneMissionJumps::ItemSegments());
+    }
+
+    GeoZoneMissionJumps::Walk walk(int returnSegment = -1, int maxSteps = GeoZoneMissionPath::maxFlightSegments) const
+    {
+        return GeoZoneMissionJumps::walk(items, itemSegments, segmentDistances, returnSegment, maxSteps);
+    }
+};
+
+/// The drawn segments and straight legs of the walk, like "0 1 2 3>1 1 2"
+QString stepsText(const GeoZoneMissionJumps::Walk &walk)
+{
+    QStringList steps;
+    for (const GeoZoneMissionJumps::Step &step : walk.steps) {
+        steps.append((step.segment >= 0) ? QString::number(step.segment) : QStringLiteral("%1>%2").arg(step.fromItem).arg(step.toItem));
+    }
+    return steps.join(QChar(u' '));
+}
+
+} // namespace
+
+void GeoZonePlanningTest::_testMissionJumpWalk()
+{
+    using Kind = GeoZoneMissionItem::Kind;
+    // Home, then items 1 to 3 around a square, a DO_JUMP to item 1 and item 5
+    const QGeoCoordinate home(47, 8);
+    JumpMission mission;
+    mission.addWaypoint(home);
+    mission.addWaypoint(offsetFrom(home, 1000, 0));
+    mission.addWaypoint(offsetFrom(home, 1000, 1000));
+    mission.addWaypoint(offsetFrom(home, 0, 1000));
+    mission.addCommand(Kind::Jump, 1, 2);
+    mission.addWaypoint(offsetFrom(home, 0, 3000));
+    QCOMPARE(mission.segmentDistances.count(), 4);
+    QVERIFY(GeoZoneMissionJumps::hasJumps(mission.items));
+
+    // The loop and the straight leg back to item 1 are flown twice more
+    GeoZoneMissionJumps::Walk walk = mission.walk();
+    QCOMPARE(stepsText(walk), QStringLiteral("0 1 2 3>1 1 2 3>1 1 2 3"));
+    QCOMPARE(walk.steps[3].label, QStringLiteral("the jump at item 4"));
+    QVERIFY(walk.steps[1].label.isEmpty());
+    const double loop = mission.segmentDistances[1] + mission.segmentDistances[2] + walk.steps[3].distance;
+    QVERIFY(std::abs(walk.steps[3].distance - std::hypot(1000.0, 1000.0)) < 1);
+    const double drawn = std::accumulate(mission.segmentDistances.cbegin(), mission.segmentDistances.cend(), 0.0);
+    QVERIFY(std::abs(walk.distance - (drawn + (2 * loop))) < 0.01);
+    // Where the vehicle first reaches the items
+    QCOMPARE(walk.itemDistances.value(1), mission.segmentDistances[0]);
+    QCOMPARE(walk.itemDistances.value(3), mission.segmentDistances[0] + mission.segmentDistances[1] + mission.segmentDistances[2]);
+    QVERIFY(std::abs(walk.itemDistances.value(5) - (drawn + (2 * loop))) < 0.01);
+    QVERIFY(!walk.itemDistances.contains(4));
+    QVERIFY(!walk.repeatsIndefinitely);
+
+    // Without repeats the drawn path is flown
+    mission.items[4].jumpRepeat = 0;
+    QCOMPARE(stepsText(mission.walk()), QStringLiteral("0 1 2 3"));
+    // Without end the loop is flown once more
+    mission.items[4].jumpRepeat = -1;
+    walk = mission.walk();
+    QCOMPARE(stepsText(walk), QStringLiteral("0 1 2 3>1 1 2 3"));
+    QVERIFY(walk.repeatsIndefinitely);
+    QCOMPARE(walk.steps[3].label, QStringLiteral("the jump at item 4, repeated without end"));
+    // Many repeats stop after the steps flown
+    mission.items[4].jumpRepeat = 1000000;
+    walk = mission.walk(-1, 20);
+    QVERIFY(walk.steps.count() >= 20);
+    QVERIFY(walk.steps.count() <= 24);
+    QCOMPARE(walk.steps.constLast().segment, 3);
+    // A jump to an unknown item, or to itself, isn't one
+    mission.items[4].jumpSequence = 42;
+    QVERIFY(!GeoZoneMissionJumps::hasJumps(mission.items));
+    QCOMPARE(stepsText(mission.walk()), QStringLiteral("0 1 2 3"));
+    mission.items[4].jumpSequence = 4;
+    QVERIFY(!GeoZoneMissionJumps::hasJumps(mission.items));
+
+    // A jump to a pattern jumps to its first item, the jump target being any of its sequence numbers
+    JumpMission patterns;
+    patterns.addWaypoint(home);
+    patterns.addWaypoint(offsetFrom(home, 1000, 0));
+    patterns.items[1].kind = Kind::Pattern;
+    patterns.items[1].lastSequenceNumber = 9;
+    patterns.items[1].exit.coordinate = offsetFrom(home, 1000, 500);
+    patterns.itemSegments[1].segments = { static_cast<int>(patterns.segmentDistances.count()) };
+    patterns.segmentDistances.append(500);
+    patterns.addWaypoint(offsetFrom(home, 0, 500));
+    patterns.items[2].sequenceNumber = patterns.items[2].lastSequenceNumber = 10;
+    patterns.addCommand(Kind::Jump, 5, 1);
+    patterns.items[3].sequenceNumber = patterns.items[3].lastSequenceNumber = 11;
+    QCOMPARE(stepsText(patterns.walk()), QStringLiteral("0 1 2 2>1 1 2"));
 }
 
 void GeoZonePlanningTest::_testMissionContingencies()
