@@ -74,6 +74,61 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
+                text:               object.provenanceText
+                textFormat:         Text.PlainText
+                visible:            text !== ""
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                text:               object.areaText
+                visible:            object.followsArea && text !== ""
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                color:              qgcPal.warningText
+                text:               qsTr("The last download did not match the SHA-256 its publisher gave and was not loaded.")
+                visible:            object.integrityFailed
+            }
+
+            // The secret of a service, like after importing a pack on another computer
+            RowLayout {
+                Layout.fillWidth:   true
+                spacing:            _margin
+                visible:            object.needsCredentials
+
+                QGCLabel {
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    color:          object.credentialsMissing ? qgcPal.warningText : qgcPal.text
+                    text:           object.credentialsMissing ? qsTr("Credentials missing") : qsTr("Credentials")
+                }
+
+                QGCTextField {
+                    id:                 sourceSecretField
+                    Layout.fillWidth:   true
+                    echoMode:           TextInput.Password
+                    placeholderText:    object.credentialsMissing ? qsTr("Enter the secret") : qsTr("Replace the secret")
+                }
+
+                QGCButton {
+                    text:       qsTr("Set")
+                    enabled:    sourceSecretField.text !== ""
+                    onClicked: {
+                        _geoZoneManager.setCredentials(object.key, sourceSecretField.text)
+                        sourceSecretField.text = ""
+                    }
+                }
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
                 font.italic:        true
                 text:               qsTr("Turned off: its zones are not shown, checked or alerted.")
                 visible:            !object.enabled
@@ -185,7 +240,21 @@ ColumnLayout {
             text:               qsTr("Add Feed...")
             checkable:          true
             checked:            feedEntry.visible
-            onClicked:          feedEntry.visible = !feedEntry.visible
+            onClicked: {
+                feedEntry.visible = !feedEntry.visible
+                serviceEntry.visible = false
+            }
+        }
+
+        QGCButton {
+            Layout.fillWidth:   true
+            text:               qsTr("Add Service...")
+            checkable:          true
+            checked:            serviceEntry.visible
+            onClicked: {
+                serviceEntry.visible = !serviceEntry.visible
+                feedEntry.visible = false
+            }
         }
     }
 
@@ -230,6 +299,197 @@ ColumnLayout {
         }
     }
 
+    // Services taking credentials, ED-318 queries or the area around the mission and the vehicle
+    ColumnLayout {
+        id:                 serviceEntry
+        Layout.fillWidth:   true
+        spacing:            _margin
+        visible:            false
+
+        readonly property var   _templates: _geoZoneManager.serviceTemplates
+        readonly property var   _template:  serviceTemplateCombo.currentIndex < _templates.length ? _templates[serviceTemplateCombo.currentIndex] : null
+        readonly property var   _authTypes: [ "none", "apiKeyHeader", "apiKeyQuery", "bearer", "basic", "oauth2ClientCredentials" ]
+        readonly property int   _auth:      authCombo.currentIndex
+
+        function applyTemplate() {
+            var service = _template ? _template.service : {}
+            serviceUrlField.text = _template ? _template.url : ""
+            methodCombo.currentIndex = service.method === "ed318Post" ? 1 : 0
+            authCombo.currentIndex = Math.max(0, _authTypes.indexOf(service.auth || "none"))
+            authParameterField.text = service.authParameter || ""
+            userField.text = service.user || ""
+            tokenUrlField.text = service.tokenUrl || ""
+            responseMemberField.text = service.responseMember || ""
+            sha256UrlField.text = service.sha256Url || ""
+            areaCheckBox.checked = service.areaOfInterest || false
+            serviceSecretField.text = ""
+        }
+
+        function serviceMap() {
+            var service = _template ? Object.assign({}, _template.service) : {}
+            service.method = methodCombo.currentIndex === 1 ? "ed318Post" : "get"
+            service.auth = _authTypes[authCombo.currentIndex]
+            service.authParameter = authParameterField.text
+            service.user = userField.text
+            service.tokenUrl = tokenUrlField.text
+            service.responseMember = responseMemberField.text
+            service.sha256Url = sha256UrlField.text
+            service.areaOfInterest = areaCheckBox.checked
+            return service
+        }
+
+        Component.onCompleted: applyTemplate()
+
+        QGCComboBox {
+            id:                 serviceTemplateCombo
+            Layout.fillWidth:   true
+            model:              serviceEntry._templates.map(serviceTemplate => serviceTemplate.name).concat([ qsTr("Other service") ])
+            onActivated:        serviceEntry.applyTemplate()
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               serviceEntry._template ? serviceEntry._template.note : qsTr("Enter the address of the service and how it is accessed.")
+        }
+
+        QGCTextField {
+            id:                 serviceUrlField
+            Layout.fillWidth:   true
+            placeholderText:    "https://"
+        }
+
+        GridLayout {
+            Layout.fillWidth:   true
+            columns:            2
+            columnSpacing:      _margin
+            rowSpacing:         _margin / 2
+
+            QGCLabel { text: qsTr("Request") }
+            QGCComboBox {
+                id:                 methodCombo
+                Layout.fillWidth:   true
+                model:              [ qsTr("GET"), qsTr("ED-318 query (POST)") ]
+            }
+
+            QGCLabel { text: qsTr("Authentication") }
+            QGCComboBox {
+                id:                 authCombo
+                Layout.fillWidth:   true
+                model:              [ qsTr("None"), qsTr("API key header"), qsTr("API key query parameter"), qsTr("Bearer token"), qsTr("User and password"), qsTr("OAuth2 client credentials") ]
+            }
+
+            QGCLabel {
+                text:       serviceEntry._auth === 1 ? qsTr("Header") : qsTr("Parameter")
+                visible:    authParameterField.visible
+            }
+            QGCTextField {
+                id:                 authParameterField
+                Layout.fillWidth:   true
+                placeholderText:    serviceEntry._auth === 1 ? "X-API-Key" : "api_key"
+                visible:            serviceEntry._auth === 1 || serviceEntry._auth === 2
+            }
+
+            QGCLabel {
+                text:       serviceEntry._auth === 5 ? qsTr("Client id") : qsTr("User")
+                visible:    userField.visible
+            }
+            QGCTextField {
+                id:                 userField
+                Layout.fillWidth:   true
+                visible:            serviceEntry._auth === 4 || serviceEntry._auth === 5
+            }
+
+            QGCLabel {
+                text:       qsTr("Token URL")
+                visible:    tokenUrlField.visible
+            }
+            QGCTextField {
+                id:                 tokenUrlField
+                Layout.fillWidth:   true
+                placeholderText:    "https://"
+                visible:            serviceEntry._auth === 5
+            }
+
+            QGCLabel {
+                text:       [ "", qsTr("API key"), qsTr("API key"), qsTr("Token"), qsTr("Password"), qsTr("Client secret") ][serviceEntry._auth]
+                visible:    serviceSecretField.visible
+            }
+            QGCTextField {
+                id:                 serviceSecretField
+                Layout.fillWidth:   true
+                echoMode:           TextInput.Password
+                visible:            serviceEntry._auth > 0
+            }
+
+            QGCLabel { text: qsTr("Zones member") }
+            QGCTextField {
+                id:                 responseMemberField
+                Layout.fillWidth:   true
+                placeholderText:    qsTr("Optional, like data.geojson")
+            }
+
+            QGCLabel { text: qsTr("SHA-256 URL") }
+            QGCTextField {
+                id:                 sha256UrlField
+                Layout.fillWidth:   true
+                placeholderText:    qsTr("Optional, like {url}.sha256")
+            }
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               qsTr("Secrets are kept unencrypted in the QGroundControl settings, never in the list of sources, logs or exported packs.")
+            visible:            serviceEntry._auth > 0
+        }
+
+        QGCCheckBox {
+            id:     areaCheckBox
+            text:   qsTr("Download the zones around the mission and the vehicle")
+        }
+
+        QGCButton {
+            Layout.fillWidth:   true
+            text:               qsTr("Download")
+            enabled:            serviceUrlField.text.trim() !== "" && (!serviceEntry._template || serviceEntry._template.supported)
+            onClicked: {
+                _geoZoneManager.addService(serviceUrlField.text, serviceEntry.serviceMap(), serviceSecretField.text)
+                serviceSecretField.text = ""
+                serviceEntry.visible = false
+            }
+        }
+    }
+
+    // Offline packs and the provenance of the sources
+    RowLayout {
+        Layout.fillWidth:   true
+        spacing:            _margin
+        uniformCellSizes:   true
+
+        QGCButton {
+            Layout.fillWidth:   true
+            text:               qsTr("Import Pack...")
+            onClicked:          importPackDialog.openForLoad()
+        }
+
+        QGCButton {
+            Layout.fillWidth:   true
+            text:               qsTr("Export Pack...")
+            enabled:            _geoZoneManager.sources.count > _geoZoneManager.disabledSourceCount
+            onClicked:          exportPackDialog.openForSave()
+        }
+
+        QGCButton {
+            Layout.fillWidth:   true
+            text:               qsTr("Export Provenance...")
+            enabled:            _geoZoneManager.sources.count > 0
+            onClicked:          provenanceDialog.openForSave()
+        }
+    }
+
     RowLayout {
         Layout.fillWidth:   true
         spacing:            _margin
@@ -267,6 +527,44 @@ ColumnLayout {
 
         onAcceptedForLoad: (file) => {
             _geoZoneManager.addFile(file)
+            close()
+        }
+    }
+
+    QGCFileDialog {
+        id:             importPackDialog
+        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
+        title:          qsTr("Import Geozone Pack")
+        nameFilters:    [ qsTr("Geozone Packs (*.zip)") ]
+
+        onAcceptedForLoad: (file) => {
+            _geoZoneManager.importPack(file)
+            close()
+        }
+    }
+
+    QGCFileDialog {
+        id:             exportPackDialog
+        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
+        title:          qsTr("Export Geozone Pack of the Sources Turned On")
+        nameFilters:    [ qsTr("Geozone Packs (*.zip)") ]
+        defaultSuffix:  "zip"
+
+        onAcceptedForSave: (file) => {
+            _geoZoneManager.exportPack(file)
+            close()
+        }
+    }
+
+    QGCFileDialog {
+        id:             provenanceDialog
+        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
+        title:          qsTr("Export Geozone Provenance")
+        nameFilters:    [ qsTr("JSON Files (*.json)") ]
+        defaultSuffix:  "json"
+
+        onAcceptedForSave: (file) => {
+            _geoZoneManager.exportProvenance(file)
             close()
         }
     }

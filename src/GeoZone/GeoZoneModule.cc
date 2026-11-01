@@ -116,6 +116,7 @@ void init()
     (void) QObject::connect(manager, &GeoZoneManager::loadFailed, app, [app](const QString &, const QString &message) { app->showAppMessage(message); });
     (void) QObject::connect(manager, &GeoZoneManager::storageFailed, app, [app](const QString &message) { app->showAppMessage(message, QCoreApplication::translate("GeoZoneModule", "Geozones")); });
     (void) QObject::connect(manager, &GeoZoneManager::outdatedDataFound, app, [app](const QString &message) { app->showAppMessage(message, QCoreApplication::translate("GeoZoneModule", "Geozones")); });
+    (void) QObject::connect(manager, &GeoZoneManager::fileOperationFinished, app, [app](bool, const QString &message) { app->showAppMessage(message, QCoreApplication::translate("GeoZoneModule", "Geozones")); });
     manager->init();
     (void) GeoZoneMonitor::instance();
 }

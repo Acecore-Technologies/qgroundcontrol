@@ -71,7 +71,7 @@ When zones are loaded, the **Geozones** button in the Plan View tool strip and t
 To add geozones:
 
 1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the Plan View **Geozones** panel or the Fly View geozone indicator.
-1. Press **Add File...** and select a `.json` or `.geojson` file, or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**.
+1. Press **Add File...** and select a `.json` or `.geojson` file, or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**, or press **Add Service...** for a service needing credentials or an area (see [Geozone Services](#geozone-services)).
 
 Several files and feeds can be loaded at the same time. Files and downloads larger than 100 MB are rejected. Zip archives are read directly; when a package holds several geozone files (`.json`, `.geojson` or AIXM `.xml`), they are loaded together as one source, zones published in more than one file are kept once, and files of another format, like metadata, are left out. When a server answers with an error document or a web page instead of zones, its message is shown. Loading the same file again (from the same folder), or a feed with the same URL, replaces its zones; files with the same name in different folders are separate sources.
 Files are loaded in the background, and the Plan View map is moved to the new zones if they are not in view.
@@ -94,6 +94,29 @@ Click a zone on the map to see its details (restriction, altitude limits in your
 Problems found while reading a source are shown below it and in the details of the zones concerned: altitude limits in an unknown unit are ignored, so the zone applies at all altitudes, and unknown days in a schedule are taken as every day. Zone shapes are checked too: repeated points are dropped and boundaries need not be closed, but polygons with fewer than 3 distinct points or without area, polygons touching or enclosing a pole (within about 11 km of it) and circles without a positive radius are ignored, with a warning naming them. A zone left without any shape is counted as skipped. An invalid hole is ignored, so the zone covers it. A polygon whose boundary crosses itself is kept with a warning; the parts it encloses twice (like the center of a star drawn in one stroke) are outside the zone. Where zones overlap, choose the zone at the top of the details. In the Plan View this works when the click doesn't add a waypoint or rally point or select a fence. In the Fly View, when guided actions are available, the map click menu has **Geozones here**. When the map is zoomed in, each zone also shows a label which opens its details.
 To find a zone, type part of its name or identifier in the search field of the Plan View **Geozones** panel or the Fly View geozone indicator, then pick a result to move the map to the zone and show its details.
 When many small zones are in view, the smallest are left out until you zoom in, and the Plan View **Geozones** panel shows how many are hidden.
+
+### Geozone Services
+
+**Add Service...** adds a feed from a service which needs credentials, an ED-318 query or the area of interest. Pick a service, or **Other service**, check its address and settings, enter its secret if it needs one and press **Download**:
+
+- **ED-318 geozone service**: a service following the retrieval interface of EUROCAE ED-318, which is sent the area and time of interest in a POST request (`geometry`, `startDateTime`, `endDateTime`) and answers with the zones in `uasZones`. Enter the address of its UAS zones endpoint.
+- **Germany ED-318 service (DFS)**: the ED-318 interface of the DFS Geospatial Information Service (`https://dipul-service.dfs.de/api/geofencing/v2/uas-zones`), with the user and password of a dipul account, which DFS grants on request through the dipul contact form. It answers areas up to 100 km².
+- **Zones of the area (GET)**: a service taking the area in its address. Write `{bbox}` (west,south,east,north), `{west}`, `{south}`, `{east}`, `{north}`, `{lat}`, `{lon}` (the center), `{radiusM}`, `{radiusKm}`, `{radiusNm}`, `{start}` or `{end}` (ISO 8601 UTC) where the service expects them, for example `https://example.org/zones?bbox={bbox}`.
+- **United States NOTAMs (FAA NMS)**: configuration only. The FAA NOTAM Management Service (`https://api-nms.aim.faa.gov`) publishes NOTAMs as GeoJSON or AIXM 5.1 events to clients registered with `NOTAMS@faa.gov`, using OAuth2 client credentials, but _QGroundControl_ does not read NOTAMs yet. FAA TFRs are available without credentials from the **United States TFRs (FAA)** feed.
+
+The authentication can be an API key in a header or a query parameter, a bearer token, a user and password (HTTP basic authentication) or OAuth2 client credentials, for which _QGroundControl_ requests a token from the token URL with the client id and secret and requests a new one when it expires or is refused. **Zones member** names the member of a JSON response holding the zones, like `data.geojson`, when the service wraps them; ED-318 replies are unwrapped automatically. Services, like other feeds, are refreshed periodically and kept for offline use.
+
+Secrets (API keys, tokens, passwords and client secrets) are kept unencrypted in the _QGroundControl_ settings, since it has no secure store on all platforms. They are never written to the list of sources, the logs, the provenance or exported packs, and are only sent to the server of the service, not after a redirect to another server. Removing a source removes its secret. A source whose secret is missing, like after importing a pack, says so and has a field to enter it.
+
+With **Download the zones around the mission and the vehicle**, a service is requested for the area of interest: the bounds of the planned mission and the position of the active vehicle, with **Service download margin** (5 km by default) around them. The source shows the area downloaded. When the mission or the vehicle leaves that area, the zones of the new area are downloaded, unless **Download services around the mission and vehicle** is turned off in the settings; refreshes keep the area while it still covers the mission and the vehicle. A service with an area is only added once a mission is planned or a vehicle is connected.
+
+If a server sends the SHA-256 of its data in a `Repr-Digest`, `Content-Digest` or `Digest` header, or a service publishes it in a file whose address is given in **SHA-256 URL** (like `{url}.sha256`, in the format `sha256sum` writes), the data is checked against it. Verified sources say so. Data which doesn't match, or whose SHA-256 can't be downloaded, isn't loaded: the previous data is kept and the source shows that the integrity check failed. Only SHA-256 hashes are checked, not signatures.
+
+### Provenance and Offline Packs
+
+Below each source, _QGroundControl_ shows where and when its data was obtained: the server which answered after redirects, its ETag or modification date, the beginning of the SHA-256 of the data received and whether it was verified or imported from a pack. **Export Provenance...** saves the provenance of all sources as JSON for briefings: per source its name, format, zone count, dates, service (without user or secrets) and provenance, which holds the provider, the address requested and the one which answered with the redirects, the validators, the time of the download, the SHA-256 of the data received, the BLAKE2b-256 hash and size of the stored copy, the area downloaded and the integrity check.
+
+To use the zones on a computer without network access, press **Export Pack...** to save the sources turned on in a zip file, then **Import Pack...** on the other computer. A pack holds the stored copy of each source in `sources/` and `manifest.json` with the provenance of the sources, their dates, validators, areas and services, without secrets. Imported sources replace the sources with the same address or file, keep the dates and provenance of their data, marked as imported from the pack, and are refreshed like other sources when the network is available. Data in the pack which doesn't match the hash of its provenance is left out.
 
 ### Mission and Flight Checks
 
@@ -191,6 +214,7 @@ Besides the sources, the **Geozones** page of the _Application Settings_ sets:
 - **QNH**: the local sea level pressure (altimeter setting, 850 to 1100 hPa) converting flight levels to heights above mean sea level. The default, 1013.25 hPa, is the standard pressure of flight levels.
 - **Feed refresh interval** and **Live restrictions refresh interval** (TFRs): how often feeds are downloaded again.
 - **Outdated data warning** and **Outdated live restrictions warning** (TFRs): the data age at which a source is reported as outdated.
+- **Download services around the mission and vehicle** and **Service download margin**: whether services taking an area download the zones of a new area when the mission or the vehicle leaves the one downloaded, and the distance around them downloaded.
 
 ::: warning
 These checks are advisory. Always check the official sources and obtain any required authorisation before flying.

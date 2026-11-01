@@ -55,6 +55,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(bool         credentialsMissing  READ credentialsMissing NOTIFY serviceChanged FINAL)    ///< The secret the service requires isn't known, like after importing a pack
     Q_PROPERTY(bool         followsArea     READ followsArea    NOTIFY serviceChanged FINAL)        ///< The service downloads the zones around the mission and the vehicle
     Q_PROPERTY(QGeoRectangle area           READ area           NOTIFY changed FINAL)               ///< Area the zones were downloaded for, invalid unless followsArea
+    Q_PROPERTY(QString      areaText        READ areaText       NOTIFY changed FINAL)               ///< Describes area, empty without
     Q_PROPERTY(QString      provenanceText  READ provenanceText NOTIFY changed FINAL)               ///< See GeoZoneProvenance::summary
     Q_PROPERTY(bool         verified        READ verified       NOTIFY changed FINAL)               ///< The data matches the SHA-256 its publisher gave
     Q_PROPERTY(bool         integrityFailed READ integrityFailed NOTIFY changed FINAL)              ///< The last download didn't match the SHA-256 its publisher gave, and wasn't loaded
@@ -147,6 +148,7 @@ public:
     /// Area of interest the feed was downloaded for, invalid when its service takes none
     QGeoRectangle area() const { return _area; }
     void setArea(const QGeoRectangle &area);
+    QString areaText() const;
 
     /// Where and how the data was obtained
     const GeoZoneProvenance &provenance() const { return _provenance; }
