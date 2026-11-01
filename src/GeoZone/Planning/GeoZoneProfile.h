@@ -10,8 +10,6 @@
 #pragma once
 
 #include <QtCore/QObject>
-#include <QtCore/QPointer>
-#include <QtCore/QTimer>
 #include <QtCore/QVariantList>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -22,6 +20,7 @@
 
 class GeoZoneCatalog;
 class GeoZoneManager;
+class GeoZoneMissionWorker;
 class MissionController;
 
 /// Vertical extent of the restricted geozones and U-space airspaces along the planned flight path, for the
@@ -52,7 +51,7 @@ public:
     void setMissionController(MissionController *missionController);
 
     QVariantList bands() const { return _bands; }
-    bool active() const { return _active; }
+    bool active() const;
     void setActive(bool active);
 
     struct BandPoint {
@@ -99,12 +98,9 @@ private:
     void _apply(const QList<Band> &bands);
 
     GeoZoneManager *_manager = nullptr;
-    QPointer<MissionController> _missionController;
+    GeoZoneMissionWorker *_worker = nullptr;    ///< Follows the mission, computes the bands and drops outdated ones
     QList<Band> _bandList;
     QVariantList _bands;
-    bool _active = true;
-    QTimer _updateTimer;
-    quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones
 
     static constexpr int _updateDelayMSecs = 500;
 };

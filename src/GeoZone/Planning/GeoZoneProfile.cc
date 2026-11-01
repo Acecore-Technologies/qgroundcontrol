@@ -12,11 +12,9 @@
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneMissionWorker.h"
 #include "GeoZonePathEvaluator.h"
 #include "MissionController.h"
-
-#include <QtConcurrent/QtConcurrentRun>
-#include <QtCore/QFutureWatcher>
 
 #include <algorithm>
 
@@ -28,47 +26,33 @@ GeoZoneProfile::GeoZoneProfile(QObject *parent)
 GeoZoneProfile::GeoZoneProfile(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _worker(new GeoZoneMissionWorker(_updateDelayMSecs, this))
 {
-    _updateTimer.setSingleShot(true);
-    _updateTimer.setInterval(_updateDelayMSecs);
-    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneProfile::_updateConcurrently);
+    (void) connect(_worker, &GeoZoneMissionWorker::triggered, this, &GeoZoneProfile::_updateConcurrently);
 
     // The bands reference no zones, but they are outdated
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneProfile::_clear);
-    (void) connect(_manager, &GeoZoneManager::zonesChanged, &_updateTimer, qOverload<>(&QTimer::start));
-    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, &_updateTimer, qOverload<>(&QTimer::start));
+    (void) connect(_manager, &GeoZoneManager::zonesChanged, _worker, &GeoZoneMissionWorker::schedule);
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, _worker, &GeoZoneMissionWorker::schedule);
 }
 
 MissionController *GeoZoneProfile::missionController() const
 {
-    return _missionController;
+    return _worker->missionController();
 }
 
 void GeoZoneProfile::setMissionController(MissionController *missionController)
 {
-    if (missionController == _missionController) {
+    if (!_worker->setMissionController(missionController)) {
         return;
     }
-
-    if (_missionController) {
-        (void) disconnect(_missionController, nullptr, this, nullptr);
-        (void) disconnect(_missionController, nullptr, &_updateTimer, nullptr);
-    }
-    _missionController = missionController;
-    if (_missionController) {
-        (void) connect(_missionController, &MissionController::recalcTerrainProfile, &_updateTimer, qOverload<>(&QTimer::start));
-        (void) connect(_missionController, &MissionController::visualItemsChanged, &_updateTimer, qOverload<>(&QTimer::start));
-        (void) connect(_missionController, &MissionController::missionTimeChanged, &_updateTimer, qOverload<>(&QTimer::start));
-    }
-
     emit missionControllerChanged();
-    _updateTimer.start();
+    _worker->schedule();
 }
 
 void GeoZoneProfile::_clear()
 {
-    _updateTimer.stop();
-    _evaluation++;
+    _worker->stop();
     if (!_bandList.isEmpty()) {
         _bandList.clear();
         _bands.clear();
@@ -76,48 +60,44 @@ void GeoZoneProfile::_clear()
     }
 }
 
+bool GeoZoneProfile::active() const
+{
+    return _worker->active();
+}
+
 void GeoZoneProfile::setActive(bool active)
 {
-    if (active == _active) {
+    if (active == _worker->active()) {
         return;
     }
-    _active = active;
+    _worker->setActive(active);
     emit activeChanged();
-    if (_active) {
-        _updateTimer.start();
-    } else {
-        _updateTimer.stop();
-    }
+    _worker->schedule();
 }
 
 void GeoZoneProfile::update()
 {
-    _updateTimer.stop();
-    _evaluation++;
-    if (!_active) {
+    if (!_worker->active()) {
+        _worker->stop();
         return;
     }
-    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    _apply(computeBands(GeoZoneMissionPath::fromMission(_missionController).segments(), _manager->catalog(), plannedStart, plannedEnd));
+    _worker->runNow([this]() {
+        const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _worker->missionController());
+        return computeBands(GeoZoneMissionPath::fromMission(_worker->missionController()).segments(), _manager->catalog(), plannedStart, plannedEnd);
+    }, [this](const QList<Band> &bands) { _apply(bands); });
 }
 
 void GeoZoneProfile::_updateConcurrently()
 {
-    const quint64 evaluation = ++_evaluation;
-    if (!_active) {
+    if (!_worker->active()) {
+        _worker->stop();
         return;
     }
-    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
+    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _worker->missionController());
     const GeoZoneCatalog catalog = _manager->catalog();
-    const QList<GeoZoneMissionPath::Segment> segments = GeoZoneMissionPath::fromMission(_missionController).segments();
-    auto *const watcher = new QFutureWatcher<QList<Band>>(this);
-    (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {
-        watcher->deleteLater();
-        if (evaluation == _evaluation) {
-            _apply(watcher->result());
-        }
-    });
-    watcher->setFuture(QtConcurrent::run([segments, catalog, start = plannedStart, end = plannedEnd]() { return computeBands(segments, catalog, start, end); }));
+    const QList<GeoZoneMissionPath::Segment> segments = GeoZoneMissionPath::fromMission(_worker->missionController()).segments();
+    _worker->run([segments, catalog, start = plannedStart, end = plannedEnd]() { return computeBands(segments, catalog, start, end); },
+                 [this](const QList<Band> &bands) { _apply(bands); });
 }
 
 void GeoZoneProfile::_apply(const QList<Band> &bands)

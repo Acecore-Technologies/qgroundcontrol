@@ -14,7 +14,6 @@
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
-#include <QtCore/QTimer>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
@@ -26,6 +25,7 @@
 class GeoFenceController;
 class GeoZoneCatalog;
 class GeoZoneManager;
+class GeoZoneMissionWorker;
 class GeoZoneSource;
 class MissionController;
 class PlanMasterController;
@@ -129,7 +129,7 @@ public:
     /// Re-evaluates immediately on this thread instead of after changes settle on another one
     Q_INVOKABLE void update();
     /// Sets how long changes settle before the mission is checked again, half a second by default
-    void setUpdateDelay(int msecs) { _updateTimer.setInterval(msecs); }
+    void setUpdateDelay(int msecs);
 
     /// Zones a mission path enters
     struct Evaluation {
@@ -165,7 +165,6 @@ signals:
     void auditChanged();
 
 private:
-    void _scheduleUpdate();
     void _clearZones(GeoZoneSource *source);
     void _connectMissionItems();
     /// Connects the plan's rally points and breach return point, which the returns go to
@@ -183,7 +182,7 @@ private:
     void _updateAudit();
 
     GeoZoneManager *_manager = nullptr;
-    QPointer<MissionController> _missionController;
+    GeoZoneMissionWorker *_worker = nullptr;    ///< Follows the mission, evaluates it and drops outdated results
     QList<const GeoZone*> _crossedZones;
     QList<const GeoZone*> _uSpaceZones;
     QList<const GeoZone*> _permittedZones;
@@ -204,8 +203,6 @@ private:
     QObject *_planConnections = nullptr;        ///< Receiver of the plan's signals, replaced to disconnect them
     QObject *_vehicleConnections = nullptr;     ///< Receiver of the vehicle's signals
     QObject *_rallyConnections = nullptr;       ///< Receiver of the rally points' signals
-    QTimer _updateTimer;
-    quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones
 
     static constexpr int _updateDelayMSecs = 500;
 };

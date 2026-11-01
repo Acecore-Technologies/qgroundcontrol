@@ -15,6 +15,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionWorker.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneSource.h"
@@ -29,9 +30,6 @@
 #include "SimpleMissionItem.h"
 #include "Vehicle.h"
 
-#include <QtConcurrent/QtConcurrentRun>
-#include <QtCore/QFutureWatcher>
-
 #include <algorithm>
 #include <cmath>
 
@@ -43,24 +41,23 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(QObject *parent)
 GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _worker(new GeoZoneMissionWorker(_updateDelayMSecs, this))
 {
-    _updateTimer.setSingleShot(true);
-    _updateTimer.setInterval(_updateDelayMSecs);
-    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneMissionCheck::_updateConcurrently);
+    (void) connect(_worker, &GeoZoneMissionWorker::triggered, this, &GeoZoneMissionCheck::_updateConcurrently);
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMissionCheck::_clearZones);
-    (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-    (void) connect(_manager->planning()->authorisations(), &GeoZoneAuthorisations::changed, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    (void) connect(_manager, &GeoZoneManager::zonesChanged, _worker, &GeoZoneMissionWorker::schedule);
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, _worker, &GeoZoneMissionWorker::schedule);
+    (void) connect(_manager->planning()->authorisations(), &GeoZoneAuthorisations::changed, _worker, &GeoZoneMissionWorker::schedule);
     (void) connect(_manager->planning(), &GeoZonePlanning::planAuditChanged, this, [this]() {
         // Running evaluations may be of the previous plan
-        _evaluation++;
-        _scheduleUpdate();
+        _worker->invalidate();
+        _worker->schedule();
     });
     // The audit waits for the sources to load
     (void) connect(_manager, &GeoZoneManager::busyChanged, this, [this](bool busy) {
         if (!busy) {
-            _scheduleUpdate();
+            _worker->schedule();
         }
     });
     // The mission no longer makes the area of interest
@@ -71,33 +68,29 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
 
 MissionController *GeoZoneMissionCheck::missionController() const
 {
-    return _missionController;
+    return _worker->missionController();
 }
 
 void GeoZoneMissionCheck::setMissionController(MissionController *missionController)
 {
-    if (missionController == _missionController) {
+    if (missionController == _worker->missionController()) {
         return;
     }
 
-    if (_missionController) {
-        (void) disconnect(_missionController, nullptr, this, nullptr);
+    if (_worker->missionController()) {
+        (void) disconnect(_worker->missionController(), nullptr, this, nullptr);
     }
     if (_masterController) {
         (void) disconnect(_masterController, nullptr, this, nullptr);
+        (void) disconnect(_masterController, nullptr, _worker, nullptr);
     }
-    _missionController = missionController;
-    _masterController = _missionController ? _missionController->masterController() : nullptr;
-    if (_missionController) {
-        // Emitted after the flight path or any item coordinate changes
-        (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionCheck::_scheduleUpdate);
-        (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-        (void) connect(_missionController, &MissionController::missionTimeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-        (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-        (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_connectMissionItems);
+    (void) _worker->setMissionController(missionController);
+    _masterController = missionController ? missionController->masterController() : nullptr;
+    if (missionController) {
+        (void) connect(missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_connectMissionItems);
         // The returns depend on the vehicle's parameters
         if (_masterController) {
-            (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+            (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, _worker, &GeoZoneMissionWorker::schedule);
             (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_connectVehicle);
             // A new plan has no saved geozone data, opened and saved plans set it, see GeoZonePlanData
             (void) connect(_masterController, &PlanMasterController::currentPlanFileChanged, this, [this]() {
@@ -112,7 +105,7 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
     _connectVehicle();
 
     emit missionControllerChanged();
-    _scheduleUpdate();
+    _worker->schedule();
 }
 
 void GeoZoneMissionCheck::_connectPlan()
@@ -125,11 +118,11 @@ void GeoZoneMissionCheck::_connectPlan()
     }
     // The returns may go to the rally points, the fence breach action to the breach return point
     GeoFenceController *const geoFenceController = _masterController->geoFenceController();
-    (void) connect(geoFenceController, &GeoFenceController::breachReturnPointChanged, _planConnections, [this]() { _scheduleUpdate(); });
-    (void) connect(geoFenceController->breachReturnAltitude(), &Fact::rawValueChanged, _planConnections, [this]() { _scheduleUpdate(); });
+    (void) connect(geoFenceController, &GeoFenceController::breachReturnPointChanged, _planConnections, [this]() { _worker->schedule(); });
+    (void) connect(geoFenceController->breachReturnAltitude(), &Fact::rawValueChanged, _planConnections, [this]() { _worker->schedule(); });
     (void) connect(_masterController->rallyPointController()->points(), &QmlObjectListModel::countChanged, _planConnections, [this]() {
         _connectRallyPoints();
-        _scheduleUpdate();
+        _worker->schedule();
     });
     _connectRallyPoints();
 }
@@ -144,7 +137,7 @@ void GeoZoneMissionCheck::_connectRallyPoints()
     const QmlObjectListModel *const rallyPoints = _masterController->rallyPointController()->points();
     for (int i = 0; i < rallyPoints->count(); i++) {
         if (RallyPoint *const rallyPoint = rallyPoints->value<RallyPoint*>(i)) {
-            (void) connect(rallyPoint, &RallyPoint::coordinateChanged, _rallyConnections, [this]() { _scheduleUpdate(); });
+            (void) connect(rallyPoint, &RallyPoint::coordinateChanged, _rallyConnections, [this]() { _worker->schedule(); });
         }
     }
 }
@@ -156,28 +149,29 @@ void GeoZoneMissionCheck::_connectVehicle()
     Vehicle *const vehicle = _masterController ? _masterController->managerVehicle() : nullptr;
     if (_vehicle && (_vehicle != vehicle) && _vehicle->parameterManager()) {
         (void) disconnect(_vehicle->parameterManager(), nullptr, this, nullptr);
+        (void) disconnect(_vehicle->parameterManager(), nullptr, _worker, nullptr);
     }
     _vehicle = vehicle;
     if (!_vehicle) {
         return;
     }
     // The defaults of the firmware and vehicle class apply until the parameters are known
-    (void) connect(_vehicle, &Vehicle::firmwareTypeChanged, _vehicleConnections, [this]() { _scheduleUpdate(); });
-    (void) connect(_vehicle, &Vehicle::vehicleTypeChanged, _vehicleConnections, [this]() { _scheduleUpdate(); });
+    (void) connect(_vehicle, &Vehicle::firmwareTypeChanged, _vehicleConnections, [this]() { _worker->schedule(); });
+    (void) connect(_vehicle, &Vehicle::vehicleTypeChanged, _vehicleConnections, [this]() { _worker->schedule(); });
     if (_vehicle->isOfflineEditingVehicle() || !_vehicle->parameterManager()) {
         return;
     }
     // The parameters arrive after the vehicle, each change of those the returns depend on is checked
     ParameterManager *const parameterManager = _vehicle->parameterManager();
     (void) connect(parameterManager, &ParameterManager::parametersReadyChanged, this, &GeoZoneMissionCheck::_connectVehicle, Qt::UniqueConnection);
-    (void) connect(parameterManager, &ParameterManager::parametersReadyChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+    (void) connect(parameterManager, &ParameterManager::parametersReadyChanged, _worker, &GeoZoneMissionWorker::schedule, Qt::UniqueConnection);
     if (!parameterManager->parametersReady()) {
         return;
     }
     for (const QString &name : GeoZoneReturnModel::parameterNames()) {
         if (parameterManager->parameterExists(ParameterManager::defaultComponentId, name)) {
             (void) connect(parameterManager->getParameter(ParameterManager::defaultComponentId, name), &Fact::rawValueChanged, _vehicleConnections, [this]() {
-                _scheduleUpdate();
+                _worker->schedule();
             });
         }
     }
@@ -185,7 +179,8 @@ void GeoZoneMissionCheck::_connectVehicle()
 
 void GeoZoneMissionCheck::_connectMissionItems()
 {
-    QmlObjectListModel *const visualItems = _missionController ? _missionController->visualItems() : nullptr;
+    MissionController *const missionController = _worker->missionController();
+    QmlObjectListModel *const visualItems = missionController ? missionController->visualItems() : nullptr;
     if (!visualItems) {
         return;
     }
@@ -193,16 +188,16 @@ void GeoZoneMissionCheck::_connectMissionItems()
     (void) connect(visualItems, &QmlObjectListModel::countChanged, this, &GeoZoneMissionCheck::_connectMissionItems, Qt::UniqueConnection);
     for (int i = 0; i < visualItems->count(); i++) {
         if (SimpleMissionItem *const item = visualItems->value<SimpleMissionItem*>(i)) {
-            (void) connect(item, &SimpleMissionItem::loiterRadiusChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
-            (void) connect(item, &SimpleMissionItem::commandChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+            (void) connect(item, &SimpleMissionItem::loiterRadiusChanged, _worker, &GeoZoneMissionWorker::schedule, Qt::UniqueConnection);
+            (void) connect(item, &SimpleMissionItem::commandChanged, _worker, &GeoZoneMissionWorker::schedule, Qt::UniqueConnection);
             (void) connect(item, &SimpleMissionItem::commandChanged, this, &GeoZoneMissionCheck::_connectMissionItems, Qt::UniqueConnection);
-            (void) connect(item, &VisualMissionItem::currentVTOLModeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+            (void) connect(item, &VisualMissionItem::currentVTOLModeChanged, _worker, &GeoZoneMissionWorker::schedule, Qt::UniqueConnection);
             if (item->command() == MAV_CMD_DO_JUMP) {
                 // The item jumped to and the repeat count
                 const QmlObjectListModel *const facts = item->textFieldFacts();
                 for (int j = 0; j < facts->count(); j++) {
                     if (Fact *const fact = facts->value<Fact*>(j)) {
-                        (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+                        (void) connect(fact, &Fact::rawValueChanged, _worker, &GeoZoneMissionWorker::schedule, Qt::UniqueConnection);
                     }
                 }
             }
@@ -215,7 +210,7 @@ void GeoZoneMissionCheck::setFlightNow(bool flightNow)
     if (flightNow != _flightNow) {
         _flightNow = flightNow;
         emit flightNowChanged();
-        _scheduleUpdate();
+        _worker->schedule();
     }
 }
 
@@ -225,21 +220,21 @@ void GeoZoneMissionCheck::setGeoFenceController(GeoFenceController *geoFenceCont
         return;
     }
     if (_geoFenceController) {
-        (void) disconnect(_geoFenceController, nullptr, this, nullptr);
-        (void) disconnect(_geoFenceController->polygons(), nullptr, this, nullptr);
-        (void) disconnect(_geoFenceController->circles(), nullptr, this, nullptr);
+        (void) disconnect(_geoFenceController, nullptr, _worker, nullptr);
+        (void) disconnect(_geoFenceController->polygons(), nullptr, _worker, nullptr);
+        (void) disconnect(_geoFenceController->circles(), nullptr, _worker, nullptr);
     }
     _geoFenceController = geoFenceController;
     if (_geoFenceController) {
         // Fence edits mark the lists dirty, additions and deletions change their counts
         for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
-            (void) connect(fences, &QmlObjectListModel::countChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
-            (void) connect(fences, &QmlObjectListModel::dirtyChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+            (void) connect(fences, &QmlObjectListModel::countChanged, _worker, &GeoZoneMissionWorker::schedule);
+            (void) connect(fences, &QmlObjectListModel::dirtyChanged, _worker, &GeoZoneMissionWorker::schedule);
         }
-        (void) connect(_geoFenceController, &GeoFenceController::supportedChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        (void) connect(_geoFenceController, &GeoFenceController::supportedChanged, _worker, &GeoZoneMissionWorker::schedule);
     }
     emit geoFenceControllerChanged();
-    _scheduleUpdate();
+    _worker->schedule();
 }
 
 GeoFenceController *GeoZoneMissionCheck::geoFenceController() const
@@ -343,14 +338,14 @@ QGeoRectangle GeoZoneMissionCheck::crossedZonesBoundingBox() const
     return box.toRectangle();
 }
 
-void GeoZoneMissionCheck::_scheduleUpdate()
+void GeoZoneMissionCheck::setUpdateDelay(int msecs)
 {
-    _updateTimer.start();
+    _worker->setDelay(msecs);
 }
 
 void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
 {
-    _evaluation++;
+    _worker->invalidate();
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     (void) _pathLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
@@ -368,19 +363,20 @@ std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::_flightTimes() const
 {
     if (_flightNow) {
         const QDateTime start = GeoZoneEnvironment::currentDateTimeUtc();
-        return { start, start.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0))) };
+        MissionController *const missionController = _worker->missionController();
+        return { start, start.addSecs(std::llround((std::max)(missionController ? missionController->missionTime() : 0.0, 0.0))) };
     }
-    return plannedFlightTimes(_manager, _missionController);
+    return plannedFlightTimes(_manager, _worker->missionController());
 }
 
 void GeoZoneMissionCheck::update()
 {
-    _updateTimer.stop();
-    _evaluation++;
-    const auto [start, end] = _flightTimes();
-    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController, true);
-    _manager->setMissionArea(this, missionArea(path));
-    _apply(evaluate(_manager->catalog(), path, start, end));
+    _worker->runNow([this]() {
+        const auto [start, end] = _flightTimes();
+        const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
+        _manager->setMissionArea(this, missionArea(path));
+        return evaluate(_manager->catalog(), path, start, end);
+    }, [this](const Evaluation &evaluation) { _apply(evaluation); });
 }
 
 QGeoRectangle GeoZoneMissionCheck::missionArea(const GeoZoneMissionPath &path)
@@ -403,21 +399,14 @@ QGeoRectangle GeoZoneMissionCheck::missionArea(const GeoZoneMissionPath &path)
 
 void GeoZoneMissionCheck::_updateConcurrently()
 {
-    const quint64 evaluation = ++_evaluation;
     const GeoZoneCatalog catalog = _manager->catalog();
-    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController, true);
+    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
     // The services taking the area of interest download the zones around the mission
     _manager->setMissionArea(this, missionArea(path));
     const auto [start, end] = _flightTimes();
-    auto *const watcher = new QFutureWatcher<Evaluation>(this);
-    (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {
-        watcher->deleteLater();
-        // Zones of an outdated evaluation may be gone
-        if (evaluation == _evaluation) {
-            _apply(watcher->result());
-        }
-    });
-    watcher->setFuture(QtConcurrent::run([catalog, path, start, end]() { return evaluate(catalog, path, start, end); }));
+    // Zones of an outdated evaluation may be gone
+    _worker->run([catalog, path, start, end]() { return evaluate(catalog, path, start, end); },
+                 [this](const Evaluation &evaluation) { _apply(evaluation); });
 }
 
 GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start,

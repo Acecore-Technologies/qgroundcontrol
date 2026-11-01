@@ -10,8 +10,6 @@
 #pragma once
 
 #include <QtCore/QObject>
-#include <QtCore/QPointer>
-#include <QtCore/QTimer>
 #include <QtCore/QVariantList>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -27,6 +25,7 @@
 
 class GeoZoneAuthorisations;
 class GeoZoneManager;
+class GeoZoneMissionWorker;
 class MissionController;
 
 /// Suggests how the legs of a mission between waypoints can avoid the restricted zones they enter, see
@@ -73,7 +72,7 @@ public:
     MissionController *missionController() const;
     void setMissionController(MissionController *missionController);
     QVariantList suggestions() const;
-    bool active() const { return _active; }
+    bool active() const;
     void setActive(bool active);
     double margin() const { return detourMargin; }
     double verticalMargin() const { return floorMargin; }
@@ -180,15 +179,13 @@ private:
     static QString _heightText(double meters);
 
     GeoZoneManager *_manager = nullptr;
-    QPointer<MissionController> _missionController;
+    GeoZoneMissionWorker *_worker = nullptr;    ///< Follows the mission, searches the routes and drops outdated results
     QList<Suggestion> _suggestions;
-    bool _active = false;
     double _maxAltitude = defaultMaxAltitude;
     bool _busy = false;
     double _progress = 0;
     QString _statusText;
-    QTimer _updateTimer;
-    quint64 _generation = 0;                ///< Of the computation whose results are wanted
-    GeoZoneCancelToken _cancel;             ///< Of the computation in progress
     std::shared_ptr<Terrain> _terrain;      ///< Ground elevations the searches looked up, kept between computations
+
+    static constexpr int _updateDelayMSecs = 500;
 };

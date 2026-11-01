@@ -13,6 +13,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneTerrain.h"
 #include "MissionController.h"
@@ -20,8 +21,6 @@
 #include "QmlObjectListModel.h"
 #include "SimpleMissionItem.h"
 
-#include <QtConcurrent/QtConcurrentRun>
-#include <QtCore/QFutureWatcher>
 #include <QtCore/QHash>
 #include <QtCore/QLocale>
 #include <QtCore/QMutex>
@@ -152,41 +151,41 @@ GeoZoneRoutePlanner::GeoZoneRoutePlanner(QObject *parent)
 GeoZoneRoutePlanner::GeoZoneRoutePlanner(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _worker(new GeoZoneMissionWorker(_updateDelayMSecs, this))
     , _terrain(std::make_shared<Terrain>())
 {
-    _updateTimer.setSingleShot(true);
-    _updateTimer.setInterval(500);
-    (void) connect(&_updateTimer, &QTimer::timeout, this, &GeoZoneRoutePlanner::startUpdate);
+    _worker->setActive(false);
+    (void) connect(_worker, &GeoZoneMissionWorker::triggered, this, &GeoZoneRoutePlanner::startUpdate);
 
     // Suggestions refer to zones and mission items, so they are dropped when either changes and computed again
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, [this]() {
         _stop();
         _clearSuggestions();
     });
-    (void) connect(_manager, &GeoZoneManager::zonesChanged, this, [this]() {
-        if (_active) {
-            _updateTimer.start();
-        }
-    });
+    (void) connect(_manager, &GeoZoneManager::zonesChanged, _worker, &GeoZoneMissionWorker::schedule);
 }
 
 GeoZoneRoutePlanner::~GeoZoneRoutePlanner()
 {
-    // The computation in progress ends on its own, its results are dropped with the watcher
-    _cancel.cancel();
+    // The computation in progress ends on its own, its results are dropped with the worker
+    _worker->stop();
+}
+
+bool GeoZoneRoutePlanner::active() const
+{
+    return _worker->active();
 }
 
 void GeoZoneRoutePlanner::setActive(bool active)
 {
-    if (active == _active) {
+    if (active == _worker->active()) {
         return;
     }
-    _active = active;
+    _worker->setActive(active);
     emit activeChanged();
-    if (_active) {
+    if (active) {
         startUpdate();
     } else {
-        _updateTimer.stop();
         _stop();
     }
 }
@@ -198,40 +197,23 @@ void GeoZoneRoutePlanner::setMaxAltitude(double maxAltitude)
     }
     _maxAltitude = maxAltitude;
     emit maxAltitudeChanged();
-    if (_active) {
-        _updateTimer.start();
-    }
+    _worker->schedule();
 }
 
 MissionController *GeoZoneRoutePlanner::missionController() const
 {
-    return _missionController;
+    return _worker->missionController();
 }
 
 void GeoZoneRoutePlanner::setMissionController(MissionController *missionController)
 {
-    if (missionController == _missionController) {
+    if (!_worker->setMissionController(missionController)) {
         return;
-    }
-    if (_missionController) {
-        (void) disconnect(_missionController, nullptr, this, nullptr);
-    }
-    _missionController = missionController;
-    if (_missionController) {
-        const auto missionChanged = [this]() {
-            if (_active) {
-                _updateTimer.start();
-            }
-        };
-        (void) connect(_missionController, &MissionController::visualItemsChanged, this, missionChanged);
-        (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, missionChanged);
     }
     _stop();
     emit missionControllerChanged();
     _clearSuggestions();
-    if (_active) {
-        _updateTimer.start();
-    }
+    _worker->schedule();
 }
 
 QVariantList GeoZoneRoutePlanner::suggestions() const
@@ -278,7 +260,8 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
 {
     Job job;
     job.catalog = _manager->catalog();
-    const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
+    MissionController *const missionController = _worker->missionController();
+    const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, missionController);
     job.time = start;
     // A copy of the authorisations for the worker thread, since they change on the GUI thread
     const std::shared_ptr<GeoZoneAuthorisations> authorisations(new GeoZoneAuthorisations(QString()), [](GeoZoneAuthorisations *copy) { copy->deleteLater(); });
@@ -288,11 +271,11 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
     job.settings = settings();
     job.terrain = _terrain;
     _terrain->forgetUnknown();
-    if (!_missionController) {
+    if (!missionController) {
         return job;
     }
 
-    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(_missionController);
+    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
     for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
         const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
         const double length = segment.isValid() ? segment.from.distanceTo(segment.to) : 0;
@@ -304,7 +287,7 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
         legJob.fromItemIndex = missionLeg.fromItemIndex;
         legJob.toItemIndex = missionLeg.toItemIndex;
         legJob.toSequenceNumber = missionLeg.toSequenceNumber;
-        if (const VisualMissionItem *const fromItem = _missionController->visualItems()->value<const VisualMissionItem*>(missionLeg.fromItemIndex)) {
+        if (const VisualMissionItem *const fromItem = missionController->visualItems()->value<const VisualMissionItem*>(missionLeg.fromItemIndex)) {
             legJob.fromSequenceNumber = fromItem->sequenceNumber();
         }
         legJob.leg.from = GeoZone::Position{ segment.from, segment.fromAltitudeAMSL, segment.terrainAt(0) };
@@ -384,24 +367,25 @@ void GeoZoneRoutePlanner::_merge(QList<LegResult> &results, const QList<LegResul
 
 void GeoZoneRoutePlanner::update()
 {
-    _updateTimer.stop();
     _stop();
     _setStatusText(QString());
-    const Job job = _makeJob();
-    QList<int> legs(job.legs.count());
-    std::iota(legs.begin(), legs.end(), 0);
-    QList<LegResult> results;
-    for (int round = 0; !legs.isEmpty(); round++) {
-        _merge(results, _run(job, legs, _cancel, nullptr));
-        legs = _legsToRetry(job, results, round);
-    }
-    _apply(job, results);
+    _worker->runNow([this]() {
+        const Job job = _makeJob();
+        QList<int> legs(job.legs.count());
+        std::iota(legs.begin(), legs.end(), 0);
+        QList<LegResult> results;
+        for (int round = 0; !legs.isEmpty(); round++) {
+            _merge(results, _run(job, legs, _worker->cancelToken(), nullptr));
+            legs = _legsToRetry(job, results, round);
+        }
+        return std::make_pair(job, results);
+    }, [this](const std::pair<Job, QList<LegResult>> &computed) { _apply(computed.first, computed.second); });
 }
 
 void GeoZoneRoutePlanner::startUpdate()
 {
-    _updateTimer.stop();
-    _stop();
+    _worker->stop();
+    _setBusy(false);
     _setStatusText(QString());
     _clearSuggestions();
     const auto job = std::make_shared<const Job>(_makeJob());
@@ -418,35 +402,25 @@ void GeoZoneRoutePlanner::startUpdate()
 
 void GeoZoneRoutePlanner::_launch(const std::shared_ptr<const Job> &job, const QList<int> &legs, const QList<LegResult> &results, int round)
 {
-    const quint64 generation = _generation;
-    auto *const watcher = new QFutureWatcher<QList<LegResult>>(this);
     // The searches again with more terrain are usually quick, the progress stays at the end of the first ones
+    std::function<void(int)> progress;
     if (round == 0) {
-        (void) connect(watcher, &QFutureWatcherBase::progressValueChanged, this, [this, generation, count = legs.count()](int done) {
-            if (generation == _generation) {
-                _setProgress(static_cast<double>(done) / count);
-            }
-        });
+        progress = [this, count = legs.count()](int done) { _setProgress(static_cast<double>(done) / count); };
     }
-    (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, job, results, round, generation]() {
-        watcher->deleteLater();
-        // Replaced or cancelled
-        if ((generation != _generation) || (watcher->future().resultCount() == 0)) {
-            return;
-        }
+    // Replaced or cancelled searches aren't applied
+    _worker->watch(QtConcurrent::run([job, legs, cancel = _worker->cancelToken()](QPromise<QList<LegResult>> &promise) {
+        promise.setProgressRange(0, static_cast<int>(legs.count()));
+        promise.addResult(_run(*job, legs, cancel, [&promise](int done) { promise.setProgressValue(done); }));
+    }), [this, job, results, round](const QList<LegResult> &roundResults) {
         QList<LegResult> merged = results;
-        _merge(merged, watcher->result());
+        _merge(merged, roundResults);
         const QList<int> retry = _legsToRetry(*job, merged, round);
         if (!retry.isEmpty()) {
             _launch(job, retry, merged, round + 1);
             return;
         }
         _apply(*job, merged);
-    });
-    watcher->setFuture(QtConcurrent::run([job, legs, cancel = _cancel](QPromise<QList<LegResult>> &promise) {
-        promise.setProgressRange(0, static_cast<int>(legs.count()));
-        promise.addResult(_run(*job, legs, cancel, [&promise](int done) { promise.setProgressValue(done); }));
-    }));
+    }, progress);
 }
 
 void GeoZoneRoutePlanner::cancel()
@@ -461,9 +435,7 @@ void GeoZoneRoutePlanner::cancel()
 
 void GeoZoneRoutePlanner::_stop()
 {
-    _cancel.cancel();
-    _cancel = GeoZoneCancelToken();
-    _generation++;
+    _worker->invalidate();
     _setBusy(false);
 }
 
@@ -572,18 +544,19 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
 
 QList<std::pair<int, double>> GeoZoneRoutePlanner::_itemAltitudes(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const
 {
-    if (!_missionController) {
+    MissionController *const missionController = _worker->missionController();
+    if (!missionController) {
         return {};
     }
     const bool climb = (route.kind == GeoZoneRouteSearch::Kind::Climb);
-    const double homeAltitude = _missionController->plannedHomePosition().altitude();
+    const double homeAltitude = missionController->plannedHomePosition().altitude();
     QList<std::pair<int, double>> altitudes;
     for (const auto &[itemIndex, current, target] : { std::make_tuple(legJob.fromItemIndex, legJob.leg.from.altitudeAMSL, route.fromAltitude),
                                                       std::make_tuple(legJob.toItemIndex, legJob.leg.to.altitudeAMSL, route.toAltitude) }) {
         if (qIsNaN(target) || (std::abs(target - current) < 0.01)) {
             continue;
         }
-        const SimpleMissionItem *const item = _missionController->visualItems()->value<const SimpleMissionItem*>(itemIndex);
+        const SimpleMissionItem *const item = missionController->visualItems()->value<const SimpleMissionItem*>(itemIndex);
         if (!item) {
             return {};
         }
@@ -701,8 +674,9 @@ QString GeoZoneRoutePlanner::_altitudeText(const LegJob &legJob, double altitude
         const double value = FactMetaData::metersToAppSettingsVerticalDistanceUnits(meters).toDouble();
         return QStringLiteral("%1 %2").arg(roundUp ? std::ceil(value - 1e-6) : std::floor(value + 1e-6)).arg(FactMetaData::appSettingsVerticalDistanceUnitsString());
     };
-    const SimpleMissionItem *const item = _missionController ? _missionController->visualItems()->value<const SimpleMissionItem*>(legJob.toItemIndex) : nullptr;
-    const double homeAltitude = _missionController ? _missionController->plannedHomePosition().altitude() : qQNaN();
+    MissionController *const missionController = _worker->missionController();
+    const SimpleMissionItem *const item = missionController ? missionController->visualItems()->value<const SimpleMissionItem*>(legJob.toItemIndex) : nullptr;
+    const double homeAltitude = missionController ? missionController->plannedHomePosition().altitude() : qQNaN();
     if (item && (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeRelative) && !qIsNaN(homeAltitude)) {
         return tr("%1 above home").arg(rounded(altitudeAMSL - homeAltitude));
     }
@@ -726,21 +700,22 @@ QString GeoZoneRoutePlanner::_heightText(double meters)
 
 bool GeoZoneRoutePlanner::applySuggestion(int index)
 {
-    if (!_missionController || (index < 0) || (index >= _suggestions.count())) {
+    MissionController *const missionController = _worker->missionController();
+    if (!missionController || (index < 0) || (index >= _suggestions.count())) {
         return false;
     }
     const Suggestion suggestion = _suggestions[index];
     if (!suggestion.altitudes.isEmpty()) {
         for (const auto &[itemIndex, altitude] : suggestion.altitudes) {
-            if (SimpleMissionItem *const item = _missionController->visualItems()->value<SimpleMissionItem*>(itemIndex)) {
+            if (SimpleMissionItem *const item = missionController->visualItems()->value<SimpleMissionItem*>(itemIndex)) {
                 item->altitude()->setRawValue(altitude);
             }
         }
     } else if ((suggestion.insertIndex >= 0) && !suggestion.waypoints.isEmpty()) {
         // The new waypoints take the altitude mode of the previous item, and the altitudes the detour was checked at
-        const double homeAltitude = _missionController->plannedHomePosition().altitude();
+        const double homeAltitude = missionController->plannedHomePosition().altitude();
         for (qsizetype i = 0; i < suggestion.waypoints.count(); i++) {
-            auto *const item = qobject_cast<SimpleMissionItem*>(_missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i)));
+            auto *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i)));
             const double altitude = suggestion.waypointAltitudes.value(i, qQNaN());
             if (!item || qIsNaN(altitude)) {
                 continue;
