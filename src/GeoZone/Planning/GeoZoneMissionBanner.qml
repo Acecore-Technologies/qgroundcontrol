@@ -20,13 +20,13 @@ import QGroundControl.ScreenTools
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(warningLabel.implicitWidth, contingencyLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
     border.color:   (missionCheck.warningText !== "" || _outdatedText !== "") ? qgcPal.warningText : qgcPal.text
     z:              QGroundControl.zOrderWidgets
-    visible:        missionCheck.warningText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== "" || _pendingAuthorisations.length > 0
+    visible:        missionCheck.warningText !== "" || missionCheck.contingencyText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== "" || _pendingAuthorisations.length > 0
 
     required property var   missionController
     required property var   map                 ///< Fitted to the crossed zones when the banner is clicked
@@ -99,6 +99,17 @@ Rectangle {
             horizontalAlignment:    Text.AlignHCenter
             color:                  qgcPal.warningText
             text:                   check.warningText
+            textFormat:             Text.PlainText
+            visible:                text !== ""
+        }
+
+        // Returns from along the mission after a failsafe or a fence breach, less likely than the planned path
+        QGCLabel {
+            id:                     contingencyLabel
+            width:                  parent.width
+            wrapMode:               Text.WordWrap
+            horizontalAlignment:    Text.AlignHCenter
+            text:                   check.contingencyText
             textFormat:             Text.PlainText
             visible:                text !== ""
         }

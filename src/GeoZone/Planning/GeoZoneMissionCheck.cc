@@ -19,9 +19,13 @@
 #include "GeoZonePlanning.h"
 #include "GeoZoneSource.h"
 #include "MissionController.h"
+#include "ParameterManager.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
+#include "RallyPoint.h"
+#include "RallyPointController.h"
 #include "SimpleMissionItem.h"
+#include "Vehicle.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFutureWatcher>
@@ -62,7 +66,11 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
     if (_missionController) {
         (void) disconnect(_missionController, nullptr, this, nullptr);
     }
+    if (_masterController) {
+        (void) disconnect(_masterController, nullptr, this, nullptr);
+    }
     _missionController = missionController;
+    _masterController = _missionController ? _missionController->masterController() : nullptr;
     if (_missionController) {
         // Emitted after the flight path or any item coordinate changes
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionCheck::_scheduleUpdate);
@@ -70,15 +78,80 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
         (void) connect(_missionController, &MissionController::missionTimeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
         (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
         (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_connectMissionItems);
-        // The return altitude is a vehicle parameter
-        if (PlanMasterController *const masterController = _missionController->masterController()) {
-            (void) connect(masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+        // The returns depend on the vehicle's parameters
+        if (_masterController) {
+            (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+            (void) connect(_masterController, &PlanMasterController::managerVehicleChanged, this, &GeoZoneMissionCheck::_connectVehicle);
         }
         _connectMissionItems();
     }
+    _connectPlan();
+    _connectVehicle();
 
     emit missionControllerChanged();
     _scheduleUpdate();
+}
+
+void GeoZoneMissionCheck::_connectPlan()
+{
+    delete _planConnections;
+    _planConnections = new QObject(this);
+    if (!_masterController) {
+        _connectRallyPoints();
+        return;
+    }
+    // The returns may go to the rally points, the fence breach action to the breach return point
+    GeoFenceController *const geoFenceController = _masterController->geoFenceController();
+    (void) connect(geoFenceController, &GeoFenceController::breachReturnPointChanged, _planConnections, [this]() { _scheduleUpdate(); });
+    (void) connect(geoFenceController->breachReturnAltitude(), &Fact::rawValueChanged, _planConnections, [this]() { _scheduleUpdate(); });
+    (void) connect(_masterController->rallyPointController()->points(), &QmlObjectListModel::countChanged, _planConnections, [this]() {
+        _connectRallyPoints();
+        _scheduleUpdate();
+    });
+    _connectRallyPoints();
+}
+
+void GeoZoneMissionCheck::_connectRallyPoints()
+{
+    delete _rallyConnections;
+    _rallyConnections = new QObject(this);
+    if (!_masterController) {
+        return;
+    }
+    const QmlObjectListModel *const rallyPoints = _masterController->rallyPointController()->points();
+    for (int i = 0; i < rallyPoints->count(); i++) {
+        if (RallyPoint *const rallyPoint = rallyPoints->value<RallyPoint*>(i)) {
+            (void) connect(rallyPoint, &RallyPoint::coordinateChanged, _rallyConnections, [this]() { _scheduleUpdate(); });
+        }
+    }
+}
+
+void GeoZoneMissionCheck::_connectVehicle()
+{
+    delete _vehicleConnections;
+    _vehicleConnections = new QObject(this);
+    Vehicle *const vehicle = _masterController ? _masterController->managerVehicle() : nullptr;
+    if (_vehicle && (_vehicle != vehicle) && _vehicle->parameterManager()) {
+        (void) disconnect(_vehicle->parameterManager(), nullptr, this, nullptr);
+    }
+    _vehicle = vehicle;
+    if (!_vehicle || _vehicle->isOfflineEditingVehicle() || !_vehicle->parameterManager()) {
+        return;
+    }
+    // The parameters arrive after the vehicle, each change of those the returns depend on is checked
+    ParameterManager *const parameterManager = _vehicle->parameterManager();
+    (void) connect(parameterManager, &ParameterManager::parametersReadyChanged, this, &GeoZoneMissionCheck::_connectVehicle, Qt::UniqueConnection);
+    (void) connect(parameterManager, &ParameterManager::parametersReadyChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+    if (!parameterManager->parametersReady()) {
+        return;
+    }
+    for (const QString &name : GeoZoneReturnModel::parameterNames()) {
+        if (parameterManager->parameterExists(ParameterManager::defaultComponentId, name)) {
+            (void) connect(parameterManager->getParameter(ParameterManager::defaultComponentId, name), &Fact::rawValueChanged, _vehicleConnections, [this]() {
+                _scheduleUpdate();
+            });
+        }
+    }
 }
 
 void GeoZoneMissionCheck::_connectMissionItems()
@@ -178,6 +251,32 @@ QString GeoZoneMissionCheck::warningText() const
     return lines.join(QStringLiteral("\n"));
 }
 
+QString GeoZoneMissionCheck::contingencyText() const
+{
+    // A line per contingency path and the items it starts from, with the zones it enters
+    QStringList labels;
+    QHash<QString, QList<const GeoZone*>> labelZones;
+    for (const GeoZone *zone : _contingencyZones) {
+        for (const QString &label : _contingencyLabels.value(zone)) {
+            if (!labels.contains(label)) {
+                labels.append(label);
+            }
+            labelZones[label].append(zone);
+        }
+    }
+    QStringList lines;
+    for (const QString &label : std::as_const(labels)) {
+        if (lines.count() == maxListedZones) {
+            lines.append(tr("%n more contingency path(s) enter restricted geozones.", nullptr, static_cast<int>(labels.count() - maxListedZones)));
+            break;
+        }
+        QString line = tr("%1 would enter %2.").arg(label, GeoZonePathEvaluator::zoneNames(labelZones.value(label), maxListedZones, true));
+        line[0] = line[0].toUpper();
+        lines.append(line);
+    }
+    return lines.join(QStringLiteral("\n"));
+}
+
 QString GeoZoneMissionCheck::infoText() const
 {
     QStringList lines;
@@ -226,9 +325,10 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     (void) _pathLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
+    (void) _contingencyLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
                               _authorisedZones.removeIf(fromSource) +
-                              _unfencedZones.removeIf(fromSource);
+                              _unfencedZones.removeIf(fromSource) + _contingencyZones.removeIf(fromSource);
     if (removed > 0) {
         emit crossedZonesChanged();
     }
@@ -248,14 +348,14 @@ void GeoZoneMissionCheck::update()
     _updateTimer.stop();
     _evaluation++;
     const auto [start, end] = _flightTimes();
-    _apply(evaluate(_manager->catalog(), GeoZoneMissionPath::fromMission(_missionController), start, end));
+    _apply(evaluate(_manager->catalog(), GeoZoneMissionPath::fromMission(_missionController, true), start, end));
 }
 
 void GeoZoneMissionCheck::_updateConcurrently()
 {
     const quint64 evaluation = ++_evaluation;
     const GeoZoneCatalog catalog = _manager->catalog();
-    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController);
+    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController, true);
     const auto [start, end] = _flightTimes();
     auto *const watcher = new QFutureWatcher<Evaluation>(this);
     (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, evaluation]() {
@@ -289,7 +389,49 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
         }
     }
     GeoZonePathEvaluator::sortBySeverity(evaluation.zones);
+
+    // Zones the returns from along the mission enter while active
+    const QList<GeoZonePathEvaluator::Path> contingencyPaths = path.contingencyEvaluatorPaths(start, end);
+    if (!contingencyPaths.isEmpty()) {
+        const GeoZonePathEvaluator::Result result = evaluator.evaluate(contingencyPaths);
+        evaluation.contingencyLabels = groupContingencies(path, result);
+        for (const GeoZonePathEvaluator::ZoneResult &zoneResult : result.zones) {
+            if (evaluation.contingencyLabels.contains(zoneResult.zone)) {
+                evaluation.contingencyZones.append(zoneResult.zone);
+            }
+        }
+        GeoZonePathEvaluator::sortBySeverity(evaluation.contingencyZones);
+    }
     return evaluation;
+}
+
+QHash<const GeoZone*, QStringList> GeoZoneMissionCheck::groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result)
+{
+    QHash<const GeoZone*, QStringList> labels;
+    const QList<GeoZoneMissionPath::ContingencyPath> &contingencyPaths = path.contingencyPaths();
+    for (const GeoZonePathEvaluator::ZoneResult &zoneResult : result.zones) {
+        // The starts of the paths by label, in the order the paths enter the zone
+        QStringList order;
+        QHash<QString, QList<int>> starts;
+        for (const GeoZonePathEvaluator::Crossing &crossing : zoneResult.crossings) {
+            if (!crossing.active || (crossing.entry.path < 0) || (crossing.entry.path >= contingencyPaths.count())) {
+                continue;
+            }
+            const GeoZoneMissionPath::ContingencyPath &contingency = contingencyPaths[crossing.entry.path];
+            if (!starts.contains(contingency.path.label)) {
+                order.append(contingency.path.label);
+            }
+            starts[contingency.path.label].append(contingency.start);
+        }
+        QStringList zoneLabels;
+        for (const QString &label : std::as_const(order)) {
+            zoneLabels.append(tr("%1 from %2").arg(label, path.startsText(starts.value(label))));
+        }
+        if (!zoneLabels.isEmpty()) {
+            labels.insert(zoneResult.zone, zoneLabels);
+        }
+    }
+    return labels;
 }
 
 void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
@@ -299,6 +441,16 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
     const int inactiveZoneCount = static_cast<int>(zones.removeIf([&evaluation](const GeoZone *zone) { return evaluation.inactiveZones.contains(zone); }));
     // Zones authorised during the whole flight are listed for information
     const GeoZonePolicy policy = GeoZonePolicy::mission(evaluation.start, evaluation.end).excludingAuthorised(_manager->planning()->authorisations());
+
+    // Restricted zones only the returns from along the mission enter, unless authorised
+    QList<const GeoZone*> contingency;
+    QHash<const GeoZone*, QStringList> contingencyZoneLabels;
+    for (const GeoZone *zone : evaluation.contingencyZones) {
+        if (GeoZonePolicy::isRestricted(zone->restriction()) && !zones.contains(zone) && !policy.authorised(zone)) {
+            contingency.append(zone);
+            contingencyZoneLabels.insert(zone, evaluation.contingencyLabels.value(zone));
+        }
+    }
 
     QList<const GeoZone*> authorised;
     for (const GeoZone *zone : std::as_const(zones)) {
@@ -332,8 +484,10 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
     }
 
     if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (authorised != _authorisedZones) || (inactiveZoneCount != _inactiveZoneCount) ||
-        (unfenced != _unfencedZones) || (evaluation.pathLabels != _pathLabels)) {
+        (unfenced != _unfencedZones) || (evaluation.pathLabels != _pathLabels) || (contingency != _contingencyZones) || (contingencyZoneLabels != _contingencyLabels)) {
         _pathLabels = evaluation.pathLabels;
+        _contingencyZones = contingency;
+        _contingencyLabels = contingencyZoneLabels;
         _unfencedZones = unfenced;
         _crossedZones = crossed;
         _uSpaceZones = uSpace;

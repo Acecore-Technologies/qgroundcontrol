@@ -14,9 +14,11 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZoneReturnModel.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneTestHelpers.h"
 #include "MissionController.h"
+#include "MissionSettingsItem.h"
 #include "MultiVehicleManager.h"
 #include "ParameterManager.h"
 #include "PlanMasterController.h"
@@ -25,6 +27,8 @@
 #include "Vehicle.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonObject>
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -314,4 +318,77 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QTRY_VERIFY(!monitor.monitoring());
     QVERIFY(monitor.nearbyZones().isEmpty());
     QVERIFY(!monitor.inside());
+}
+
+void GeoZoneFlightTest::_testReturnParameterChanges()
+{
+    const ScopedEnvironment environment;
+    _connectMockLink(MAV_AUTOPILOT_ARDUPILOTMEGA);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->homePosition().isValid(), 30000);
+
+    // The return parameters of the MockLink ArduCopter, in centimeters until Copter 4.6
+    ParameterManager *const parameterManager = vehicle->parameterManager();
+    Fact *const returnAltitude = parameterManager->getParameter(ParameterManager::defaultComponentId, QStringLiteral("RTL_ALT"));
+    QCOMPARE(returnAltitude->rawValue().toInt(), 1500);
+    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(vehicle);
+    QCOMPARE(static_cast<int>(parameters.autopilot), static_cast<int>(GeoZoneReturnModel::Autopilot::ArduCopter));
+    QCOMPARE(parameters.returnAltitude, 15.0);
+    QCOMPARE(parameters.coneSlope, 3.0);
+    QVERIFY(std::abs(parameters.rallyLimit - 300) < 0.01);
+
+    // A square mission north and east of home 30 m high, the zone in its middle from 80 m above home
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    QTRY_COMPARE(masterController.managerVehicle(), vehicle);
+    MissionController *const missionController = masterController.missionController();
+    missionController->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(vehicle->homePosition());
+    const QGeoCoordinate home = missionController->plannedHomePosition();
+    QVERIFY(home.isValid() && !std::isnan(home.altitude()));
+    const auto offset = [&home](double north, double east) {
+        return home.atDistanceAndAzimuth(std::hypot(north, east), qRadiansToDegrees(std::atan2(east, north)));
+    };
+    QJsonObject zone = _circleFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), offset(1000, 1000), 100);
+    QJsonArray geometry = zone[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = home.altitude() + 80;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
+    layer[QStringLiteral("upperLimit")] = home.altitude() + 1000;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
+    geometry[0] = layer;
+    zone[QStringLiteral("geometry")] = geometry;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zone }), errorString), qPrintable(errorString));
+    for (const QGeoCoordinate &coordinate : { offset(2000, 0), offset(2000, 2000), offset(0, 2000) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->altitude()->setRawValue(30);
+    }
+    QTRY_COMPARE(GeoZoneMissionPath::fromMission(missionController).segments().count(), 3);
+
+    // Returning at the altitude of the mission stays below the zone
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    check.update();
+    QVERIFY(check.contingencyZones().isEmpty());
+    QVERIFY(check.crossedZones().isEmpty());
+
+    // Returns at RTL_ALT 100 m from around the second item enter it, the mission is checked again when it changes
+    returnAltitude->setRawValue(10000);
+    QTRY_COMPARE(identifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
+    QVERIFY2(check.contingencyText().startsWith(QStringLiteral("A return to launch from items")), qPrintable(check.contingencyText()));
+    QVERIFY(check.crossedZones().isEmpty());
+    returnAltitude->setRawValue(1500);
+    QTRY_VERIFY(check.contingencyZones().isEmpty());
+
+    check.setMissionController(nullptr);
+    _disconnectMockLink();
 }

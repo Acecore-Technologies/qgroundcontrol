@@ -27,6 +27,8 @@ class GeoZoneCatalog;
 class GeoZoneManager;
 class GeoZoneSource;
 class MissionController;
+class PlanMasterController;
+class Vehicle;
 
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
 /// altitudes. U-space airspaces and no restriction zones are reported separately, they never hide
@@ -35,6 +37,11 @@ class MissionController;
 /// GeoZonePathEvaluator::defaultScheduleToleranceSecs, otherwise zone schedules are not considered since
 /// the mission may be flown at any time. Zones authorised for the whole flight, or from now on without a planned
 /// start, are listed as information. See GeoZonePathEvaluator.
+/// The returns the vehicle would fly from along the mission after a failsafe or a fence breach, see
+/// GeoZoneMissionPath::contingencyPaths, are checked too. Restricted zones only they enter are listed apart as
+/// contingency zones, which don't need a confirmation for the upload, with the items they would be flown from.
+/// The mission is checked again when the return parameters of the vehicle, the rally points or the breach return
+/// point change.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -54,6 +61,8 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)   ///< Fence expected to exclude the prohibited zones
     Q_PROPERTY(QVariantList         unfencedZones       READ unfencedZonesInfo                              NOTIFY crossedZonesChanged FINAL)     ///< Prohibited zones entered which the fence doesn't exclude
     Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QVariantList         contingencyZones    READ contingencyZonesInfo                           NOTIFY crossedZonesChanged FINAL)     ///< Restricted zones only returns from along the mission enter
+    Q_PROPERTY(QString              contingencyText     READ contingencyText                                NOTIFY crossedZonesChanged FINAL)
 
 public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
@@ -86,6 +95,14 @@ public:
     const QList<const GeoZone*> &unfencedZones() const { return _unfencedZones; }
     QVariantList unfencedZonesInfo() const { return GeoZoneInfo::toVariantList(_unfencedZones); }
     QString fenceText() const;
+    /// Restricted zones the returns from along the mission enter but the mission doesn't, most restrictive first
+    const QList<const GeoZone*> &contingencyZones() const { return _contingencyZones; }
+    QVariantList contingencyZonesInfo() const { return GeoZoneInfo::toVariantList(_contingencyZones); }
+    /// Which returns from which items enter the contingency zones, like "A return to launch from items 3–7 would enter X."
+    QString contingencyText() const;
+    /// @return Labels of the contingency paths entering the zone with the items they start from, like "a return to
+    ///         launch from items 3–7"
+    QStringList contingencyLabels(const GeoZone *zone) const { return _contingencyLabels.value(zone); }
 
     /// @return true if exclusion fences of the controller cover the whole zone, like the fences GeoZoneFenceImporter
     ///         adds for it with any simplification, see GeoZoneFences::fencesCover
@@ -107,12 +124,17 @@ public:
         QList<const GeoZone*> inactiveZones;            ///< Zones of zones which aren't active while the mission flies through them
         QDateTime start;                                ///< Of the flight evaluated
         QDateTime end;
+        QList<const GeoZone*> contingencyZones;         ///< Entered by contingency paths while active, most restrictive first
+        QHash<const GeoZone*, QStringList> contingencyLabels;   ///< Of the contingency paths entering them with their items
     };
 
     /// @return Zones the path or its areas enter whatever their authorisations, for a flight from start to end or at
     ///         any time without start. Can run on any thread with a copy of the catalog.
     static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start = QDateTime(),
                                const QDateTime &end = QDateTime());
+    /// @return The labels of the contingency paths the evaluator result has entering zones while active, grouped by
+    ///         label with the items they start from, like "a return to launch from items 3–7", by zone
+    static QHash<const GeoZone*, QStringList> groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result);
 
     /// @return Labels of the paths besides the drawn flight path entering the zone, when only those do
     QStringList pathLabels(const GeoZone *zone) const { return _pathLabels.value(zone); }
@@ -127,6 +149,11 @@ private:
     void _scheduleUpdate();
     void _clearZones(GeoZoneSource *source);
     void _connectMissionItems();
+    /// Connects the plan's rally points and breach return point, which the returns go to
+    void _connectPlan();
+    void _connectRallyPoints();
+    /// Connects the return parameters of the vehicle, see GeoZoneReturnModel::parameterNames
+    void _connectVehicle();
     /// Evaluates the mission path on another thread, the result is dropped when the mission or zones change meanwhile
     void _updateConcurrently();
     /// @return Start and end of the flight checked, now with flightNow, invalid to check it at any time
@@ -145,6 +172,13 @@ private:
     QPointer<GeoFenceController> _geoFenceController;
     QList<const GeoZone*> _unfencedZones;
     QHash<const GeoZone*, QStringList> _pathLabels;
+    QList<const GeoZone*> _contingencyZones;
+    QHash<const GeoZone*, QStringList> _contingencyLabels;
+    QPointer<PlanMasterController> _masterController;
+    QPointer<Vehicle> _vehicle;
+    QObject *_planConnections = nullptr;        ///< Receiver of the plan's signals, replaced to disconnect them
+    QObject *_vehicleConnections = nullptr;     ///< Receiver of the vehicle's signals
+    QObject *_rallyConnections = nullptr;       ///< Receiver of the rally points' signals
     QTimer _updateTimer;
     quint64 _evaluation = 0;    ///< Incremented when an evaluation starts or the zones change, outdating running ones
 

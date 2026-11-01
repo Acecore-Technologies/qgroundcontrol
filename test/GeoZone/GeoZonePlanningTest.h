@@ -25,6 +25,8 @@ private slots:
     void _testMissionCheck();
     void _testMissionCoverage();
     void _testMissionJumps();
+    void _testMissionContingencies();
+    void _testMissionReturnParameters();
     void _testAuthorisations();
     void _testRoutePlanner();
     void _testProfileBands();

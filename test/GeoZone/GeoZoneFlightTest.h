@@ -22,4 +22,5 @@ private slots:
     void _testFlightAlertSequence();
     void _testMissionCrossedZones();
     void _testMockLinkVehicle();
+    void _testReturnParameterChanges();
 };

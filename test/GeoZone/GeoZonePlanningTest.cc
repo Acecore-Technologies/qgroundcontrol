@@ -9,6 +9,8 @@
 
 #include "GeoZonePlanningTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "RallyPoint.h"
+#include "RallyPointController.h"
 
 using namespace GeoZoneTestHelpers;
 
@@ -710,6 +712,21 @@ void GeoZonePlanningTest::_testMissionCoverage()
 
 namespace {
 
+/// The feature with AMSL limits in meters
+QJsonObject withAmslLimits(QJsonObject feature, double lower, double upper)
+{
+    QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = lower;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
+    layer[QStringLiteral("upperLimit")] = upper;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
+    geometry[0] = layer;
+    feature[QStringLiteral("geometry")] = geometry;
+    return feature;
+}
+
 QStringList zoneIdentifiers(const QList<const GeoZone*> &zones)
 {
     QStringList identifiers;
@@ -816,6 +833,152 @@ void GeoZonePlanningTest::_testMissionJumps()
     const GeoZoneMissionPath capped = GeoZoneMissionPath::fromMission(missionController);
     QVERIFY(capped.flightDistance() > (capped.totalDistance() + (100 * loop)));
     QVERIFY(capped.flightDistance() < (capped.totalDistance() + (((GeoZoneMissionPath::maxFlightSegments / 3) + 2) * loop)));
+}
+
+void GeoZonePlanningTest::_testMissionContingencies()
+{
+    const ScopedEnvironment environment;
+    // Around a square north and east of home. X is in the middle of the square, where returns home from the second
+    // item pass, R on the way from it to a rally point east of it.
+    const QGeoCoordinate home(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        withAmslLimits(_circleFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), offsetFrom(home, 1000, 1000), 100), 470, 1000),
+        _circleFeature(QStringLiteral("R"), QStringLiteral("PROHIBITED"), offsetFrom(home, 2000, 2500), 50),
+    }), errorString), qPrintable(errorString));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    missionController->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(home.latitude(), home.longitude(), 400));
+    (void) missionController->insertSimpleMissionItem(offsetFrom(home, 2000, 0), 1);
+    (void) missionController->insertSimpleMissionItem(offsetFrom(home, 2000, 2000), 2);
+    (void) missionController->insertSimpleMissionItem(offsetFrom(home, 0, 2000), 3);
+
+    // The offline vehicle returns home at an unknown altitude. The mission doesn't enter X, returns from around the
+    // second item would.
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
+    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.warningText().isEmpty());
+    const GeoZone *const x = check.contingencyZones().first();
+    QCOMPARE(check.contingencyLabels(x), QStringList{ QStringLiteral(u"a return to launch at an unknown altitude from items 1\u20133") });
+    QCOMPARE(check.contingencyText(), QStringLiteral(u"A return to launch at an unknown altitude from items 1\u20133 would enter X (Prohibited)."));
+
+    // The starts are grouped into ranges of items
+    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController, true);
+    const QList<GeoZoneMissionPath::ContingencyStart> &starts = path.contingencyStarts();
+    QVERIFY(starts.count() > 10);
+    QVERIFY(starts.count() <= GeoZoneMissionPath::maxContingencyStarts);
+    const auto atItem = [&starts](int sequenceNumber) {
+        const auto it = std::find_if(starts.cbegin(), starts.cend(), [sequenceNumber](const GeoZoneMissionPath::ContingencyStart &start) {
+            return (start.fromSequenceNumber == sequenceNumber) && (start.toSequenceNumber == sequenceNumber);
+        });
+        return (it != starts.cend()) ? static_cast<int>(it - starts.cbegin()) : -1;
+    };
+    const int second = atItem(2);
+    QVERIFY((atItem(1) == 0) && (second > 0) && (atItem(3) == (starts.count() - 1)));
+    QCOMPARE(path.startsText({ second }), QStringLiteral("item 2"));
+    QCOMPARE(path.startsText({ second + 1, second, second - 1 }), QStringLiteral(u"items 1\u20133"));
+    QCOMPARE(path.startsText({ 0, second }), QStringLiteral("items 1, 2"));
+    QCOMPARE(path.contingencyPaths().count(), starts.count());
+
+    // A rally point closer than home, the returns from around the second item go there
+    RallyPointController *const rallyPointController = masterController.rallyPointController();
+    rallyPointController->addPoint(offsetFrom(home, 2000, 3000));
+    QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("R") });
+    QVERIFY(check.contingencyLabels(check.contingencyZones().first()).first().startsWith(QStringLiteral("a return to rally point 1 at an unknown altitude from items")));
+    // Moved away it isn't closer anymore
+    rallyPointController->points()->value<RallyPoint*>(0)->setCoordinate(offsetFrom(home, 6000, 6000));
+    QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
+
+    // Zones are released before the manager deletes them
+    manager.clear();
+    QVERIFY(check.contingencyZones().isEmpty());
+    QVERIFY(check.contingencyText().isEmpty());
+}
+
+void GeoZonePlanningTest::_testMissionReturnParameters()
+{
+    const ScopedEnvironment environment;
+    // X is above the returns at 60 m from around the second item, 70 m above home and higher. B is on the way from
+    // the first item to the breach return point west of it.
+    const QGeoCoordinate home(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        withAmslLimits(_circleFeature(QStringLiteral("X"), QStringLiteral("PROHIBITED"), offsetFrom(home, 1000, 1000), 100), 470, 1000),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), offsetFrom(home, 2000, -500), 50),
+    }), errorString), qPrintable(errorString));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    missionController->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(home.latitude(), home.longitude(), 400));
+    for (const QGeoCoordinate &coordinate : { offsetFrom(home, 2000, 0), offsetFrom(home, 2000, 2000), offsetFrom(home, 0, 2000) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->altitude()->setRawValue(30);
+    }
+    QTRY_COMPARE(GeoZoneMissionPath::fromMission(missionController).segments().count(), 3);
+    const auto contingencies = [&manager, missionController](const GeoZoneReturnModel::Parameters &parameters) {
+        return GeoZoneMissionCheck::evaluate(manager.catalog(), GeoZoneMissionPath::fromMission(missionController, parameters, true));
+    };
+
+    // ArduCopter at 60 m stays below X, at 100 m it enters it
+    GeoZoneReturnModel::Parameters copter;
+    copter.autopilot = GeoZoneReturnModel::Autopilot::ArduCopter;
+    copter.multicopter = true;
+    copter.returnAltitude = 60;
+    GeoZoneMissionCheck::Evaluation evaluation = contingencies(copter);
+    QVERIFY(evaluation.zones.isEmpty());
+    QVERIFY(evaluation.contingencyZones.isEmpty());
+    copter.returnAltitude = 100;
+    evaluation = contingencies(copter);
+    QCOMPARE(zoneIdentifiers(evaluation.contingencyZones), QStringList{ QStringLiteral("X") });
+    QCOMPARE(evaluation.contingencyLabels.value(evaluation.contingencyZones.first()), QStringList{ QStringLiteral(u"a return to launch from items 1\u20133") });
+    // The cone of a PX4 multicopter doesn't lower the return this far from home
+    GeoZoneReturnModel::Parameters px4;
+    px4.autopilot = GeoZoneReturnModel::Autopilot::PX4;
+    px4.multicopter = true;
+    px4.returnAltitude = 100;
+    px4.coneHalfAngle = 45;
+    px4.coneRadius = 10;
+    QCOMPARE(zoneIdentifiers(contingencies(px4).contingencyZones), QStringList{ QStringLiteral("X") });
+
+    // ArduPlane flying to the breach return point after a fence breach, at FENCE_RET_ALT
+    masterController.geoFenceController()->setBreachReturnPoint(offsetFrom(home, 2000, -1000));
+    GeoZoneReturnModel::Parameters plane;
+    plane.autopilot = GeoZoneReturnModel::Autopilot::ArduPlane;
+    plane.returnAltitude = 50;
+    plane.loiterRadius = 80;
+    plane.breachAction = GeoZoneReturnModel::BreachAction::ReturnPoint;
+    plane.breachReturnAltitude = 40;
+    evaluation = contingencies(plane);
+    QCOMPARE(zoneIdentifiers(evaluation.contingencyZones), QStringList{ QStringLiteral("B") });
+    QCOMPARE(evaluation.contingencyLabels.value(evaluation.contingencyZones.first()),
+             QStringList{ QStringLiteral(u"a flight to the breach return point after a fence breach from items 1\u20133") });
+    // Without the guided breach action only the returns home are checked
+    plane.breachAction = GeoZoneReturnModel::BreachAction::Return;
+    QVERIFY(contingencies(plane).contingencyZones.isEmpty());
+
+    // The return to launch at the end is part of the planned flight, to the rally point closer than home
+    masterController.rallyPointController()->addPoint(offsetFrom(home, 1000, 1000));
+    SimpleMissionItem *const returnItem = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(home, missionController->visualItems()->count()));
+    QVERIFY(returnItem);
+    returnItem->setCommand(MAV_CMD_NAV_RETURN_TO_LAUNCH);
+    evaluation = contingencies(copter);
+    QCOMPARE(zoneIdentifiers(evaluation.zones), QStringList{ QStringLiteral("X") });
+    QCOMPARE(evaluation.pathLabels.value(evaluation.zones.first()), QStringList{ QStringLiteral("the return to rally point 1") });
 }
 
 void GeoZonePlanningTest::_testAuthorisations()
