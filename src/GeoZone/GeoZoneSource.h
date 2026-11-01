@@ -15,6 +15,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZoneParser.h"
+#include "GeoZoneProviders.h"
 
 class GeoZone;
 class GeoZoneShape;
@@ -94,7 +95,7 @@ public:
     void updateValidity(const QDateTime &now);
 
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
-    bool isLive() const { return _format == GeoZoneParser::Format::FaaTfr; }
+    bool isLive() const { return GeoZoneProviders::isLive(_format); }
 
     /// @return Seconds after which a feed is downloaded again, from the refresh interval settings
     int refreshIntervalSecs() const;

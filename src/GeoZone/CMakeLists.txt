@@ -10,6 +10,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneDownloader.h
         GeoZoneFenceImporter.cc
         GeoZoneFenceImporter.h
+        GeoZoneFormat.cc
+        GeoZoneFormat.h
         GeoZoneGeometry.cc
         GeoZoneGeometry.h
         GeoZoneIndex.cc
@@ -26,8 +28,12 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneMonitor.h
         GeoZoneParser.cc
         GeoZoneParser.h
+        GeoZoneParserUtils.cc
+        GeoZoneParserUtils.h
         GeoZoneProfile.cc
         GeoZoneProfile.h
+        GeoZoneProviders.cc
+        GeoZoneProviders.h
         GeoZoneRoutePlanner.cc
         GeoZoneRoutePlanner.h
         GeoZoneSchedule.cc
@@ -38,6 +44,12 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneSource.h
         GeoZoneStore.cc
         GeoZoneStore.h
+        Formats/GeoZoneAixmFormat.cc
+        Formats/GeoZoneDipulFormat.cc
+        Formats/GeoZoneEd269Format.cc
+        Formats/GeoZoneEd318Format.cc
+        Formats/GeoZoneFaaTfrFormat.cc
+        Formats/GeoZoneFranceUasFormat.cc
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

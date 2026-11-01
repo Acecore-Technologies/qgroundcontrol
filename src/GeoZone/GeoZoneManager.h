@@ -22,6 +22,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneLoader.h"
+#include "GeoZoneProviders.h"
 #include "GeoZoneStore.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
@@ -149,14 +150,11 @@ public:
     QString progressText() const;
     QString validityWarning() const { return _validityWarning; }
     QStringList fileDialogFilters() const;
-    static QVariantList feedPresets();
-
-    static constexpr double maxAreaDegrees = 1.0;   ///< Largest area downloaded from providers serving zones by area
-
-    /// @return Maps with name, id and coverage (rectangle) of providers whose zones are downloaded by area
-    static QVariantList areaProviders();
-    /// @return URL downloading the zones of the provider in the area, empty for an unknown provider or a larger area than maxAreaDegrees
-    Q_INVOKABLE QString areaFeedUrl(const QString &provider, const QGeoRectangle &area) const;
+    static QVariantList feedPresets() { return GeoZoneProviders::feedPresets(); }
+    /// See GeoZoneProviders::areaProviders
+    static QVariantList areaProviders() { return GeoZoneProviders::areaProviders(); }
+    /// See GeoZoneProviders::areaFeedUrl
+    Q_INVOKABLE QString areaFeedUrl(const QString &provider, const QGeoRectangle &area) const { return GeoZoneProviders::areaFeedUrl(provider, area); }
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for
     /// offline use and refreshed like other feeds. loadFailed is emitted when the area is too large.
     Q_INVOKABLE bool addArea(const QString &provider, const QGeoRectangle &area);
@@ -203,24 +201,6 @@ private:
     void _saveIndex();
     void _reportStorageError(const QString &message);
     void _updateValidity();
-    static QString _dipulUrl(const QStringList &layers, const QGeoRectangle &area);
-
-    /// DiPUL layers of aviation zones, small enough to download for the whole country
-    static inline const QStringList _dipulAviationLayers = {
-        QStringLiteral("kontrollzonen"), QStringLiteral("flughaefen"), QStringLiteral("flugplaetze"),
-        QStringLiteral("flugbeschraenkungsgebiete"), QStringLiteral("temporaere_betriebseinschraenkungen"),
-    };
-    static inline const QStringList _dipulAllLayers = {
-        QStringLiteral("bahnanlagen"), QStringLiteral("behoerden"), QStringLiteral("binnenwasserstrassen"), QStringLiteral("bundesautobahnen"),
-        QStringLiteral("bundesstrassen"), QStringLiteral("diplomatische_vertretungen"), QStringLiteral("flugbeschraenkungsgebiete"),
-        QStringLiteral("flughaefen"), QStringLiteral("flugplaetze"), QStringLiteral("freibaeder"), QStringLiteral("industrieanlagen"),
-        QStringLiteral("internationale_organisationen"), QStringLiteral("justizvollzugsanstalten"), QStringLiteral("kontrollzonen"),
-        QStringLiteral("kraftwerke"), QStringLiteral("krankenhaeuser"), QStringLiteral("labore"), QStringLiteral("militaerische_anlagen"),
-        QStringLiteral("nationalparks"), QStringLiteral("naturschutzgebiete"), QStringLiteral("polizei"), QStringLiteral("schifffahrtsanlagen"),
-        QStringLiteral("seewasserstrassen"), QStringLiteral("sicherheitsbehoerden"), QStringLiteral("stromleitungen"),
-        QStringLiteral("temporaere_betriebseinschraenkungen"), QStringLiteral("umspannwerke"), QStringLiteral("vogelschutzgebiete"),
-        QStringLiteral("windkraftanlagen"), QStringLiteral("wohngrundstuecke"),
-    };
 
     GeoZoneStore _store;
     GeoZoneDownloader *_downloader = nullptr;

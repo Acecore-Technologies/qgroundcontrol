@@ -1,0 +1,197 @@
+/****************************************************************************
+ *
+ * (c) 2009-2024 QGROUNDCONTROL PROJECT <http://www.qgroundcontrol.org>
+ *
+ * QGroundControl is licensed according to the terms in the file
+ * COPYING.md in the root of the source code directory.
+ *
+ ****************************************************************************/
+
+#include "GeoZoneProviders.h"
+
+#include <QtCore/QUrl>
+
+namespace {
+
+/// DiPUL layers of aviation zones, small enough to download for the whole country
+const QStringList kDipulAviationLayers = {
+    QStringLiteral("kontrollzonen"), QStringLiteral("flughaefen"), QStringLiteral("flugplaetze"),
+    QStringLiteral("flugbeschraenkungsgebiete"), QStringLiteral("temporaere_betriebseinschraenkungen"),
+};
+
+const QStringList kDipulAllLayers = {
+    QStringLiteral("bahnanlagen"), QStringLiteral("behoerden"), QStringLiteral("binnenwasserstrassen"), QStringLiteral("bundesautobahnen"),
+    QStringLiteral("bundesstrassen"), QStringLiteral("diplomatische_vertretungen"), QStringLiteral("flugbeschraenkungsgebiete"),
+    QStringLiteral("flughaefen"), QStringLiteral("flugplaetze"), QStringLiteral("freibaeder"), QStringLiteral("industrieanlagen"),
+    QStringLiteral("internationale_organisationen"), QStringLiteral("justizvollzugsanstalten"), QStringLiteral("kontrollzonen"),
+    QStringLiteral("kraftwerke"), QStringLiteral("krankenhaeuser"), QStringLiteral("labore"), QStringLiteral("militaerische_anlagen"),
+    QStringLiteral("nationalparks"), QStringLiteral("naturschutzgebiete"), QStringLiteral("polizei"), QStringLiteral("schifffahrtsanlagen"),
+    QStringLiteral("seewasserstrassen"), QStringLiteral("sicherheitsbehoerden"), QStringLiteral("stromleitungen"),
+    QStringLiteral("temporaere_betriebseinschraenkungen"), QStringLiteral("umspannwerke"), QStringLiteral("vogelschutzgebiete"),
+    QStringLiteral("windkraftanlagen"), QStringLiteral("wohngrundstuecke"),
+};
+
+} // namespace
+
+QList<GeoZoneProviders::Service> GeoZoneProviders::services()
+{
+    using Format = GeoZoneParser::Format;
+    const auto feed = [](const QString &id, const QString &name, const QString &host, Format format, const QString &url) {
+        Service service;
+        service.id = id;
+        service.name = name;
+        service.host = host;
+        service.format = format;
+        service.feedUrl = url;
+        return service;
+    };
+
+    Service dipulAviation = feed(QStringLiteral("dipul-aviation"), tr("Germany aviation zones (DiPUL)"), QStringLiteral("uas-betrieb.de"), Format::Dipul,
+                                 _dipulUrl(kDipulAviationLayers, QGeoRectangle()));
+
+    Service dipulAll = feed(QStringLiteral("dipul"), tr("Germany, all zones (DiPUL)"), QStringLiteral("uas-betrieb.de"), Format::Dipul, QString());
+    dipulAll.coverage = QGeoRectangle(QGeoCoordinate(55.2, 5.8), QGeoCoordinate(47.2, 15.1));
+    dipulAll.areaUrl = [](const QGeoRectangle &area) { return _dipulUrl(kDipulAllLayers, area); };
+
+    Service france = feed(QStringLiteral("france"), tr("France, open category (IGN)"), QStringLiteral("data.geopf.fr"), Format::FranceUas, QString());
+    france.coverage = QGeoRectangle(QGeoCoordinate(51.2, -5.3), QGeoCoordinate(41.3, 9.7));
+    france.areaUrl = [](const QGeoRectangle &area) {
+        return QStringLiteral("https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=TRANSPORTS.DRONES.RESTRICTIONS:carte_restriction_drones_lf"
+                              "&OUTPUTFORMAT=application/json&BBOX=") + _bboxQuery(area, QStringLiteral(",EPSG:4326"));
+    };
+
+    Service nats = feed(QStringLiteral("nats"), tr("United Kingdom FRZ (NATS)"), QStringLiteral("ead-it.com"), Format::Aixm,
+                        QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/"));
+    // NATS lists the full UAS flight restriction datasets of the current and next AIRAC cycles
+    nats.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\""));
+
+    return {
+        feed(QStringLiteral("traficom"), tr("Finland (Traficom)"), QStringLiteral("traficom.fi"), Format::Unknown,
+             QStringLiteral("https://eservices.traficom.fi/Ilmatilasovellus/api/uas-reservations/json?lang=en")),
+        feed(QStringLiteral("lgs"), tr("Latvia (LGS)"), QStringLiteral("drz.lv"), Format::Unknown,
+             QStringLiteral("https://drz.lv/api/v1/export-history/UASZoneVersion")),
+        feed(QStringLiteral("geoportail-lu"), tr("Luxembourg (Geoportail)"), QStringLiteral("geoportail.lu"), Format::Unknown,
+             QStringLiteral("https://drones.geoportail.lu/zones")),
+        feed(QStringLiteral("lfv"), tr("Sweden (LFV)"), QStringLiteral("lfv.se"), Format::Unknown,
+             QStringLiteral("https://dronechart.lfv.se/data/uas_zones_ED318.json")),
+        feed(QStringLiteral("faa-tfr"), tr("United States TFRs (FAA)"), QStringLiteral("faa.gov"), Format::FaaTfr,
+             QStringLiteral("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&outputFormat=application/json")),
+        feed(QStringLiteral("foca"), tr("Switzerland (FOCA)"), QStringLiteral("admin.ch"), Format::Unknown,
+             QStringLiteral("https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json")),
+        dipulAviation,
+        nats,
+        dipulAll,
+        france,
+    };
+}
+
+QVariantList GeoZoneProviders::feedPresets()
+{
+    QVariantList presets;
+    for (const Service &service : services()) {
+        if (!service.feedUrl.isEmpty()) {
+            presets.append(QVariantMap{ { QStringLiteral("name"), service.name }, { QStringLiteral("url"), service.feedUrl } });
+        }
+    }
+    return presets;
+}
+
+QVariantList GeoZoneProviders::areaProviders()
+{
+    QVariantList providers;
+    for (const Service &service : services()) {
+        if (service.areaUrl) {
+            providers.append(QVariantMap{ { QStringLiteral("name"), service.name }, { QStringLiteral("id"), service.id },
+                                          { QStringLiteral("coverage"), QVariant::fromValue(service.coverage) } });
+        }
+    }
+    return providers;
+}
+
+QString GeoZoneProviders::areaFeedUrl(const QString &serviceId, const QGeoRectangle &area)
+{
+    if (!area.isValid() || (area.width() > maxAreaDegrees) || (area.height() > maxAreaDegrees)) {
+        return QString();
+    }
+    for (const Service &service : services()) {
+        if ((service.id == serviceId) && service.areaUrl) {
+            return service.areaUrl(area);
+        }
+    }
+    return QString();
+}
+
+GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
+{
+    const QString host = QUrl(url).host();
+    for (const Service &service : services()) {
+        if ((service.format != GeoZoneParser::Format::Unknown) &&
+            ((host == service.host) || host.endsWith(QLatin1Char('.') + service.host))) {
+            return service.format;
+        }
+    }
+    return GeoZoneParser::Format::Unknown;
+}
+
+QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data, const QDate &today)
+{
+    const QByteArray start = data.left(1024).trimmed().toLower();
+    if (!start.startsWith("<!doctype html") && !start.startsWith("<html")) {
+        return QString();
+    }
+
+    const QString page = QString::fromUtf8(data);
+    for (const Service &service : services()) {
+        if (!service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {
+            continue;
+        }
+        QString link;
+        QDate linkDate;
+        QString earliestLink;
+        QDate earliestDate;
+        QRegularExpressionMatchIterator it = service.datasetLinkPattern.globalMatch(page);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch match = it.next();
+            const QDate date = QDate::fromString(match.captured(2), QStringLiteral("yyyyMMdd"));
+            if (!date.isValid()) {
+                continue;
+            }
+            if ((date <= today) && (!linkDate.isValid() || (date > linkDate))) {
+                link = match.captured(1);
+                linkDate = date;
+            }
+            if (!earliestDate.isValid() || (date < earliestDate)) {
+                earliestLink = match.captured(1);
+                earliestDate = date;
+            }
+        }
+        if (link.isEmpty()) {
+            link = earliestLink;
+        }
+        if (!link.isEmpty()) {
+            return QUrl(url).resolved(QUrl(link)).toString();
+        }
+    }
+    return QString();
+}
+
+QString GeoZoneProviders::_bboxQuery(const QGeoRectangle &area, const QString &suffix)
+{
+    return QStringLiteral("%1,%2,%3,%4").arg(area.topLeft().longitude(), 0, 'f', 5).arg(area.bottomRight().latitude(), 0, 'f', 5)
+                                         .arg(area.bottomRight().longitude(), 0, 'f', 5).arg(area.topLeft().latitude(), 0, 'f', 5) + suffix;
+}
+
+QString GeoZoneProviders::_dipulUrl(const QStringList &layers, const QGeoRectangle &area)
+{
+    QStringList typeNames;
+    for (const QString &layer : layers) {
+        typeNames.append(QStringLiteral("dipul:") + layer);
+    }
+    // WFS 1.0.0 is the version of the DiPUL server which filters several layers by a bounding box
+    QString url = QStringLiteral("https://uas-betrieb.de/geoservices/dipul/ows?service=WFS&version=1.0.0&request=GetFeature&outputFormat=application/json&typeName=%1")
+                      .arg(typeNames.join(QLatin1Char(',')));
+    if (area.isValid()) {
+        url += QStringLiteral("&BBOX=") + _bboxQuery(area);
+    }
+    return url;
+}

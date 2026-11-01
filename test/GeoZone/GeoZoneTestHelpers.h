@@ -17,6 +17,7 @@
 #include "GeoZoneGeometry.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneLoader.h"
+#include "GeoZoneProviders.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
@@ -48,6 +49,7 @@
 #include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QScopeGuard>
+#include <QtCore/QSet>
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimeZone>

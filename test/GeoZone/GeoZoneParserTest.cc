@@ -353,11 +353,11 @@ void GeoZoneParserTest::_testParseNationalFormats()
         "<a href=\"/cms-nats/export/sites/default/en/Publications/digital-datasets/UAS_AREA_1/EG_UAS_FR_DS_AREA1_FULL_20261126_XML.zip\">XML</a>"
         "</body></html>";
     const QString pageUrl = QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/");
-    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 11, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
-    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 11, 26)).startsWith(QStringLiteral("https://nats-uk.ead-it.com/cms-nats/export/")));
-    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 11, 26)).endsWith(QStringLiteral("FULL_20261126_XML.zip")));
-    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 1, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
-    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, aixmBytes, QDate(2026, 11, 1)).isEmpty());
+    QVERIFY(GeoZoneProviders::datasetLink(pageUrl, page, QDate(2026, 11, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
+    QVERIFY(GeoZoneProviders::datasetLink(pageUrl, page, QDate(2026, 11, 26)).startsWith(QStringLiteral("https://nats-uk.ead-it.com/cms-nats/export/")));
+    QVERIFY(GeoZoneProviders::datasetLink(pageUrl, page, QDate(2026, 11, 26)).endsWith(QStringLiteral("FULL_20261126_XML.zip")));
+    QVERIFY(GeoZoneProviders::datasetLink(pageUrl, page, QDate(2026, 1, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
+    QVERIFY(GeoZoneProviders::datasetLink(pageUrl, aixmBytes, QDate(2026, 11, 1)).isEmpty());
 
     // Area feeds of providers serving zones by area
     GeoZoneManager manager(QTemporaryDir().path());
@@ -365,7 +365,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     const QString dipulUrl = manager.areaFeedUrl(QStringLiteral("dipul"), frankfurt);
     QVERIFY(dipulUrl.contains(QStringLiteral("dipul:wohngrundstuecke")));
     QVERIFY(dipulUrl.endsWith(QStringLiteral("&BBOX=8.55000,50.00000,8.75000,50.15000")));
-    QCOMPARE(GeoZoneLoader::formatHint(dipulUrl), GeoZoneParser::Format::Dipul);
+    QCOMPARE(GeoZoneProviders::formatHint(dipulUrl), GeoZoneParser::Format::Dipul);
     QVERIFY(manager.areaFeedUrl(QStringLiteral("france"), frankfurt).contains(QStringLiteral("BBOX=8.55000,50.00000,8.75000,50.15000,EPSG:4326")));
     QVERIFY(manager.areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))).isEmpty());
     QVERIFY(manager.areaFeedUrl(QStringLiteral("unknown"), frankfurt).isEmpty());
@@ -526,4 +526,32 @@ void GeoZoneParserTest::_testDisplayText()
     const GeoZone scheduled(ed269.zones[2]);
     QCOMPARE(scheduled.verticalLimitsText(), QStringLiteral("Not specified"));
     QCOMPARE(scheduled.applicabilityText(), QStringLiteral("From 2026-03-29 01:00 UTC to 2026-10-25 00:59 UTC\n  MON, TUE 05:00-18:00 UTC"));
+}
+
+void GeoZoneParserTest::_testProviders()
+{
+    // Each service is recognized from its own URLs, and identifiers are unique
+    const QList<GeoZoneProviders::Service> services = GeoZoneProviders::services();
+    QSet<QString> ids;
+    const QGeoRectangle area(QGeoCoordinate(48.2, 2.2), QGeoCoordinate(48.0, 2.5));
+    for (const GeoZoneProviders::Service &service : services) {
+        QVERIFY2(!ids.contains(service.id), qPrintable(service.id));
+        ids.insert(service.id);
+        QVERIFY(!service.name.isEmpty());
+        QVERIFY(!service.feedUrl.isEmpty() || service.areaUrl);
+        if (!service.feedUrl.isEmpty()) {
+            QVERIFY2(QUrl(service.feedUrl).host().endsWith(service.host), qPrintable(service.id));
+            if (service.format != GeoZoneParser::Format::Unknown) {
+                QCOMPARE(GeoZoneProviders::formatHint(service.feedUrl), service.format);
+            }
+        }
+        if (service.areaUrl) {
+            const QString url = GeoZoneProviders::areaFeedUrl(service.id, area);
+            QVERIFY2(QUrl(url).host().endsWith(service.host), qPrintable(url));
+            QCOMPARE(GeoZoneProviders::formatHint(url), service.format);
+        }
+    }
+    QCOMPARE(GeoZoneProviders::feedPresets().count() + GeoZoneProviders::areaProviders().count(), services.count());
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://example.com/zones.json")), GeoZoneParser::Format::Unknown);
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://notfaa.gov/zones.json")), GeoZoneParser::Format::Unknown);
 }
