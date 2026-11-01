@@ -10,6 +10,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Layouts
 import QtLocation
 import QtPositioning
 
@@ -25,11 +26,16 @@ Item {
     property var    map
     property bool   showZones:          true    ///< False hides the zones on this map, like the small picture in picture map
     property real   labelMinZoomLevel:  11      ///< Zone labels are only shown from this zoom level up
-    property var    highlightedZones:   []      ///< Zones drawn with a white border
+    property var    highlightedZones:   []      ///< Zones drawn with a white border, which the map filters don't hide
+    property var    keptZones:          []      ///< Zones the map filters don't hide, like those the flight alerts report
+    property var    missionController:  null    ///< The altitude filter shows the zones near the altitudes of its mission
+    property bool   vehicleAltitudes:   false   ///< The altitude filter shows the zones near the altitude of the active vehicle
     property bool   fitToAddedSources:  false   ///< Moves the map to the zones of files and feeds the user adds when they are out of view or too small to see
     property bool   showPrediction:     false   ///< Shows where the active vehicle enters a zone at its velocity, see GeoZoneMonitor
+    property real   filterHintBottomMargin: ScreenTools.defaultFontPixelHeight  ///< Of the hint about zones hidden by the map filters
 
-    readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
+    readonly property int hiddenZoneCount:      _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
+    readonly property int filteredZoneCount:    _mapModel.filteredZoneCount ///< Zones in view hidden by the map filters, see GeoZoneMapFilters
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property bool  _showZones:         showZones && _geoZoneManager.display.visible && map.visible // Items are not kept for maps in hidden views
@@ -39,13 +45,15 @@ Item {
         geoZoneInfoDialogComponent.createObject(mainWindow, { geoZone: zone, zones: zones ? zones : [] }).open()
     }
 
+    /// @return Zones shown at the coordinate, see GeoZoneMapModel::zonesAt
+    function zonesAt(coordinate) {
+        return _showZones ? _mapModel.zonesAt(coordinate) : []
+    }
+
     /// Shows the details of the shown zones at the coordinate, with a choice where several overlap
     /// @return true if there are zones at the coordinate
     function showZonesAt(coordinate) {
-        if (!_showZones) {
-            return false
-        }
-        const zones = _geoZoneManager.zonesAt(coordinate)
+        const zones = zonesAt(coordinate)
         if (zones.length === 0) {
             return false
         }
@@ -112,6 +120,9 @@ Item {
     GeoZoneMapModel {
         id:                 _mapModel
         highlightedZones:   _root.highlightedZones
+        keptZones:          _root.keptZones
+        missionController:  _root.missionController
+        vehicleAltitudes:   _root.vehicleAltitudes
     }
 
     function _updateView() {
@@ -250,6 +261,42 @@ Item {
         highlightColor:     GeoZoneStyle.highlightColor
         activeFillAlpha:    GeoZoneStyle.activeFillAlpha
         inactiveFillAlpha:  GeoZoneStyle.inactiveFillAlpha
+    }
+
+    // Zones in view hidden by the map filters, which can be forgotten, with a reset
+    Rectangle {
+        parent:                     _root.map
+        anchors.horizontalCenter:   parent.horizontalCenter
+        anchors.bottom:             parent.bottom
+        anchors.bottomMargin:       _root.filterHintBottomMargin
+        width:                      filterHintRow.implicitWidth + ScreenTools.defaultFontPixelWidth
+        height:                     filterHintRow.implicitHeight + ScreenTools.defaultFontPixelHeight / 4
+        radius:                     ScreenTools.defaultFontPixelHeight / 4
+        color:                      Qt.rgba(0, 0, 0, 0.6)
+        visible:                    _root._showZones && _root.filteredZoneCount > 0
+        z:                          QGroundControl.zOrderWidgets
+
+        // Clicks on the hint don't reach the map
+        QGCMouseArea {
+            anchors.fill: parent
+        }
+
+        RowLayout {
+            id:                 filterHintRow
+            anchors.centerIn:   parent
+            spacing:            ScreenTools.defaultFontPixelWidth
+
+            QGCLabel {
+                text:           qsTr("%n zone(s) in view hidden by map filters", "", _root.filteredZoneCount)
+                color:          "white"
+                font.pointSize: ScreenTools.smallFontPointSize
+            }
+
+            QGCButton {
+                text:       qsTr("Reset Filters")
+                onClicked:  _root._geoZoneManager.display.resetFilters()
+            }
+        }
     }
 
     // Clickable zone labels which show the zone details

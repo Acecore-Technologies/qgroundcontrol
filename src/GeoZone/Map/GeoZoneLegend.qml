@@ -15,8 +15,8 @@ import QGroundControl.Controls
 import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 
-/// Explains how the geozones are drawn on the maps, with check boxes showing or hiding them by restriction. Hidden
-/// zones are still checked and alerted.
+/// Explains how the geozones are drawn on the maps, with check boxes showing or hiding them by restriction and the
+/// other map filters, see GeoZoneMapFilters. Hidden zones are still checked and alerted.
 ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
@@ -99,5 +99,9 @@ ColumnLayout {
             text:       qsTr("White outline: crossed by the mission")
             visible:    root.showCrossedZones
         }
+    }
+
+    GeoZoneMapFilters {
+        Layout.fillWidth: true
     }
 }

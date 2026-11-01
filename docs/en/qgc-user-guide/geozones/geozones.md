@@ -121,7 +121,17 @@ Limits published as flight levels (pressure altitude, `STD`) are approximate: th
 Zones that are not active at the current time are drawn with a fainter fill. Schedules based on sunrise, sunset or civil twilight are computed for the location of each zone. Daily times published in UTC (`08:00Z`) or with an offset from UTC (`08:00+01:00`) keep it all year. Since the formats don't tell whether times without offset (`08:00`) are UTC or local times, to be safe such a zone counts as active whenever it is in either: in the local time of the zone's country, which follows its daylight saving time, or in UTC. So a zone active from 08:00 to 18:00 in Zurich counts as active from 07:00 to 18:00 UTC in winter and from 06:00 to 18:00 UTC in summer, for the map, the flight alerts, the mission check, the routes and the briefing. The local time of European countries with one time zone on their mainland is known, with those of the Canary Islands, Madeira and the Azores; times of zones in other countries or without country are taken as UTC only, with a warning. The details of the zone show such times in local time with the assumed time zone, like "Every day 08:00-18:00 Europe/Zurich (time zone assumed)".
 
 **Show geozones** in the Plan View **Geozones** panel (or **Show geozones on maps** in the expanded Fly View indicator and the settings) hides or shows the zones.
-The check boxes of the legend hide or show the zones of each restriction on the maps, for example to see the map under large U-space airspace. Hidden zones are not picked by map clicks, but the mission check, flight alerts and guided command checks still apply to them.
+
+### Map Filters {#map-filters}
+
+Below the legend of the Plan View **Geozones** panel and the Fly View geozone indicator, filters declutter the maps of areas with many zones:
+
+- The check boxes of the legend hide or show the zones of each restriction, for example to see the map under large U-space airspace.
+- **Only zones near the flight altitudes** hides zones whose floor is more than the **Within** margin (100 m by default) above, or whose ceiling is more than the margin below, the altitude of the active vehicle in the Fly View, or the range of altitudes of the mission in the Plan View. Limits above ground are compared with the height above the terrain (of the vehicle, or along the mission), the others with the altitude above mean sea level. Without a vehicle altitude or mission, and for limits above ground where the terrain isn't known, no zones are hidden by altitude.
+- **Schedule** shows **All zones**, only those **Active now**, or those **Active soon**: active now or within the **Active within** hours (12 by default).
+- **Source**, with several sources, shows the zones of one source only. Unlike the source check boxes, it only changes the maps.
+
+The filters are kept between sessions and apply to both views. They only change the maps: zones hidden by them are not picked by map clicks, but the mission check, flight alerts and guided command checks still apply to them. The zones the mission check reports in the Plan View (those the mission or its returns enter) and the zones near the vehicle or reached at its velocity in the Fly View are always shown. When filters hide zones in view, a hint at the bottom of the map shows how many, with **Reset Filters**, which shows all restrictions, altitudes, schedules and sources again (also in the panels).
 
 Click a zone on the map to see its details (restriction, altitude limits in your units, applicability schedule, reason, message, responsible authority, exemptions, U-space class, other published properties and the source it was loaded from). Where zones overlap, choose the zone at the top of the details. In the Plan View this works when the click doesn't add a waypoint or rally point or select a fence. In the Fly View, when guided actions are available, the map click menu has **Geozones here**. When the map is zoomed in, each zone also shows a label which opens its details.
 
@@ -319,7 +329,7 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 
 | Section | Setting | Default | Range | Description |
 | ------- | ------- | ------- | ----- | ----------- |
-| Display | **Show geozones on maps** | On | | Shows or hides the zones on the Plan and Fly View maps. The legend check boxes hide the zones of single restrictions. |
+| Display | **Show geozones on maps** | On | | Shows or hides the zones on the Plan and Fly View maps. The legend check boxes and the [map filters](#map-filters) next to them hide some zones. |
 | Flight Alerts | **Flight alerts** | On | | Turns the flight alerts and the nearby zones of the toolbar indicator on or off. |
 | Flight Alerts | **Speak flight alerts** | On | | Turns the audio of the alerts on or off. |
 | Flight Alerts | **Log flight alerts** | On | | Appends the alerts to the [CSV log](#alert-log). |

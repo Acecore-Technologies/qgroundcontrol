@@ -17,6 +17,50 @@
     "default":      0
 },
 {
+    "name":         "altitudeFilter",
+    "shortDesc":    "Only zones near the flight altitudes",
+    "longDesc":     "Hide geozones on maps whose floor is more than the altitude filter margin above, or whose ceiling is more than the margin below, the altitude of the active vehicle in the Fly View or the altitudes of the mission in the Plan View. Checks and alerts still apply to them.",
+    "type":         "bool",
+    "default":      false
+},
+{
+    "name":         "altitudeFilterMargin",
+    "shortDesc":    "Within",
+    "longDesc":     "Vertical distance from the flight altitudes within which the altitude filter shows geozones.",
+    "type":         "double",
+    "units":        "m",
+    "min":          0,
+    "max":          10000,
+    "decimalPlaces": 0,
+    "default":      100
+},
+{
+    "name":         "scheduleFilter",
+    "shortDesc":    "Schedule",
+    "longDesc":     "Which geozones maps show by their schedule: all, those active now, or those active now or within the schedule filter hours. Checks and alerts still apply to the others.",
+    "type":         "uint32",
+    "enumStrings":  "All zones,Active now,Active soon",
+    "enumValues":   "0,1,2",
+    "default":      0
+},
+{
+    "name":         "scheduleFilterHours",
+    "shortDesc":    "Active within",
+    "longDesc":     "Hours ahead in which geozones shown as active soon become active.",
+    "type":         "uint32",
+    "units":        "hours",
+    "min":          1,
+    "max":          168,
+    "default":      12
+},
+{
+    "name":         "mapSource",
+    "shortDesc":    "Source shown on maps",
+    "longDesc":     "Key of the only geozone source whose zones maps show, empty for all sources. Checks and alerts still apply to the zones of the other sources.",
+    "type":         "string",
+    "default":      ""
+},
+{
     "name":         "alertsEnabled",
     "shortDesc":    "Flight alerts",
     "longDesc":     "Alert when a connected vehicle approaches or enters an active restricted geozone or U-space airspace.",

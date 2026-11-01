@@ -23,6 +23,11 @@ public:
 
     DEFINE_SETTINGFACT(showZones)
     DEFINE_SETTINGFACT(hiddenRestrictions)
+    DEFINE_SETTINGFACT(altitudeFilter)
+    DEFINE_SETTINGFACT(altitudeFilterMargin)
+    DEFINE_SETTINGFACT(scheduleFilter)
+    DEFINE_SETTINGFACT(scheduleFilterHours)
+    DEFINE_SETTINGFACT(mapSource)
     DEFINE_SETTINGFACT(alertsEnabled)
     DEFINE_SETTINGFACT(audioAlerts)
     DEFINE_SETTINGFACT(logAlerts)

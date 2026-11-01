@@ -10,10 +10,16 @@
 #include "GeoZoneMapModel.h"
 #include "GeoZone.h"
 #include "GeoZoneDisplay.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionPath.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneVehicleMonitor.h"
+#include "MissionController.h"
+#include "MultiVehicleManager.h"
 #include "QmlObjectListModel.h"
+#include "Vehicle.h"
 
 #include <QtCore/QSet>
 #include <QtCore/QtMath>
@@ -81,9 +87,17 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
 {
     // Shapes are deleted when zones change, so items referencing them must go first
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_removeSource);
-    (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_refresh);
+    (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_updateFilter);
     (void) connect(_manager, &GeoZoneManager::activeZonesChanged, this, &GeoZoneMapModel::_updateActive);
-    (void) connect(_manager->display(), &GeoZoneDisplay::hiddenRestrictionsChanged, this, &GeoZoneMapModel::_refresh);
+    (void) connect(_manager->display(), &GeoZoneDisplay::filtersChanged, this, &GeoZoneMapModel::_updateFilter);
+
+    (void) connect(&_altitudeTimer, &QTimer::timeout, this, &GeoZoneMapModel::_updateAltitudes);
+    _scheduleTimer.setInterval(60 * 1000);
+    (void) connect(&_scheduleTimer, &QTimer::timeout, this, [this]() {
+        _invalidateFilter();
+        _refresh();
+    });
+    _updateFilter();
 }
 
 GeoZoneMapModel::~GeoZoneMapModel()
@@ -119,9 +133,9 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     }
     const double marginX = viewWidth * viewMargin;
     const double marginY = views.first().height() * viewMargin;
-    const int hiddenRestrictions = _manager->display()->hiddenRestrictions();
     QList<GeoZoneMercatorBounds> nearViews;
     QList<const GeoZoneShape*> nearShapes;
+    QList<const GeoZoneShape*> filteredShapes;
     QSet<const GeoZoneShape*> nearShapeSet;
     for (const GeoZoneMercatorBounds &view : views) {
         const GeoZoneMercatorBounds nearView{ view.minX - marginX, view.minY - marginY, view.maxX + marginX, view.maxY + marginY };
@@ -133,9 +147,9 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         const double north = (nearView.minY <= 0) ? 90.0 : northWest.latitude();
         const double south = (nearView.maxY >= 1) ? -90.0 : southEast.latitude();
         for (const GeoZoneShape *shape : _manager->shapesInArea(south, northWest.longitude(), north, southEast.longitude())) {
-            if (!nearShapeSet.contains(shape) && !(hiddenRestrictions & (1 << shape->zone()->restriction()))) {
+            if (!nearShapeSet.contains(shape)) {
                 nearShapeSet.insert(shape);
-                nearShapes.append(shape);
+                (isShown(shape->zone()) ? nearShapes : filteredShapes).append(shape);
             }
         }
     }
@@ -143,6 +157,14 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     const auto intersectsAny = [](const QList<GeoZoneMercatorBounds> &bounds, const GeoZoneMercatorBounds &shapeBounds) {
         return std::any_of(bounds.cbegin(), bounds.cend(), [&shapeBounds](const GeoZoneMercatorBounds &b) { return b.intersects(shapeBounds); });
     };
+
+    QSet<const GeoZone*> filteredZones;
+    for (const GeoZoneShape *shape : std::as_const(filteredShapes)) {
+        if (intersectsAny(views, shape->mercatorBounds())) {
+            filteredZones.insert(shape->zone());
+        }
+    }
+    _setFilteredZoneCount(static_cast<int>(filteredZones.count()));
 
     struct Candidate {
         const GeoZoneShape *shape;
@@ -275,6 +297,7 @@ void GeoZoneMapModel::_clear()
     }
     _items.clear();
     _setHiddenZoneCount(0);
+    _setFilteredZoneCount(0);
 }
 
 void GeoZoneMapModel::setHighlightedZones(const QVariantList &zones)
@@ -289,6 +312,98 @@ void GeoZoneMapModel::setHighlightedZones(const QVariantList &zones)
         item->setHighlighted(_highlightedZoneSet.contains(item->zone()));
     }
     emit highlightedZonesChanged();
+    if (_filter.isActive()) {
+        _refresh();
+    }
+}
+
+void GeoZoneMapModel::setKeptZones(const QVariantList &zones)
+{
+    if (zones == _keptZones) {
+        return;
+    }
+    _keptZones = zones;
+    const QList<const GeoZone*> kept = GeoZoneInfo::fromVariantList(zones);
+    _keptZoneSet = QSet<const GeoZone*>(kept.cbegin(), kept.cend());
+    emit keptZonesChanged();
+    if (_filter.isActive()) {
+        _refresh();
+    }
+}
+
+MissionController *GeoZoneMapModel::missionController() const
+{
+    return _missionController;
+}
+
+void GeoZoneMapModel::setMissionController(MissionController *missionController)
+{
+    if (missionController == _missionController) {
+        return;
+    }
+    if (_missionController) {
+        (void) disconnect(_missionController, nullptr, this, nullptr);
+    }
+    _missionController = missionController;
+    if (_missionController) {
+        const auto scheduleUpdate = [this]() {
+            if (_filter.altitudes) {
+                _altitudeTimer.start();
+            }
+        };
+        (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, scheduleUpdate);
+        (void) connect(_missionController, &MissionController::visualItemsChanged, this, scheduleUpdate);
+        (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, scheduleUpdate);
+    }
+    _updateTimers();
+    if (_filter.altitudes) {
+        _updateAltitudes();
+    }
+    emit missionControllerChanged();
+}
+
+void GeoZoneMapModel::setVehicleAltitudes(bool vehicleAltitudes)
+{
+    if (vehicleAltitudes == _vehicleAltitudes) {
+        return;
+    }
+    _vehicleAltitudes = vehicleAltitudes;
+    _updateTimers();
+    if (_filter.altitudes) {
+        _updateAltitudes();
+    }
+    emit vehicleAltitudesChanged();
+}
+
+void GeoZoneMapModel::setAltitudeRange(const GeoZoneAltitudeRange &altitudeRange)
+{
+    if (altitudeRange.near(_altitudeRange, altitudeTolerance)) {
+        return;
+    }
+    _altitudeRange = altitudeRange;
+    if (_filter.altitudes) {
+        _invalidateFilter();
+        _refresh();
+    }
+}
+
+bool GeoZoneMapModel::isShown(const GeoZone *zone)
+{
+    if (!_filter.isActive() || _keptZoneSet.contains(zone) || _highlightedZoneSet.contains(zone)) {
+        return true;
+    }
+    auto it = _accepted.constFind(zone);
+    if (it == _accepted.cend()) {
+        it = _accepted.insert(zone, _filter.accepts(*zone, _filterTime, _altitudeRange));
+    }
+    return it.value();
+}
+
+QVariantList GeoZoneMapModel::zonesAt(const QGeoCoordinate &coordinate)
+{
+    QList<const GeoZone*> zones = _manager->catalog().zonesAt(coordinate);
+    (void) zones.removeIf([this](const GeoZone *zone) { return !isShown(zone); });
+    return GeoZoneInfo::toVariantList(zones);
 }
 
 void GeoZoneMapModel::_removeSource(GeoZoneSource *source)
@@ -302,6 +417,7 @@ void GeoZoneMapModel::_removeSource(GeoZoneSource *source)
             (void) model->swapObjectList(kept);
         }
     }
+    _invalidateFilter();
     const qsizetype labelCount = _labelZones.count();
     _labelZones.removeIf([source](const QVariant &value) { return GeoZoneInfo::fromVariant(value)->sourceKey() == source->key(); });
     if (_labelZones.count() != labelCount) {
@@ -322,11 +438,101 @@ void GeoZoneMapModel::_updateActive()
     for (GeoZoneMapItem *item : std::as_const(_items)) {
         item->updateActive();
     }
+    if (_filter.schedule != GeoZoneMapFilter::AnyTime) {
+        _invalidateFilter();
+        _refresh();
+    }
+}
+
+void GeoZoneMapModel::_updateFilter()
+{
+    GeoZoneMapFilter filter = _manager->display()->filter();
+    // The key of a source which was removed doesn't hide the zones of the others
+    if (!filter.source.isEmpty() && !_manager->source(filter.source)) {
+        filter.source.clear();
+    }
+    const bool readAltitudes = filter.altitudes && !_filter.altitudes;
+    _filter = filter;
+    _invalidateFilter();
+    _updateTimers();
+    if (readAltitudes && (_missionController || _vehicleAltitudes)) {
+        _altitudeRange = _readAltitudes();
+    }
+    _refresh();
+}
+
+void GeoZoneMapModel::_invalidateFilter()
+{
+    _accepted.clear();
+    _filterTime = GeoZoneEnvironment::currentDateTimeUtc();
+}
+
+void GeoZoneMapModel::_updateTimers()
+{
+    if (_filter.altitudes && _missionController) {
+        _altitudeTimer.setSingleShot(true);
+        _altitudeTimer.setInterval(missionAltitudeDelayMSecs);
+    } else if (_filter.altitudes && _vehicleAltitudes) {
+        _altitudeTimer.setSingleShot(false);
+        _altitudeTimer.setInterval(vehicleAltitudeIntervalMSecs);
+        if (!_altitudeTimer.isActive()) {
+            _altitudeTimer.start();
+        }
+    } else {
+        _altitudeTimer.stop();
+    }
+
+    if (_filter.schedule == GeoZoneMapFilter::ActiveSoon) {
+        if (!_scheduleTimer.isActive()) {
+            _scheduleTimer.start();
+        }
+    } else {
+        _scheduleTimer.stop();
+    }
+}
+
+GeoZoneAltitudeRange GeoZoneMapModel::_readAltitudes() const
+{
+    GeoZoneAltitudeRange range;
+    if (_missionController) {
+        const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController);
+        for (const QList<GeoZone::Position> &positions : path.positionLists()) {
+            for (const GeoZone::Position &position : positions) {
+                range.add(position);
+            }
+        }
+        for (const GeoZone::Area &area : path.areas()) {
+            range.add(area.lowest);
+            range.add(area.highest);
+        }
+    } else if (_vehicleAltitudes) {
+        Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+        if (vehicle) {
+            range.add(GeoZoneVehicleMonitor::vehiclePosition(vehicle, vehicle->coordinate()));
+        }
+    }
+    return range;
+}
+
+void GeoZoneMapModel::_updateAltitudes()
+{
+    // Maps in hidden views skip the reads of the vehicle altitude
+    if (_visibleRegion.isValid() || _missionController) {
+        setAltitudeRange(_readAltitudes());
+    }
 }
 
 void GeoZoneMapModel::_refresh()
 {
     setView(_visibleRegion, _zoomLevel, _showLabels);
+}
+
+void GeoZoneMapModel::_setFilteredZoneCount(int filteredZoneCount)
+{
+    if (filteredZoneCount != _filteredZoneCount) {
+        _filteredZoneCount = filteredZoneCount;
+        emit filteredZoneCountChanged();
+    }
 }
 
 void GeoZoneMapModel::_setHiddenZoneCount(int hiddenZoneCount)

@@ -3319,3 +3319,160 @@ void GeoZonePlanningTest::_testMapModelShapeLimit()
         QVERIFY(GeoZoneInfo::fromVariant(model.labelZones().at(i))->identifier().mid(1).toInt() >= extraZones);
     }
 }
+
+void GeoZonePlanningTest::_testMapModelFilters()
+{
+    ScopedEnvironment environment;
+    const QDateTime now = _utc(QDate(2026, 6, 15), QTime(10, 0));
+    environment.setNow(now);
+    const QGeoCoordinate center(47, 8);
+    const auto withLimits = [](QJsonObject feature, double lower, const QString &lowerReference, double upper, const QString &upperReference) {
+        QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
+        QJsonObject layer = geometry[0].toObject();
+        layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+        layer[QStringLiteral("lowerLimit")] = lower;
+        layer[QStringLiteral("lowerVerticalReference")] = lowerReference;
+        layer[QStringLiteral("upperLimit")] = upper;
+        layer[QStringLiteral("upperVerticalReference")] = upperReference;
+        geometry[0] = layer;
+        feature[QStringLiteral("geometry")] = geometry;
+        return feature;
+    };
+    QJsonObject later = _circleFeature(QStringLiteral("LATER"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 270), 300);
+    later[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" },
+        { "startDateTime", now.addSecs(6 * 3600).toString(Qt::ISODate) }, { "endDateTime", now.addSecs(8 * 3600).toString(Qt::ISODate) } } };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        withLimits(_circleFeature(QStringLiteral("LOW"), QStringLiteral("PROHIBITED"), center, 300), 0, QStringLiteral("AGL"), 60, QStringLiteral("AGL")),
+        withLimits(_circleFeature(QStringLiteral("HIGH"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 90), 300),
+                   1500, QStringLiteral("AMSL"), 3000, QStringLiteral("AMSL")),
+        _circleFeature(QStringLiteral("ALL"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(2000, 0), 300),
+        later,
+    }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("other.json"), QJsonArray{
+        _circleFeature(QStringLiteral("OTHER"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2000, 180), 300),
+    }), errorString), qPrintable(errorString));
+
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    GeoZoneDisplay *const display = manager.display();
+    const auto restoreFilters = qScopeGuard([settings, display]() {
+        display->resetFilters();
+        settings->altitudeFilterMargin()->setRawValue(settings->altitudeFilterMargin()->rawDefaultValue());
+        settings->scheduleFilterHours()->setRawValue(settings->scheduleFilterHours()->rawDefaultValue());
+    });
+    settings->altitudeFilterMargin()->setRawValue(100);
+    settings->scheduleFilterHours()->setRawValue(12);
+
+    GeoZoneMapModel model(&manager);
+    const QGeoRectangle view(center.atDistanceAndAzimuth(5000, 315), center.atDistanceAndAzimuth(5000, 135));
+    model.setView(view, 12, false);
+    const auto shown = [&model]() {
+        QStringList identifiers;
+        for (int i = 0; i < model.circles()->count(); i++) {
+            identifiers.append(model.circles()->value<GeoZoneMapItem*>(i)->zone()->identifier());
+        }
+        identifiers.sort();
+        return identifiers.join(QLatin1Char(' '));
+    };
+    const auto zone = [&manager](const QString &identifier) {
+        const QList<GeoZone*> &zones = manager.zoneList();
+        return *std::find_if(zones.cbegin(), zones.cend(), [&identifier](const GeoZone *z) { return z->identifier() == identifier; });
+    };
+    const auto altitudes = [](double altitudeAMSL, double terrainAMSL) {
+        GeoZoneAltitudeRange range;
+        range.add(GeoZone::Position{ QGeoCoordinate(47, 8), altitudeAMSL, terrainAMSL });
+        return range;
+    };
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 0);
+    QVERIFY(!display->filtered());
+
+    // Restrictions hidden in the legend, except kept and highlighted zones, also at map clicks
+    display->setRestrictionVisible(GeoZone::Prohibited, false);
+    QVERIFY(display->filtered());
+    QCOMPARE(shown(), QStringLiteral("ALL OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 3);
+    QCOMPARE(model.zonesAt(center).count(), 0);
+    model.setKeptZones(GeoZoneInfo::toVariantList(QList<const GeoZone*>{ zone(QStringLiteral("LOW")) }));
+    model.setHighlightedZones(GeoZoneInfo::toVariantList(QList<const GeoZone*>{ zone(QStringLiteral("HIGH")) }));
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LOW OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 1);
+    QCOMPARE(model.zonesAt(center).count(), 1);
+    model.setKeptZones({});
+    model.setHighlightedZones({});
+    display->resetFilters();
+    QVERIFY(!display->filtered());
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+
+    // Altitudes: all zones without them, then those within the margin of the vehicle above the terrain or sea level
+    settings->altitudeFilter()->setRawValue(true);
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+    model.setAltitudeRange(altitudes(500, 450));
+    QCOMPARE(shown(), QStringLiteral("ALL LATER LOW OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 1);
+    model.setAltitudeRange(altitudes(1450, 450));
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER OTHER"));
+    settings->altitudeFilterMargin()->setRawValue(1000);
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+    settings->altitudeFilterMargin()->setRawValue(100);
+    // Limits above ground are kept without the terrain
+    model.setAltitudeRange(altitudes(1450, qQNaN()));
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+    // A range of altitudes, like those of a mission climbing from the ground
+    GeoZoneAltitudeRange mission = altitudes(450, 450);
+    mission.add(GeoZone::Position{ center, 1450, 450 });
+    model.setAltitudeRange(mission);
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+    model.setAltitudeRange(altitudes(500, 450));
+
+    // Schedules: active now, or within the hours ahead
+    settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveNow);
+    QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 2);
+    settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveSoon);
+    QCOMPARE(shown(), QStringLiteral("ALL LATER LOW OTHER"));
+    settings->scheduleFilterHours()->setRawValue(2);
+    QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
+
+    // Sources, with the other filters
+    settings->mapSource()->setRawValue(zone(QStringLiteral("OTHER"))->sourceKey());
+    QCOMPARE(shown(), QStringLiteral("OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 4);
+    settings->mapSource()->setRawValue(zone(QStringLiteral("LOW"))->sourceKey());
+    QCOMPARE(shown(), QStringLiteral("ALL LOW"));
+    display->setRestrictionVisible(GeoZone::Conditional, false);
+    QCOMPARE(shown(), QStringLiteral("LOW"));
+    // The key of a source which isn't loaded doesn't hide the others
+    settings->mapSource()->setRawValue(QStringLiteral("removed.json"));
+    QCOMPARE(shown(), QStringLiteral("LOW OTHER"));
+
+    display->resetFilters();
+    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
+    QCOMPARE(model.filteredZoneCount(), 0);
+
+    // The altitudes of a mission, read again when its items change
+    settings->altitudeFilter()->setRawValue(true);
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    const QGeoCoordinate home = center.atDistanceAndAzimuth(1000, 270);
+    missionController->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(home.latitude(), home.longitude(), 400));
+    QList<SimpleMissionItem*> items;
+    for (const QGeoCoordinate &coordinate : { home, center.atDistanceAndAzimuth(1000, 90) }) {
+        items.append(qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count())));
+        items.last()->altitude()->setRawValue(50);
+    }
+    model.setMissionController(missionController);
+    // The home altitude may change to the terrain elevation once it is received, the zone floor is far above both
+    QTRY_VERIFY_WITH_TIMEOUT(model.altitudeRange().isValid(), 5000);
+    QCOMPARE(qRound(model.altitudeRange().maxAMSL - model.altitudeRange().minAMSL), 0);
+    QCOMPARE(shown(), QStringLiteral("ALL LATER LOW OTHER"));
+    items.last()->altitude()->setRawValue(1450);
+    QTRY_COMPARE_WITH_TIMEOUT(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"), 5000);
+    QCOMPARE(qRound(model.altitudeRange().maxAMSL - model.altitudeRange().minAMSL), 1400);
+    model.setMissionController(nullptr);
+}

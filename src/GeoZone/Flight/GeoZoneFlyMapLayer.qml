@@ -16,9 +16,12 @@ import QGroundControl.GeoZone
 /// panel (GeoZoneMapClickButton) and the check of go to locations: the zones, left out of the small picture in picture
 /// map, where the active vehicle enters a zone at its velocity, and the zones at map clicks which open no guided action.
 GeoZoneMapVisuals {
-    id:             control
-    showZones:      map.pipState.state !== map.pipState.pipState
-    showPrediction: showZones
+    id:                 control
+    showZones:          map.pipState.state !== map.pipState.pipState
+    showPrediction:     showZones
+    vehicleAltitudes:   true
+    // The map filters don't hide the zones the flight alerts report
+    keptZones:          GeoZoneMonitor.nearbyZones.map(nearby => nearby.zone).concat([ GeoZoneMonitor.predictedEntryZone ])
 
     /// @return true if a go to location would enter geozones, so it is confirmed even where QGroundControl wouldn't
     function gotoEntersZones(coordinate) {
@@ -28,7 +31,7 @@ GeoZoneMapVisuals {
 
     /// @return Number of zones shown at the coordinate
     function zoneCountAt(coordinate) {
-        return showZones && GeoZoneManager.display.visible ? GeoZoneManager.zonesAt(coordinate).length : 0
+        return zonesAt(coordinate).length
     }
 
     // FlyViewMap.qml opens its panel of guided actions for the other clicks, see its onMapClicked
