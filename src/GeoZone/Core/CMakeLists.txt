@@ -2,65 +2,72 @@
 # storage, and the evaluation of positions and paths. It only depends on Qt, QGroundControl connects it to the
 # application through GeoZoneEnvironment.
 qt_add_library(GeoZoneCore STATIC
-    GeoZone.cc
-    GeoZone.h
-    GeoZoneAlertTracker.cc
-    GeoZoneAlertTracker.h
-    GeoZoneAuthorisations.cc
-    GeoZoneAuthorisations.h
-    GeoZoneBox.cc
-    GeoZoneBox.h
-    GeoZoneCatalog.cc
-    GeoZoneCatalog.h
-    GeoZoneDownloader.cc
-    GeoZoneDownloader.h
     GeoZoneEnvironment.cc
     GeoZoneEnvironment.h
-    GeoZoneFences.cc
-    GeoZoneFences.h
-    GeoZoneFormat.cc
-    GeoZoneFormat.h
-    GeoZoneGeometry.cc
-    GeoZoneGeometry.h
-    GeoZoneIndex.cc
-    GeoZoneIndex.h
-    GeoZoneInfo.cc
-    GeoZoneInfo.h
-    GeoZoneLoader.cc
-    GeoZoneLoader.h
-    GeoZoneParser.cc
-    GeoZoneParser.h
-    GeoZoneParserUtils.cc
-    GeoZoneParserUtils.h
-    GeoZonePathEvaluator.cc
-    GeoZonePathEvaluator.h
-    GeoZonePolicy.cc
-    GeoZonePolicy.h
-    GeoZoneProviders.cc
-    GeoZoneProviders.h
-    GeoZoneSchedule.cc
-    GeoZoneSchedule.h
-    GeoZoneShape.cc
-    GeoZoneShape.h
-    GeoZoneSource.cc
-    GeoZoneSource.h
-    GeoZoneSourceRepository.cc
-    GeoZoneSourceRepository.h
-    GeoZoneStore.cc
-    GeoZoneStore.h
-    GeoZoneTerrain.cc
-    GeoZoneTerrain.h
-    GeoZoneZip.cc
-    GeoZoneZip.h
+    Model/GeoZone.cc
+    Model/GeoZone.h
+    Model/GeoZoneBox.cc
+    Model/GeoZoneBox.h
+    Model/GeoZoneCatalog.cc
+    Model/GeoZoneCatalog.h
+    Model/GeoZoneGeometry.cc
+    Model/GeoZoneGeometry.h
+    Model/GeoZoneIndex.cc
+    Model/GeoZoneIndex.h
+    Model/GeoZoneInfo.cc
+    Model/GeoZoneInfo.h
+    Model/GeoZonePolicy.cc
+    Model/GeoZonePolicy.h
+    Model/GeoZoneSchedule.cc
+    Model/GeoZoneSchedule.h
+    Model/GeoZoneShape.cc
+    Model/GeoZoneShape.h
     Formats/GeoZoneAixmFormat.cc
     Formats/GeoZoneDipulFormat.cc
     Formats/GeoZoneEd269Format.cc
     Formats/GeoZoneEd318Format.cc
     Formats/GeoZoneFaaTfrFormat.cc
+    Formats/GeoZoneFormat.cc
+    Formats/GeoZoneFormat.h
     Formats/GeoZoneFranceUasFormat.cc
+    Formats/GeoZoneParser.cc
+    Formats/GeoZoneParser.h
+    Formats/GeoZoneParserUtils.cc
+    Formats/GeoZoneParserUtils.h
+    Formats/GeoZoneZip.cc
+    Formats/GeoZoneZip.h
+    Sources/GeoZoneDownloader.cc
+    Sources/GeoZoneDownloader.h
+    Sources/GeoZoneLoader.cc
+    Sources/GeoZoneLoader.h
+    Sources/GeoZoneProviders.cc
+    Sources/GeoZoneProviders.h
+    Sources/GeoZoneSource.cc
+    Sources/GeoZoneSource.h
+    Sources/GeoZoneSourceRepository.cc
+    Sources/GeoZoneSourceRepository.h
+    Sources/GeoZoneStore.cc
+    Sources/GeoZoneStore.h
+    Evaluation/GeoZoneAlertTracker.cc
+    Evaluation/GeoZoneAlertTracker.h
+    Evaluation/GeoZoneAuthorisations.cc
+    Evaluation/GeoZoneAuthorisations.h
+    Evaluation/GeoZoneFences.cc
+    Evaluation/GeoZoneFences.h
+    Evaluation/GeoZonePathEvaluator.cc
+    Evaluation/GeoZonePathEvaluator.h
+    Evaluation/GeoZoneTerrain.cc
+    Evaluation/GeoZoneTerrain.h
 )
 
-target_include_directories(GeoZoneCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(GeoZoneCore
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/Model
+        ${CMAKE_CURRENT_SOURCE_DIR}/Formats
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+        ${CMAKE_CURRENT_SOURCE_DIR}/Evaluation
+)
 
 target_link_libraries(GeoZoneCore
     PUBLIC

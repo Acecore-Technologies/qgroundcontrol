@@ -19,17 +19,18 @@ target_sources(${CMAKE_PROJECT_NAME}
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(GEOZONE_TEST_DATA
-    ch_zurich_ed269.json
-    dipul_test.json
-    ed269_test.json
-    ed318_test.json
-    faa_tfr_test.json
-    france_uas_test.json
-    uk_aixm_test.xml
+    data/ch_zurich_ed269.json
+    data/dipul_test.json
+    data/ed269_test.json
+    data/ed318_test.json
+    data/faa_tfr_test.json
+    data/france_uas_test.json
+    data/uk_aixm_test.xml
 )
 
 qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_test_resources"
     PREFIX "/unittest"
+    BASE data
     FILES ${GEOZONE_TEST_DATA}
 )
 
@@ -60,6 +61,7 @@ set_target_properties(GeoZoneCoreTest PROPERTIES
 
 qt_add_resources(GeoZoneCoreTest "geozone_core_test_resources"
     PREFIX "/unittest"
+    BASE data
     FILES ${GEOZONE_TEST_DATA}
 )
 

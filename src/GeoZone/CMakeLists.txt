@@ -3,45 +3,51 @@ add_subdirectory(Core)
 # The application layer: zones on the maps, mission checks, flight monitoring, settings and QML
 target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
-        GeoZoneAlertHistory.cc
-        GeoZoneAlertHistory.h
-        GeoZoneAlertLog.cc
-        GeoZoneAlertLog.h
-        GeoZoneDisplay.cc
-        GeoZoneDisplay.h
-        GeoZoneFenceImporter.cc
-        GeoZoneFenceImporter.h
-        GeoZoneGuidedCheck.cc
-        GeoZoneGuidedCheck.h
         GeoZoneManager.cc
         GeoZoneManager.h
-        GeoZoneMapLayer.cc
-        GeoZoneMapLayer.h
-        GeoZoneMapModel.cc
-        GeoZoneMapModel.h
-        GeoZoneMissionCheck.cc
-        GeoZoneMissionCheck.h
-        GeoZoneMissionPath.cc
-        GeoZoneMissionPath.h
         GeoZoneModule.cc
         GeoZoneModule.h
-        GeoZoneMonitor.cc
-        GeoZoneMonitor.h
-        GeoZoneNearbyModel.cc
-        GeoZoneNearbyModel.h
-        GeoZonePlanData.cc
-        GeoZonePlanData.h
-        GeoZonePlanning.cc
-        GeoZonePlanning.h
-        GeoZoneProfile.cc
-        GeoZoneProfile.h
-        GeoZoneRoutePlanner.cc
-        GeoZoneRoutePlanner.h
         GeoZoneSettings.cc
         GeoZoneSettings.h
+        Map/GeoZoneDisplay.cc
+        Map/GeoZoneDisplay.h
+        Map/GeoZoneMapLayer.cc
+        Map/GeoZoneMapLayer.h
+        Map/GeoZoneMapModel.cc
+        Map/GeoZoneMapModel.h
+        Map/GeoZoneNearbyModel.cc
+        Map/GeoZoneNearbyModel.h
+        Planning/GeoZoneFenceImporter.cc
+        Planning/GeoZoneFenceImporter.h
+        Planning/GeoZoneGuidedCheck.cc
+        Planning/GeoZoneGuidedCheck.h
+        Planning/GeoZoneMissionCheck.cc
+        Planning/GeoZoneMissionCheck.h
+        Planning/GeoZoneMissionPath.cc
+        Planning/GeoZoneMissionPath.h
+        Planning/GeoZonePlanData.cc
+        Planning/GeoZonePlanData.h
+        Planning/GeoZonePlanning.cc
+        Planning/GeoZonePlanning.h
+        Planning/GeoZoneProfile.cc
+        Planning/GeoZoneProfile.h
+        Planning/GeoZoneRoutePlanner.cc
+        Planning/GeoZoneRoutePlanner.h
+        Flight/GeoZoneAlertHistory.cc
+        Flight/GeoZoneAlertHistory.h
+        Flight/GeoZoneAlertLog.cc
+        Flight/GeoZoneAlertLog.h
+        Flight/GeoZoneMonitor.cc
+        Flight/GeoZoneMonitor.h
 )
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(${CMAKE_PROJECT_NAME}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/Map
+        ${CMAKE_CURRENT_SOURCE_DIR}/Planning
+        ${CMAKE_CURRENT_SOURCE_DIR}/Flight
+)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE GeoZoneCore)
 
 # Settings metadata
@@ -55,7 +61,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::GuiPrivate)
 
 qt_add_library(GeoZoneModule STATIC)
 
-set_source_files_properties(GeoZoneStyle.qml PROPERTIES
+set_source_files_properties(Map/GeoZoneStyle.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -64,25 +70,25 @@ qt_add_qml_module(GeoZoneModule
     VERSION 1.0
     RESOURCE_PREFIX /qml
     QML_FILES
-        GeoZoneAlertPopup.qml
-        GeoZoneAltitudeStrip.qml
-        GeoZoneAuthorisationsPanel.qml
-        GeoZoneFenceImportDialog.qml
-        GeoZoneGuidedActionCheck.qml
-        GeoZoneIndicator.qml
-        GeoZoneInfoDialog.qml
-        GeoZoneLegend.qml
-        GeoZoneMapPanel.qml
-        GeoZoneMapVisuals.qml
-        GeoZoneMissionBanner.qml
-        GeoZoneProfileOverlay.qml
-        GeoZoneRouteDialog.qml
-        GeoZoneSearch.qml
-        GeoZoneSettingsPage.qml
-        GeoZoneSourceSwitches.qml
-        GeoZoneSourcesPanel.qml
-        GeoZoneStyle.qml
-        GeoZoneSummary.qml
+        Map/GeoZoneInfoDialog.qml
+        Map/GeoZoneLegend.qml
+        Map/GeoZoneMapPanel.qml
+        Map/GeoZoneMapVisuals.qml
+        Map/GeoZoneSearch.qml
+        Map/GeoZoneStyle.qml
+        Map/GeoZoneSummary.qml
+        Planning/GeoZoneFenceImportDialog.qml
+        Planning/GeoZoneGuidedActionCheck.qml
+        Planning/GeoZoneMissionBanner.qml
+        Planning/GeoZoneProfileOverlay.qml
+        Planning/GeoZoneRouteDialog.qml
+        Flight/GeoZoneAlertPopup.qml
+        Flight/GeoZoneAltitudeStrip.qml
+        Flight/GeoZoneIndicator.qml
+        Settings/GeoZoneAuthorisationsPanel.qml
+        Settings/GeoZoneSettingsPage.qml
+        Settings/GeoZoneSourceSwitches.qml
+        Settings/GeoZoneSourcesPanel.qml
     RESOURCES
         GeoZone.svg
     NO_PLUGIN # Required by Qt 6.6.3. TODO: Remove when no longer supported.

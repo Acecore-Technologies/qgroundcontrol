@@ -37,7 +37,7 @@ ListModel {
 
     ListElement {
         name: qsTr("Geozones")
-        url: "qrc:/qml/QGroundControl/GeoZone/GeoZoneSettingsPage.qml"
+        url: "qrc:/qml/QGroundControl/GeoZone/Settings/GeoZoneSettingsPage.qml"
         iconUrl: "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         pageVisible: function() { return GeoZoneManager.settings.visible }
     }
