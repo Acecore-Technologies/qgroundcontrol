@@ -121,6 +121,10 @@ Item {
                 dropPanel.hide()
                 banner.exportBriefing()
             }
+            onExportOperationalIntentRequested: {
+                dropPanel.hide()
+                banner.exportOperationalIntent()
+            }
         }
     }
 }

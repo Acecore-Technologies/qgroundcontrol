@@ -25,11 +25,12 @@ ColumnLayout {
     property int    hiddenZoneCount:    0       ///< Smallest zones in the map view left out to limit the number of map items
     property var    map:                null    ///< Map whose visible area can be downloaded from providers serving zones by area
     property bool   showCrossedZones:   false   ///< See GeoZoneLegend
-    property bool   briefingEnabled:    false   ///< Offers to export the geozone briefing of the planned mission
+    property bool   briefingEnabled:    false   ///< Offers to export the geozone briefing and the operational intent of the planned mission
 
     signal manageRequested
     signal zoneSelected     ///< A zone picked in the search is shown on the map
     signal exportBriefingRequested
+    signal exportOperationalIntentRequested
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 32
@@ -186,6 +187,13 @@ ColumnLayout {
         text:               qsTr("Export Briefing...")
         visible:            root.briefingEnabled
         onClicked:          root.exportBriefingRequested()
+    }
+
+    QGCButton {
+        Layout.fillWidth:   true
+        text:               qsTr("Export Operational Intent...")
+        visible:            root.briefingEnabled
+        onClicked:          root.exportOperationalIntentRequested()
     }
 
     QGCButton {

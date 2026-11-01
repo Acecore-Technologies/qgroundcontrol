@@ -12,7 +12,7 @@
 #include "GeoZoneTestBase.h"
 
 /// Tests of GeoZoneOperationalIntent, the 4D volumes of the operational intent of a planned flight in the ASTM
-/// F3548-21 data model
+/// F3548-21 data model, and of its export from the Plan view, GeoZoneOperationalIntentExport
 class GeoZoneIntentTest : public GeoZoneTestBase
 {
     Q_OBJECT
@@ -24,4 +24,7 @@ private slots:
     void _testAltitudes();
     void _testErrors();
     void _testJson();
+#ifndef GEOZONE_CORE_TEST
+    void _testExport();
+#endif
 };

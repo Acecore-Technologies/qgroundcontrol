@@ -11,6 +11,10 @@
 #include "GeoZoneGeometry.h"
 #include "GeoZoneOperationalIntent.h"
 #include "GeoZoneTestHelpers.h"
+#ifndef GEOZONE_CORE_TEST
+#include "GeoZoneMissionPath.h"
+#include "GeoZoneOperationalIntentExport.h"
+#endif
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -433,3 +437,93 @@ void GeoZoneIntentTest::_testJson()
     QCOMPARE(polygons, 1);
     QCOMPARE(circles, 1);
 }
+
+#ifndef GEOZONE_CORE_TEST
+void GeoZoneIntentTest::_testExport()
+{
+    using namespace GeoZoneTestHelpers;
+
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("U1"), QStringLiteral("USPACE"), center.atDistanceAndAzimuth(1000, 90), 300),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2500, 90), 200),
+        _circleFeature(QStringLiteral("C"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(3000, 0), 200),
+    }), errorString), qPrintable(errorString));
+    // Authorisations of the zones the mission enters reference their permits, the others are left out
+    GeoZoneAuthorisations *const authorisations = manager.planning()->authorisations();
+    for (const GeoZone *zone : manager.catalog().zones()) {
+        if (zone->identifier() != QStringLiteral("U1")) {
+            authorisations->set(GeoZoneAuthorisation{ GeoZoneAuthorisations::zoneKey(zone), zone->name(), QStringLiteral("PERMIT-%1").arg(zone->identifier()), QDateTime(), QDateTime() });
+        }
+    }
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(3500, 90), 2);
+    // The flight path is updated after the items
+    QTRY_VERIFY(GeoZoneMissionPath::fromMission(missionController).totalDistance() > 3900);
+
+    GeoZoneOperationalIntentExport exporter(&manager);
+    exporter.setMissionController(missionController);
+    QCOMPARE(exporter.defaultFileName(), QStringLiteral("operational-intent.json"));
+    QVERIFY(!exporter.defaultFolder().isEmpty());
+
+    // The volumes need the flight times
+    const QString fileName = dir.filePath(QStringLiteral("intent.json"));
+    manager.planning()->clearPlannedStart();
+    QVERIFY(!exporter.exportIntent(fileName));
+    QVERIFY(!exporter.errorString().isEmpty());
+    QVERIFY(!QFileInfo::exists(fileName));
+    manager.planning()->setPlannedStart(GeoZoneEnvironment::currentDateTimeUtc().addSecs(-7200));
+    QVERIFY(!exporter.exportIntent(fileName));
+
+    // With the buffers of the settings, without extension
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const QVariant savedBuffer = settings->intentHorizontalBuffer()->rawValue();
+    const QVariant savedTimeBuffer = settings->intentTimeBuffer()->rawValue();
+    const auto restore = qScopeGuard([&]() {
+        settings->intentHorizontalBuffer()->setRawValue(savedBuffer);
+        settings->intentTimeBuffer()->setRawValue(savedTimeBuffer);
+    });
+    settings->intentHorizontalBuffer()->setRawValue(80);
+    settings->intentTimeBuffer()->setRawValue(10);
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(GeoZoneEnvironment::currentDateTimeUtc().toSecsSinceEpoch() + 3600, QTimeZone::UTC);
+    manager.planning()->setPlannedStart(start);
+    QVERIFY2(exporter.exportIntent(dir.filePath(QStringLiteral("intent"))), qPrintable(exporter.errorString()));
+    QVERIFY(exporter.errorString().isEmpty());
+    QFile file(fileName);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+    QCOMPARE(json[QStringLiteral("schema")].toString(), QString::fromLatin1(GeoZoneOperationalIntent::jsonSchema));
+    QCOMPARE(json[QStringLiteral("parameters")].toObject()[QStringLiteral("horizontalBufferMeters")].toDouble(), 80.0);
+    QCOMPARE(json[QStringLiteral("parameters")].toObject()[QStringLiteral("timeBufferSeconds")].toInt(), 600);
+    const QJsonObject flight = json[QStringLiteral("flight")].toObject();
+    QCOMPARE(flight[QStringLiteral("plannedStart")].toString(), start.toString(Qt::ISODate));
+    QVERIFY(flight[QStringLiteral("distanceMeters")].toDouble() > 3900);
+    const QJsonObject operationalIntent = json[QStringLiteral("operational_intent")].toObject();
+    QCOMPARE(operationalIntent[QStringLiteral("reference")].toObject()[QStringLiteral("time_start")].toObject()[QStringLiteral("value")].toString(),
+             start.addSecs(-600).toString(Qt::ISODate));
+    const QJsonArray volumes = operationalIntent[QStringLiteral("details")].toObject()[QStringLiteral("volumes")].toArray();
+    QVERIFY(!volumes.isEmpty());
+    QVERIFY(volumes.count() <= settings->intentMaxVolumes()->rawValue().toInt());
+
+    const QJsonArray airspaces = json[QStringLiteral("uSpaceAirspaces")].toArray();
+    QCOMPARE(airspaces.count(), 1);
+    QCOMPARE(airspaces[0].toObject()[QStringLiteral("identifier")].toString(), QStringLiteral("U1"));
+    QStringList permits;
+    for (const QJsonValue &authorisation : json[QStringLiteral("authorisations")].toArray()) {
+        permits.append(authorisation.toObject()[QStringLiteral("permit")].toString());
+    }
+    QCOMPARE(permits, QStringList{ QStringLiteral("PERMIT-B") });
+
+    QVERIFY(!exporter.exportIntent(dir.filePath(QStringLiteral("missing/intent.json"))));
+    QVERIFY(!exporter.errorString().isEmpty());
+}
+#endif

@@ -17,7 +17,8 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
 /// Plan View banner warning when the mission enters restricted geozones or the geozone data changed since the plan was
-/// saved, centered between leftLimit and rightLimit. Exports the geozone briefing of the mission, see exportBriefing().
+/// saved, centered between leftLimit and rightLimit. Exports the geozone briefing of the mission, see exportBriefing(),
+/// and its operational intent for a flight authorisation request, see exportOperationalIntent().
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
@@ -70,6 +71,13 @@ Rectangle {
         briefingDialog.openForSave()
     }
 
+    /// Asks for a file and exports the operational intent of the mission to it as JSON, see GeoZoneOperationalIntentExport
+    function exportOperationalIntent() {
+        intentDialog.folder = intentExport.defaultFolder()
+        intentDialog.fileName = intentExport.defaultFileName()
+        intentDialog.openForSave()
+    }
+
     /// Markup in names from the files is defused for the message dialog, which detects rich text
     function _plainText(text) {
         return text.replace(/</g, "\u2039").replace(/>/g, "\u203A")
@@ -94,6 +102,27 @@ Rectangle {
                 mainWindow.showMessageDialog(qsTr("Export Geozone Briefing"), qsTr("Briefing saved to %1").arg(control._plainText(file)))
             } else {
                 mainWindow.showMessageDialog(qsTr("Export Geozone Briefing"), control._plainText(briefingExport.errorString))
+            }
+        }
+    }
+
+    GeoZoneOperationalIntentExport {
+        id:                 intentExport
+        missionController:  control.missionController
+    }
+
+    QGCFileDialog {
+        id:             intentDialog
+        title:          qsTr("Export Operational Intent")
+        nameFilters:    intentExport.nameFilters
+        defaultSuffix:  "json"
+
+        onAcceptedForSave: (file) => {
+            close()
+            if (intentExport.exportIntent(file)) {
+                mainWindow.showMessageDialog(qsTr("Export Operational Intent"), qsTr("Operational intent saved to %1").arg(control._plainText(file)))
+            } else {
+                mainWindow.showMessageDialog(qsTr("Export Operational Intent"), control._plainText(intentExport.errorString))
             }
         }
     }
@@ -263,6 +292,11 @@ Rectangle {
             QGCButton {
                 text:       qsTr("Export Briefing...")
                 onClicked:  control.exportBriefing()
+            }
+
+            QGCButton {
+                text:       qsTr("Export Operational Intent...")
+                onClicked:  control.exportOperationalIntent()
             }
         }
 

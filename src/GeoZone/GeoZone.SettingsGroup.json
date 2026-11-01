@@ -238,6 +238,47 @@
     "longDesc":     "Publishers whose signed offline packs are trusted: a JSON array of objects with their name and Ed25519 public key in base64.",
     "type":         "string",
     "default":      ""
+},
+{
+    "name":         "intentHorizontalBuffer",
+    "shortDesc":    "Horizontal buffer",
+    "longDesc":     "Distance around the flight path which the volumes of exported operational intents contain.",
+    "type":         "double",
+    "units":        "m",
+    "min":          1,
+    "max":          5000,
+    "decimalPlaces": 0,
+    "default":      50
+},
+{
+    "name":         "intentVerticalBuffer",
+    "shortDesc":    "Vertical buffer",
+    "longDesc":     "Height below and above the flight path which the volumes of exported operational intents contain.",
+    "type":         "double",
+    "units":        "m",
+    "min":          0,
+    "max":          1000,
+    "decimalPlaces": 0,
+    "default":      20
+},
+{
+    "name":         "intentTimeBuffer",
+    "shortDesc":    "Time buffer",
+    "longDesc":     "Minutes before and after the estimated times at which the volumes of exported operational intents start and end, for an earlier or later take-off and another pace than estimated.",
+    "type":         "uint32",
+    "units":        "min",
+    "min":          0,
+    "max":          240,
+    "default":      15
+},
+{
+    "name":         "intentMaxVolumes",
+    "shortDesc":    "Maximum volumes",
+    "longDesc":     "Most volumes of exported operational intents. Legs of the flight are merged into larger volumes to stay within it.",
+    "type":         "uint32",
+    "min":          1,
+    "max":          1000,
+    "default":      50
 }
 ]
 }

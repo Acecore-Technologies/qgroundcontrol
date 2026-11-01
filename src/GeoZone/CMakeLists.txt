@@ -39,6 +39,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Planning/GeoZoneMissionReader.h
         Planning/GeoZoneMissionWorker.cc
         Planning/GeoZoneMissionWorker.h
+        Planning/GeoZoneOperationalIntentExport.cc
+        Planning/GeoZoneOperationalIntentExport.h
         Planning/GeoZonePlanData.cc
         Planning/GeoZonePlanData.h
         Planning/GeoZonePlanning.cc

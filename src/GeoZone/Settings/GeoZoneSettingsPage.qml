@@ -146,6 +146,40 @@ SettingsPage {
 
     SettingsGroupLayout {
         Layout.fillWidth:   true
+        heading:            qsTr("Operational Intent Export")
+        headingDescription: qsTr("Export Operational Intent... in the Geozones panel of the Plan View writes the volumes of the planned flight for a U-space or UTM flight authorisation request. They contain the flight path with these buffers around it from the planned start.")
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.intentHorizontalBuffer
+            visible:            fact.visible
+        }
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.intentVerticalBuffer
+            visible:            fact.visible
+        }
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.intentTimeBuffer
+            visible:            fact.visible
+        }
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.intentMaxVolumes
+            visible:            fact.visible
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:   true
         heading:            qsTr("Altitude Limits")
         headingDescription: _geoZoneSettings.qnhHPa.longDescription
 
