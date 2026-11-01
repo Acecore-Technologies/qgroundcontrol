@@ -357,6 +357,6 @@ QString GeoZoneDownloader::progressText() const
     const QString size = totalKnown ?
         tr("%1 of %2").arg(locale.formattedDataSize(received), locale.formattedDataSize(total)) :
         locale.formattedDataSize(received);
-    const QString name = (_downloads.count() == 1) ? QUrl(_downloads.cbegin()->url).host() : tr("%1 feeds").arg(_downloads.count());
+    const QString name = (_downloads.count() == 1) ? QUrl(_downloads.cbegin()->url).host() : tr("%n feeds", nullptr, static_cast<int>(_downloads.count()));
     return tr("Downloading %1: %2").arg(name, size);
 }

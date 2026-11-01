@@ -185,7 +185,7 @@ Column {
             wrapMode:       Text.WordWrap
             font.pointSize: ScreenTools.smallFontPointSize
             color:          qgcPal.warningText
-            text:           qsTr("A polygon has %1 vertices. ArduPilot supports at most %2 per polygon.").arg(largestPolygon).arg(arduPilotMaxPolygonVertices)
+            text:           qsTr("A polygon has %n vertices. ArduPilot supports at most %1 per polygon.", "", largestPolygon).arg(arduPilotMaxPolygonVertices)
             visible:        _polygonTooLarge
         }
     }
@@ -267,7 +267,7 @@ Column {
         anchors.right:  parent.right
         text:           qsTr("Delete Geozone Fences")
         visible:        fenceSection.checked && importedCount > 0 && drawnCount > 0
-        onClicked:      control._confirmDelete(text, qsTr("Delete the %1 fences added from geozones?").arg(importedCount), true)
+        onClicked:      control._confirmDelete(text, qsTr("Delete the %n fence(s) added from geozones?", "", importedCount), true)
     }
 
     QGCButton {
@@ -275,7 +275,7 @@ Column {
         anchors.right:  parent.right
         text:           qsTr("Delete All Fences")
         visible:        fenceSection.checked && fenceCount > 1
-        onClicked:      control._confirmDelete(text, qsTr("Delete all %1 fences?").arg(fenceCount), undefined)
+        onClicked:      control._confirmDelete(text, qsTr("Delete all %n fences?", "", fenceCount), undefined)
     }
 
     component FenceRow: Rectangle {
@@ -300,7 +300,7 @@ Column {
         readonly property string _numberText:   isCircle ? qsTr("Circle %1").arg(fenceIndex + 1) : qsTr("Polygon %1").arg(fenceIndex + 1)
         readonly property string _sizeText:     isCircle ?
                                                     qsTr("radius %1").arg(list._distanceText(fence.radius.rawValue)) :
-                                                    qsTr("%1 points, %2").arg(fence.count).arg(list._areaText(fence.area))
+                                                    qsTr("%n point(s), %1", "", fence.count).arg(list._areaText(fence.area))
 
         QGCMouseArea {
             anchors.fill:   parent

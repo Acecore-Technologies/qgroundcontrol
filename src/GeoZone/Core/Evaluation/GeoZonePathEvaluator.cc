@@ -767,7 +767,7 @@ QString GeoZonePathEvaluator::zoneNames(const QList<const GeoZone*> &zones, int 
     }
     QString text = names.join(QStringLiteral(", "));
     if (zones.count() > maxListed) {
-        text += tr(" and %1 more").arg(zones.count() - maxListed);
+        text += tr(" and %n more", nullptr, static_cast<int>(zones.count() - maxListed));
     }
     return text;
 }

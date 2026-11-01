@@ -19,6 +19,18 @@
 
 #include <QtCore/QTimer>
 
+namespace {
+
+QString _countText(const GeoZoneFenceUpload::FenceSnapshot &fence)
+{
+    return GeoZoneFenceUpload::tr("%1 with %2 and %3", "Polygons with points and circles of a fence")
+        .arg(GeoZoneFenceUpload::tr("%n polygon(s)", nullptr, static_cast<int>(fence.polygons.count())),
+             GeoZoneFenceUpload::tr("%n point(s)", nullptr, fence.pointCount()),
+             GeoZoneFenceUpload::tr("%n circle(s)", nullptr, static_cast<int>(fence.circles.count())));
+}
+
+} // namespace
+
 GeoZoneFenceUpload::GeoZoneFenceUpload(QObject *parent)
     : QObject(parent)
 {
@@ -201,7 +213,7 @@ QString GeoZoneFenceUpload::_rejectionText(const QString &errorMessage) const
     const int points = _sentFence.pointCount() + _sentFence.circles.count() + (_sentFence.returnPoint.isValid() ? 1 : 0);
     switch (_ackResult) {
     case MAV_MISSION_NO_SPACE:
-        return tr("The vehicle has no room for this fence of %1 points. Leave out zones or allow more simplification.").arg(points);
+        return tr("The vehicle has no room for this fence of %n point(s). Leave out zones or allow more simplification.", nullptr, points);
     case MAV_MISSION_ERROR:
         if (_vehicle && _vehicle->apmFirmware()) {
             return tr("The vehicle rejected the fence. ArduPilot does when the fence exceeds its storage, leave out zones or allow more simplification.");
@@ -267,8 +279,7 @@ void GeoZoneFenceUpload::_readBack()
     }
     const QString differences = compareFences(_sentFence, snapshot(_manager->polygons(), _manager->circles(), _manager->breachReturnPoint()));
     if (differences.isEmpty()) {
-        (void) _transition(Verified, tr("Verified: the vehicle stores the fence of %1 polygons with %2 points and %3 circles.")
-                                         .arg(_sentFence.polygons.count()).arg(_sentFence.pointCount()).arg(_sentFence.circles.count()));
+        (void) _transition(Verified, tr("Verified: the vehicle stores the fence of %1.").arg(_countText(_sentFence)));
     } else {
         (void) _transition(Mismatch, tr("The fence read back differs from the plan. %1").arg(differences));
     }
@@ -318,10 +329,6 @@ QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const Fence
     const auto near = [](const QGeoCoordinate &a, const QGeoCoordinate &b) {
         return a.isValid() && b.isValid() && (QGeoCoordinate(a.latitude(), a.longitude()).distanceTo(QGeoCoordinate(b.latitude(), b.longitude())) <= verifyTolerance);
     };
-    const auto countText = [](const FenceSnapshot &fence) {
-        return tr("%1 polygons with %2 points and %3 circles").arg(fence.polygons.count()).arg(fence.pointCount()).arg(fence.circles.count());
-    };
-
     QList<bool> polygonMatched(received.polygons.count(), false);
     QList<bool> circleMatched(received.circles.count(), false);
     int unmatchedPolygons = 0;
@@ -354,7 +361,7 @@ QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const Fence
 
     QStringList differences;
     if ((sent.polygons.count() != received.polygons.count()) || (sent.circles.count() != received.circles.count())) {
-        differences.append(tr("The vehicle has %1 instead of %2.").arg(countText(received), countText(sent)));
+        differences.append(tr("The vehicle has %1 instead of %2.").arg(_countText(received), _countText(sent)));
     } else if ((unmatchedPolygons > 0) || (unmatchedCircles > 0)) {
         differences.append(tr("Fences differing from the plan: %1.").arg(unmatchedPolygons + unmatchedCircles));
     }

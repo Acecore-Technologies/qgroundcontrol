@@ -177,7 +177,7 @@ QString GeoZoneSource::warningText() const
 {
     QStringList lines;
     if (_missingCount > 0) {
-        lines.append(tr("The server left out %1 zones beyond its limit, which could not be downloaded. Download a smaller area.").arg(_missingCount));
+        lines.append(tr("The server left out %n zone(s) beyond its limit, which could not be downloaded. Download a smaller area.", nullptr, _missingCount));
     }
     for (auto it = _issues.cbegin(); it != _issues.cend(); ++it) {
         lines.append(tr("%1 (%n zone(s))", nullptr, it.value()).arg(it.key()));
@@ -369,7 +369,7 @@ void GeoZoneSource::_summarizeChanges(const QList<GeoZone::Data> &previous, cons
         namesList.sort(Qt::CaseInsensitive);
         QString text = namesList.mid(0, maxNames).join(QStringLiteral(", "));
         if (namesList.count() > maxNames) {
-            text += tr(" and %1 more").arg(namesList.count() - maxNames);
+            text += tr(" and %n more", nullptr, static_cast<int>(namesList.count() - maxNames));
         }
         return text;
     };
@@ -413,9 +413,9 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
         } else if (_validFrom.isValid() && (_validFrom > now)) {
             text = tr("Not valid until %1").arg(_formatDate(_validFrom));
         } else if (isLive() && date.isValid() && (date.secsTo(now) > (qint64{ settings.liveStaleHours } * 3600))) {
-            text = tr("Data is %1 hours old").arg(date.secsTo(now) / 3600);
+            text = tr("Data is %n hour(s) old", nullptr, static_cast<int>(date.secsTo(now) / 3600));
         } else if (!isLive() && date.isValid() && (date.daysTo(now) > settings.staleDays)) {
-            text = tr("Data is %1 days old").arg(date.daysTo(now));
+            text = tr("Data is %n days old", nullptr, static_cast<int>(date.daysTo(now)));
         }
     }
 

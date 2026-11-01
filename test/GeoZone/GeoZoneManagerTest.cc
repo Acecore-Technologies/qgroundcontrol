@@ -2294,7 +2294,7 @@ void GeoZoneManagerTest::_testWfsPaging()
     restarted.refreshFeeds();
     QTRY_VERIFY(!restarted.busy());
     QCOMPARE(restarted.zoneCount(), 4);
-    QVERIFY(restarted.source(url)->warningText().contains(QStringLiteral("left out 1 zones")));
+    QVERIFY(restarted.source(url)->warningText().contains(QStringLiteral("left out 1 zone(s)")));
 }
 
 void GeoZoneManagerTest::_testCatalogSnapshot()

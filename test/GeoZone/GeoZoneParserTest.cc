@@ -551,7 +551,7 @@ void GeoZoneParserTest::_testParseFaaTfr()
     source.updateValidity(result.issued.addSecs(3600));
     QVERIFY(source.validityText().isEmpty());
     source.updateValidity(result.issued.addSecs(3 * 3600));
-    QCOMPARE(source.validityText(), QStringLiteral("Data is 3 hours old"));
+    QCOMPARE(source.validityText(), QStringLiteral("Data is 3 hour(s) old"));
 
     // The NOTAM details give the times and altitudes of their TFRs, which apply at all times and altitudes without
     const QByteArray detail = R"(<XNOTAM-Update><Group><Add><Not>

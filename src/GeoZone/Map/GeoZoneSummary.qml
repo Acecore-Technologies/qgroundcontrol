@@ -32,15 +32,15 @@ ColumnLayout {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
         text:               _geoZoneManager.busy ? _geoZoneManager.progressText :
-                                (_activeSourceCount === 1 ? qsTr("%1 zones from 1 source.").arg(_geoZoneManager.zoneCount) :
-                                                            qsTr("%1 zones from %2 sources.").arg(_geoZoneManager.zoneCount).arg(_activeSourceCount)) +
+                                qsTr("%1 from %2.", "Number of zones from number of sources").arg(qsTr("%n zone(s)", "", _geoZoneManager.zoneCount))
+                                                                                                   .arg(qsTr("%n source(s)", "", _activeSourceCount)) +
                                 (_geoZoneManager.disabledSourceCount > 0 ? " " + qsTr("%n source(s) turned off.", "", _geoZoneManager.disabledSourceCount) : "")
     }
 
     QGCLabel {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
-        text:               qsTr("%1 of the smallest zones in view are not shown. Zoom in to see them.").arg(root.hiddenZoneCount)
+        text:               qsTr("Not shown: the %n smallest zone(s) in view. Zoom in to see them.", "", root.hiddenZoneCount)
         visible:            _geoZoneManager.display.visible && root.hiddenZoneCount > 0
     }
 

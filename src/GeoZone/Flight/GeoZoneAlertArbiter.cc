@@ -179,7 +179,7 @@ GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
     announcement.text = parts.join(QStringLiteral(". "));
     const qsizetype more = candidates.count() - parts.count();
     if (more > 0) {
-        announcement.text += tr(", and %1 more").arg(more);
+        announcement.text += tr(", and %n more", nullptr, static_cast<int>(more));
     }
 
     _pending.clear();

@@ -99,7 +99,7 @@ QGCPopupDialog {
             parts.push(choice.proximityText)
         }
         if (choice.selected) {
-            parts.push(qsTr("%1 points").arg(choice.points))
+            parts.push(qsTr("%n point(s)", "", choice.points))
             if (choice.simplifyTolerance > 0) {
                 parts.push(qsTr("simplified %1").arg(_horizontalDistanceText(choice.simplifyTolerance)))
             }
@@ -257,7 +257,7 @@ QGCPopupDialog {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               (_capacity.note ?? "") + ((_capacity.keptItems ?? 0) > 0 ? " " + qsTr("Drawn fences and the breach return point take %1 points.").arg(_capacity.keptItems) : "")
+                text:               (_capacity.note ?? "") + ((_capacity.keptItems ?? 0) > 0 ? " " + qsTr("Drawn fences and the breach return point take %n point(s).", "", _capacity.keptItems) : "")
             }
 
             QGCLabel {

@@ -318,12 +318,12 @@ QVariantMap GeoZoneFenceImporter::capacityInfo() const
     if (!_capacity.exclusions) {
         text = tr("Vehicle fence: not supported");
     } else if (_capacity.maxItems > 0) {
-        text = tr("Vehicle fence: %1 of %2 points").arg(usage.items).arg(_capacity.maxItems);
+        text = tr("Vehicle fence: %1 of %n points", nullptr, _capacity.maxItems).arg(usage.items);
         if (_capacity.storageBytes > 0) {
-            text += tr(", %1 of %2 bytes").arg(usage.items > 0 ? usage.bytes + GeoZoneFences::Capacity::arduPilotFixedBytes : 0).arg(_capacity.storageBytes);
+            text += tr(", %1 of %n bytes", nullptr, _capacity.storageBytes).arg(usage.items > 0 ? usage.bytes + GeoZoneFences::Capacity::arduPilotFixedBytes : 0);
         }
     } else {
-        text = tr("Vehicle fence: %1 points").arg(usage.items);
+        text = tr("Vehicle fence: %n point(s)", nullptr, usage.items);
     }
 
     return QVariantMap{

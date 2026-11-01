@@ -3132,7 +3132,7 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
     received.circles[0].circle.setRadius(302);
     QVERIFY(GeoZoneFenceUpload::compareFences(sent, received).contains(QStringLiteral("Fences differing from the plan: 1.")));
     received.circles.clear();
-    QVERIFY(GeoZoneFenceUpload::compareFences(sent, received).contains(QStringLiteral("0 circles")));
+    QVERIFY(GeoZoneFenceUpload::compareFences(sent, received).contains(QStringLiteral("0 circle(s)")));
     received = sent;
     received.returnPoint = QGeoCoordinate();
     QVERIFY(!GeoZoneFenceUpload::compareFences(sent, received).isEmpty());
