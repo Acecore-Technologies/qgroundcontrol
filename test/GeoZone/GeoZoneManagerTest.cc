@@ -1189,6 +1189,17 @@ void GeoZoneManagerTest::_testDownloadRedirects()
     QVERIFY(TestFeedServer::header(otherServer.requests.first(), "X-Api-Key").isEmpty());
     QCOMPARE(TestFeedServer::header(otherServer.requests.first(), "Accept"), QByteArray("application/json"));
 
+    // nor the custom headers of a service, which may hold keys
+    GeoZoneService service;
+    service.headers.append({ QStringLiteral("X-Client-Key"), QStringLiteral("header-s3cret") });
+    server.requests.clear();
+    otherServer.requests.clear();
+    result = download(server.url(QStringLiteral("/away")), service.downloadOptions(QGeoRectangle(), QDateTime(), QString()));
+    QVERIFY2(result.status == GeoZoneDownloader::Result::Status::Ok, qPrintable(result.errorString));
+    QCOMPARE(TestFeedServer::header(server.requests.first(), "X-Client-Key"), QByteArray("header-s3cret"));
+    QCOMPARE(otherServer.requests.count(), 1);
+    QVERIFY(TestFeedServer::header(otherServer.requests.first(), "X-Client-Key").isEmpty());
+
     result = download(server.url(QStringLiteral("/loop")), options);
     QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
     QCOMPARE(result.errorString, QStringLiteral("The server redirected more than %1 times.").arg(GeoZoneDownloader::maxRedirects));
@@ -1821,6 +1832,7 @@ void GeoZoneManagerTest::_testOfflinePack()
     GeoZoneService keyed;
     keyed.auth = GeoZoneService::Auth::ApiKeyHeader;
     keyed.authParameter = QStringLiteral("X-Api-Key");
+    keyed.headers.append({ QStringLiteral("X-Client-Key"), QStringLiteral("pack-header-s3cret") });
     manager.addService(keyedUrl, keyed.toVariantMap(), QStringLiteral("pack-s3cret"));
     QVERIFY(addedSpy.wait(10000));
     manager.addUrl(plainUrl);
@@ -1840,7 +1852,7 @@ void GeoZoneManagerTest::_testOfflinePack()
     QVERIFY(manager.exportPack(packPath));
     QVERIFY(fileSpy.last()[0].toBool());
 
-    // without secrets
+    // without secrets, nor the headers of the services, which may hold keys
     QFile pack(packPath);
     QVERIFY(pack.open(QIODevice::ReadOnly));
     const QByteArray packBytes = pack.readAll();
@@ -1852,10 +1864,13 @@ void GeoZoneManagerTest::_testOfflinePack()
     QJsonObject manifest;
     for (const GeoZoneZip::File &file : files) {
         QVERIFY(!file.data.contains("pack-s3cret"));
+        QVERIFY(!file.data.contains("pack-header-s3cret"));
         if (file.name == QStringLiteral("manifest.json")) {
             manifest = QJsonDocument::fromJson(file.data).object();
         }
     }
+    QVERIFY(!QJsonDocument(manager.provenanceReport()).toJson().contains("pack-header-s3cret"));
+    QCOMPARE(manager.source(keyedUrl)->service().headers.count(), 1);
     QCOMPARE(manifest.value("format").toString(), QStringLiteral("qgc-geozone-pack"));
     const QJsonArray packSources = manifest.value("sources").toArray();
     QCOMPARE(packSources.count(), 3);

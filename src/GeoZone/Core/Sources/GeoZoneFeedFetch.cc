@@ -10,6 +10,7 @@
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFormat.h"
+#include "GeoZoneOrigin.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneSource.h"
 
@@ -116,9 +117,7 @@ GeoZoneDownloader::Options GeoZoneFeedFetch::_optionsFor(const QString &url) con
     if (_request.service.isEmpty()) {
         return GeoZoneDownloader::Options();
     }
-    const QUrl feedUrl(_requestUrl);
-    const QUrl other(url);
-    if ((other.scheme() != feedUrl.scheme()) || (other.host().compare(feedUrl.host(), Qt::CaseInsensitive) != 0) || (other.port(-1) != feedUrl.port(-1))) {
+    if (!GeoZoneOrigin::same(QUrl(url), QUrl(_requestUrl))) {
         return GeoZoneDownloader::Options();
     }
     GeoZoneDownloader::Options options = _request.service.downloadOptions(_request.area, _request.time, _request.secret, _accessToken);

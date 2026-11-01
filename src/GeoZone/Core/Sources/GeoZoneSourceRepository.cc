@@ -885,8 +885,8 @@ QJsonObject GeoZoneSourceRepository::sourceReport(const GeoZoneSource &source)
         }
     }
     if (!source.service().isEmpty()) {
-        // The user of a service, like an OAuth2 client id, is left out with the secrets
-        QJsonObject service = source.service().toJson();
+        // The user of a service, like an OAuth2 client id, is left out with the secrets and the headers
+        QJsonObject service = source.service().shareableJson();
         service.remove(QStringLiteral("user"));
         report.insert(QStringLiteral("service"), service);
     }
@@ -940,8 +940,8 @@ bool GeoZoneSourceRepository::exportPack(const QStringList &keys, const QString 
         QJsonObject object = sourceReport(*source);
         object.insert(QStringLiteral("file"), name);
         if (!source->service().isEmpty()) {
-            // The service with its user, which identifies but doesn't authenticate
-            object.insert(QStringLiteral("service"), source->service().toJson());
+            // The service with its user, which identifies but doesn't authenticate, without its headers, which may hold keys
+            object.insert(QStringLiteral("service"), source->service().shareableJson());
         }
         if (entry.fileDate.isValid()) {
             object.insert(QStringLiteral("fileDate"), entry.fileDate.toUTC().toString(Qt::ISODate));

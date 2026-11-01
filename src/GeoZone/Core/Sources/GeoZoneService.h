@@ -55,7 +55,9 @@ public:
     QString user;               ///< User of basic authentication, or OAuth2 client id
     QString tokenUrl;           ///< OAuth2 token endpoint
     QString scope;              ///< OAuth2 scope, optional
-    QList<std::pair<QString, QString>> headers;     ///< Further request headers, like the response format
+    /// Further request headers, like the response format. They may hold keys: like the credentials, they are only
+    /// sent to the origin of the feed, and they are left out of packs and provenance reports.
+    QList<std::pair<QString, QString>> headers;
     QString responseMember;     ///< Member of the JSON response holding the zones, dot separated, like "data.geojson"
     bool areaOfInterest = false;    ///< The request takes the area of interest, the zones are downloaded again when it moves out
     int timeWindowHours = 24;   ///< Time of interest after the request
@@ -76,6 +78,8 @@ public:
 
     /// @return Without the secrets, which it never holds
     QJsonObject toJson() const;
+    /// @return toJson without the custom headers, for packs and reports leaving the computer
+    QJsonObject shareableJson() const;
     static GeoZoneService fromJson(const QJsonObject &object);
     /// For QML: the fields of toJson with the enums as their names
     QVariantMap toVariantMap() const { return toJson().toVariantMap(); }

@@ -9,6 +9,7 @@
 
 #include "GeoZoneDownloader.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneOrigin.h"
 #include "GeoZoneSource.h"
 
 #include <QtCore/QDir>
@@ -98,8 +99,7 @@ void GeoZoneDownloader::_send(Download download, const QUrl &url)
     }
 
     // Credentials are for the server they were configured for, a redirect to another one doesn't get them
-    const QUrl first(download.url);
-    const bool sameOrigin = (url.scheme() == first.scheme()) && (url.host().compare(first.host(), Qt::CaseInsensitive) == 0) && (url.port(-1) == first.port(-1));
+    const bool sameOrigin = GeoZoneOrigin::same(url, QUrl(download.url));
     QUrl requestUrl = url;
     if (sameOrigin && !download.options.authQuery.isEmpty()) {
         QUrlQuery query(requestUrl);

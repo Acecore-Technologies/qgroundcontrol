@@ -144,6 +144,13 @@ QJsonObject GeoZoneService::toJson() const
     return object;
 }
 
+QJsonObject GeoZoneService::shareableJson() const
+{
+    QJsonObject object = toJson();
+    (void) object.remove(QLatin1String(headersKey));
+    return object;
+}
+
 GeoZoneService GeoZoneService::fromJson(const QJsonObject &object)
 {
     GeoZoneService service;
@@ -247,8 +254,9 @@ QString GeoZoneService::requestUrl(const QString &urlTemplate, const QGeoRectang
 GeoZoneDownloader::Options GeoZoneService::downloadOptions(const QGeoRectangle &area, const QDateTime &start, const QString &secret, const QString &accessToken) const
 {
     GeoZoneDownloader::Options options;
+    // Custom headers may hold keys, they go where the credentials go
     for (const auto &[headerName, value] : headers) {
-        options.headers.append({ headerName.toUtf8(), value.toUtf8() });
+        options.authHeaders.append({ headerName.toUtf8(), value.toUtf8() });
     }
     if (method == Method::Ed318Post) {
         options.post = true;

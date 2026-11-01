@@ -37,8 +37,10 @@ public:
 
     /// How a request is sent besides its URL and validators
     struct Options {
-        QList<Header> headers;      ///< Further request headers
-        QList<Header> authHeaders;  ///< Credentials, only sent to the scheme, host and port of the URL, not after redirects elsewhere
+        QList<Header> headers;      ///< Further request headers, sent to every server
+        /// Credentials and other headers which may hold keys, only sent to the origin of the URL (see GeoZoneOrigin),
+        /// not after redirects to another server
+        QList<Header> authHeaders;
         QList<std::pair<QString, QString>> authQuery;   ///< Credentials added to the query like authHeaders
         bool post = false;          ///< POST the body rather than GET
         QByteArray body;

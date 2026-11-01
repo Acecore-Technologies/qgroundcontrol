@@ -158,6 +158,18 @@ The services _QGroundControl_ knows are listed in `GeoZoneProviders` (`src/GeoZo
 
 `GeoZoneParserTest::_testProviders()` tests the providers, `GeoZoneManagerTest` the services with `TestFeedServer` (`_testServiceApiKeys`, `_testServiceOAuth2`, `_testEd318Service`, `_testServiceAreaOfInterest`), and `GeoZoneParserTest::_testLiveNationalFeeds()` downloads the real services when `QGC_GEOZONE_LIVE_TEST` is set. Add the provider to the national feeds or services listed in the [user guide](../qgc-user-guide/geozones/geozones.md#loading-data).
 
+## Origins and Credentials {#origins-and-credentials}
+
+The secrets of the services, their custom headers and the area of interest only go to the server the user configured:
+
+- `GeoZoneOrigin::same()` compares the scheme, host and port of two URLs (the default port of http and https when none is given). `GeoZoneDownloader` sends the `authHeaders` and `authQuery` of its `Options` only to the origin of the first URL of a download, not after a redirect to another origin; `GeoZoneFeedFetch::_optionsFor()` gives the further downloads of a feed (dataset, pages, companions, SHA-256) the service's options only on the origin of the request URL. `GeoZoneService::downloadOptions()` puts the custom `headers` of a service with the credentials, since they may hold keys.
+- `GeoZoneService::otherOrigins()` lists the token and SHA-256 URLs which aren't on the origin of the feed. **Add Service...** asks the user to confirm them (`GeoZoneManager::serviceOtherOrigins()`, the `allowOtherOrigins` argument of `addService()`), otherwise the service is refused.
+- A secret is kept for the authentication target of its service (`GeoZoneService::sameAuthTarget()`: the authentication and, for OAuth2, the token URL). Setting a service with another target forgets the secret and the token.
+- Imported packs never replace the service of a source already known. A new source takes the service of the pack without its `headers`, forgets any secret kept for its URL, and is left out when `otherOrigins()` isn't empty.
+- Packs and provenance reports write `GeoZoneService::shareableJson()`, without the headers; the index of the sources keeps them locally.
+
+`GeoZoneManagerTest::_testPackServiceTrust()` and `_testDownloadRedirects()` test these rules with two `TestFeedServer`s, whose different ports make different origins.
+
 ## Testing {#testing}
 
 The tests are in `test/GeoZone`, whose `README.md` also describes the fixtures, the fuzzers and the benchmark.
