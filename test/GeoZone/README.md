@@ -1,8 +1,10 @@
 # Geozone tests
 
 The application tests run with `QGroundControl --unittest:<Class>` (GeoZoneParserTest, GeoZoneGeometryTest,
-GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest). The parser and geometry tests also
-run headless in `GeoZoneCoreTest`, which only links the GeoZoneCore library (`ctest -R GeoZoneCore`).
+GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest, GeoZoneReturnTest). They are
+registered in `GeoZoneUnitTests.cc` and `CMakeLists.txt` here, not in QGroundControl's `UnitTestList.cc`. The parser,
+geometry and return tests also run headless in `GeoZoneCoreTest`, which only links the GeoZoneCore library
+(`ctest -R GeoZoneCore`).
 
 Tests which depend on the time or the terrain set them with `GeoZoneTestHelpers::ScopedEnvironment`, whose clock
 stands still until the test advances it and whose terrain is unknown until set.

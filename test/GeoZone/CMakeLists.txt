@@ -16,9 +16,19 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneReturnTest.h
         GeoZoneTestBase.h
         GeoZoneTestHelpers.h
+        GeoZoneUnitTests.cc
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Registered with UnitTest in GeoZoneUnitTests.cc
+add_qgc_test(GeoZoneFlightTest)
+add_qgc_test(GeoZoneGeometryTest)
+add_qgc_test(GeoZoneManagerTest)
+add_qgc_test(GeoZoneMonitorTest)
+add_qgc_test(GeoZoneParserTest)
+add_qgc_test(GeoZonePlanningTest)
+add_qgc_test(GeoZoneReturnTest)
 
 set(GEOZONE_TEST_DATA
     data/ch_zurich_ed269.json

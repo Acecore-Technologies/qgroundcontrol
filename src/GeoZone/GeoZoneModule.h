@@ -12,7 +12,7 @@
 /// Entry points of the geozone module for the application. The module keeps its settings, resources and QML types,
 /// so outside src/GeoZone it only needs these hooks, kept small to ease rebasing:
 /// - QGCApplication: registerQmlTypes() and init()
-/// - CMake: add_subdirectory(GeoZone); tests in test/GeoZone, test/CMakeLists.txt and test/UnitTestList.cc
+/// - CMake: add_subdirectory(GeoZone) in src and test, the tests register themselves in test/GeoZone
 /// - QGCCorePlugin::toolBarIndicators: GeoZoneIndicator.qml
 /// - SettingsPagesModel.qml: the Geozones page
 /// - MainWindow.qml: GeoZoneAlertPopup

@@ -41,15 +41,6 @@
 // FollowMe
 #include "FollowMeTest.h"
 
-// GeoZone
-#include "GeoZoneFlightTest.h"
-#include "GeoZoneGeometryTest.h"
-#include "GeoZoneManagerTest.h"
-#include "GeoZoneMonitorTest.h"
-#include "GeoZoneParserTest.h"
-#include "GeoZonePlanningTest.h"
-#include "GeoZoneReturnTest.h"
-
 // GPS
 #include "GpsTest.h"
 
@@ -154,15 +145,6 @@ int runTests(bool stress, QStringView unitTestOptions)
 
     // FollowMe
     UT_REGISTER_TEST(FollowMeTest)
-
-    // GeoZone
-    UT_REGISTER_TEST(GeoZoneFlightTest)
-    UT_REGISTER_TEST(GeoZoneGeometryTest)
-    UT_REGISTER_TEST(GeoZoneManagerTest)
-    UT_REGISTER_TEST(GeoZoneMonitorTest)
-    UT_REGISTER_TEST(GeoZoneParserTest)
-    UT_REGISTER_TEST(GeoZonePlanningTest)
-    UT_REGISTER_TEST(GeoZoneReturnTest)
 
     // GPS
     // UT_REGISTER_TEST(GpsTest)
