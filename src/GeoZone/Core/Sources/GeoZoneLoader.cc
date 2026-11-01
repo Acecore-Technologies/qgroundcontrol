@@ -12,6 +12,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneParseCache.h"
 #include "GeoZoneProviders.h"
+#include "GeoZoneService.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneStore.h"
 #include "GeoZoneZip.h"
@@ -137,6 +138,26 @@ void mergePages(const QString &filePath, const QStringList &pagePaths)
     }
 }
 
+/// Replaces a service's response with the member holding the zones, so that the stored copy is the zones' document
+bool extractMember(const QString &filePath, const QString &member, QString &errorString)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        errorString = GeoZoneLoader::tr("Unable to open file %1: %2").arg(filePath, file.errorString());
+        return false;
+    }
+    const QByteArray document = GeoZoneService::extractMember(file.readAll(), member, errorString);
+    file.close();
+    if (document.isEmpty()) {
+        return false;
+    }
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || (file.write(document) != document.size())) {
+        errorString = GeoZoneLoader::tr("Unable to write file %1: %2").arg(filePath, file.errorString());
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 bool GeoZoneLoader::parse(const QByteArray &content, GeoZoneParser::Result &result, QString &errorString, GeoZoneParser::Format formatHint,
@@ -245,6 +266,9 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     if (job.fromStore && GeoZoneParseCache::read(job.sourcePath, cacheKey, loadResult.result)) {
         loadResult.fromCache = true;
         qCDebug(GeoZoneSourceLog) << "Read" << loadResult.result.zones.count() << "zones of" << job.key << "from the parse cache in" << timer.elapsed() << "ms";
+        return loadResult;
+    }
+    if (job.downloaded && !job.responseMember.isEmpty() && !extractMember(job.sourcePath, job.responseMember, loadResult.errorString)) {
         return loadResult;
     }
     if (!job.pagePaths.isEmpty()) {

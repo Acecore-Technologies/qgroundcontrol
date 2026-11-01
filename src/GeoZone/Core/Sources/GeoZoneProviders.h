@@ -11,6 +11,7 @@
 #pragma once
 
 #include "GeoZoneParser.h"
+#include "GeoZoneService.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDate>
@@ -41,9 +42,22 @@ public:
         QRegularExpression datasetLinkPattern;
     };
 
+    /// A service queried with credentials, an ED-318 POST or by the area of interest, which the user completes with its
+    /// URL or secret
+    struct ServiceTemplate {
+        QString url;                ///< URL template, see GeoZoneService, empty when the user enters it
+        GeoZoneService service;     ///< id and name are those of the template
+        QString note;               ///< How to get access, or what QGroundControl doesn't read yet
+        bool supported = true;      ///< false when QGroundControl can't read the data yet: configuration only
+    };
+
     static constexpr double maxAreaDegrees = 1.0;   ///< Largest area downloaded from services serving zones by area
 
     static QList<Service> services();
+    static QList<ServiceTemplate> serviceTemplates();
+    /// @return Maps with name, id, url, note, supported and service (GeoZoneService::toVariantMap) of the service
+    ///         templates, for QML
+    static QVariantList serviceTemplateList();
 
     /// @return Maps with name and url of the services with a whole dataset, for QML
     static QVariantList feedPresets();

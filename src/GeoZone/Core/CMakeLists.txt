@@ -38,6 +38,8 @@ qt_add_library(GeoZoneCore STATIC
     Formats/GeoZoneParserUtils.h
     Formats/GeoZoneZip.cc
     Formats/GeoZoneZip.h
+    Sources/GeoZoneCredentials.cc
+    Sources/GeoZoneCredentials.h
     Sources/GeoZoneDownloader.cc
     Sources/GeoZoneDownloader.h
     Sources/GeoZoneFeedFetch.cc
@@ -50,6 +52,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneProviders.h
     Sources/GeoZoneRefreshScheduler.cc
     Sources/GeoZoneRefreshScheduler.h
+    Sources/GeoZoneService.cc
+    Sources/GeoZoneService.h
     Sources/GeoZoneSource.cc
     Sources/GeoZoneSource.h
     Sources/GeoZoneSourceIndex.cc

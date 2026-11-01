@@ -115,6 +115,62 @@ void GeoZoneSourceRepository::addUrl(const QString &url)
     _download(trimmedUrl, GeoZoneLoader::Request::Add);
 }
 
+void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneService &service, const QString &secret)
+{
+    const QString trimmedUrl = url.trimmed();
+    const QUrl parsedUrl(trimmedUrl);
+    if (!parsedUrl.isValid() || !QStringList({ QStringLiteral("http"), QStringLiteral("https") }).contains(parsedUrl.scheme()) || parsedUrl.host().isEmpty()) {
+        emit loadFailed(trimmedUrl, tr("Geozone download failed. %1 is not a valid http or https address.").arg(trimmedUrl));
+        return;
+    }
+    GeoZoneService feedService = service;
+    if (GeoZoneService::hasAreaPlaceholders(trimmedUrl)) {
+        feedService.areaOfInterest = true;
+    }
+    if (!secret.isEmpty()) {
+        _credentials.setSecret(trimmedUrl, secret);
+    }
+    _tokens.remove(trimmedUrl);
+    _setService(trimmedUrl, feedService);
+    _download(trimmedUrl, GeoZoneLoader::Request::Add);
+}
+
+void GeoZoneSourceRepository::setSecret(const QString &key, const QString &secret)
+{
+    _credentials.setSecret(key, secret);
+    _tokens.remove(key);
+    if (GeoZoneSource *const existing = source(key)) {
+        existing->setCredentialsMissing(secret.isEmpty());
+        if (existing->isFeed() && !secret.isEmpty()) {
+            _download(key, GeoZoneLoader::Request::User);
+        }
+    }
+}
+
+void GeoZoneSourceRepository::_setService(const QString &key, const GeoZoneService &service)
+{
+    if (service.isEmpty()) {
+        (void) _services.remove(key);
+    } else {
+        _services.insert(key, service);
+    }
+    if (GeoZoneSource *const existing = source(key)) {
+        existing->setService(service);
+        existing->setCredentialsMissing(service.needsSecret() && _credentials.secret(key).isEmpty());
+    }
+    if (_index.setService(key, service.isEmpty() ? QJsonObject() : service.toJson())) {
+        _saveIndex();
+    }
+}
+
+void GeoZoneSourceRepository::_forgetService(const QString &key)
+{
+    if (_services.remove(key) > 0) {
+        _credentials.remove(key);
+    }
+    (void) _tokens.remove(key);
+}
+
 void GeoZoneSourceRepository::refreshFeeds()
 {
     for (int i = 0; i < _sources.count(); i++) {
@@ -145,6 +201,14 @@ void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Reque
     fetchRequest.url = url;
     fetchRequest.formatHint = GeoZoneProviders::formatHint(url);
     fetchRequest.companions = _companions.value(url);
+    fetchRequest.service = _services.value(url);
+    fetchRequest.time = GeoZoneEnvironment::currentDateTimeUtc();
+    if (fetchRequest.service.needsSecret()) {
+        fetchRequest.secret = _credentials.secret(url);
+    }
+    if (const auto token = _tokens.constFind(url); (token != _tokens.cend()) && (token->expiresAt > fetchRequest.time)) {
+        fetchRequest.accessToken = token->value;
+    }
     if (existing && existing->loaded()) {
         fetchRequest.etag = existing->etag();
         fetchRequest.lastModified = existing->lastModified();
@@ -184,8 +248,12 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     const auto done = qScopeGuard([this]() { _setPending(-1); });
 
     GeoZoneSource *const existing = source(url);
+    if (!result.accessToken.isEmpty()) {
+        _tokens.insert(url, Token{ result.accessToken, result.tokenExpiresAt });
+    }
     if (result.status == GeoZoneFeedFetch::Result::Status::Ready) {
         GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
+        job.responseMember = fetch->request().service.effectiveResponseMember();
         job.sourcePath = result.filePath;
         job.pagePaths = result.pagePaths;
         job.downloaded = true;
@@ -221,6 +289,10 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         existing->setBusy(false);
         existing->setErrorString(error);
         _scheduler->refreshFailed(*existing);
+    }
+    if (!existing) {
+        // The service of a feed which couldn't be added is forgotten with its secret
+        _forgetService(url);
     }
     if (request != GeoZoneLoader::Request::Automatic) {
         emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
@@ -308,6 +380,8 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         if (source) {
             source->setErrorString(loadResult.errorString);
             _scheduler->refreshFailed(*source);
+        } else {
+            _forgetService(job.key);
         }
         if (job.request != GeoZoneLoader::Request::Automatic) {
             emit loadFailed(job.key, tr("Geozone file load failed. %1").arg(loadResult.errorString));
@@ -325,6 +399,10 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         if (!source) {
             source = _newSource(job.key, job.url);
             _removeLegacyFileSource(job);
+        }
+        if (const auto service = _services.constFind(job.key); service != _services.cend()) {
+            source->setService(service.value());
+            source->setCredentialsMissing(service->needsSecret() && _credentials.secret(job.key).isEmpty());
         }
         emit sourceAboutToChange(source);
         source->setResult(loadResult.result, job.loadedAt, job.fileDate);
@@ -387,6 +465,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     if (const GeoZoneSource *const source = this->source(job.key)) {
         entry.enabled = source->enabled();
     }
+    entry.service = _services.contains(job.key) ? _services.value(job.key).toJson() : QJsonObject();
     if (job.downloaded) {
         entry.etag = job.etag;
         entry.lastModified = job.lastModified;
@@ -467,6 +546,7 @@ void GeoZoneSourceRepository::removeSource(int index)
         source->setBusy(false);
     }
     _companions.remove(source->key());
+    _forgetService(source->key());
     _scheduler->remove(source->key());
     emit sourceAboutToChange(source);
     _sources.removeAt(index);
@@ -539,6 +619,12 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         placeholder->setStoredDates(job.loadedAt, job.fileDate, job.checkedAt);
         placeholder->setValidators(job.etag, job.lastModified);
         placeholder->setDatasetUrl(job.datasetUrl);
+        if (!entry.service.isEmpty()) {
+            const GeoZoneService service = GeoZoneService::fromJson(entry.service);
+            _services.insert(entry.key, service);
+            placeholder->setService(service);
+            placeholder->setCredentialsMissing(service.needsSecret() && _credentials.secret(entry.key).isEmpty());
+        }
         _index.insert(entry);
         jobs.append(job);
     }

@@ -87,6 +87,72 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
     };
 }
 
+QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
+{
+    QList<ServiceTemplate> templates;
+
+    ServiceTemplate ed318;
+    ed318.service.id = QStringLiteral("ed318");
+    ed318.service.name = tr("ED-318 geozone service");
+    ed318.service.method = GeoZoneService::Method::Ed318Post;
+    ed318.service.areaOfInterest = true;
+    ed318.note = tr("Enter the address of the UAS zones endpoint of a service following the ED-318 retrieval interface. "
+                    "The zones around the mission and the vehicle are requested with their area and time.");
+    templates.append(ed318);
+
+    // The ED-318 retrieval interface of the DFS Geospatial Information Service, see its OpenAPI specification
+    ServiceTemplate dfs;
+    dfs.url = QStringLiteral("https://dipul-service.dfs.de/api/geofencing/v2/uas-zones");
+    dfs.service.id = QStringLiteral("dfs-ed318");
+    dfs.service.name = tr("Germany ED-318 service (DFS)");
+    dfs.service.method = GeoZoneService::Method::Ed318Post;
+    dfs.service.auth = GeoZoneService::Auth::Basic;
+    dfs.service.areaOfInterest = true;
+    dfs.note = tr("Requires a dipul account, requested from DFS through the dipul contact form. The service answers areas up to 100 km².");
+    templates.append(dfs);
+
+    ServiceTemplate area;
+    area.service.id = QStringLiteral("area");
+    area.service.name = tr("Zones of the area (GET)");
+    area.service.areaOfInterest = true;
+    area.note = tr("Enter an address with {bbox} (west,south,east,north), {west}, {south}, {east}, {north}, {lat}, {lon}, {radiusKm}, "
+                   "{start} or {end}, filled with the area around the mission and the vehicle.");
+    templates.append(area);
+
+    // The FAA NOTAM Management Service publishes NOTAMs as GeoJSON or AIXM 5.1 events to registered clients
+    ServiceTemplate nms;
+    nms.url = QStringLiteral("https://api-nms.aim.faa.gov/nmsapi/v1/notams?latitude={lat}&longitude={lon}&radius={radiusNm}&feature=AIRSPACE");
+    nms.service.id = QStringLiteral("faa-nms");
+    nms.service.name = tr("United States NOTAMs (FAA NMS)");
+    nms.service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    nms.service.tokenUrl = QStringLiteral("https://api-nms.aim.faa.gov/v1/auth/token");
+    nms.service.headers = { { QStringLiteral("nmsResponseFormat"), QStringLiteral("GEOJSON") } };
+    nms.service.responseMember = QStringLiteral("data.geojson");
+    nms.service.areaOfInterest = true;
+    nms.service.timeWindowHours = 24;
+    nms.note = tr("Configuration only: QGroundControl does not read NOTAM GeoJSON yet. The FAA grants client credentials on request to NOTAMS@faa.gov.");
+    nms.supported = false;
+    templates.append(nms);
+
+    return templates;
+}
+
+QVariantList GeoZoneProviders::serviceTemplateList()
+{
+    QVariantList list;
+    for (const ServiceTemplate &serviceTemplate : serviceTemplates()) {
+        list.append(QVariantMap{
+            { QStringLiteral("id"), serviceTemplate.service.id },
+            { QStringLiteral("name"), serviceTemplate.service.name },
+            { QStringLiteral("url"), serviceTemplate.url },
+            { QStringLiteral("note"), serviceTemplate.note },
+            { QStringLiteral("supported"), serviceTemplate.supported },
+            { QStringLiteral("service"), serviceTemplate.service.toVariantMap() },
+        });
+    }
+    return list;
+}
+
 QVariantList GeoZoneProviders::feedPresets()
 {
     QVariantList presets;

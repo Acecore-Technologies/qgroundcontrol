@@ -20,12 +20,13 @@
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneService.h"
 
 class GeoZoneFormat;
 
-/// Downloads one feed for loading, in stages: the feed URL, which may be a page linking to the current dataset, then
-/// that dataset, the further pages of a WFS response the server limited, and the companion documents the format of
-/// the document refers to. The result is a document ready to load, the confirmation that the stored copy is current,
+/// Downloads one feed for loading, in stages: the OAuth2 token of its service, the feed URL, which may be a page
+/// linking to the current dataset, then that dataset, the further pages of a WFS response the server limited, and the
+/// companion documents the format of the document refers to. The result is a document ready to load, the confirmation that the stored copy is current,
 /// or a failure. Canceling stops the downloads and drops whatever arrives later.
 class GeoZoneFeedFetch : public QObject
 {
@@ -34,6 +35,7 @@ class GeoZoneFeedFetch : public QObject
 public:
     enum class Stage : quint8 {
         Idle,
+        Token,          ///< Requesting an OAuth2 token of the service
         Feed,           ///< Downloading the feed URL
         Dataset,        ///< Downloading the dataset the feed's page linked to
         Pages,          ///< Downloading the further pages of a WFS response
@@ -49,6 +51,11 @@ public:
         GeoZoneParser::Format formatHint = GeoZoneParser::Format::Unknown;  ///< Format of the stored copy or expected from the URL
         GeoZoneParser::Companions companions;   ///< Of the stored copy, those of the current version aren't downloaded again
         QList<const GeoZoneFormat*> formats;    ///< Formats recognizing the document, GeoZoneFormat::formats() when empty
+        GeoZoneService service;     ///< How the feed is requested, url being its URL template. Empty for a GET of url.
+        QString secret;             ///< Of the service, see GeoZoneCredentials
+        QString accessToken;        ///< OAuth2 token of the service still valid, empty to request one
+        QGeoRectangle area;         ///< Area of interest of a service taking it
+        QDateTime time;             ///< Start of the time of interest
     };
 
     struct Result {
@@ -65,6 +72,9 @@ public:
         QString datasetUrl;         ///< Dataset the feed's page linked to, empty when the feed URL is the dataset
         QString errorString;
         qint64 maxAgeSecs = -1;     ///< Shortest time the server said the feed or its dataset stays current, negative without
+        QString requestUrl;         ///< URL requested, the URL template filled with the area and time of interest
+        QString accessToken;        ///< OAuth2 token requested by the fetch, empty when it requested none
+        QDateTime tokenExpiresAt;
     };
 
     /// @param downloader Shared with other fetches, each cancels its own downloads
@@ -84,6 +94,7 @@ public:
 
     static constexpr qint64 maxPageBytes = 4 * 1024 * 1024;        ///< Downloads read to look for links to datasets and companions
     static constexpr qint64 maxCompanionBytes = 1024 * 1024;
+    static constexpr qint64 maxTokenBytes = 64 * 1024;
 
 signals:
     /// Emitted once when the fetch wasn't canceled. The receiver owns the files of the result.
@@ -93,7 +104,13 @@ private:
     using Handler = std::function<void(const GeoZoneDownloader::Result &download)>;
 
     /// Downloads with this fetch's tag, the handler isn't called once the fetch is canceled
-    void _get(const QString &url, const QString &etag, const QString &lastModified, Handler handler);
+    void _get(const QString &url, const QString &etag, const QString &lastModified, Handler handler,
+              const GeoZoneDownloader::Options &options = GeoZoneDownloader::Options());
+    /// @return Options of a further download: the headers and credentials of the service for its server, a GET
+    GeoZoneDownloader::Options _optionsFor(const QString &url) const;
+    void _requestToken();
+    void _tokenReceived(const GeoZoneDownloader::Result &download);
+    void _fetchFeed();
     void _feedReceived(const GeoZoneDownloader::Result &download);
     void _datasetReceived(const GeoZoneDownloader::Result &download);
     /// Continues with the further pages of the document, then its companions
@@ -112,6 +129,9 @@ private:
     QString _tag;           ///< Of the downloads of this fetch
     Stage _stage = Stage::Idle;
     Result _result;
+    QString _requestUrl;
+    QString _accessToken;
+    bool _tokenRequested = false;
 
     qint64 _pageSize = 0;
     int _pageCount = 0;     ///< After the first

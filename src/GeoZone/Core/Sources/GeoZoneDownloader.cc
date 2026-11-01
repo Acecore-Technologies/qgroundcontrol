@@ -17,6 +17,7 @@
 #include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -96,7 +97,21 @@ void GeoZoneDownloader::_send(Download download, const QUrl &url)
         _networkManager = new QNetworkAccessManager(this);
     }
 
-    QNetworkRequest request{ url };
+    // Credentials are for the server they were configured for, a redirect to another one doesn't get them
+    const QUrl first(download.url);
+    const bool sameOrigin = (url.scheme() == first.scheme()) && (url.host().compare(first.host(), Qt::CaseInsensitive) == 0) && (url.port(-1) == first.port(-1));
+    QUrl requestUrl = url;
+    if (sameOrigin && !download.options.authQuery.isEmpty()) {
+        QUrlQuery query(requestUrl);
+        for (const auto &[name, value] : std::as_const(download.options.authQuery)) {
+            if (!query.hasQueryItem(name)) {
+                query.addQueryItem(QString::fromLatin1(QUrl::toPercentEncoding(name)), QString::fromLatin1(QUrl::toPercentEncoding(value)));
+            }
+        }
+        requestUrl.setQuery(query);
+    }
+
+    QNetworkRequest request{ requestUrl };
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setTransferTimeout(_timeout);
     // Servers answer 304 Not Modified instead of sending unchanged data again
@@ -109,9 +124,7 @@ void GeoZoneDownloader::_send(Download download, const QUrl &url)
     for (const auto &[name, value] : std::as_const(download.options.headers)) {
         request.setRawHeader(name, value);
     }
-    // Credentials are for the server they were configured for, a redirect to another one doesn't get them
-    const QUrl first(download.url);
-    if ((url.scheme() == first.scheme()) && (url.host().compare(first.host(), Qt::CaseInsensitive) == 0) && (url.port(-1) == first.port(-1))) {
+    if (sameOrigin) {
         for (const auto &[name, value] : std::as_const(download.options.authHeaders)) {
             request.setRawHeader(name, value);
         }

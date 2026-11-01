@@ -50,6 +50,7 @@ public:
         QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
         qint64 maxAgeSecs = -1;     ///< How long the server said a downloaded feed stays current, negative when it didn't
         QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
+        QString responseMember;     ///< Member of a downloaded JSON response holding the zones, see GeoZoneService::responseMember
         Request request = Request::Automatic;
         GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops parsing or before storing
     };

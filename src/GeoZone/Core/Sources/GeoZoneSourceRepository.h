@@ -14,9 +14,11 @@
 #include <QtCore/QString>
 
 #include "GeoZoneCancelToken.h"
+#include "GeoZoneCredentials.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneLoader.h"
+#include "GeoZoneService.h"
 #include "GeoZoneSourceIndex.h"
 #include "GeoZoneStore.h"
 
@@ -48,6 +50,14 @@ public:
     void addFile(const QString &fileName);
     /// See GeoZoneManager::addUrl
     void addUrl(const QString &url);
+    /// Adds a feed requested from a service taking credentials, a POST query or the area of interest, replacing the
+    /// source with the same URL. The URL may be a template, see GeoZoneService.
+    /// @param secret Kept by credentials(), the one kept is used when empty
+    void addService(const QString &url, const GeoZoneService &service, const QString &secret);
+    /// Replaces the secret of the service of a source and downloads it again
+    void setSecret(const QString &key, const QString &secret);
+    /// Keeps the secrets of the services, in the application settings by default
+    GeoZoneCredentials &credentials() { return _credentials; }
     /// Downloads all feeds again. Failures keep the previous data.
     void refreshFeeds();
     /// Removes a source, its stored copy, and cancels its downloads
@@ -114,6 +124,14 @@ private:
     void _removeLegacyFileSource(const GeoZoneLoader::Job &job);
     void _sourceEnabledChanged(GeoZoneSource *source);
     void _reportStorageError(const QString &message);
+    /// Forgets the service of a source with its secret and token
+    void _forgetService(const QString &key);
+    void _setService(const QString &key, const GeoZoneService &service);
+
+    struct Token {
+        QString value;
+        QDateTime expiresAt;
+    };
 
     GeoZoneStore _store;
     GeoZoneSourceIndex _index;
@@ -124,6 +142,9 @@ private:
     QHash<QString, GeoZoneCancelToken> _operations; ///< Fetch or load in progress per source key, earlier ones were canceled
     QHash<QString, GeoZoneFeedFetch*> _fetches;     ///< Feeds being downloaded, by URL
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
+    GeoZoneCredentials _credentials;
+    QHash<QString, GeoZoneService> _services;   ///< Of the feeds requested from a service, by source key
+    QHash<QString, Token> _tokens;              ///< OAuth2 tokens of the services by source key, kept for the session
     bool _storageErrorReported = false;
     QString _validityWarning;
     bool _startupRefreshPending = false;

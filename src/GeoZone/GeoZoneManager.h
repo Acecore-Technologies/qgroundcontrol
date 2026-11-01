@@ -57,6 +57,7 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
     Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
+    Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< See GeoZoneProviders::serviceTemplateList
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
@@ -80,6 +81,18 @@ public:
     /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the
     /// source with the same URL. loadFailed is emitted on errors and sourceAdded on success.
     Q_INVOKABLE void addUrl(const QString &url) { _repository->addUrl(url); }
+
+    /// Downloads a feed from a service taking credentials, an ED-318 query or the area of interest, see
+    /// GeoZoneSourceRepository::addService
+    /// @param service Fields of GeoZoneService::toVariantMap
+    /// @param secret API key, token, password or client secret, kept in the settings, the one kept when empty
+    Q_INVOKABLE void addService(const QString &url, const QVariantMap &service, const QString &secret)
+    {
+        _repository->addService(url, GeoZoneService::fromVariantMap(service), secret);
+    }
+
+    /// Replaces the secret of the service of a source and downloads it again
+    Q_INVOKABLE void setCredentials(const QString &key, const QString &secret) { _repository->setSecret(key, secret); }
 
     /// Downloads all feeds again. Failures keep the previous data.
     Q_INVOKABLE void refreshFeeds() { _repository->refreshFeeds(); }
@@ -140,6 +153,7 @@ public:
     static QVariantList feedPresets() { return GeoZoneProviders::feedPresets(); }
     /// See GeoZoneProviders::areaProviders
     static QVariantList areaProviders() { return GeoZoneProviders::areaProviders(); }
+    static QVariantList serviceTemplates() { return GeoZoneProviders::serviceTemplateList(); }
     /// See GeoZoneProviders::areaFeedUrl
     Q_INVOKABLE QString areaFeedUrl(const QString &provider, const QGeoRectangle &area) const { return GeoZoneProviders::areaFeedUrl(provider, area); }
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for

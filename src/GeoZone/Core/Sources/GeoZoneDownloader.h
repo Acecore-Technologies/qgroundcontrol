@@ -39,6 +39,7 @@ public:
     struct Options {
         QList<Header> headers;      ///< Further request headers
         QList<Header> authHeaders;  ///< Credentials, only sent to the scheme, host and port of the URL, not after redirects elsewhere
+        QList<std::pair<QString, QString>> authQuery;   ///< Credentials added to the query like authHeaders
         bool post = false;          ///< POST the body rather than GET
         QByteArray body;
         QByteArray contentType;

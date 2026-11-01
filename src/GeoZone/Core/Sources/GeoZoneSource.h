@@ -19,6 +19,7 @@
 #include "GeoZoneBox.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneProviders.h"
+#include "GeoZoneService.h"
 
 /// Loading, downloading and storing sources
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneSourceLog)
@@ -49,6 +50,8 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
     Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
     Q_PROPERTY(QString      changesText     READ changesText    NOTIFY changed FINAL)               ///< Zones added, removed and changed by the last reload which changed them, empty without
+    Q_PROPERTY(bool         needsCredentials    READ needsCredentials   NOTIFY serviceChanged FINAL)    ///< The service of the feed requires a secret, see GeoZoneCredentials
+    Q_PROPERTY(bool         credentialsMissing  READ credentialsMissing NOTIFY serviceChanged FINAL)    ///< The secret the service requires isn't known, like after importing a pack
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
@@ -127,12 +130,20 @@ public:
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
     bool isLive() const { return GeoZoneProviders::isLive(_format); }
 
+    /// How the feed is requested from its service, empty for plain feeds and files
+    const GeoZoneService &service() const { return _service; }
+    void setService(const GeoZoneService &service);
+    bool needsCredentials() const { return _service.needsSecret(); }
+    bool credentialsMissing() const { return _service.needsSecret() && _credentialsMissing; }
+    void setCredentialsMissing(bool missing);
+
 signals:
     void changed();
     void validityChanged();
     void busyChanged(bool busy);
     void errorStringChanged();
     void enabledChanged();
+    void serviceChanged();
 
 private:
     void _clearZones();
@@ -168,6 +179,8 @@ private:
     QString _etag;
     QString _lastModified;
     QString _datasetUrl;
+    GeoZoneService _service;
+    bool _credentialsMissing = false;
 
     QList<GeoZone*> _zones;
     QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones

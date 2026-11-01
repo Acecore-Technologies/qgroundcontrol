@@ -74,8 +74,28 @@ GeoZoneSource::~GeoZoneSource()
     _clearZones();
 }
 
+void GeoZoneSource::setService(const GeoZoneService &service)
+{
+    if (!(service == _service)) {
+        _service = service;
+        emit serviceChanged();
+        emit changed();
+    }
+}
+
+void GeoZoneSource::setCredentialsMissing(bool missing)
+{
+    if (missing != _credentialsMissing) {
+        _credentialsMissing = missing;
+        emit serviceChanged();
+    }
+}
+
 QString GeoZoneSource::name() const
 {
+    if (!_service.name.isEmpty()) {
+        return _service.name;
+    }
     QString name = _title.isEmpty() ? (isFeed() ? QUrl(_url).host() : QFileInfo(_key).fileName()) : _title;
 
     // Feeds of an area, like the map area downloaded from a WFS, are told apart by where they are

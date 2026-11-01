@@ -31,6 +31,9 @@ private slots:
     void _testDownloadSizeLimit();
     void _testDownloadFailures();
     void _testDownloadRedirects();
+    void _testServiceApiKeys();
+    void _testServiceOAuth2();
+    void _testEd318Service();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();

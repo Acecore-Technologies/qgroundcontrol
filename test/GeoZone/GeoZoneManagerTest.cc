@@ -33,6 +33,55 @@ public:
     }
 };
 
+/// Captures the messages logged while in scope, with the debug messages of the geozone categories enabled
+class ScopedLogCapture
+{
+public:
+    ScopedLogCapture()
+    {
+        _instance = this;
+        QLoggingCategory::setFilterRules(QStringLiteral("qgc.geozone.*.debug=true"));
+        _previous = qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &message) {
+            const QMutexLocker locker(&_instance->_mutex);
+            _instance->_messages.append(message);
+        });
+    }
+
+    ~ScopedLogCapture()
+    {
+        (void) qInstallMessageHandler(_previous);
+        QLoggingCategory::setFilterRules(QString());
+        _instance = nullptr;
+    }
+
+    Q_DISABLE_COPY_MOVE(ScopedLogCapture)
+
+    QString text() const
+    {
+        const QMutexLocker locker(&_mutex);
+        return _messages.join(QLatin1Char('\n'));
+    }
+
+private:
+    static inline ScopedLogCapture *_instance = nullptr;
+    QtMessageHandler _previous = nullptr;
+    mutable QMutex _mutex;
+    QStringList _messages;
+};
+
+/// @return The content of the files of a directory, to look for secrets
+QByteArray _directoryContent(const QString &path)
+{
+    QByteArray content;
+    for (const QString &fileName : QDir(path).entryList(QDir::Files)) {
+        QFile file(QDir(path).filePath(fileName));
+        if (file.open(QIODevice::ReadOnly)) {
+            content += file.readAll();
+        }
+    }
+    return content;
+}
+
 } // namespace
 
 void GeoZoneManagerTest::_testManagerLoadPersistClear()
@@ -1098,6 +1147,272 @@ void GeoZoneManagerTest::_testDownloadRedirects()
     QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
     QVERIFY2(!result.errorString.contains(QStringLiteral("s3cret")) && result.errorString.contains(QStringLiteral("key=***")), qPrintable(result.errorString));
     QCOMPARE(GeoZoneDownloader::redacted(QStringLiteral("a s3cret key b s3cret%20key"), options.secrets), QStringLiteral("a *** b ***"));
+}
+
+void GeoZoneManagerTest::_testServiceApiKeys()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/header", server.body);
+    server.files.insert("/query", server.body);
+    server.files.insert("/bearer", server.body);
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString headerUrl = server.url(QStringLiteral("/header"));
+    const QString queryUrl = server.url(QStringLiteral("/query"));
+    {
+        ScopedLogCapture log;
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+
+        // An API key in a header
+        GeoZoneService service;
+        service.auth = GeoZoneService::Auth::ApiKeyHeader;
+        service.authParameter = QStringLiteral("X-Api-Key");
+        manager.addService(headerUrl, service.toVariantMap(), QStringLiteral("header-s3cret"));
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(TestFeedServer::header(server.requests.last(), "X-Api-Key"), QByteArray("header-s3cret"));
+        GeoZoneSource *const headerFeed = manager.source(headerUrl);
+        QVERIFY(headerFeed);
+        QCOMPARE(manager.zoneCount(), 3);
+        QVERIFY(headerFeed->needsCredentials());
+        QVERIFY(!headerFeed->credentialsMissing());
+
+        // An API key in the query, which the source's URL doesn't show
+        service.auth = GeoZoneService::Auth::ApiKeyQuery;
+        service.authParameter = QStringLiteral("api_key");
+        manager.addService(queryUrl, service.toVariantMap(), QStringLiteral("query-s3cret"));
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(server.requestedPaths.last(), QByteArray("/query?api_key=query-s3cret"));
+        QVERIFY(manager.source(queryUrl));
+
+        // A static bearer token
+        service.auth = GeoZoneService::Auth::Bearer;
+        service.authParameter.clear();
+        manager.addService(server.url(QStringLiteral("/bearer")), service.toVariantMap(), QStringLiteral("bearer-s3cret"));
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(TestFeedServer::header(server.requests.last(), "Authorization"), QByteArray("Bearer bearer-s3cret"));
+
+        // Failures don't show the secret, and a feed which couldn't be added leaves no secret behind
+        service.auth = GeoZoneService::Auth::ApiKeyQuery;
+        service.authParameter = QStringLiteral("api_key");
+        const QString missingUrl = server.url(QStringLiteral("/missing"));
+        manager.addService(missingUrl, service.toVariantMap(), QStringLiteral("missing-s3cret"));
+        QVERIFY(failedSpy.wait(10000));
+        QVERIFY2(!failedSpy.last()[1].toString().contains(QStringLiteral("missing-s3cret")), qPrintable(failedSpy.last()[1].toString()));
+        QVERIFY(manager.repository()->credentials().secret(missingUrl).isEmpty());
+
+        // The service is kept with the source, its secret in the settings rather than the store, and neither is logged
+        QVERIFY(manager.repository()->credentials().secret(headerUrl) == QStringLiteral("header-s3cret"));
+        const QByteArray stored = _directoryContent(storageDir.path());
+        QVERIFY(stored.contains("X-Api-Key"));
+        for (const char *secret : { "header-s3cret", "query-s3cret", "bearer-s3cret", "missing-s3cret" }) {
+            QVERIFY2(!stored.contains(secret), secret);
+            QVERIFY2(!log.text().contains(QLatin1String(secret)), secret);
+        }
+        QVERIFY(log.text().contains(QStringLiteral("Downloading")));
+    }
+
+    // The services are restored with the sources, their secrets from the settings
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    GeoZoneSource *const queryFeed = restarted.source(queryUrl);
+    QVERIFY(queryFeed);
+    QCOMPARE(queryFeed->service().auth, GeoZoneService::Auth::ApiKeyQuery);
+    server.requestedPaths.clear();
+    restarted.refreshFeeds();
+    QTRY_VERIFY(!restarted.busy());
+    QVERIFY(server.requestedPaths.contains("/query?api_key=query-s3cret"));
+
+    // Without its secret, a service isn't requested
+    restarted.setCredentials(queryUrl, QString());
+    QVERIFY(queryFeed->credentialsMissing());
+    restarted.refreshFeeds();
+    QTRY_VERIFY(!restarted.busy());
+    QCOMPARE(queryFeed->errorString(), QStringLiteral("The credentials of the service are missing."));
+    QCOMPARE(restarted.zoneCount(), 9);
+    restarted.setCredentials(queryUrl, QStringLiteral("new-s3cret"));
+    QVERIFY(!queryFeed->credentialsMissing());
+    QTRY_VERIFY(!restarted.busy());
+    QVERIFY(server.requestedPaths.contains("/query?api_key=new-s3cret"));
+    QVERIFY(queryFeed->errorString().isEmpty());
+
+    // Removing the sources removes their secrets
+    restarted.clear();
+    QVERIFY(restarted.repository()->credentials().secret(queryUrl).isEmpty());
+    QVERIFY(restarted.repository()->credentials().secret(headerUrl).isEmpty());
+}
+
+void GeoZoneManagerTest::_testServiceOAuth2()
+{
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    int tokenRequests = 0;
+    QByteArray currentToken = "token-1";
+    server.handler = [&](const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &) {
+        const QByteArray path = request.split(' ').value(1);
+        if (path == "/token") {
+            tokenRequests++;
+            if (!request.startsWith("POST") || (TestFeedServer::header(request, "Authorization") != "Basic " + QByteArray("client:client-s3cret").toBase64()) ||
+                (TestFeedServer::requestBody(request) != "grant_type=client_credentials&scope=zones")) {
+                status = "401 Unauthorized";
+                return true;
+            }
+            currentToken = "token-" + QByteArray::number(tokenRequests);
+            content = R"({ "access_token": ")" + currentToken + R"(", "token_type": "Bearer", "expires_in": 3600 })";
+            return true;
+        }
+        if (path == "/zones") {
+            if (TestFeedServer::header(request, "Authorization") != "Bearer " + currentToken) {
+                status = "401 Unauthorized";
+            } else {
+                content = server.body;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    ScopedLogCapture log;
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    service.tokenUrl = server.url(QStringLiteral("/token"));
+    service.user = QStringLiteral("client");
+    service.scope = QStringLiteral("zones");
+    const QString url = server.url(QStringLiteral("/zones"));
+
+    // A wrong client secret is reported
+    manager.addService(url, service.toVariantMap(), QStringLiteral("wrong"));
+    QVERIFY(failedSpy.wait(10000));
+    QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("The client id or secret were refused.")), qPrintable(failedSpy.last()[1].toString()));
+    QCOMPARE(manager.sources()->count(), 0);
+
+    // A token is requested with the client credentials, then used until it expires
+    manager.addService(url, service.toVariantMap(), QStringLiteral("client-s3cret"));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(tokenRequests, 2);
+    QCOMPARE(manager.zoneCount(), 3);
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(tokenRequests, 2);
+    QVERIFY(manager.source(url)->errorString().isEmpty());
+
+    // A token the server no longer accepts is replaced
+    currentToken = "revoked";
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(tokenRequests, 3);
+    QVERIFY(manager.source(url)->errorString().isEmpty());
+
+    // An expired token is replaced before the download
+    environment.addSecs(3600);
+    const qsizetype requests = server.requests.count();
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(tokenRequests, 4);
+    QCOMPARE(server.requests.count(), requests + 2);
+    QVERIFY(manager.source(url)->errorString().isEmpty());
+
+    QVERIFY(!_directoryContent(storageDir.path()).contains("client-s3cret"));
+    QVERIFY(!_directoryContent(storageDir.path()).contains("token-"));
+    QVERIFY(!log.text().contains(QStringLiteral("client-s3cret")));
+    QVERIFY(!log.text().contains(QStringLiteral("token-")));
+}
+
+void GeoZoneManagerTest::_testEd318Service()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QJsonObject query;
+    server.handler = [&](const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &) {
+        if (!request.startsWith("POST /uas-zones ")) {
+            return false;
+        }
+        if (TestFeedServer::header(request, "Authorization") != "Basic " + QByteArray("user:dfs-s3cret").toBase64()) {
+            status = "401 Unauthorized";
+            return true;
+        }
+        query = QJsonDocument::fromJson(TestFeedServer::requestBody(request)).object();
+        const QJsonObject reply{
+            { "genericReply", QJsonObject{ { "requestProcessedTimeStamp", "2026-11-01T10:00:00Z" } } },
+            { "uasZones", QJsonDocument::fromJson(server.body).object() },
+        };
+        content = QJsonDocument(reply).toJson();
+        return true;
+    };
+    // A service wrapping the GeoJSON features in its response
+    const QJsonArray features = QJsonDocument::fromJson(server.body).object().value("features").toArray();
+    const QByteArray wrapped = QJsonDocument(QJsonObject{ { "status", "Success" }, { "data", QJsonObject{ { "geojson", features } } } }).toJson();
+    server.files.insert("/wrapped", wrapped);
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+
+    // ED-318 retrieval interface: a POST of the time of interest, the zones in the reply
+    GeoZoneService service;
+    service.name = QStringLiteral("Test ED-318 service");
+    service.method = GeoZoneService::Method::Ed318Post;
+    service.auth = GeoZoneService::Auth::Basic;
+    service.user = QStringLiteral("user");
+    service.timeWindowHours = 6;
+    const QString url = server.url(QStringLiteral("/uas-zones"));
+    manager.addService(url, service.toVariantMap(), QStringLiteral("dfs-s3cret"));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.zoneCount(), 3);
+    GeoZoneSource *const feed = manager.source(url);
+    QVERIFY(feed);
+    QCOMPARE(feed->name(), service.name);
+    QCOMPARE(feed->formatName(), QStringLiteral("ED-318"));
+    QCOMPARE(query.value("startDateTime").toString(), environment.now().toString(Qt::ISODate));
+    QCOMPARE(query.value("endDateTime").toString(), environment.now().addSecs(6 * 3600).toString(Qt::ISODate));
+    QVERIFY(!query.contains("geometry"));
+
+    // The stored copy is the zones' document
+    QFile stored(QDir(storageDir.path()).filePath(manager.storedFileName(url)));
+    QVERIFY(stored.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(stored.readAll()).object(), QJsonDocument::fromJson(server.body).object());
+
+    // Zones in a member of the response, like the GeoJSON of the FAA NOTAM Management Service
+    service = GeoZoneService();
+    service.responseMember = QStringLiteral("data.geojson");
+    manager.addService(server.url(QStringLiteral("/wrapped")), service.toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.zoneCount(), 6);
+    service.responseMember = QStringLiteral("data.aixm");
+    manager.addService(server.url(QStringLiteral("/wrapped")), service.toVariantMap(), QString());
+    QVERIFY(failedSpy.wait(10000));
+    QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("has no data.aixm")), qPrintable(failedSpy.last()[1].toString()));
+    QCOMPARE(manager.zoneCount(), 6);
+
+    // The FAA NOTAM Management Service is configured, but its NOTAMs can't be read yet
+    const QList<GeoZoneProviders::ServiceTemplate> templates = GeoZoneProviders::serviceTemplates();
+    const auto nms = std::find_if(templates.cbegin(), templates.cend(), [](const GeoZoneProviders::ServiceTemplate &serviceTemplate) {
+        return serviceTemplate.service.id == QStringLiteral("faa-nms");
+    });
+    QVERIFY(nms != templates.cend());
+    QVERIFY(!nms->supported);
+    QCOMPARE(nms->service.auth, GeoZoneService::Auth::OAuth2ClientCredentials);
+    QVERIFY(GeoZoneService::hasAreaPlaceholders(nms->url));
+    QCOMPARE(GeoZoneService::fromVariantMap(nms->service.toVariantMap()), nms->service);
 }
 
 void GeoZoneManagerTest::_testManagerStartup()

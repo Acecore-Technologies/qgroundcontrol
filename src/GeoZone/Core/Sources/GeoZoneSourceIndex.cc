@@ -30,6 +30,7 @@ constexpr const char *datasetUrlKey = "datasetUrl";
 constexpr const char *enabledKey = "enabled";
 constexpr const char *maxAgeKey = "maxAge";
 constexpr const char *checkedAtKey = "checkedAt";
+constexpr const char *serviceKey = "service";
 constexpr const char *sourcesKey = "sources";
 constexpr const char *versionKey = "version";
 
@@ -86,6 +87,7 @@ GeoZoneSourceIndex::Contents GeoZoneSourceIndex::read() const
             if (!entry.checkedAt.isValid() || (entry.checkedAt < entry.loadedAt)) {
                 entry.checkedAt = entry.loadedAt;
             }
+            entry.service = object.value(serviceKey).toObject();
             contents.entries.append(entry);
         }
         contents.status = Status::Ok;
@@ -155,6 +157,9 @@ bool GeoZoneSourceIndex::write(const QList<Entry> &entries, QString &errorString
         if (entry.checkedAt.isValid() && (entry.checkedAt > entry.loadedAt)) {
             object.insert(checkedAtKey, entry.checkedAt.toString(Qt::ISODate));
         }
+        if (!entry.service.isEmpty()) {
+            object.insert(serviceKey, entry.service);
+        }
         values.append(object);
     }
 
@@ -185,6 +190,16 @@ bool GeoZoneSourceIndex::setEnabled(const QString &key, bool enabled)
         return false;
     }
     it->enabled = enabled;
+    return true;
+}
+
+bool GeoZoneSourceIndex::setService(const QString &key, const QJsonObject &service)
+{
+    const auto it = _entries.find(key);
+    if ((it == _entries.end()) || _readOnly || (it->service == service)) {
+        return false;
+    }
+    it->service = service;
     return true;
 }
 

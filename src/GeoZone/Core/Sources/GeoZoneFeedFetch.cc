@@ -14,6 +14,7 @@
 #include "GeoZoneSource.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QUrl>
 #include <QtCore/QUuid>
 
@@ -38,12 +39,87 @@ GeoZoneFeedFetch::~GeoZoneFeedFetch()
 void GeoZoneFeedFetch::start()
 {
     qCDebug(GeoZoneSourceLog) << "Downloading" << _request.url;
+    const GeoZoneService &service = _request.service;
+    _requestUrl = service.isEmpty() ? _request.url : service.requestUrl(_request.url, _request.area, _request.time);
+    _result.requestUrl = _requestUrl;
+    _accessToken = _request.accessToken;
+    if (service.areaOfInterest && !_request.area.isValid()) {
+        _finish(Result::Status::Failed, tr("The service downloads the zones around the mission or the vehicle. Plan a mission or connect a vehicle."));
+        return;
+    }
+    if (service.needsSecret() && _request.secret.isEmpty()) {
+        _finish(Result::Status::Failed, tr("The credentials of the service are missing."));
+        return;
+    }
+    if ((service.auth == GeoZoneService::Auth::OAuth2ClientCredentials) && _accessToken.isEmpty()) {
+        _requestToken();
+    } else {
+        _fetchFeed();
+    }
+}
+
+void GeoZoneFeedFetch::_requestToken()
+{
+    qCDebug(GeoZoneSourceLog) << "Requesting an access token from" << _request.service.tokenUrl;
+    _stage = Stage::Token;
+    _tokenRequested = true;
+    _get(_request.service.tokenUrl, QString(), QString(), [this](const GeoZoneDownloader::Result &download) { _tokenReceived(download); },
+         _request.service.tokenRequestOptions(_request.secret));
+}
+
+void GeoZoneFeedFetch::_tokenReceived(const GeoZoneDownloader::Result &download)
+{
+    const QByteArray data = (download.status == GeoZoneDownloader::Result::Status::Ok) ? GeoZoneDownloader::readFile(download.filePath, maxTokenBytes) : QByteArray();
+    if (!download.filePath.isEmpty()) {
+        (void) QFile::remove(download.filePath);
+    }
+    if (download.status != GeoZoneDownloader::Result::Status::Ok) {
+        const QString reason = ((download.statusCode == 400) || (download.statusCode == 401)) ? tr("The client id or secret were refused.") : download.errorString;
+        _finish(Result::Status::Failed, tr("The access token request failed. %1").arg(reason));
+        return;
+    }
+    const QJsonObject token = QJsonDocument::fromJson(data).object();
+    _accessToken = token.value(QStringLiteral("access_token")).toString();
+    if (_accessToken.isEmpty()) {
+        _finish(Result::Status::Failed, tr("The access token request failed. The response has no token."));
+        return;
+    }
+    // Requested again a minute before it expires
+    const qint64 expiresIn = token.value(QStringLiteral("expires_in")).toInteger(300);
+    _result.accessToken = _accessToken;
+    _result.tokenExpiresAt = GeoZoneEnvironment::currentDateTimeUtc().addSecs((std::max)(qint64{ 0 }, expiresIn - 60));
+    _fetchFeed();
+}
+
+void GeoZoneFeedFetch::_fetchFeed()
+{
     _stage = Stage::Feed;
     // The validators of a feed linking to its dataset are the dataset's, its page is read every time since the
     // link depends on the date, like the current AIRAC cycle
     const bool conditional = _request.datasetUrl.isEmpty();
-    _get(_request.url, conditional ? _request.etag : QString(), conditional ? _request.lastModified : QString(),
-         [this](const GeoZoneDownloader::Result &download) { _feedReceived(download); });
+    GeoZoneDownloader::Options options;
+    if (!_request.service.isEmpty()) {
+        options = _request.service.downloadOptions(_request.area, _request.time, _request.secret, _accessToken);
+    }
+    _get(_requestUrl, conditional ? _request.etag : QString(), conditional ? _request.lastModified : QString(),
+         [this](const GeoZoneDownloader::Result &download) { _feedReceived(download); }, options);
+}
+
+GeoZoneDownloader::Options GeoZoneFeedFetch::_optionsFor(const QString &url) const
+{
+    if (_request.service.isEmpty()) {
+        return GeoZoneDownloader::Options();
+    }
+    const QUrl feedUrl(_requestUrl);
+    const QUrl other(url);
+    if ((other.scheme() != feedUrl.scheme()) || (other.host().compare(feedUrl.host(), Qt::CaseInsensitive) != 0) || (other.port(-1) != feedUrl.port(-1))) {
+        return GeoZoneDownloader::Options();
+    }
+    GeoZoneDownloader::Options options = _request.service.downloadOptions(_request.area, _request.time, _request.secret, _accessToken);
+    options.post = false;
+    options.body.clear();
+    options.contentType.clear();
+    return options;
 }
 
 void GeoZoneFeedFetch::cancel()
@@ -65,7 +141,7 @@ void GeoZoneFeedFetch::cancel()
     _result = Result();
 }
 
-void GeoZoneFeedFetch::_get(const QString &url, const QString &etag, const QString &lastModified, Handler handler)
+void GeoZoneFeedFetch::_get(const QString &url, const QString &etag, const QString &lastModified, Handler handler, const GeoZoneDownloader::Options &options)
 {
     if (!_downloader) {
         _finish(Result::Status::Failed, tr("The download was canceled."));
@@ -79,7 +155,7 @@ void GeoZoneFeedFetch::_get(const QString &url, const QString &etag, const QStri
             return;
         }
         handler(download);
-    }, _tag);
+    }, _tag, options);
 }
 
 void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
@@ -90,13 +166,24 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
         return;
     }
     if (download.status != GeoZoneDownloader::Result::Status::Ok) {
-        _finish(Result::Status::Failed, download.errorString);
+        // A token of an earlier fetch may have been revoked or expired early
+        if ((download.statusCode == 401) && (_request.service.auth == GeoZoneService::Auth::OAuth2ClientCredentials) && !_tokenRequested) {
+            _requestToken();
+            return;
+        }
+        QString errorString = download.errorString;
+        if (((download.statusCode == 401) || (download.statusCode == 403)) && _request.service.needsSecret()) {
+            errorString = tr("The service refused the credentials (status %1).").arg(download.statusCode);
+        } else if (download.statusCode == 413) {
+            errorString = tr("The service refused the area as too large.");
+        }
+        _finish(Result::Status::Failed, errorString);
         return;
     }
 
     // Pages linking to the current dataset, like the AIRAC cycles of NATS, are followed. Pages are small, datasets aren't read here.
     const QByteArray page = GeoZoneDownloader::readFile(download.filePath, maxPageBytes);
-    const QString linkedUrl = GeoZoneProviders::datasetLink(_request.url, page, GeoZoneEnvironment::currentDateTimeUtc().date());
+    const QString linkedUrl = GeoZoneProviders::datasetLink(_requestUrl, page, GeoZoneEnvironment::currentDateTimeUtc().date());
     if (linkedUrl.isEmpty()) {
         _documentReceived(download);
         return;
@@ -109,7 +196,7 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
     // The dataset already downloaded is confirmed by its validators
     const bool known = (_request.datasetUrl == linkedUrl);
     _get(linkedUrl, known ? _request.etag : QString(), known ? _request.lastModified : QString(),
-         [this](const GeoZoneDownloader::Result &dataset) { _datasetReceived(dataset); });
+         [this](const GeoZoneDownloader::Result &dataset) { _datasetReceived(dataset); }, _optionsFor(linkedUrl));
 }
 
 void GeoZoneFeedFetch::_datasetReceived(const GeoZoneDownloader::Result &download)
@@ -147,7 +234,7 @@ bool GeoZoneFeedFetch::_startPages()
     const QByteArray tail = file.read(countBytes);
     file.close();
     const GeoZoneProviders::WfsCounts counts = GeoZoneProviders::wfsCounts(head, tail);
-    if ((counts.returned <= 0) || (counts.matched <= counts.returned) || GeoZoneProviders::wfsPageUrl(_request.url, counts.returned).isEmpty()) {
+    if ((counts.returned <= 0) || (counts.matched <= counts.returned) || GeoZoneProviders::wfsPageUrl(_requestUrl, counts.returned).isEmpty()) {
         return false;
     }
 
@@ -166,7 +253,7 @@ void GeoZoneFeedFetch::_fetchNextPage()
         return;
     }
 
-    const QString pageUrl = GeoZoneProviders::wfsPageUrl(_request.url, _pageSize * _nextPage);
+    const QString pageUrl = GeoZoneProviders::wfsPageUrl(_requestUrl, _pageSize * _nextPage);
     _get(pageUrl, QString(), QString(), [this](const GeoZoneDownloader::Result &page) {
         if (page.status == GeoZoneDownloader::Result::Status::Ok) {
             _result.pagePaths.append(page.filePath);
@@ -177,7 +264,7 @@ void GeoZoneFeedFetch::_fetchNextPage()
             _nextPage = _pageCount + 1;
         }
         _fetchNextPage();
-    });
+    }, _optionsFor(pageUrl));
 }
 
 void GeoZoneFeedFetch::_fetchCompanions()
@@ -186,7 +273,7 @@ void GeoZoneFeedFetch::_fetchCompanions()
     // Feeds with companions, like the FAA TFR list, are small enough to read here
     const QList<const GeoZoneFormat*> &formats = _request.formats.isEmpty() ? GeoZoneFormat::formats() : _request.formats;
     const QList<GeoZoneFormat::CompanionRequest> requests = GeoZoneFormat::companionRequestsOf(
-        QUrl(_request.url), GeoZoneDownloader::readFile(_result.filePath, maxPageBytes), _request.formatHint, _document, formats);
+        QUrl(_requestUrl), GeoZoneDownloader::readFile(_result.filePath, maxPageBytes), _request.formatHint, _document, formats);
     if (requests.isEmpty()) {
         _finish(Result::Status::Ready);
         return;
@@ -225,7 +312,7 @@ void GeoZoneFeedFetch::_fetchCompanions()
             if (--_remainingCompanions == 0) {
                 _companionsReceived();
             }
-        });
+        }, _optionsFor(companion.url));
     }
 }
 

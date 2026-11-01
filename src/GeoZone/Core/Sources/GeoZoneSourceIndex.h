@@ -11,6 +11,7 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QHash>
+#include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
@@ -18,7 +19,8 @@
 #include "GeoZoneStore.h"
 
 /// The persisted index of the geozone sources: for each source kept in the GeoZoneStore, its origin, the name of its
-/// stored copy, its dates, HTTP validators and whether it is turned on. Reads the index of earlier versions, keeps an
+/// stored copy, its dates, HTTP validators, how its service is requested and whether it is turned on. Secrets aren't
+/// kept here, see GeoZoneCredentials. Reads the index of earlier versions, keeps an
 /// index written by a newer version untouched, and writes the entries in the order of the sources.
 class GeoZoneSourceIndex
 {
@@ -35,6 +37,7 @@ public:
         QString datasetUrl;     ///< Dataset the feed's page linked to, whose download the validators belong to
         qint64 maxAgeSecs = -1; ///< How long the server said the data stays current, negative when it didn't
         QDateTime checkedAt;    ///< When the server last confirmed the stored copy current, at least loadedAt
+        QJsonObject service;    ///< See GeoZoneService::toJson, empty for plain feeds and files. Holds no secrets.
     };
 
     enum class Status : quint8 {
@@ -74,6 +77,8 @@ public:
     void remove(const QString &key);
     /// @return true if the source has an entry, which was changed
     bool setEnabled(const QString &key, bool enabled);
+    /// @return true if the source has an entry, which was changed
+    bool setService(const QString &key, const QJsonObject &service);
     /// Records that the server confirmed the stored copy current, when the validators are those of the copy
     /// @return true if the entry was changed
     bool confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt, qint64 maxAgeSecs);
