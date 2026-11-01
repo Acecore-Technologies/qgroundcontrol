@@ -23,4 +23,5 @@ private slots:
     void _testMissionCrossedZones();
     void _testMockLinkVehicle();
     void _testReturnParameterChanges();
+    void _testGuidedReturnLandMission();
 };

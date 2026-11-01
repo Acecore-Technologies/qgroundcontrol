@@ -130,6 +130,21 @@ QStringList spiedAlerts(const QSignalSpy &spy)
     return alerts;
 }
 
+/// @return The zone feature with its vertical limits in meters above ground
+QJsonObject withHeightLimits(QJsonObject feature, double lower, double upper)
+{
+    QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = lower;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
+    layer[QStringLiteral("upperLimit")] = upper;
+    layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AGL");
+    geometry[0] = layer;
+    feature[QStringLiteral("geometry")] = geometry;
+    return feature;
+}
+
 void restoreSettingDefaults()
 {
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
@@ -390,5 +405,91 @@ void GeoZoneFlightTest::_testReturnParameterChanges()
     QTRY_VERIFY(check.contingencyZones().isEmpty());
 
     check.setMissionController(nullptr);
+    _disconnectMockLink();
+}
+
+void GeoZoneFlightTest::_testGuidedReturnLandMission()
+{
+    ScopedEnvironment environment;
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->homePosition().isValid() && vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
+    const QGeoCoordinate home = vehicle->homePosition();
+    environment.setTerrain(home.altitude());
+    const auto offset = [&home](double north, double east) {
+        return home.atDistanceAndAzimuth(std::hypot(north, east), qRadiansToDegrees(std::atan2(east, north)));
+    };
+
+    // Around home from the ground and higher up, and a zone 2 km east at all altitudes
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        withHeightLimits(_circleFeature(QStringLiteral("UNDER"), QStringLiteral("PROHIBITED"), home, 300), 0, 150),
+        withHeightLimits(_circleFeature(QStringLiteral("ABOVE"), QStringLiteral("PROHIBITED"), home, 100), 50, 1000),
+        _circleFeature(QStringLiteral("EAST"), QStringLiteral("PROHIBITED"), offset(0, 2000), 300),
+    }), errorString), qPrintable(errorString));
+    GeoZoneMonitor monitor(&manager);
+    GeoZoneGuidedCheck *const check = monitor.guidedCheck();
+
+    // A mission 100 m high through the zone east
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    QTRY_COMPARE(masterController.managerVehicle(), vehicle);
+    MissionController *const missionController = masterController.missionController();
+    missionController->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(home);
+    for (const QGeoCoordinate &coordinate : { offset(1000, 0), offset(0, 2000), offset(0, -1000), offset(-1000, 0) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->altitude()->setRawValue(100);
+    }
+    QTRY_COMPARE(GeoZoneMissionPath::fromMission(missionController).segments().count(), 4);
+    const GeoZoneReturnModel::Destinations destinations = GeoZoneGuidedCheck::returnDestinations(vehicle, missionController);
+    QVERIFY(destinations.home.coordinate.distanceTo(home) < 0.01);
+    QVERIFY(destinations.firstWaypoint.coordinate.distanceTo(offset(1000, 0)) < 0.01);
+
+    // On the ground in the zone below, a resumed mission takes off through the zone above to the item
+    QVERIFY(check->landWarning(vehicle).isEmpty());
+    QVERIFY(check->returnWarning(vehicle, missionController).isEmpty());
+    const QString resumeEast = check->missionWarning(vehicle, missionController, 2, true);
+    QVERIFY2(resumeEast.startsWith(QStringLiteral("The mission from item 2")) && resumeEast.contains(QStringLiteral("EAST")), qPrintable(resumeEast));
+    const QString resumeWest = check->missionWarning(vehicle, missionController, 3, true);
+    QVERIFY2(resumeWest.contains(QStringLiteral("ABOVE")) && !resumeWest.contains(QStringLiteral("EAST")), qPrintable(resumeWest));
+    QVERIFY(check->missionWarning(vehicle, missionController, 3, false).isEmpty());
+
+    // 300 m up, landing or returning to launch descends into the zone below
+    vehicle->sendMavCommand(vehicle->defaultComponentId(), MAV_CMD_NAV_TAKEOFF, false /* showError */, 0, 0, 0, 0, 0, 0, 300);
+    QTRY_COMPARE_WITH_TIMEOUT(vehicle->altitudeRelative()->rawValue().toInt(), 300, 30000);
+    const QString landWarning = check->landWarning(vehicle);
+    QVERIFY2(landWarning.startsWith(QStringLiteral("The landing")) && landWarning.contains(QStringLiteral("UNDER")) && !landWarning.contains(QStringLiteral("ABOVE")),
+             qPrintable(landWarning));
+    const QString returnWarning = check->returnWarning(vehicle, missionController);
+    QVERIFY2(returnWarning.startsWith(QStringLiteral("The return to launch")) && returnWarning.contains(QStringLiteral("UNDER")), qPrintable(returnWarning));
+    QVERIFY(check->returnWarning(nullptr, missionController).isEmpty());
+
+    // The current item set: from the vehicle to the item and on along the mission
+    QVERIFY2(check->missionWarning(vehicle, missionController, 2).contains(QStringLiteral("EAST")), qPrintable(check->missionWarning(vehicle, missionController, 2)));
+    QVERIFY(check->missionWarning(vehicle, missionController, 3).isEmpty());
+    QVERIFY(check->missionWarning(vehicle, missionController, 9).isEmpty());
+
+    // Returns along the mission: on to its end, or back to the first waypoint and home
+    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
+    GeoZoneReturnModel::Start start;
+    start.position = monitor.vehiclePosition(vehicle, vehicle->coordinate());
+    GeoZoneReturnModel::Path forward;
+    forward.destination = GeoZoneReturnModel::Destination::MissionForward;
+    QVERIFY(check->pathsWarning(GeoZoneGuidedCheck::returnPaths(forward, start, destinations, missionPath, 2, home.altitude())).contains(QStringLiteral("EAST")));
+    QVERIFY(check->pathsWarning(GeoZoneGuidedCheck::returnPaths(forward, start, destinations, missionPath, 3, home.altitude())).isEmpty());
+    GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(vehicle);
+    parameters.returnType = 2;
+    const GeoZoneReturnModel::Path reverse = GeoZoneReturnModel::returnPath(parameters, destinations, start);
+    QCOMPARE(static_cast<int>(reverse.destination), static_cast<int>(GeoZoneReturnModel::Destination::ReverseMission));
+    QVERIFY(check->pathsWarning(GeoZoneGuidedCheck::returnPaths(reverse, start, destinations, missionPath, 4, home.altitude())).contains(QStringLiteral("EAST")));
+    QVERIFY(!check->pathsWarning(GeoZoneGuidedCheck::returnPaths(reverse, start, destinations, missionPath, 2, home.altitude())).contains(QStringLiteral("EAST")));
+
     _disconnectMockLink();
 }

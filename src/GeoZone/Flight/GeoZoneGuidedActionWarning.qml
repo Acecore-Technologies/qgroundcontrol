@@ -15,8 +15,9 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 
 /// Geozone warning in the confirmation of a guided action, GuidedActionConfirm.qml: the zones a go to, orbit, altitude
-/// change or takeoff would enter, following the value slider, and the check of the mission on the vehicle when starting
-/// it. Empty and hidden for other actions or without zones.
+/// change or takeoff would enter, following the value slider, those a return to launch or a landing would enter, those
+/// of the mission flown from the item set as current or resumed at, and the check of the mission on the vehicle when
+/// starting it. Empty and hidden for other actions or without zones.
 QGCLabel {
     id:                     control
     Layout.fillWidth:       true
@@ -59,6 +60,16 @@ QGCLabel {
             return check.altitudeWarning(_vehicle, sliderMeters)
         case controller.actionTakeoff:
             return _vehicle.guidedTakeoffSupported ? check.altitudeWarning(_vehicle, sliderMeters) : ""
+        case controller.actionRTL:
+            // Smart RTL retraces the path flown
+            return (confirmDialog.optionText !== "" && confirmDialog.optionChecked) ? "" : check.returnWarning(_vehicle, _missionController)
+        case controller.actionLand:
+            return check.landWarning(_vehicle)
+        case controller.actionSetWaypoint:
+            return check.missionWarning(_vehicle, _missionController, actionData, false)
+        case controller.actionResumeMission:
+        case controller.actionResumeMissionUploadFail:
+            return _missionController ? check.missionWarning(_vehicle, _missionController, _missionController.resumeMissionIndex, true) : ""
         case controller.actionStartMission:
         case controller.actionContinueMission:
             return [ _vehicleMissionCheck.warningText, _vehicleMissionCheck.fenceText ].filter(text => text !== "").join("\n")
