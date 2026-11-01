@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZonePolicy.h"
+#include "GeoZoneAuthorisations.h"
 
 namespace {
 
@@ -67,9 +68,36 @@ GeoZonePolicy GeoZonePolicy::activeDuring(const QDateTime &start, const QDateTim
 
 GeoZonePolicy GeoZonePolicy::anyTime() const
 {
-    GeoZonePolicy policy;
-    policy._restrictions = _restrictions;
+    GeoZonePolicy policy = *this;
+    policy._schedule = Schedule::Any;
+    policy._start = QDateTime();
+    policy._end = QDateTime();
     return policy;
+}
+
+GeoZonePolicy GeoZonePolicy::excludingAuthorised(const GeoZoneAuthorisations *authorisations) const
+{
+    GeoZonePolicy policy = *this;
+    policy._authorisations = authorisations;
+    return policy;
+}
+
+bool GeoZonePolicy::authorised(const GeoZone *zone) const
+{
+    const GeoZoneAuthorisation *const authorisation = _authorisations ? _authorisations->find(zone) : nullptr;
+    if (!authorisation) {
+        return false;
+    }
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    switch (_schedule) {
+    case Schedule::Any:
+        return !authorisation->expired(now);
+    case Schedule::Current:
+        return authorisation->covers(now, now);
+    case Schedule::Planned:
+        return authorisation->covers(_start, _end.isValid() ? _end : _start);
+    }
+    return false;
 }
 
 bool GeoZonePolicy::acceptsSchedule(const GeoZone *zone) const

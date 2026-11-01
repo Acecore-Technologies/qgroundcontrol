@@ -17,7 +17,8 @@
 class GeoZoneMonitor;
 
 /// Checks of the guided commands of the Fly View, each returning a warning naming the zones accepted by
-/// GeoZonePolicy::alerts which the vehicle would enter, or an empty string. Zones the vehicle is in are left out.
+/// GeoZonePolicy::alerts which the vehicle would enter, or an empty string. Zones the vehicle is in and zones
+/// authorised now are left out.
 /// Limits above ground use the terrain along the path from GeoZoneTerrain where it is loaded, and the terrain below
 /// the vehicle elsewhere, see GeoZoneMonitor::vehiclePosition.
 class GeoZoneGuidedCheck : public QObject

@@ -197,6 +197,95 @@ void GeoZonePlanningTest::_testMissionCheck()
     QVERIFY(check.crossedZones().isEmpty());
 }
 
+void GeoZonePlanningTest::_testAuthorisations()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString storage = dir.filePath(QStringLiteral("storage"));
+    GeoZoneManager manager(storage);
+    QString errorString;
+    QJsonObject controlZone = _circleFeature(QStringLiteral("CTR"), QStringLiteral("REQ_AUTHORISATION"), center, 300);
+    controlZone[QStringLiteral("country")] = QStringLiteral("CHE");
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ controlZone }), errorString), qPrintable(errorString));
+    GeoZone *const zone = manager.zoneList().constFirst();
+    GeoZoneAuthorisations *const authorisations = manager.authorisations();
+    const QVariant zoneInfo = QVariant::fromValue(GeoZoneInfo(zone));
+    QCOMPARE(GeoZoneAuthorisations::zoneKey(zone), QStringLiteral("CHE/CTR"));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
+    GeoZoneMissionCheck check(&manager);
+    check.setMissionController(missionController);
+    QTRY_COMPARE(check.crossedZones().count(), 1);
+
+    // Dates are local days, the last one included
+    QVERIFY(!authorisations->authorise(zoneInfo, QString(), QStringLiteral("2026-13-40"), QString()).isEmpty());
+    QVERIFY(!authorisations->authorise(zoneInfo, QString(), QStringLiteral("2026-11-02"), QStringLiteral("2026-11-01")).isEmpty());
+    QCOMPARE(authorisations->count(), 0);
+
+    // An authorisation without end is listed for information instead of warned about
+    const QDate today = QDate::currentDate();
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral(" P-123 "), QString(), QString()).isEmpty());
+    QCOMPARE(authorisations->count(), 1);
+    QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("permit")].toString(), QStringLiteral("P-123"));
+    QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString(), QStringLiteral("Valid"));
+    QTRY_VERIFY(check.crossedZones().isEmpty());
+    QCOMPARE(check.authorisedZones().count(), 1);
+    QVERIFY(check.infoText().contains(QStringLiteral("Authorised: CTR.")));
+
+    // Alerts and guided commands leave the zone out while authorised
+    GeoZoneMonitor monitor(&manager);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 0);
+    const QList<GeoZone::Position> path = { { center.atDistanceAndAzimuth(1000, 270) }, { center.atDistanceAndAzimuth(1000, 90) } };
+    QVERIFY(monitor.guidedCheck()->pathWarning(path).isEmpty());
+
+    // Expired authorisations don't count
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-122"), QString(), today.addDays(-1).toString(Qt::ISODate)).isEmpty());
+    QCOMPARE(authorisations->count(), 1);
+    QVERIFY(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString().startsWith(QStringLiteral("Expired")));
+    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QVERIFY(!monitor.guidedCheck()->pathWarning(path).isEmpty());
+    monitor.evaluate({ center });
+    QCOMPARE(alertSpy.count(), 1);
+
+    // An authorisation from tomorrow covers a flight planned then, not one now
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-124"), today.addDays(1).toString(Qt::ISODate), today.addDays(3).toString(Qt::ISODate)).isEmpty());
+    manager.setPlannedStart(QDateTime(today, QTime(12, 0)));
+    QTRY_COMPARE(check.crossedZones().count(), 1);
+    manager.setPlannedStart(QDateTime(today.addDays(2), QTime(12, 0)));
+    QTRY_VERIFY(check.crossedZones().isEmpty());
+
+    // Plans entering the zone keep the planned start and the authorisation
+    QJsonObject planJson;
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    const QJsonObject geoZones = planJson[QString(GeoZonePlanData::jsonKey)].toObject();
+    QCOMPARE(QDateTime::fromString(geoZones[QStringLiteral("plannedStart")].toString(), Qt::ISODate), QDateTime(today.addDays(2), QTime(12, 0)).toUTC());
+    QCOMPARE(geoZones[QStringLiteral("authorisations")].toArray().count(), 1);
+    QCOMPARE(geoZones[QStringLiteral("authorisations")].toArray()[0].toObject()[QStringLiteral("permit")].toString(), QStringLiteral("P-124"));
+
+    authorisations->revoke(QStringLiteral("CHE/CTR"));
+    manager.clearPlannedStart();
+    QCOMPARE(authorisations->count(), 0);
+    GeoZonePlanData::load(planJson, &manager);
+    QCOMPARE(authorisations->count(), 1);
+    QCOMPARE(manager.plannedStart(), QDateTime(today.addDays(2), QTime(12, 0)).toUTC());
+
+    // Kept across restarts next to the stored sources
+    GeoZoneManager restarted(storage);
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QCOMPARE(restarted.zoneCount(), 1);
+    QCOMPARE(restarted.authorisations()->count(), 1);
+    QVERIFY(restarted.authorisations()->find(restarted.zoneList().constFirst()));
+    manager.clearPlannedStart();
+}
+
 void GeoZonePlanningTest::_testRoutePlanner()
 {
     const QGeoCoordinate center(47, 8);

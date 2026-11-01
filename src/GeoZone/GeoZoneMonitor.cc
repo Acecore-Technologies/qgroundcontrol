@@ -336,8 +336,10 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
     limits.verticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
     limits.time = settings->approachTime()->rawValue().toDouble();
 
+    // Authorised zones don't alert while the authorisation is valid
+    const GeoZonePolicy policy = GeoZonePolicy::alerts().excludingAuthorised(_manager->authorisations());
     Tracker &tracker = _trackers[vehicleId];
-    const GeoZoneAlertTracker::Update update = tracker.alerts.update(_manager->catalog(), position, velocity, limits);
+    const GeoZoneAlertTracker::Update update = tracker.alerts.update(_manager->catalog(), policy, position, velocity, limits);
     if (update.nearby != tracker.nearby) {
         tracker.nearby = update.nearby;
         if (vehicleId == _activeVehicleId) {
@@ -347,7 +349,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
 
     // Zones above and below are only shown for the active vehicle
     if (vehicleId == _activeVehicleId) {
-        const QList<GeoZoneVerticalBand> bands = GeoZoneVerticalBand::at(_manager->catalog(), position);
+        const QList<GeoZoneVerticalBand> bands = GeoZoneVerticalBand::at(_manager->catalog(), policy, position);
         const bool altitudeChanged = (std::isnan(position.altitudeAMSL) != std::isnan(tracker.position.altitudeAMSL)) ||
                                      (std::abs(position.altitudeAMSL - tracker.position.altitudeAMSL) >= 0.5) ||
                                      (std::isnan(position.terrainAMSL) != std::isnan(tracker.position.terrainAMSL)) ||

@@ -27,7 +27,8 @@ class MissionController;
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
 /// altitudes. U-space airspaces and no restriction zones are reported separately, they never hide
 /// restricted zones. With a planned start in GeoZoneManager, only zones active at some time during the mission
-/// are reported, otherwise zone schedules are not considered since the mission may be flown at any time.
+/// are reported, otherwise zone schedules are not considered since the mission may be flown at any time. Zones
+/// authorised for the whole flight, or from now on without a planned start, are listed as information.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -40,6 +41,7 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(QVariantList         uSpaceZones         READ uSpaceZonesInfo                                NOTIFY crossedZonesChanged FINAL)     ///< U-space airspaces the mission enters
     Q_PROPERTY(QVariantList         permittedZones      READ permittedZonesInfo                             NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
+    Q_PROPERTY(QVariantList         authorisedZones     READ authorisedZonesInfo                            NOTIFY crossedZonesChanged FINAL)     ///< Zones entered with an authorisation covering the flight, see GeoZoneAuthorisations
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(int                  inactiveZoneCount   READ inactiveZoneCount                              NOTIFY crossedZonesChanged FINAL)     ///< Zones entered which aren't active during the planned flight
     Q_PROPERTY(bool                 flightNow           READ flightNow          WRITE setFlightNow          NOTIFY flightNowChanged FINAL)        ///< Checks a flight starting now instead of at the planned start, like a mission on the vehicle
@@ -67,6 +69,8 @@ public:
     QVariantList uSpaceZonesInfo() const { return GeoZoneInfo::toVariantList(_uSpaceZones); }
     const QList<GeoZone*> &permittedZones() const { return _permittedZones; }
     QVariantList permittedZonesInfo() const { return GeoZoneInfo::toVariantList(_permittedZones); }
+    const QList<GeoZone*> &authorisedZones() const { return _authorisedZones; }
+    QVariantList authorisedZonesInfo() const { return GeoZoneInfo::toVariantList(_authorisedZones); }
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
@@ -121,6 +125,7 @@ private:
     QList<GeoZone*> _crossedZones;
     QList<GeoZone*> _uSpaceZones;
     QList<GeoZone*> _permittedZones;
+    QList<GeoZone*> _authorisedZones;
     int _inactiveZoneCount = 0;
     bool _flightNow = false;
     QPointer<GeoFenceController> _geoFenceController;

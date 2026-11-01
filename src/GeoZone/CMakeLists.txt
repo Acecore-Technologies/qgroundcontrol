@@ -6,6 +6,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneAlertLog.h
         GeoZoneAlertTracker.cc
         GeoZoneAlertTracker.h
+        GeoZoneAuthorisations.cc
+        GeoZoneAuthorisations.h
         GeoZoneCatalog.cc
         GeoZoneCatalog.h
         GeoZoneDownloader.cc
@@ -38,6 +40,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneParser.h
         GeoZoneParserUtils.cc
         GeoZoneParserUtils.h
+        GeoZonePlanData.cc
+        GeoZonePlanData.h
         GeoZonePolicy.cc
         GeoZonePolicy.h
         GeoZoneProfile.cc
@@ -81,6 +85,7 @@ qt_add_qml_module(GeoZoneModule
     QML_FILES
         GeoZoneAlertPopup.qml
         GeoZoneAltitudeStrip.qml
+        GeoZoneAuthorisationsPanel.qml
         GeoZoneFenceImportDialog.qml
         GeoZoneIndicator.qml
         GeoZoneInfoDialog.qml

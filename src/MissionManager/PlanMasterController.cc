@@ -23,6 +23,7 @@
 #include "BlankPlanCreator.h"
 #include "QmlObjectListModel.h"
 #include "GeoFenceManager.h"
+#include "GeoZonePlanData.h"
 #include "RallyPointManager.h"
 #include "QGCLoggingCategory.h"
 
@@ -393,6 +394,7 @@ void PlanMasterController::loadFromFile(const QString& filename)
                 !_rallyPointController.load(json[kJsonRallyPointsObjectKey].toObject(), errorString)) {
             qgcApp()->showAppMessage(errorMessage.arg(errorString));
         } else {
+            GeoZonePlanData::load(json);
             //-- Allow plugins to post process the load
             QGCCorePlugin::instance()->postLoadFromJson(this, json);
             success = true;
@@ -429,6 +431,7 @@ QJsonDocument PlanMasterController::saveToJson()
     planJson[kJsonMissionObjectKey] = missionJson;
     planJson[kJsonGeoFenceObjectKey] = fenceJson;
     planJson[kJsonRallyPointsObjectKey] = rallyJson;
+    GeoZonePlanData::save(this, planJson);
     QGCCorePlugin::instance()->postSaveToJson(this, planJson);
     return QJsonDocument(planJson);
 }

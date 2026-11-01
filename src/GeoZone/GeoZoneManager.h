@@ -25,6 +25,7 @@
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 
+class GeoZoneAuthorisations;
 class GeoZoneShape;
 class GeoZoneSource;
 class QmlObjectListModel;
@@ -37,9 +38,11 @@ class GeoZoneManager : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("QmlObjectListModel.h")
     Q_MOC_INCLUDE("GeoZoneSource.h")
+    Q_MOC_INCLUDE("GeoZoneAuthorisations.h")
 
     Q_PROPERTY(int                  zoneCount           READ zoneCount          NOTIFY zoneCountChanged FINAL)            ///< Zones of all sources
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
+    Q_PROPERTY(GeoZoneAuthorisations* authorisations    READ authorisations     CONSTANT FINAL)                           ///< Zones the operator is authorised to fly in
     Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
     Q_PROPERTY(bool                 visible             READ visible            WRITE setVisible NOTIFY visibleChanged FINAL)
     Q_PROPERTY(int                  hiddenRestrictions  READ hiddenRestrictions NOTIFY hiddenRestrictionsChanged FINAL)    ///< Bit mask of the restrictions not drawn on maps, 1 << GeoZone::Restriction
@@ -119,6 +122,7 @@ public:
     QmlObjectListModel *sources() const { return _repository->sources(); }
     GeoZoneSource *source(const QString &key) const { return _repository->source(key); }
     GeoZoneSourceRepository *repository() const { return _repository; }
+    GeoZoneAuthorisations *authorisations() const { return _authorisations; }
     /// Polygons and circles of all zones for map display
     const QList<GeoZoneShape*> &shapes() const { return _catalog.shapes(); }
     /// @return Shapes of the zones whose bounding box intersects the bounds in degrees
@@ -181,6 +185,7 @@ private:
     void _endZonesChange(GeoZoneSource *source);
 
     GeoZoneSourceRepository *_repository = nullptr;
+    GeoZoneAuthorisations *_authorisations = nullptr;
     GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
     QDateTime _plannedStart;

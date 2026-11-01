@@ -18,8 +18,9 @@
 #include <cmath>
 
 class GeoZoneCatalog;
+class GeoZonePolicy;
 
-/// Approach and entry states of the zones around one vehicle. Each zone accepted by GeoZonePolicy::alerts alerts once
+/// Approach and entry states of the zones around one vehicle. Each zone alerts once
 /// when the vehicle comes near it, by distance or by its predicted entry, and once when the vehicle enters it, with
 /// hysteresis so that alerts don't repeat while the vehicle stays at a limit. States are kept by GeoZone::key, so
 /// reloading a source doesn't repeat alerts.
@@ -70,9 +71,10 @@ public:
         QList<Alert> alerts;    ///< The most restrictive first, entries before approaches
     };
 
-    /// Updates the states of the zones for a position of the vehicle. Unknown altitudes are inside all vertical
-    /// limits. With a valid velocity, zones the vehicle would enter within the approach time are near too.
-    Update update(const GeoZoneCatalog &catalog, const GeoZone::Position &position, const Velocity &velocity, const Limits &limits);
+    /// Updates the states of the zones accepted by the policy, usually GeoZonePolicy::alerts, for a position of the
+    /// vehicle. Unknown altitudes are inside all vertical limits. With a valid velocity, zones the vehicle would enter
+    /// within the approach time are near too.
+    Update update(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position, const Velocity &velocity, const Limits &limits);
 
     /// Forgets the states, so that the alerts repeat
     void reset() { _states.clear(); }
@@ -111,7 +113,7 @@ private:
     QList<Sample> _samples;     ///< Oldest first
 };
 
-/// Volume of an alerting zone above or below a position
+/// Volume of a zone above or below a position
 struct GeoZoneVerticalBand
 {
     GeoZone *zone = nullptr;
@@ -124,6 +126,6 @@ struct GeoZoneVerticalBand
         return (a.zone == b.zone) && same(a.floor, b.floor) && same(a.ceiling, b.ceiling);
     }
 
-    /// @return Volumes of the zones accepted by GeoZonePolicy::alerts whose horizontal projection contains the position
-    static QList<GeoZoneVerticalBand> at(const GeoZoneCatalog &catalog, const GeoZone::Position &position);
+    /// @return Volumes of the zones accepted by the policy whose horizontal projection contains the position
+    static QList<GeoZoneVerticalBand> at(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position);
 };

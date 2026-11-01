@@ -25,7 +25,8 @@ GeoZoneGuidedCheck::GeoZoneGuidedCheck(GeoZoneMonitor *monitor)
 QString GeoZoneGuidedCheck::pathWarning(const QList<GeoZone::Position> &path) const
 {
     QList<GeoZone*> zones;
-    for (const GeoZoneCatalog::PathHit &hit : _monitor->manager()->catalog().pathHits(path, GeoZonePolicy::alerts())) {
+    GeoZoneManager *const manager = _monitor->manager();
+    for (const GeoZoneCatalog::PathHit &hit : manager->catalog().pathHits(path, GeoZonePolicy::alerts().excludingAuthorised(manager->authorisations()))) {
         // Zones the vehicle is already in were alerted when it entered them
         if ((hit.entry.segment > 0) || (hit.entry.fraction > 0)) {
             zones.append(hit.zone);

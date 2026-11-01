@@ -17,6 +17,7 @@
 #include "GeoZoneProfile.h"
 #include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
@@ -50,6 +51,7 @@ QString defaultStorageDir()
 GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     : QObject(parent)
     , _repository(new GeoZoneSourceRepository(storageDir.isEmpty() ? defaultStorageDir() : storageDir, this))
+    , _authorisations(new GeoZoneAuthorisations(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
     , _activeTimer(new QTimer(this))
 {
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
@@ -65,6 +67,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAdded, this, &GeoZoneManager::sourceAdded);
     (void) connect(_repository, &GeoZoneSourceRepository::loadFailed, this, &GeoZoneManager::loadFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::storageFailed, this, &GeoZoneManager::storageFailed);
+    (void) connect(_authorisations, &GeoZoneAuthorisations::saveFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::outdatedDataFound, this, &GeoZoneManager::outdatedDataFound);
     (void) connect(_repository, &GeoZoneSourceRepository::busyChanged, this, &GeoZoneManager::busyChanged);
     (void) connect(_repository, &GeoZoneSourceRepository::progressChanged, this, &GeoZoneManager::progressChanged);
@@ -85,6 +88,7 @@ void GeoZoneManager::registerQmlTypes()
     (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, "QGroundControl.GeoZone", 1, 0, "GeoZone", "Enums only");
     (void) qmlRegisterUncreatableType<GeoZoneMonitor>("QGroundControl.GeoZone", 1, 0, "GeoZoneMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneGuidedCheck", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>("QGroundControl.GeoZone", 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapModel");
     (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
     (void) qmlRegisterType<GeoZoneFenceImporter>("QGroundControl.GeoZone", 1, 0, "GeoZoneFenceImporter");

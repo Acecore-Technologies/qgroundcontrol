@@ -18,6 +18,7 @@ class GeoZonePlanningTest : public UnitTest
 private slots:
     void _testPathHits();
     void _testMissionCheck();
+    void _testAuthorisations();
     void _testRoutePlanner();
     void _testProfileBands();
     void _testGeoFenceImport();

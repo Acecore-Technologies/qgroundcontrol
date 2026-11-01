@@ -32,6 +32,16 @@ SettingsPage {
 
     SettingsGroupLayout {
         Layout.fillWidth:   true
+        heading:            qsTr("Authorisations")
+        headingDescription: qsTr("Zones you are authorised to fly in are left out of the mission check, flight alerts and guided command checks while the authorisation is valid.")
+
+        GeoZoneAuthorisationsPanel {
+            Layout.fillWidth: true
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:   true
         heading:            qsTr("Display")
 
         FactCheckBoxSlider {

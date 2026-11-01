@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <limits>
 
-GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &catalog, const GeoZone::Position &position, const Velocity &velocity, const Limits &limits)
+GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position, const Velocity &velocity, const Limits &limits)
 {
     Update update;
     if (!position.coordinate.isValid()) {
@@ -38,7 +38,7 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     }
 
     QSet<QString> nearbyZones;
-    for (GeoZone *zone : catalog.zonesInArea(area, GeoZonePolicy::alerts())) {
+    for (GeoZone *zone : catalog.zonesInArea(area, policy)) {
         const QString &key = zone->key();
         const State previous = _states.value(key, State::Away);
         const double nearLimit = limits.distance + ((previous != State::Away) ? hysteresisDistance : 0);
@@ -158,9 +158,8 @@ GeoZoneAlertTracker::Velocity GeoZoneVelocityEstimator::add(qint64 msecs, const 
     return velocity;
 }
 
-QList<GeoZoneVerticalBand> GeoZoneVerticalBand::at(const GeoZoneCatalog &catalog, const GeoZone::Position &position)
+QList<GeoZoneVerticalBand> GeoZoneVerticalBand::at(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position)
 {
-    const GeoZonePolicy policy = GeoZonePolicy::alerts();
     QList<GeoZoneVerticalBand> bands;
     for (GeoZone *zone : catalog.zonesAt(position.coordinate)) {
         if (!policy.accepts(zone)) {

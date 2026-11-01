@@ -14,8 +14,10 @@
 
 #include "GeoZone.h"
 
-/// Which zones a check applies to, by restriction and schedule. The named policies keep the mission check, routes,
-/// altitude profile, alerts and guided command checks in agreement.
+class GeoZoneAuthorisations;
+
+/// Which zones a check applies to, by restriction, schedule and authorisation. The named policies keep the mission
+/// check, routes, altitude profile, alerts and guided command checks in agreement.
 class GeoZonePolicy
 {
 public:
@@ -51,10 +53,15 @@ public:
     GeoZonePolicy activeDuring(const QDateTime &start, const QDateTime &end = QDateTime()) const;
     /// @return The policy for zones whatever their schedule
     GeoZonePolicy anyTime() const;
+    /// @return The policy leaving out the zones authorised for the schedule: now, during the whole planned period, or
+    ///         at some time from now on whatever the schedule
+    GeoZonePolicy excludingAuthorised(const GeoZoneAuthorisations *authorisations) const;
 
     bool acceptsRestriction(GeoZone::Restriction restriction) const { return (_restrictions & _bit(restriction)) != 0; }
     bool acceptsSchedule(const GeoZone *zone) const;
-    bool accepts(const GeoZone *zone) const { return acceptsRestriction(zone->restriction()) && acceptsSchedule(zone); }
+    /// @return true if an authorisation of the policy covers the zone for its schedule
+    bool authorised(const GeoZone *zone) const;
+    bool accepts(const GeoZone *zone) const { return acceptsRestriction(zone->restriction()) && acceptsSchedule(zone) && !authorised(zone); }
 
     Schedule schedule() const { return _schedule; }
 
@@ -65,4 +72,5 @@ private:
     Schedule _schedule = Schedule::Any;
     QDateTime _start;
     QDateTime _end;
+    const GeoZoneAuthorisations *_authorisations = nullptr;
 };

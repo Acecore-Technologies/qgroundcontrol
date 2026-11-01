@@ -285,7 +285,7 @@ QList<GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position>
 {
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
     QList<GeoZone*> zones;
-    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end))) {
+    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->authorisations()))) {
         zones.append(hit.zone);
     }
     return zones;

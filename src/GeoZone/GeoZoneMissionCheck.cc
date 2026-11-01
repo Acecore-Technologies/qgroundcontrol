@@ -12,6 +12,7 @@
 #include "FlightPathSegment.h"
 #include "GeoFenceController.h"
 #include "GeoZone.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSource.h"
@@ -42,6 +43,7 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMissionCheck::_clearZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
     (void) connect(_manager, &GeoZoneManager::plannedStartChanged, this, &GeoZoneMissionCheck::_scheduleUpdate);
+    (void) connect(_manager->authorisations(), &GeoZoneAuthorisations::changed, this, &GeoZoneMissionCheck::_scheduleUpdate);
 }
 
 MissionController *GeoZoneMissionCheck::missionController() const
@@ -204,6 +206,9 @@ QString GeoZoneMissionCheck::infoText() const
     if (!_uSpaceZones.isEmpty()) {
         lines.append(tr("U-space airspace: %1. A flight authorisation from a U-space service provider is required.").arg(_zoneNames(_uSpaceZones, NameStyle::Name)));
     }
+    if (!_authorisedZones.isEmpty()) {
+        lines.append(tr("Authorised: %1.").arg(_zoneNames(_authorisedZones, NameStyle::Name)));
+    }
     if (!_permittedZones.isEmpty()) {
         lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(_zoneNames(_permittedZones, NameStyle::Name)));
     }
@@ -244,6 +249,7 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
+                              _authorisedZones.removeIf(fromSource) +
                               _unfencedZones.removeIf(fromSource);
     if (removed > 0) {
         emit crossedZonesChanged();
@@ -260,8 +266,9 @@ void GeoZoneMissionCheck::update()
         plannedStart = QDateTime::currentDateTimeUtc();
         plannedEnd = plannedStart.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0)));
     }
-    const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd);
-    const GeoZonePolicy anyTime = policy.anyTime();
+    // Zones authorised during the whole flight are listed for information
+    const GeoZonePolicy policy = GeoZonePolicy::mission(plannedStart, plannedEnd).excludingAuthorised(_manager->authorisations());
+    const GeoZonePolicy anyTime = GeoZonePolicy::mission(QDateTime(), QDateTime());
 
     const GeoZoneCatalog &catalog = _manager->catalog();
     QList<GeoZone*> zones;
@@ -280,6 +287,13 @@ void GeoZoneMissionCheck::update()
         return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
     });
     const int inactiveZoneCount = static_cast<int>(zones.removeIf([&policy](const GeoZone *zone) { return !policy.acceptsSchedule(zone); }));
+    QList<GeoZone*> authorised;
+    for (GeoZone *zone : std::as_const(zones)) {
+        if (policy.authorised(zone)) {
+            authorised.append(zone);
+        }
+    }
+    (void) zones.removeIf([&policy](const GeoZone *zone) { return policy.authorised(zone); });
 
     QList<GeoZone*> crossed;
     QList<GeoZone*> uSpace;
@@ -304,12 +318,13 @@ void GeoZoneMissionCheck::update()
         }
     }
 
-    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (inactiveZoneCount != _inactiveZoneCount) ||
+    if ((crossed != _crossedZones) || (uSpace != _uSpaceZones) || (permitted != _permittedZones) || (authorised != _authorisedZones) || (inactiveZoneCount != _inactiveZoneCount) ||
         (unfenced != _unfencedZones)) {
         _unfencedZones = unfenced;
         _crossedZones = crossed;
         _uSpaceZones = uSpace;
         _permittedZones = permitted;
+        _authorisedZones = authorised;
         _inactiveZoneCount = inactiveZoneCount;
         emit crossedZonesChanged();
     }

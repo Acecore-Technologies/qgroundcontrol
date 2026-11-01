@@ -16,6 +16,8 @@ import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
+import QGroundControl.GeoZone
+import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
 /// Details of a GeoZone loaded from an ED-269 / ED-318 file, with a choice of zones where several overlap.
@@ -30,6 +32,18 @@ QGCPopupDialog {
 
     readonly property real _labelWidth: ScreenTools.defaultFontPixelWidth * 14
     readonly property real _valueWidth: ScreenTools.defaultFontPixelWidth * 45
+    readonly property var  _authorisations: QGroundControl.geoZoneManager.authorisations
+
+    property int _authorisationRevision: 0  ///< Re-reads the authorisation when the authorisations change
+    readonly property var _authorisation: (_authorisationRevision, geoZone ? _authorisations.authorisationOf(geoZone) : ({}))
+    readonly property bool _authorised: _authorisation.zoneKey !== undefined
+
+    QGCPalette { id: qgcPal; colorGroupEnabled: true }
+
+    Connections {
+        target:             root._authorisations
+        function onChanged() { root._authorisationRevision++ }
+    }
 
     onGeoZoneChanged: {
         if (!geoZone) {
@@ -157,6 +171,106 @@ QGCPopupDialog {
             value:      root.geoZone ? root.geoZone.sourceText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
+        }
+
+        // The operator's authorisation stops the warnings and alerts about the zone while it is valid
+        ColumnLayout {
+            Layout.preferredWidth:  root._labelWidth + root._valueWidth
+            spacing:                ScreenTools.defaultFontPixelHeight / 4
+            visible:                root.geoZone && root.geoZone.restriction !== GeoZone.NoRestriction
+
+            InfoRow {
+                label:      qsTr("Authorisation")
+                value:      !root._authorised ? "" : (root._authorisation.permit !== "" ? qsTr("%1, permit %2").arg(root._authorisation.statusText).arg(root._authorisation.permit) :
+                                                                                         root._authorisation.statusText)
+                labelWidth: root._labelWidth
+                valueWidth: root._valueWidth
+            }
+
+            RowLayout {
+                spacing:    ScreenTools.defaultFontPixelWidth
+                visible:    !authorisationForm.visible
+
+                QGCButton {
+                    text:       root._authorised ? qsTr("Edit Authorisation...") : qsTr("Add Authorisation...")
+                    onClicked: {
+                        permitField.text = root._authorised ? root._authorisation.permit : ""
+                        validFromField.text = root._authorised ? root._authorisation.validFrom : ""
+                        validToField.text = root._authorised ? root._authorisation.validTo : ""
+                        authorisationError.text = ""
+                        authorisationForm.visible = true
+                    }
+                }
+
+                QGCButton {
+                    text:       qsTr("Remove Authorisation")
+                    visible:    root._authorised
+                    onClicked:  root._authorisations.revoke(root._authorisation.zoneKey)
+                }
+            }
+
+            GridLayout {
+                id:             authorisationForm
+                columns:        2
+                columnSpacing:  ScreenTools.defaultFontPixelWidth
+                visible:        false
+
+                QGCLabel { text: qsTr("Permit") }
+                QGCTextField {
+                    id:                     permitField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("Number or reference")
+                }
+
+                QGCLabel { text: qsTr("First day") }
+                QGCTextField {
+                    id:                     validFromField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("yyyy-MM-dd, optional")
+                }
+
+                QGCLabel { text: qsTr("Last day") }
+                QGCTextField {
+                    id:                     validToField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("yyyy-MM-dd, optional")
+                }
+
+                QGCLabel {
+                    id:                     authorisationError
+                    Layout.columnSpan:      2
+                    Layout.preferredWidth:  root._labelWidth + root._valueWidth
+                    wrapMode:               Text.WordWrap
+                    color:                  qgcPal.warningText
+                    visible:                text !== ""
+                }
+
+                QGCLabel {
+                    Layout.columnSpan:      2
+                    Layout.preferredWidth:  root._labelWidth + root._valueWidth
+                    wrapMode:               Text.WordWrap
+                    font.pointSize:         ScreenTools.smallFontPointSize
+                    text:                   qsTr("While the authorisation is valid, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
+                }
+
+                RowLayout {
+                    Layout.columnSpan:  2
+                    spacing:            ScreenTools.defaultFontPixelWidth
+
+                    QGCButton {
+                        text:       qsTr("Save")
+                        onClicked: {
+                            authorisationError.text = root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text)
+                            authorisationForm.visible = authorisationError.text !== ""
+                        }
+                    }
+
+                    QGCButton {
+                        text:       qsTr("Cancel")
+                        onClicked:  authorisationForm.visible = false
+                    }
+                }
+            }
         }
     }
 }
