@@ -23,4 +23,5 @@ private slots:
     void _testVehicleTelemetry();
     void _testMonitorMultipleVehicles();
     void _testAlertLog();
+    void _testAlertHistory();
 };

@@ -115,6 +115,7 @@ While zones are above or below the active vehicle, a strip on the left of the Fl
 Every connected vehicle is monitored, and alerts name the vehicle when several are connected. The geozone indicator in the Fly View toolbar turns red, orange, yellow or blue when the active vehicle is near or inside a zone, and is dimmed while no vehicle is monitored. Click it to see the nearby zones; expand it to change the display and flight alert settings.
 
 Alerts are also appended to a `GeoZoneAlerts-<date>.csv` file per day (UTC) in the _Telemetry_ folder of the application load/save path, with the time, vehicle, position, altitude, terrain elevation, event, distance, zone and predicted time to entry, for reviewing flights.
+The indicator lists the **Recent Alerts** of the session, newest first, followed by those logged earlier the same day. Alerts not looked at yet are shown in bold and counted in a red badge on the indicator; **Acknowledge All** clears them. **Show** opens the details of the alert's zone and marks the vehicle position at the time of the alert on the map for two minutes (click the mark to remove it).
 
 Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 geoid, within a few meters.
 

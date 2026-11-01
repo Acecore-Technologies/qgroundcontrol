@@ -11,6 +11,7 @@
 #include "GeoZoneInfo.h"
 #include "AudioOutput.h"
 #include "GeoZone.h"
+#include "GeoZoneAlertHistory.h"
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
@@ -38,6 +39,8 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 {
     _alertLog = new GeoZoneAlertLog(this);
     (void) connect(this, &GeoZoneMonitor::alertEvent, _alertLog, &GeoZoneAlertLog::append);
+    // Alerts of earlier sessions today, before those of this session are logged
+    _alertHistory->loadLog(_alertLog->filePath(QDateTime::currentDateTimeUtc().date()));
 
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
@@ -62,8 +65,10 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
     , _nearbyModel(new GeoZoneNearbyModel(this))
     , _guidedCheck(new GeoZoneGuidedCheck(this))
+    , _alertHistory(new GeoZoneAlertHistory(_manager, this))
 {
     _clock.start();
+    (void) connect(this, &GeoZoneMonitor::alertEvent, _alertHistory, &GeoZoneAlertHistory::append);
     // Zones of a source are about to be deleted. Their alert states are kept so reloading the source doesn't repeat alerts.
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::monitoringChanged);
@@ -421,6 +426,7 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZoneAlertTracker
     event.restriction = zone->restriction();
     event.sourceText = zone->sourceText();
     event.message = message;
+    event.zoneKey = zone->key();
     event.timeToEntry = alert.timeToEntry;
     return event;
 }

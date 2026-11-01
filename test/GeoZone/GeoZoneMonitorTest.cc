@@ -455,3 +455,81 @@ void GeoZoneMonitorTest::_testAlertLog()
     event.zoneIdentifier = QStringLiteral("@A1");
     QVERIFY(GeoZoneAlertLog::line(event).contains(QStringLiteral(",'@A1,'=1+1,")));
 }
+
+void GeoZoneMonitorTest::_testAlertHistory()
+{
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
+    settings->logAlerts()->setRawValue(true);
+
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QJsonObject feature = _circleFeature(QStringLiteral("P1"), QStringLiteral("PROHIBITED"), center, 300);
+    feature[QStringLiteral("name")] = QStringLiteral("Prison \"West\", Zurich");
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
+
+    // The alerts of the session, newest first
+    GeoZoneMonitor monitor(&manager);
+    GeoZoneAlertHistory *const history = monitor.alertHistory();
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    QSignalSpy showSpy(&manager, &GeoZoneManager::showZoneRequested);
+    const QGeoCoordinate approach = center.atDistanceAndAzimuth(380, 0);
+    monitor.evaluate({ approach, 520, 400 }, 3);
+    monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
+    QCOMPARE(history->count(), 2);
+    QCOMPARE(history->unacknowledgedCount(), 2);
+    QVERIFY(history->data(history->index(0), GeoZoneAlertHistory::InsideRole).toBool());
+    QVERIFY(history->data(history->index(0), GeoZoneAlertHistory::MessageRole).toString().startsWith(QStringLiteral("Entered geozone Prison \"West\", Zurich")));
+    QVERIFY(!history->data(history->index(1), GeoZoneAlertHistory::InsideRole).toBool());
+
+    // Showing an alert acknowledges it and shows its zone and the vehicle position
+    history->show(1);
+    QCOMPARE(history->unacknowledgedCount(), 1);
+    QVERIFY(history->data(history->index(1), GeoZoneAlertHistory::AcknowledgedRole).toBool());
+    QCOMPARE(showSpy.count(), 1);
+    QCOMPARE(GeoZoneInfo::fromVariant(showSpy.first().first())->identifier(), QStringLiteral("P1"));
+    QVERIFY(history->shownPosition().distanceTo(approach) < 0.01);
+    history->clearShownPosition();
+    QVERIFY(!history->shownPosition().isValid());
+    history->acknowledgeAll();
+    QCOMPARE(history->unacknowledgedCount(), 0);
+
+    // Alerts an earlier session logged today are read back acknowledged, after those of the session
+    GeoZoneAlertLog log;
+    log.setDirectory(dir.filePath(QStringLiteral("logs")));
+    for (const QList<QVariant> &arguments : std::as_const(eventSpy)) {
+        log.append(arguments.first().value<GeoZoneMonitor::AlertEvent>());
+    }
+    GeoZoneMonitor::AlertEvent formula;
+    formula.time = QDateTime::currentDateTimeUtc();
+    formula.zoneIdentifier = QStringLiteral("F1");
+    formula.zoneName = QStringLiteral("=1+1");
+    formula.restriction = GeoZone::Conditional;
+    formula.distance = 50;
+    formula.timeToEntry = 12;
+    log.append(formula);
+    const QDate logDate = formula.time.date();
+    if (eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>().time.date() != logDate) {
+        QSKIP("The alerts were logged on both sides of midnight UTC");
+    }
+    GeoZoneAlertHistory later(&manager);
+    later.append(formula);
+    later.loadLog(log.filePath(logDate));
+    QCOMPARE(later.count(), 4);
+    QCOMPARE(later.unacknowledgedCount(), 1);
+    QVERIFY(!later.data(later.index(0), GeoZoneAlertHistory::EarlierRole).toBool());
+    QVERIFY(later.data(later.index(1), GeoZoneAlertHistory::EarlierRole).toBool());
+    QVERIFY(later.data(later.index(1), GeoZoneAlertHistory::AcknowledgedRole).toBool());
+    QCOMPARE(later.data(later.index(1), GeoZoneAlertHistory::ZoneNameRole).toString(), QStringLiteral("=1+1"));
+    QVERIFY(later.data(later.index(1), GeoZoneAlertHistory::MessageRole).toString().endsWith(QStringLiteral("entry in about 12 s")));
+    QCOMPARE(later.data(later.index(2), GeoZoneAlertHistory::MessageRole).toString(), history->data(history->index(0), GeoZoneAlertHistory::MessageRole).toString());
+    QCOMPARE(later.data(later.index(3), GeoZoneAlertHistory::AltitudeRole).toDouble(), 520.0);
+    QVERIFY(!GeoZoneAlertHistory::parseLogLine(GeoZoneAlertLog::header()));
+
+    // Earlier alerts are shown by their zone identifier and name
+    later.show(2);
+    QCOMPARE(showSpy.count(), 2);
+}

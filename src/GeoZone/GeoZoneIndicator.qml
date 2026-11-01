@@ -29,6 +29,7 @@ Item {
     property bool showIndicator: GeoZoneManager.zoneCount > 0
 
     readonly property var _monitor:         GeoZoneMonitor
+    readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
 
@@ -53,6 +54,25 @@ Item {
         sourceSize.height:  height
         color:              control._restrictionColor(control._monitor.monitoring ? control._monitor.alertRestriction : -1)
         opacity:            (control._monitor.monitoring && !control._monitor.positionUnavailable) ? 1 : 0.5
+    }
+
+    // Alerts not acknowledged in the alert history
+    Rectangle {
+        anchors.top:    parent.top
+        anchors.right:  geoZoneIcon.right
+        height:         ScreenTools.defaultFontPixelHeight * 0.9
+        width:          Math.max(height, badgeLabel.contentWidth + (height / 2))
+        radius:         height / 2
+        color:          qgcPal.colorRed
+        visible:        control._history.unacknowledgedCount > 0
+
+        QGCLabel {
+            id:                 badgeLabel
+            anchors.centerIn:   parent
+            text:               control._history.unacknowledgedCount
+            color:              "white"
+            font.pointSize:     ScreenTools.smallFontPointSize
+        }
     }
 
     MouseArea {
@@ -126,6 +146,69 @@ Item {
                                     textFormat:     Text.PlainText
                                 }
                             }
+                        }
+                    }
+
+                    SettingsGroupLayout {
+                        heading:            qsTr("Recent Alerts")
+                        headingDescription: qsTr("Alerts of this session and earlier today, newest first. Show puts the zone and the vehicle position on the map.")
+                        visible:            control._history.count > 0
+
+                        QGCListView {
+                            Layout.fillWidth:       true
+                            Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 12)
+                            clip:                   true
+                            spacing:                ScreenTools.defaultFontPixelHeight / 4
+                            model:                  control._history
+
+                            delegate: RowLayout {
+                                id:         alertRow
+                                width:      ListView.view.width
+                                spacing:    ScreenTools.defaultFontPixelWidth
+
+                                required property int       index
+                                required property date      time
+                                required property string    message
+                                required property int       restriction
+                                required property bool      acknowledged
+                                required property bool      earlier
+
+                                Rectangle {
+                                    Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
+                                    Layout.preferredHeight: Layout.preferredWidth
+                                    radius:                 width / 2
+                                    color:                  control._restrictionColor(alertRow.restriction)
+                                }
+
+                                QGCLabel {
+                                    text:           Qt.formatTime(alertRow.time, "HH:mm:ss")
+                                    font.pointSize: ScreenTools.smallFontPointSize
+                                    opacity:        alertRow.earlier ? 0.6 : 1
+                                }
+
+                                QGCLabel {
+                                    Layout.fillWidth:   true
+                                    wrapMode:           Text.WordWrap
+                                    text:               alertRow.message
+                                    textFormat:         Text.PlainText
+                                    font.bold:          !alertRow.acknowledged
+                                    opacity:            alertRow.earlier ? 0.6 : 1
+                                }
+
+                                QGCButton {
+                                    text:       qsTr("Show")
+                                    onClicked: {
+                                        control._history.show(alertRow.index)
+                                        mainWindow.closeIndicatorDrawer()
+                                    }
+                                }
+                            }
+                        }
+
+                        QGCButton {
+                            text:       qsTr("Acknowledge All")
+                            visible:    control._history.unacknowledgedCount > 0
+                            onClicked:  control._history.acknowledgeAll()
                         }
                     }
 

@@ -27,7 +27,9 @@
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneMonitorLog)
 
 Q_MOC_INCLUDE("GeoZoneGuidedCheck.h")
+Q_MOC_INCLUDE("GeoZoneAlertHistory.h")
 
+class GeoZoneAlertHistory;
 class GeoZoneAlertLog;
 class GeoZoneGuidedCheck;
 class GeoZoneManager;
@@ -48,6 +50,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyZonesChanged FINAL)      ///< The vehicle is inside one of the nearby zones
     Q_PROPERTY(GeoZoneNearbyModel *nearbyModel  READ nearbyModel        CONSTANT FINAL)                       ///< nearbyZones as a list model
     Q_PROPERTY(GeoZoneGuidedCheck *guidedCheck  READ guidedCheck        CONSTANT FINAL)                       ///< Checks of guided commands
+    Q_PROPERTY(GeoZoneAlertHistory *alertHistory READ alertHistory      CONSTANT FINAL)                       ///< Alerts of the session and earlier today
     /// Volumes of the active zones above and below the active vehicle, as maps with restriction, name, limitsText, floor and
     /// ceiling (meters AMSL, NaN when the zone extends to the ground or has no ceiling, or the limit is unknown)
     Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
@@ -81,6 +84,7 @@ public:
         GeoZone::Restriction restriction = GeoZone::Unknown;
         QString sourceText;
         QString message;            ///< As shown to the user
+        QString zoneKey;            ///< See GeoZone::key, empty for alerts read from a log
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
     };
 
@@ -129,6 +133,7 @@ public:
 
     /// Log of the alerts of vehicles, null for monitors of positions passed to evaluate()
     GeoZoneAlertLog *alertLog() const { return _alertLog; }
+    GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
@@ -191,4 +196,5 @@ private:
     GeoZoneAlertLog *_alertLog = nullptr;
     GeoZoneNearbyModel *_nearbyModel = nullptr;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;
+    GeoZoneAlertHistory *_alertHistory = nullptr;
 };

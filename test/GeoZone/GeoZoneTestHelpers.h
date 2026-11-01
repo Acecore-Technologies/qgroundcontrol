@@ -12,6 +12,7 @@
 #include "GeoFenceController.h"
 #include "GeoZone.h"
 #include "GeoZoneDownloader.h"
+#include "GeoZoneAlertHistory.h"
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneFenceImporter.h"

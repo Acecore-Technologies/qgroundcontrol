@@ -138,7 +138,42 @@ Item {
         function onVisibleRegionChanged()   { _root._scheduleViewUpdate() }
     }
 
-    Component.onCompleted: _scheduleViewUpdate()
+    Component.onCompleted: {
+        _scheduleViewUpdate()
+        map.addMapItem(_alertPositionItem)
+    }
+
+    // Vehicle position of the alert shown from the alert history, click to hide it
+    MapQuickItem {
+        id:             _alertPositionItem
+        coordinate:     GeoZoneMonitor.alertHistory.shownPosition
+        visible:        _root.showZones && coordinate.isValid
+        anchorPoint.x:  sourceItem.width / 2
+        anchorPoint.y:  sourceItem.height / 2
+        z:              QGroundControl.zOrderMapItems + 1
+
+        sourceItem: Rectangle {
+            width:          ScreenTools.defaultFontPixelHeight * 1.6
+            height:         width
+            radius:         width / 2
+            color:          Qt.rgba(0, 0, 0, 0.4)
+            border.color:   GeoZoneStyle.highlightColor
+            border.width:   ScreenTools.defaultFontPixelHeight / 6
+
+            Rectangle {
+                anchors.centerIn:   parent
+                width:              parent.width / 3
+                height:             width
+                radius:             width / 2
+                color:              GeoZoneStyle.highlightColor
+            }
+
+            QGCMouseArea {
+                anchors.fill:   parent
+                onClicked:      GeoZoneMonitor.alertHistory.clearShownPosition()
+            }
+        }
+    }
 
     // All shapes are drawn by one item over the map, below the other map items
     GeoZoneMapLayer {

@@ -2,6 +2,8 @@ target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
         GeoZone.cc
         GeoZone.h
+        GeoZoneAlertHistory.cc
+        GeoZoneAlertHistory.h
         GeoZoneAlertLog.cc
         GeoZoneAlertLog.h
         GeoZoneAlertTracker.cc
