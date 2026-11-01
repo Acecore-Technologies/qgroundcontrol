@@ -10,6 +10,7 @@
 #include "GeoZoneGeometryTest.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneFences.h"
+#include "GeoZoneVertical.h"
 
 using namespace GeoZoneTestHelpers;
 
@@ -970,7 +971,7 @@ void GeoZoneGeometryTest::_testFlightLevels()
     environment.setQnh(qnh);
     const auto meters = _setVerticalUnits(false);
     QCOMPARE(GeoZoneEnvironment::qnhHPa(), qnh);
-    QVERIFY(qAbs(GeoZone::pressureAltitudeToAMSL(9500 * 0.3048, qnh) - floorAMSL) < 0.01);
+    QVERIFY(qAbs(GeoZoneVertical::pressureAltitudeToAMSL(9500 * 0.3048, qnh) - floorAMSL) < 0.01);
 
     const QGeoCoordinate center(47, 8);
     GeoZone::Volume volume;
@@ -985,8 +986,8 @@ void GeoZoneGeometryTest::_testFlightLevels()
 
     // Checks lower the floor and raise the ceiling by the margin for air colder than standard
     const auto at = [&center](double altitude) { return GeoZone::Position{ center, altitude }; };
-    const double floor = floorAMSL * (1 - GeoZone::flightLevelMargin);
-    const double ceiling = ceilingAMSL * (1 + GeoZone::flightLevelMargin);
+    const double floor = floorAMSL * (1 - GeoZoneVertical::flightLevelMargin);
+    const double ceiling = ceilingAMSL * (1 + GeoZoneVertical::flightLevelMargin);
     QVERIFY(qAbs(GeoZone::limitAMSL(volume, false, at(qQNaN())) - floor) < 0.01);
     QVERIFY(qAbs(GeoZone::limitAMSL(volume, true, at(qQNaN())) - ceiling) < 0.01);
     QCOMPARE(GeoZone::verticalPosition(volume, at(floor - 1)), GeoZone::VerticalPosition::Below);

@@ -10,7 +10,7 @@ The module has two layers:
 | Directory | Contents |
 | --------- | -------- |
 | `src/GeoZone/Core` | `GeoZoneCore`, a static library which only depends on Qt (Core and Positioning, privately Concurrent, Network and zlib), so it can be tested and fuzzed without _QGroundControl_. |
-| `src/GeoZone/Core/Model` | The zones (`GeoZone`, its `Data`, `Volume` and schedule in `GeoZoneSchedule`), their geometry (`GeoZoneGeometry`, `GeoZoneBox`, `GeoZoneShape` for the maps), the spatial index (`GeoZoneIndex`), the `GeoZoneCatalog` of all zones, `GeoZonePolicy` (which zones a check applies to) and `GeoZoneInfo`, the value QML gets. |
+| `src/GeoZone/Core/Model` | The zones (`GeoZone`, its `Data`, `Volume` and schedule in `GeoZoneSchedule`), the vertical datums of their limits (`GeoZoneVertical`), their geometry (`GeoZoneGeometry`, `GeoZoneBox`, `GeoZoneShape` for the maps), the spatial index (`GeoZoneIndex`), the `GeoZoneCatalog` of all zones, `GeoZonePolicy` (which zones a check applies to) and `GeoZoneInfo`, the value QML gets. |
 | `src/GeoZone/Core/Formats` | `GeoZoneParser`, the `GeoZoneFormat` interface with one class per format, the helpers shared by the formats (`GeoZoneParserUtils`) and the zip reader (`GeoZoneZip`). |
 | `src/GeoZone/Core/Sources` | The sources and how they are obtained: `GeoZoneSourceRepository`, `GeoZoneSource`, `GeoZoneFeedFetch`, `GeoZoneDownloader`, `GeoZoneRefreshScheduler`, `GeoZoneLoader`, `GeoZoneStore`, `GeoZoneSourceIndex`, `GeoZoneParseCache`, the known services (`GeoZoneProviders`, `GeoZoneService`), `GeoZoneCredentials`, `GeoZoneProvenance` and offline packs (`GeoZonePack`). |
 | `src/GeoZone/Core/Evaluation` | Checks of positions and paths: `GeoZonePathEvaluator`, the autopilot return paths (`GeoZoneReturnModel`) and the return destinations of missions (`GeoZoneReturnDestinations` on `GeoZoneMissionItem`), `GeoZoneRouteSearch`, `GeoZoneAlertTracker`, `GeoZoneBriefing`, `GeoZonePlanAudit`, `GeoZoneFences` (fence storage and priorities), `GeoZoneAuthorisations`, `GeoZoneSourceVersion` and `GeoZoneTerrain`. |
@@ -71,6 +71,12 @@ The Plan View checks see the mission as a `GeoZoneMissionPath`: the segments flo
 - `GeoZoneMissionJumps` walks the items like the vehicle with their **DO_JUMP** items, a pure computation on the items and the indexes and lengths of the drawn segments, tested without a mission controller (`GeoZonePlanningTest::_testMissionJumpWalk`).
 - `GeoZoneReturnDestinations::fromMission()` (core) finds where the vehicle can return to from the items and the plan's home, rally points and breach return point, given as plain positions: the first waypoint after the takeoff, the landing sequences and the return path, for `GeoZoneReturnModel`. `GeoZoneMissionReader::destinations()` calls it with the plan of a `MissionController`, other checks can call it with their own. `GeoZoneReturnTest` tests it headless.
 - `GeoZoneMissionPath` itself keeps the result and computes what doesn't need the application: the connected paths of the segments, the times along them, the contingency starts and paths with `GeoZoneReturnModel`, and the labels of the paths.
+
+## Vertical Limits {#vertical-limits}
+
+`GeoZoneVertical` converts the published limits of a volume to heights comparable with altitudes above mean sea level and compares them, for `GeoZone`, the evaluator, the alerts, the profile and the route search (`GeoZone::verticalOverlap()`, `verticalInterval()`, `verticalPosition()` and `limitAMSL()` forward to it). Limits above ground subtract the terrain elevation from the altitudes, limits above the WGS84 ellipsoid add the EGM96 geoid height, and flight levels are converted with the QNH, then floors are lowered and ceilings raised by `GeoZoneVertical::flightLevelMargin`.
+
+There is one policy for what isn't known, in `GeoZoneVertical::bound()`: a limit bounds the volume only when it can be compared. A limit in an unknown reference, a limit above ground where the terrain is unknown, or any limit compared with an unknown altitude doesn't bound it, so the volume extends over all altitudes on that side and unknowns count as inside. Floors at the ground and the published unlimited ceiling don't bound it either. New comparisons should go through `bound()` rather than read the limits.
 
 ## Threading Model {#threading}
 

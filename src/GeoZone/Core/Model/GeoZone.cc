@@ -11,6 +11,7 @@
 #include "GeoZoneDataStream.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneGeometry.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QHash>
 
@@ -21,65 +22,6 @@
 #include <optional>
 
 namespace {
-
-constexpr double kUnlimitedSentinel = 99999.0; // Published as upper limit when a zone has no ceiling
-constexpr double kMetersPerFoot = 0.3048;
-// ICAO standard atmosphere: sea level temperature over the temperature lapse rate in meters, and the exponent of the
-// pressure ratio R * L / (g * M)
-constexpr double kStandardTemperatureOverLapseRate = 288.15 / 0.0065;
-constexpr double kPressureExponent = 0.190263;
-
-/// @return Heights of the positions in the datum of a limit, nothing when they can't be compared
-std::optional<std::pair<double, double>> referenceHeights(GeoZone::VerticalReference reference, const GeoZone::Position &from, const GeoZone::Position &to)
-{
-    double height1 = from.altitudeAMSL;
-    double height2 = to.altitudeAMSL;
-    switch (reference) {
-    case GeoZone::VerticalReference::Ground:
-        height1 -= from.terrainAMSL;
-        height2 -= to.terrainAMSL;
-        break;
-    case GeoZone::VerticalReference::Ellipsoid:
-        // Heights above the ellipsoid differ from mean sea level by the geoid height of up to about 100 m
-        height1 += GeoZoneGeometry::geoidHeight(from.coordinate);
-        height2 += GeoZoneGeometry::geoidHeight(to.coordinate);
-        break;
-    case GeoZone::VerticalReference::MeanSeaLevel:
-    case GeoZone::VerticalReference::FlightLevel:
-        // Flight levels are compared once converted to heights above mean sea level, see comparableLimit
-        break;
-    case GeoZone::VerticalReference::Unknown:
-        return std::nullopt;
-    }
-    if (qIsNaN(height1) || qIsNaN(height2)) {
-        return std::nullopt;
-    }
-    return std::make_pair(height1, height2);
-}
-
-/// Zones from the ground have no floor, vehicles on the ground or terrain data errors can be slightly below it
-bool hasFloor(const GeoZone::Volume &volume)
-{
-    return !qIsNaN(volume.lowerLimit) && !((volume.lowerReference == GeoZone::VerticalReference::Ground) && (volume.lowerLimit <= 0));
-}
-
-bool hasCeiling(const GeoZone::Volume &volume)
-{
-    return !qIsNaN(volume.upperLimit) && (volume.upperLimit < kUnlimitedSentinel);
-}
-
-/// @return The limit of the volume in meters in the datum of referenceHeights: as published, except for flight levels
-///         which are converted to heights above mean sea level with the current QNH, then widened by the margin
-double comparableLimit(const GeoZone::Volume &volume, bool upper)
-{
-    const double meters = (upper ? volume.upperLimit : volume.lowerLimit) * (volume.feet ? kMetersPerFoot : 1.0);
-    if ((upper ? volume.upperReference : volume.lowerReference) != GeoZone::VerticalReference::FlightLevel) {
-        return meters;
-    }
-    const double amsl = GeoZone::pressureAltitudeToAMSL(meters, GeoZoneEnvironment::qnhHPa());
-    const double margin = GeoZone::flightLevelMargin * std::abs(amsl);
-    return upper ? (amsl + margin) : (amsl - margin);
-}
 
 /// @return The ring with each longitude moved by whole turns to within 180 degrees of the previous one, starting
 ///         from the reference, so that edges crossing the antimeridian don't wrap around the world. Shared when
@@ -330,102 +272,22 @@ QList<GeoZoneGeometry::Interval> GeoZone::horizontalIntervals(qsizetype volumeIn
 
 bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin)
 {
-    if (hasFloor(volume)) {
-        const auto heights = referenceHeights(volume.lowerReference, from, to);
-        if (heights && ((std::max)(heights->first, heights->second) < (comparableLimit(volume, false) - margin))) {
-            return false;
-        }
-    }
-    if (hasCeiling(volume)) {
-        const auto heights = referenceHeights(volume.upperReference, from, to);
-        if (heights && ((std::min)(heights->first, heights->second) > (comparableLimit(volume, true) + margin))) {
-            return false;
-        }
-    }
-    return true;
+    return GeoZoneVertical::overlap(volume, from, to, margin);
 }
 
 std::optional<std::pair<double, double>> GeoZone::verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin)
 {
-    double first = 0;
-    double last = 1;
-    // Keeps the fractions at which the height in the datum of the limit is on the inner side of it
-    const auto constrain = [&first, &last, &from, &to](VerticalReference reference, double limit, bool upper) {
-        const auto heights = referenceHeights(reference, from, to);
-        if (!heights) {
-            return;
-        }
-        const double slope = heights->second - heights->first;
-        if (std::abs(slope) < 1e-9) {
-            if (upper ? (heights->first > limit) : (heights->first < limit)) {
-                first = 1;
-                last = 0;
-            }
-            return;
-        }
-        const double crossing = (limit - heights->first) / slope;
-        if (upper == (slope > 0)) {
-            last = (std::min)(last, crossing);
-        } else {
-            first = (std::max)(first, crossing);
-        }
-    };
-    if (hasFloor(volume)) {
-        constrain(volume.lowerReference, comparableLimit(volume, false) - margin, false);
-    }
-    if (hasCeiling(volume)) {
-        constrain(volume.upperReference, comparableLimit(volume, true) + margin, true);
-    }
-    if (first > last) {
-        return std::nullopt;
-    }
-    return std::make_pair(first, last);
+    return GeoZoneVertical::interval(volume, from, to, margin);
 }
 
 GeoZone::VerticalPosition GeoZone::verticalPosition(const Volume &volume, const Position &position)
 {
-    if (hasFloor(volume)) {
-        const auto heights = referenceHeights(volume.lowerReference, position, position);
-        if (heights && (heights->first < comparableLimit(volume, false))) {
-            return VerticalPosition::Below;
-        }
-    }
-    if (hasCeiling(volume)) {
-        const auto heights = referenceHeights(volume.upperReference, position, position);
-        if (heights && (heights->first > comparableLimit(volume, true))) {
-            return VerticalPosition::Above;
-        }
-    }
-    return VerticalPosition::Inside;
+    return GeoZoneVertical::position(volume, position);
 }
 
 double GeoZone::limitAMSL(const Volume &volume, bool upper, const Position &position)
 {
-    const double limit = upper ? volume.upperLimit : volume.lowerLimit;
-    const VerticalReference reference = upper ? volume.upperReference : volume.lowerReference;
-    if (qIsNaN(limit) || (upper && (limit >= kUnlimitedSentinel)) || (!upper && (reference == VerticalReference::Ground) && (limit <= 0))) {
-        return qQNaN();
-    }
-
-    const double meters = comparableLimit(volume, upper);
-    switch (reference) {
-    case VerticalReference::Ground:
-        return meters + position.terrainAMSL;
-    case VerticalReference::MeanSeaLevel:
-    case VerticalReference::FlightLevel:
-        return meters;
-    case VerticalReference::Ellipsoid:
-        return meters - GeoZoneGeometry::geoidHeight(position.coordinate);
-    case VerticalReference::Unknown:
-        break;
-    }
-    return qQNaN();
-}
-
-double GeoZone::pressureAltitudeToAMSL(double pressureAltitude, double qnhHPa)
-{
-    const double qnhPressureAltitude = kStandardTemperatureOverLapseRate * (1.0 - std::pow(qnhHPa / GeoZoneEnvironment::kStandardPressureHPa, kPressureExponent));
-    return pressureAltitude - qnhPressureAltitude;
+    return GeoZoneVertical::limitAMSL(volume, upper, position);
 }
 
 bool GeoZone::contains(const Position &position) const
@@ -435,7 +297,7 @@ bool GeoZone::contains(const Position &position) const
     }
 
     for (qsizetype i = 0; i < _data.volumes.count(); i++) {
-        if (verticalOverlap(_data.volumes[i], position, position) && volumeContains(i, position.coordinate)) {
+        if (GeoZoneVertical::overlap(_data.volumes[i], position, position) && volumeContains(i, position.coordinate)) {
             return true;
         }
     }
@@ -447,7 +309,7 @@ double GeoZone::distanceTo(const Position &position, double verticalMargin, doub
     double minDistance = std::numeric_limits<double>::infinity();
     for (qsizetype i = 0; i < _data.volumes.count(); i++) {
         const Volume &volume = _data.volumes[i];
-        if (!verticalOverlap(volume, position, position, verticalMargin)) {
+        if (!GeoZoneVertical::overlap(volume, position, position, verticalMargin)) {
             continue;
         }
         if (volume.isCircle) {
@@ -486,7 +348,7 @@ bool GeoZone::intersectsArea(const Area &area) const
     const QList<QPointF> polygon = projection.toLocal(area.polygon);
     for (qsizetype v = 0; v < _data.volumes.count(); v++) {
         const Volume &volume = _data.volumes[v];
-        if (!verticalOverlap(volume, area.lowest, area.highest)) {
+        if (!GeoZoneVertical::overlap(volume, area.lowest, area.highest)) {
             continue;
         }
 
@@ -556,7 +418,7 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
         // The earliest fraction of the segment inside a volume horizontally and vertically
         double entry = qInf();
         for (qsizetype v = 0; v < _data.volumes.count(); v++) {
-            const auto vertical = verticalInterval(_data.volumes[v], from, to);
+            const auto vertical = GeoZoneVertical::interval(_data.volumes[v], from, to);
             if (!vertical || (vertical->first >= entry)) {
                 continue;
             }
@@ -637,7 +499,7 @@ QString GeoZone::verticalLimitsText() const
 {
     const double qnh = GeoZoneEnvironment::qnhHPa();
     const auto convertedFlightLevel = [](double limit, VerticalReference reference) {
-        return (reference == VerticalReference::FlightLevel) && !qIsNaN(limit) && (limit < kUnlimitedSentinel);
+        return (reference == VerticalReference::FlightLevel) && !qIsNaN(limit) && (limit < GeoZoneVertical::unlimitedSentinel);
     };
     QStringList lines;
     for (const Volume &volume : _data.volumes) {
@@ -668,7 +530,7 @@ QString GeoZone::_limitToString(double limit, VerticalReference reference, const
     if (qIsNaN(limit)) {
         return tr("not specified");
     }
-    if (limit >= kUnlimitedSentinel) {
+    if (limit >= GeoZoneVertical::unlimitedSentinel) {
         return tr("Unlimited");
     }
     if ((limit == 0) && (reference == VerticalReference::Ground)) {
@@ -676,9 +538,9 @@ QString GeoZone::_limitToString(double limit, VerticalReference reference, const
     }
     if (reference == VerticalReference::FlightLevel) {
         // In hundreds of feet of pressure altitude, with the height it is at with the QNH in the standard atmosphere
-        const double pressureAltitude = feet ? (limit * kMetersPerFoot) : limit;
-        const double flightLevel = std::round(pressureAltitude / kMetersPerFoot / 10) / 10;
-        const double amsl = GeoZoneEnvironment::metersToVerticalDistanceUnits(pressureAltitudeToAMSL(pressureAltitude, qnhHPa));
+        const double pressureAltitude = feet ? (limit * GeoZoneVertical::metersPerFoot) : limit;
+        const double flightLevel = std::round(pressureAltitude / GeoZoneVertical::metersPerFoot / 10) / 10;
+        const double amsl = GeoZoneEnvironment::metersToVerticalDistanceUnits(GeoZoneVertical::pressureAltitudeToAMSL(pressureAltitude, qnhHPa));
         return tr("FL %1 ≈ %2 %3 AMSL").arg(flightLevel).arg(qRound(amsl)).arg(GeoZoneEnvironment::verticalDistanceUnits());
     }
 
@@ -689,7 +551,7 @@ QString GeoZone::_limitToString(double limit, VerticalReference reference, const
     }
 
     // Show the published value too since the converted value is rounded
-    const double meters = feet ? (limit * kMetersPerFoot) : limit;
+    const double meters = feet ? (limit * GeoZoneVertical::metersPerFoot) : limit;
     const double converted = GeoZoneEnvironment::metersToVerticalDistanceUnits(meters);
     return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, referenceCode).arg(limit).arg(publishedUnits);
 }

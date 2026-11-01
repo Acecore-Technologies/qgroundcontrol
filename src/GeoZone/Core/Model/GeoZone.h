@@ -58,7 +58,7 @@ public:
         Ground,         ///< AGL or SFC
         MeanSeaLevel,   ///< AMSL or MSL
         Ellipsoid,      ///< WGS84
-        FlightLevel,    ///< STD, pressure altitude converted with the QNH, see pressureAltitudeToAMSL
+        FlightLevel,    ///< STD, pressure altitude converted with the QNH, see GeoZoneVertical::pressureAltitudeToAMSL
     };
 
     /// Altitude of a position relative to the vertical limits of a volume
@@ -225,17 +225,10 @@ public:
     /// @return true if the area overlaps a volume horizontally and vertically
     bool intersectsArea(const Area &area) const;
 
-    /// @return true if the vertical limits of the volume overlap the altitudes between the positions, extended by
-    ///         the margin. Unknown altitudes, limits and references overlap.
+    /// Comparisons with the vertical limits of a volume, see GeoZoneVertical for the datums and the policy for unknown
+    /// altitudes, limits, references and terrain, which don't bound the volume
     static bool verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin = 0);
-
-    /// @return Fractions of the straight path between the positions, with altitudes and terrain interpolated linearly,
-    ///         which are within the vertical limits of the volume extended by the margin, nothing when none is.
-    ///         Unknown altitudes, limits and references don't limit it.
     static std::optional<std::pair<double, double>> verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin = 0);
-
-    /// @return Where the altitude of the position is relative to the vertical limits of the volume. Unknown altitudes,
-    ///         limits and references are inside, like for verticalInterval.
     static VerticalPosition verticalPosition(const Volume &volume, const Position &position);
 
     /// @return true if the coordinate is inside the horizontal projection of the volume at the index
@@ -247,23 +240,9 @@ public:
     ///         way, which may cross the antimeridian.
     QList<GeoZoneGeometry::Interval> horizontalIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const;
 
-    /// @return Lower or upper limit of the volume in meters above mean sea level at the position, using its terrain
-    ///         elevation for limits above ground. NaN when the zone extends to the ground or has no ceiling, or the
-    ///         limit can't be converted, like limits above unknown terrain or in unknown references. Flight levels
-    ///         are converted with the QNH and widened by flightLevelMargin, like when they are compared.
+    /// @return Lower or upper limit of the volume in meters above mean sea level at the position, see
+    ///         GeoZoneVertical::limitAMSL
     static double limitAMSL(const Volume &volume, bool upper, const Position &position);
-
-    /// Fraction of the height of a flight level above mean sea level by which floors are lowered and ceilings raised
-    /// when they are compared. The conversion assumes the temperatures of the standard atmosphere, in colder air flight
-    /// levels are lower by about 4 % of their height per 10 degrees Celsius.
-    static constexpr double flightLevelMargin = 0.04;
-
-    /// @return Height in meters above mean sea level of a pressure altitude, like a flight level, where the sea
-    ///         level pressure is qnhHPa. As read by an altimeter set to the QNH, which is the true altitude in the
-    ///         standard atmosphere: the pressure altitude less the pressure altitude of the QNH,
-    ///         44330.8 m * (1 - (QNH / 1013.25 hPa)^0.190263), about 8.3 m per hPa near the sea level.
-    /// @param pressureAltitude Meters in the ICAO standard atmosphere, 30.48 m per flight level
-    static double pressureAltitudeToAMSL(double pressureAltitude, double qnhHPa);
 
     static VerticalReference verticalReferenceFromString(const QString &reference);
     static Restriction restrictionFromString(const QString &restriction);
