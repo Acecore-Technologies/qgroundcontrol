@@ -2047,10 +2047,16 @@ void GeoZoneTest::_testMonitorMultipleVehicles()
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 2);
     QVERIFY(monitor.inside());
     QSignalSpy nearbySpy(&monitor, &GeoZoneMonitor::nearbyZonesChanged);
+    QCOMPARE(monitor.nearbyModel()->count(), 1);
     monitor.setActiveVehicleId(2);
     QCOMPARE(nearbySpy.count(), 1);
     QVERIFY(monitor.nearbyZones().isEmpty());
+    QCOMPARE(monitor.nearbyModel()->count(), 0);
     QVERIFY(!monitor.inside());
+    monitor.setActiveVehicleId(1);
+    QCOMPARE(monitor.nearbyModel()->count(), 1);
+    QVERIFY(monitor.inside());
+    monitor.setActiveVehicleId(2);
 
     // A removed vehicle alerts again when it reconnects, the others keep their state
     monitor.removeVehicle(1);
@@ -2229,6 +2235,172 @@ void GeoZoneTest::_testProfileBands()
     const double longSpacing = 180000.0 / GeoZoneProfile::maxSamples;
     QVERIFY(qAbs(value(endPoints.first(), "distance") - 178700) <= longSpacing + 1);
     QVERIFY(qAbs(value(endPoints.last(), "distance") - 179300) <= longSpacing + 1);
+}
+
+namespace {
+
+/// Answers requests by path: /ok with the ED-318 test file, /missing 404, /broken 500, /empty an empty 200 and
+/// /hang never. Counts the requests.
+class TestFeedServer : public QTcpServer
+{
+public:
+    TestFeedServer()
+    {
+        QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));
+        if (fixture.open(QIODevice::ReadOnly)) {
+            body = fixture.readAll();
+        }
+        (void) connect(this, &QTcpServer::newConnection, this, [this]() {
+            while (QTcpSocket *const socket = nextPendingConnection()) {
+                (void) connect(socket, &QTcpSocket::readyRead, socket, [this, socket]() {
+                    const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
+                    socket->setProperty("request", request);
+                    if (request.contains("\r\n\r\n")) {
+                        requestCount++;
+                        _respond(socket, request.split(' ').value(1));
+                    }
+                });
+                (void) connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+            }
+        });
+    }
+
+    QString url(const QString &path) const { return QStringLiteral("http://127.0.0.1:%1%2").arg(serverPort()).arg(path); }
+
+    QByteArray body;
+    int requestCount = 0;
+    QByteArray okPathStatus = "200 OK";     ///< Status of /ok, to make a feed fail later
+
+private:
+    void _respond(QTcpSocket *socket, const QByteArray &path)
+    {
+        QByteArray status = "200 OK";
+        QByteArray content;
+        if (path == "/ok") {
+            status = okPathStatus;
+            content = status.startsWith("200") ? body : QByteArray();
+        } else if (path == "/missing") {
+            status = "404 Not Found";
+        } else if (path == "/broken") {
+            status = "500 Internal Server Error";
+        } else if (path == "/hang") {
+            return;
+        }
+        (void) socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " +
+                             QByteArray::number(content.size()) + "\r\n\r\n" + content);
+        socket->disconnectFromHost();
+    }
+};
+
+} // namespace
+
+void GeoZoneTest::_testDownloadFailures()
+{
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    GeoZoneDownloader downloader;
+    downloader.setTimeout(std::chrono::milliseconds(500));
+    const auto download = [&downloader, &server](const QString &path) {
+        GeoZoneDownloader::Result result;
+        bool done = false;
+        downloader.get(server.url(path), QString(), QString(), [&result, &done](const GeoZoneDownloader::Result &downloadResult) { result = downloadResult; done = true; });
+        if (!QTest::qWaitFor([&done]() { return done; }, 10000)) {
+            result.errorString = QStringLiteral("no callback");
+        }
+        return result;
+    };
+
+    GeoZoneDownloader::Result result = download(QStringLiteral("/missing"));
+    QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
+    QVERIFY2(result.errorString.contains(QStringLiteral("Not Found")), qPrintable(result.errorString));
+    result = download(QStringLiteral("/broken"));
+    QCOMPARE(result.status, GeoZoneDownloader::Result::Status::Failed);
+    QVERIFY2(result.errorString.contains(QStringLiteral("Internal Server Error")), qPrintable(result.errorString));
+    result = download(QStringLiteral("/empty"));
+    QCOMPARE(result.errorString, QStringLiteral("No data was received."));
+    result = download(QStringLiteral("/hang"));
+    QCOMPARE(result.errorString, QStringLiteral("The server didn't respond within 1 second(s)."));
+    QCOMPARE(downloader.count(), 0);
+
+    // Adding a feed which fails reports it and adds nothing
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.addUrl(server.url(QStringLiteral("/missing")));
+    QVERIFY(failedSpy.wait(10000));
+    QCOMPARE(failedSpy.last()[0].toString(), server.url(QStringLiteral("/missing")));
+    QVERIFY(failedSpy.last()[1].toString().contains(QStringLiteral("Not Found")));
+    QCOMPARE(manager.sources()->count(), 0);
+    manager.addUrl(QStringLiteral("ftp://example.com/zones.json"));
+    QCOMPARE(failedSpy.count(), 2);
+
+    // A refresh which fails keeps the zones and shows the error on the source
+    manager.addUrl(server.url(QStringLiteral("/ok")));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    GeoZoneSource *const feed = manager.source(server.url(QStringLiteral("/ok")));
+    QVERIFY(feed);
+    server.okPathStatus = "503 Service Unavailable";
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(failedSpy.count(), 3);
+    QVERIFY(feed->errorString().contains(QStringLiteral("Service Unavailable")));
+    QCOMPARE(manager.zones()->count(), 3);
+
+    // The next successful refresh clears the error
+    server.okPathStatus = "200 OK";
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(feed->errorString().isEmpty());
+}
+
+void GeoZoneTest::_testManagerStartup()
+{
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const QString url = server.url(QStringLiteral("/ok"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+    }
+    QCOMPARE(server.requestCount, 1);
+
+    // Downloaded two days ago, so the feed is due for a refresh
+    QFile indexFile(QDir(storageDir.path()).filePath(QStringLiteral("sources.json")));
+    QVERIFY(indexFile.open(QIODevice::ReadOnly));
+    QJsonObject index = QJsonDocument::fromJson(indexFile.readAll()).object();
+    indexFile.close();
+    QJsonArray sources = index[QStringLiteral("sources")].toArray();
+    QCOMPARE(sources.count(), 1);
+    const QDateTime downloaded = QDateTime::currentDateTimeUtc().addDays(-2);
+    QJsonObject entry = sources[0].toObject();
+    entry[QStringLiteral("loadedAt")] = downloaded.toString(Qt::ISODate);
+    sources[0] = entry;
+    index[QStringLiteral("sources")] = sources;
+    QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(indexFile.write(QJsonDocument(index).toJson()) > 0);
+    indexFile.close();
+
+    // Startup loads the stored copy, refreshes due feeds, then reports outdated data once: the test file was
+    // issued months ago
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy outdatedSpy(&manager, &GeoZoneManager::outdatedDataFound);
+    manager.init();
+    QCOMPARE(manager.sources()->count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, 2, 10000);
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.zones()->count(), 3);
+    QVERIFY(manager.source(url)->loadedAt() > downloaded.addDays(1));
+    QTRY_COMPARE(outdatedSpy.count(), 1);
+    QVERIFY(outdatedSpy.first()[0].toString().contains(QStringLiteral("days old")));
 }
 
 void GeoZoneTest::_testDownloadSizeLimit()

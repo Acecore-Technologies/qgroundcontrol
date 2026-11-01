@@ -13,7 +13,9 @@
 #include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 
+#include <chrono>
 #include <functional>
 
 class QNetworkAccessManager;
@@ -38,7 +40,7 @@ public:
     };
     using Callback = std::function<void(const Result &result)>;
 
-    static constexpr int timeoutSecs = 120;
+    static constexpr std::chrono::seconds defaultTimeout{ 120 };   ///< Without data received, a download fails
     static constexpr qint64 defaultMaxBytes = 100 * 1024 * 1024;   ///< Several times the largest national file
 
     explicit GeoZoneDownloader(QObject *parent = nullptr);
@@ -49,6 +51,7 @@ public:
 
     /// Downloads larger than this fail without being read
     void setMaxBytes(qint64 maxBytes) { _maxBytes = maxBytes; }
+    void setTimeout(std::chrono::milliseconds timeout) { _timeout = timeout; }
 
     int count() const { return static_cast<int>(_downloads.count()); }
     /// @return Fraction of the downloads received, negative when a size is unknown
@@ -65,9 +68,11 @@ private:
         qint64 received = 0;
         qint64 total = -1;      ///< Negative when the size is unknown
         bool tooLarge = false;
+        QStringList sslErrors;  ///< Why the server's certificate wasn't trusted
     };
 
     QNetworkAccessManager *_networkManager = nullptr;
     QHash<const QObject*, Download> _downloads;  ///< Keyed by reply
     qint64 _maxBytes = defaultMaxBytes;
+    std::chrono::milliseconds _timeout = defaultTimeout;
 };

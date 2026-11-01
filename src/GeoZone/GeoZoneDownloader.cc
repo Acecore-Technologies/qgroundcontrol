@@ -15,6 +15,9 @@
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#if QT_CONFIG(ssl)
+#include <QtNetwork/QSslError>
+#endif
 
 GeoZoneDownloader::GeoZoneDownloader(QObject *parent)
     : QObject(parent)
@@ -29,7 +32,7 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
 
     QNetworkRequest request{ QUrl(url) };
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    request.setTransferTimeout(timeoutSecs * 1000);
+    request.setTransferTimeout(_timeout);
     // Servers answer 304 Not Modified instead of sending unchanged data again
     if (!etag.isEmpty()) {
         request.setRawHeader("If-None-Match", etag.toUtf8());
@@ -42,6 +45,18 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
     QGCFileDownload::setIgnoreSSLErrorsIfNeeded(*reply);
     _downloads.insert(reply, Download{ url });
     emit progressChanged();
+
+#if QT_CONFIG(ssl)
+    // The reply only reports that the handshake failed, these tell why
+    (void) connect(reply, &QNetworkReply::sslErrors, this, [this, reply](const QList<QSslError> &errors) {
+        const auto it = _downloads.find(reply);
+        if (it != _downloads.end()) {
+            for (const QSslError &error : errors) {
+                it->sslErrors.append(error.errorString());
+            }
+        }
+    });
+#endif
 
     (void) connect(reply, &QNetworkReply::downloadProgress, this, [this, reply](qint64 received, qint64 total) {
         const auto it = _downloads.find(reply);
@@ -61,14 +76,18 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
     const bool conditional = !etag.isEmpty() || !lastModified.isEmpty();
     (void) connect(reply, &QNetworkReply::finished, this, [this, reply, conditional, callback = std::move(callback)]() {
         reply->deleteLater();
-        const bool tooLarge = _downloads.value(reply).tooLarge;
-        (void) _downloads.remove(reply);
+        const Download download = _downloads.take(reply);
         emit progressChanged();
 
         Result result;
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (tooLarge) {
+        if (download.tooLarge) {
             result.errorString = tr("The download is larger than %1.").arg(QLocale().formattedDataSize(_maxBytes));
+        } else if ((reply->error() == QNetworkReply::SslHandshakeFailedError) && !download.sslErrors.isEmpty()) {
+            result.errorString = tr("The secure connection to %1 failed: %2").arg(QUrl(download.url).host(), download.sslErrors.join(QStringLiteral("; ")));
+        } else if (reply->error() == QNetworkReply::OperationCanceledError) {
+            // Transfer timeouts cancel the reply
+            result.errorString = tr("The server didn't respond within %n second(s).", nullptr, static_cast<int>(std::chrono::ceil<std::chrono::seconds>(_timeout).count()));
         } else if (reply->error() != QNetworkReply::NoError) {
             result.errorString = reply->errorString();
         } else if ((statusCode == 304) && conditional) {

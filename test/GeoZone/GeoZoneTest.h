@@ -45,6 +45,8 @@ private slots:
     void _testAlertLog();
     void _testProfileBands();
     void _testDownloadSizeLimit();
+    void _testDownloadFailures();
+    void _testManagerStartup();
     void _testParserFuzz();
     void _testSettings();
     void _testLabelZonesLimit();
