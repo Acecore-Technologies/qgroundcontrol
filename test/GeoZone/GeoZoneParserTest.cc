@@ -55,7 +55,11 @@ QString _resultDifference(const GeoZoneParser::Result &a, const GeoZoneParser::R
     if ((a.skippedFeatures != b.skippedFeatures) || (a.missingFeatures != b.missingFeatures) || (a.contentHash != b.contentHash) || (a.issues != b.issues)) {
         return QStringLiteral("counts, hash or issues");
     }
-    if (a.companions.keys() != b.companions.keys()) {
+    QStringList companionKeys = a.companions.keys();
+    QStringList otherCompanionKeys = b.companions.keys();
+    companionKeys.sort();
+    otherCompanionKeys.sort();
+    if (companionKeys != otherCompanionKeys) {
         return QStringLiteral("companions");
     }
     for (auto it = a.companions.cbegin(); it != a.companions.cend(); ++it) {
