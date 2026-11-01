@@ -29,6 +29,7 @@ Item {
     property bool showIndicator: GeoZoneManager.zoneCount > 0
 
     readonly property var _monitor:         GeoZoneMonitor
+    readonly property var _active:          GeoZoneMonitor.activeVehicle
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
@@ -52,8 +53,8 @@ Item {
         source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
-        color:              control._monitor.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._monitor.alertRestriction : -1)
-        opacity:            (control._monitor.monitoring && !control._monitor.positionUnavailable) ? 1 : 0.5
+        color:              control._active.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._active.alertRestriction : -1)
+        opacity:            (control._monitor.monitoring && !control._active.positionUnavailable) ? 1 : 0.5
     }
 
     // Alerts not acknowledged in the alert history
@@ -97,7 +98,7 @@ Item {
                         QGCLabel {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
                                       (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
-                            visible: (!control._monitor.monitoring || control._monitor.nearbyModel.count === 0) && !_pausedLabel.visible
+                            visible: (!control._monitor.monitoring || control._active.nearbyModel.count === 0) && !_pausedLabel.visible
                         }
 
                         QGCLabel {
@@ -105,8 +106,8 @@ Item {
                             wrapMode:           Text.WordWrap
                             color:              qgcPal.colorRed
                             font.bold:          true
-                            text:               qsTr("Vehicle: %1").arg(control._monitor.fenceBreachText)
-                            visible:            control._monitor.fenceBreached
+                            text:               qsTr("Vehicle: %1").arg(control._active.fenceBreachText)
+                            visible:            control._active.fenceBreached
                         }
 
                         QGCLabel {
@@ -115,7 +116,7 @@ Item {
                             wrapMode:           Text.WordWrap
                             color:              qgcPal.warningText
                             text:               qsTr("No current position from the vehicle, its alerts are paused. The zones below are from its last position.")
-                            visible:            control._monitor.monitoring && control._monitor.positionUnavailable
+                            visible:            control._monitor.monitoring && control._active.positionUnavailable
                         }
 
                         RowLayout {
@@ -127,7 +128,7 @@ Item {
                                 Layout.fillWidth:   true
                                 wrapMode:           Text.WordWrap
                                 color:              qgcPal.warningText
-                                text:               qsTr("Spoken alerts are muted, except entries into prohibited zones.")
+                                text:               qsTr("Alerts are muted: they are shown but neither spoken nor repeated, except entries into prohibited zones.")
                             }
 
                             QGCButton {
@@ -137,7 +138,7 @@ Item {
                         }
 
                         Repeater {
-                            model: control._monitor.monitoring ? control._monitor.nearbyModel : null
+                            model: control._monitor.monitoring ? control._active.nearbyModel : null
 
                             RowLayout {
                                 id:         nearbyRow

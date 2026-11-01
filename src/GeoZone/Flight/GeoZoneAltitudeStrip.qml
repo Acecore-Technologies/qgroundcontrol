@@ -27,9 +27,10 @@ Rectangle {
     visible:    _monitor.monitoring && _bands.length > 0 && !isNaN(_altitude)
 
     readonly property var   _monitor:       GeoZoneMonitor
-    readonly property var   _bands:         _monitor.verticalBands
-    readonly property real  _altitude:      _monitor.altitudeAMSL
-    readonly property real  _terrain:       _monitor.terrainAMSL
+    readonly property var   _active:        GeoZoneMonitor.activeVehicle
+    readonly property var   _bands:         _active.verticalBands
+    readonly property real  _altitude:      _active.altitudeAMSL
+    readonly property real  _terrain:       _active.terrainAMSL
     readonly property real  _margin:        ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _barX:          _margin
     readonly property real  _barWidth:      ScreenTools.defaultFontPixelWidth * 2.5

@@ -10,11 +10,11 @@
 #include "GeoZoneMonitor.h"
 #include "AudioOutput.h"
 #include "GeoZone.h"
+#include "GeoZoneActiveVehicleView.h"
 #include "GeoZoneAlertHistory.h"
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneGuidedCheck.h"
-#include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneSettings.h"
@@ -36,7 +36,7 @@ Q_APPLICATION_STATIC(GeoZoneMonitor, _geoZoneMonitor);
 namespace {
 
 /// Speaks with the audio output of the application. The alert popup shows the alerts.
-class ApplicationAudioSink : public GeoZoneAlertArbiter::AudioSink
+class ApplicationAudioSink : public GeoZoneMonitor::AudioSink
 {
 public:
     void say(const QString &text) override { AudioOutput::instance()->say(text); }
@@ -51,7 +51,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     (void) connect(this, &GeoZoneMonitor::alertEvent, _alertLog, &GeoZoneAlertLog::append);
     // Alerts of earlier sessions today, before those of this session are logged
     _alertHistory->loadLog(_alertLog->filePath(GeoZoneEnvironment::currentDateTimeUtc().date()));
-    _arbiter.setAudioSink(std::make_shared<ApplicationAudioSink>());
+    _audioSink = std::make_shared<ApplicationAudioSink>();
 
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
@@ -71,7 +71,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
-    , _nearbyModel(new GeoZoneNearbyModel(this))
+    , _activeView(new GeoZoneActiveVehicleView(this))
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
 {
@@ -170,32 +170,6 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
     GeoZoneVehicleMonitor *const monitor = new GeoZoneVehicleMonitor(vehicle, vehicleId, _nextVehicleKey++, [this]() { return _now(); }, this);
     _monitors.append(monitor);
 
-    // The state of the active vehicle is published
-    (void) connect(monitor, &GeoZoneVehicleMonitor::nearbyChanged, this, [this, monitor]() {
-        if (monitor == _activeMonitor()) {
-            _publishNearby();
-        }
-    });
-    (void) connect(monitor, &GeoZoneVehicleMonitor::verticalBandsChanged, this, [this, monitor]() {
-        if (monitor == _activeMonitor()) {
-            emit verticalBandsChanged();
-        }
-    });
-    (void) connect(monitor, &GeoZoneVehicleMonitor::predictionChanged, this, [this, monitor]() {
-        if (monitor == _activeMonitor()) {
-            emit predictionChanged();
-        }
-    });
-    (void) connect(monitor, &GeoZoneVehicleMonitor::positionUnavailableChanged, this, [this, monitor]() {
-        if (monitor == _activeMonitor()) {
-            emit positionUnavailableChanged();
-        }
-    });
-    (void) connect(monitor, &GeoZoneVehicleMonitor::fenceStatusChanged, this, [this, monitor]() {
-        if (monitor == _activeMonitor()) {
-            emit fenceStatusChanged();
-        }
-    });
     (void) connect(monitor, &GeoZoneVehicleMonitor::fenceBreachStarted, this, [this, monitor](const QString &text) {
         emit fenceBreach(_labelled(monitor->vehicleId(), text));
     });
@@ -270,8 +244,7 @@ void GeoZoneMonitor::setActiveVehicle(Vehicle *vehicle)
     }
     _activeVehicle = vehicle;
     _activeVehicleId = vehicle ? vehicle->id() : noVehicle;
-    _active = vehicleMonitor(vehicle);
-    _publishActive();
+    _activeView->setMonitor(vehicleMonitor(vehicle));
 }
 
 void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
@@ -281,32 +254,12 @@ void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
     }
     _activeVehicle = nullptr;
     _activeVehicleId = vehicleId;
-    _active = positionMonitor(vehicleId);
-    _publishActive();
+    _activeView->setMonitor(positionMonitor(vehicleId));
 }
 
 void GeoZoneMonitor::_resolveActive()
 {
-    GeoZoneVehicleMonitor *const active = _activeVehicle ? vehicleMonitor(_activeVehicle) : positionMonitor(_activeVehicleId);
-    if (active != _active) {
-        _active = active;
-        _publishActive();
-    }
-}
-
-void GeoZoneMonitor::_publishNearby()
-{
-    _nearbyModel->setItems(_activeNearby());
-    emit nearbyZonesChanged();
-}
-
-void GeoZoneMonitor::_publishActive()
-{
-    _publishNearby();
-    emit verticalBandsChanged();
-    emit predictionChanged();
-    emit positionUnavailableChanged();
-    emit fenceStatusChanged();
+    _activeView->setMonitor(_activeVehicle ? vehicleMonitor(_activeVehicle) : positionMonitor(_activeVehicleId));
 }
 
 void GeoZoneMonitor::_updateEvaluateTimer()
@@ -386,10 +339,13 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
 
 void GeoZoneMonitor::_announce()
 {
-    _arbiter.setEnabled(settings().audioAlerts);
     const GeoZoneAlertArbiter::Announcement announcement = _arbiter.tick();
     if (!announcement.text.isEmpty()) {
-        qCDebug(GeoZoneMonitorLog) << "Spoken:" << announcement.text;
+        qCDebug(GeoZoneMonitorLog) << "Announced:" << announcement.text;
+        // Speech is one output of the announcements, the repeats are shown also without it
+        if (settings().audioAlerts && _audioSink) {
+            _audioSink->say(announcement.text);
+        }
     }
     for (const GeoZoneAlertArbiter::Alert &repeated : announcement.repeated) {
         emit alertRepeated(repeated.repeatMessage, repeated.severity, repeated.id);
@@ -432,127 +388,6 @@ bool GeoZoneMonitor::monitoring() const
 {
     const bool vehicles = std::any_of(_monitors.cbegin(), _monitors.cend(), [](const GeoZoneVehicleMonitor *monitor) { return monitor->followsVehicle(); });
     return vehicles && (_manager->zoneCount() > 0) && settings().alertsEnabled;
-}
-
-std::optional<GeoZoneAlertTracker::Entry> GeoZoneMonitor::_activeEntry() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor ? monitor->entry() : std::nullopt;
-}
-
-QVariantList GeoZoneMonitor::predictedPath() const
-{
-    const std::optional<GeoZoneAlertTracker::Entry> entry = _activeEntry();
-    if (!entry) {
-        return {};
-    }
-    return { QVariant::fromValue(_activeMonitor()->entryFrom()), QVariant::fromValue(entry->position.coordinate) };
-}
-
-QGeoCoordinate GeoZoneMonitor::predictedEntry() const
-{
-    const std::optional<GeoZoneAlertTracker::Entry> entry = _activeEntry();
-    return entry ? entry->position.coordinate : QGeoCoordinate();
-}
-
-int GeoZoneMonitor::predictedEntryTime() const
-{
-    const std::optional<GeoZoneAlertTracker::Entry> entry = _activeEntry();
-    return entry ? static_cast<int>(std::lround(entry->time)) : -1;
-}
-
-QVariant GeoZoneMonitor::predictedEntryZone() const
-{
-    const std::optional<GeoZoneAlertTracker::Entry> entry = _activeEntry();
-    return entry ? QVariant::fromValue(GeoZoneInfo(entry->zone)) : QVariant();
-}
-
-const QList<GeoZoneMonitor::Nearby> &GeoZoneMonitor::_activeNearby() const
-{
-    static const QList<Nearby> none;
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor ? monitor->nearby() : none;
-}
-
-QVariantList GeoZoneMonitor::nearbyZones() const
-{
-    QVariantList zones;
-    for (const Nearby &nearby : _activeNearby()) {
-        zones.append(QVariantMap{
-            { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(nearby.zone)) },
-            { QStringLiteral("inside"), nearby.inside },
-            { QStringLiteral("distance"), nearby.distance },
-            { QStringLiteral("timeToEntry"), nearby.timeToEntry },
-        });
-    }
-    return zones;
-}
-
-int GeoZoneMonitor::alertRestriction() const
-{
-    const QList<Nearby> &nearby = _activeNearby();
-    return nearby.isEmpty() ? -1 : static_cast<int>(nearby.first().zone->restriction());
-}
-
-bool GeoZoneMonitor::inside() const
-{
-    const QList<Nearby> &nearby = _activeNearby();
-    return std::any_of(nearby.cbegin(), nearby.cend(), [](const Nearby &zone) { return zone.inside; });
-}
-
-QVariantList GeoZoneMonitor::verticalBands() const
-{
-    QVariantList bands;
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    if (!monitor) {
-        return bands;
-    }
-    for (const GeoZoneVerticalBand &band : monitor->verticalBands()) {
-        bands.append(QVariantMap{
-            { QStringLiteral("restriction"), static_cast<int>(band.zone->restriction()) },
-            { QStringLiteral("name"), band.zone->displayName() },
-            { QStringLiteral("limitsText"), band.zone->verticalLimitsText() },
-            { QStringLiteral("floor"), band.floor },
-            { QStringLiteral("ceiling"), band.ceiling },
-        });
-    }
-    return bands;
-}
-
-double GeoZoneMonitor::altitudeAMSL() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor ? monitor->bandsPosition().altitudeAMSL : qQNaN();
-}
-
-double GeoZoneMonitor::terrainAMSL() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor ? monitor->bandsPosition().terrainAMSL : qQNaN();
-}
-
-bool GeoZoneMonitor::positionUnavailable() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor && monitor->positionUnavailable();
-}
-
-bool GeoZoneMonitor::fenceBreached() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor && monitor->fenceBreached();
-}
-
-bool GeoZoneMonitor::fenceStatusKnown() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor && monitor->fenceStatusKnown();
-}
-
-QString GeoZoneMonitor::fenceBreachText() const
-{
-    const GeoZoneVehicleMonitor *const monitor = _activeMonitor();
-    return monitor ? monitor->fenceBreachText() : QString();
 }
 
 void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)

@@ -13,6 +13,7 @@
 #include <QtCore/QStringList>
 
 #include <algorithm>
+#include <memory>
 
 namespace {
 
@@ -25,9 +26,8 @@ GeoZoneAlertArbiter::Clock elapsedClock()
 
 } // namespace
 
-GeoZoneAlertArbiter::GeoZoneAlertArbiter(const Clock &clock, const std::shared_ptr<AudioSink> &sink)
+GeoZoneAlertArbiter::GeoZoneAlertArbiter(const Clock &clock)
     : _clock(clock ? clock : elapsedClock())
-    , _sink(sink)
 {
 }
 
@@ -95,11 +95,6 @@ int GeoZoneAlertArbiter::_urgency(const Candidate &candidate)
 GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
 {
     Announcement announcement;
-    if (!_enabled) {
-        clear();
-        return announcement;
-    }
-
     const qint64 now = _now();
     const bool silenced = muted();
     if (silenced) {
@@ -154,8 +149,5 @@ GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
     _pending.clear();
     _lastSpokenMSecs = now;
     _lastSpokenUrgency = urgency;
-    if (_sink) {
-        _sink->say(announcement.text);
-    }
     return announcement;
 }

@@ -16,12 +16,13 @@
 
 #include <functional>
 #include <limits>
-#include <memory>
 
-/// Decides which geozone alerts are spoken and when, so that several alerts don't produce a burst of speech and a
-/// vehicle inside a prohibited zone isn't forgotten. It has no timer: GeoZoneMonitor calls tick() after each
-/// evaluation of the vehicles, every second while it monitors them.
-/// - The alerts submitted since the last tick are spoken as one message, the most urgent first: the most severe
+/// Decides which geozone alerts are announced and when, so that several alerts don't produce a burst of messages and a
+/// vehicle inside a prohibited zone isn't forgotten. It keeps the state of the alerts (pending, repeated, acknowledged
+/// and muted) and has no output of its own: GeoZoneMonitor calls tick() after each evaluation of the vehicles, every
+/// second while it monitors them, shows the repeats of the announcement and speaks its text when spoken alerts are on.
+/// So repeats, acknowledgements and muting work the same with the audio turned off.
+/// - The alerts submitted since the last tick are announced as one message, the most urgent first: the most severe
 ///   restriction, then entries before repeats before approaches. The message names maxSpokenAlerts of them and
 ///   counts the others ("and 2 more").
 /// - Messages are at least minIntervalMSecs apart. Alerts arriving sooner wait for a later tick, unless they are more
@@ -29,20 +30,12 @@
 /// - Entering a prohibited zone (a breach) is repeated every repeatIntervalMSecs until its alert is acknowledged or
 ///   the vehicle leaves the zone.
 /// - Muting silences the alerts and repeats for a while, except the first announcement of a new breach. Alerts
-///   raised while muted are dropped, not spoken later.
+///   raised while muted are dropped, not announced later.
 class GeoZoneAlertArbiter
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneAlertArbiter)
 
 public:
-    /// Speaks the messages, like AudioOutput
-    class AudioSink
-    {
-    public:
-        virtual ~AudioSink() = default;
-        virtual void say(const QString &text) = 0;
-    };
-
     /// @return Monotonic milliseconds
     using Clock = std::function<qint64()>;
 
@@ -58,28 +51,21 @@ public:
         int severity = 0;       ///< GeoZone::restrictionSeverity, the most severe is 0
         bool inside = false;    ///< Entered, otherwise approached
         bool breach = false;    ///< Entered a prohibited zone: repeated until acknowledged or left, and never muted
-        QString message;        ///< Spoken
-        QString repeatMessage;  ///< Spoken when a breach is repeated
+        QString message;        ///< Announced
+        QString repeatMessage;  ///< Announced when a breach is repeated
     };
 
-    /// What a tick spoke
+    /// What a tick announces
     struct Announcement {
-        QString text;               ///< Empty when nothing was spoken
+        QString text;               ///< Empty when nothing is announced
         QList<Alert> alerts;        ///< Named or counted, the most urgent first
         QList<Alert> repeated;      ///< Breaches among them which were announced before
     };
 
     /// @param clock A timer started now when empty
-    /// @param sink Nothing is spoken when null, but the announcements are still decided
-    explicit GeoZoneAlertArbiter(const Clock &clock = Clock(), const std::shared_ptr<AudioSink> &sink = nullptr);
+    explicit GeoZoneAlertArbiter(const Clock &clock = Clock());
 
     void setClock(const Clock &clock);
-    void setAudioSink(const std::shared_ptr<AudioSink> &sink) { _sink = sink; }
-    const std::shared_ptr<AudioSink> &audioSink() const { return _sink; }
-
-    /// Turned off, like when the alerts aren't spoken, ticks speak nothing and forget the alerts and breaches
-    void setEnabled(bool enabled) { _enabled = enabled; }
-    bool enabled() const { return _enabled; }
 
     /// Adds an alert to announce at the next tick. Breaches are announced again until acknowledged or left.
     void submit(const Alert &alert);
@@ -106,7 +92,7 @@ public:
     int breachCount() const { return static_cast<int>(_breaches.count()); }
     int pendingCount() const { return static_cast<int>(_pending.count()); }
 
-    /// Speaks the alerts submitted since the last tick and the breaches due to be repeated, as the rules allow
+    /// Announces the alerts submitted since the last tick and the breaches due to be repeated, as the rules allow
     Announcement tick();
 
 private:
@@ -125,8 +111,6 @@ private:
     qint64 _now() const { return _clock(); }
 
     Clock _clock;
-    std::shared_ptr<AudioSink> _sink;
-    bool _enabled = true;
     QList<Alert> _pending;          ///< Submitted, not spoken yet, in submission order
     QList<Breach> _breaches;
     qint64 _lastSpokenMSecs = -1;   ///< -1 before the first message

@@ -21,7 +21,8 @@ import QGroundControl.GeoZone
 
 /// Non-blocking popup for the flight alerts of GeoZoneMonitor, closed after a while or when clicked. Alerts
 /// arriving while it is open are added, the most severe first. A geozone alert can be acknowledged, which also stops
-/// the spoken repeats of an entry into a prohibited zone, and the spoken alerts can be muted for a while.
+/// the repeats of an entry into a prohibited zone, and the alerts can be muted for a while. Repeats are shown also
+/// when the alerts aren't spoken.
 Popup {
     id:             control
     y:              (stackBelow && stackBelow.visible) ?
@@ -40,7 +41,6 @@ Popup {
 
     readonly property int   _maxAlerts:     4
     readonly property var   _monitor:       GeoZoneMonitor
-    readonly property bool  _audioAlerts:   GeoZoneManager.settings.audioAlerts.rawValue
 
     property var _alerts: []        ///< Shown alerts as { message, severity, alertId }, alertId 0 for fence breaches
 
@@ -155,7 +155,6 @@ Popup {
 
             QGCButton {
                 text:       control._monitor.alertsMuted ? qsTr("Unmute Alerts") : qsTr("Mute Alerts for %1 min").arg(Math.round(control._monitor.defaultMuteSecs / 60))
-                visible:    control._audioAlerts
                 onClicked:  control._monitor.alertsMuted ? control._monitor.unmuteAlerts() : control._monitor.muteAlerts(0)
             }
 
