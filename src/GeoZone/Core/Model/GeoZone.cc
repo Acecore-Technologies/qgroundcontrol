@@ -13,8 +13,6 @@
 #include "GeoZoneGeometry.h"
 #include "GeoZoneVertical.h"
 
-#include <QtCore/QHash>
-
 #include <cmath>
 
 #include <algorithm>
@@ -148,23 +146,40 @@ bool GeoZone::updateActive(const QDateTime &now)
 QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance) const
 {
     if (simplifyTolerance > 0) {
+        const qint64 key = (std::max)(qRound64(simplifyTolerance / simplifiedCacheResolution), qint64{ 1 });
+        // Moves the cached result to the front, as the most recently used
+        const auto cached = [this, key]() -> std::optional<QList<QList<QGeoCoordinate>>> {
+            for (qsizetype i = 0; i < _simplifiedPolygons.count(); i++) {
+                if (_simplifiedPolygons[i].first == key) {
+                    _simplifiedPolygons.move(i, 0);
+                    return _simplifiedPolygons.constFirst().second;
+                }
+            }
+            return std::nullopt;
+        };
         {
             const QMutexLocker locker(&_simplifiedMutex);
-            const auto cached = _simplifiedPolygons.constFind(simplifyTolerance);
-            if (cached != _simplifiedPolygons.constEnd()) {
-                return cached.value();
+            if (const auto polygons = cached()) {
+                return *polygons;
             }
         }
 
         QList<QList<QGeoCoordinate>> simplified;
         for (const QList<QGeoCoordinate> &polygon : exclusionPolygons()) {
-            const QList<QGeoCoordinate> ring = GeoZoneGeometry::simplifyOutward(polygon, simplifyTolerance);
+            const QList<QGeoCoordinate> ring = GeoZoneGeometry::simplifyOutward(polygon, key * simplifiedCacheResolution);
             if (!simplified.contains(ring)) {
                 simplified.append(ring);
             }
         }
         const QMutexLocker locker(&_simplifiedMutex);
-        _simplifiedPolygons.insert(simplifyTolerance, simplified);
+        // Another thread may have simplified it meanwhile
+        if (const auto polygons = cached()) {
+            return *polygons;
+        }
+        _simplifiedPolygons.prepend({ key, simplified });
+        if (_simplifiedPolygons.count() > simplifiedCacheSize) {
+            _simplifiedPolygons.removeLast();
+        }
         return simplified;
     }
 

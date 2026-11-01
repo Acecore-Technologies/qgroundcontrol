@@ -188,8 +188,12 @@ public:
     /// Outer boundaries of all polygon volumes, clockwise and without duplicates. Holes are dropped
     /// so that excluding these polygons is always conservative.
     /// @param simplifyTolerance Meters. When positive, polygons are reduced to fewer vertices which still enclose
-    ///                          the zone, see GeoZoneGeometry::simplifyOutward.
+    ///                          the zone, see GeoZoneGeometry::simplifyOutward. The tolerance is rounded to
+    ///                          simplifiedCacheResolution, and the results of the last simplifiedCacheSize tolerances
+    ///                          are cached.
     QList<QList<QGeoCoordinate>> exclusionPolygons(double simplifyTolerance = 0) const;
+    static constexpr double simplifiedCacheResolution = 0.1;   ///< Meters
+    static constexpr qsizetype simplifiedCacheSize = 4;
 
     /// Circle volumes without duplicates
     QList<QGeoCircle> exclusionCircles() const;
@@ -279,7 +283,8 @@ private:
     QString _sourceText;
     QString _key;
     mutable QMutex _simplifiedMutex;
-    mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance, guarded by _simplifiedMutex
+    /// By tolerance in units of simplifiedCacheResolution, the most recently used first, guarded by _simplifiedMutex
+    mutable QList<std::pair<qint64, QList<QList<QGeoCoordinate>>>> _simplifiedPolygons;
     mutable std::once_flag _projectedOnce;
     mutable std::unique_ptr<const Projected> _projectedData;
 };

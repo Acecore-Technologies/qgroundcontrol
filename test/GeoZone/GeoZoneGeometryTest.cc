@@ -435,6 +435,24 @@ void GeoZoneGeometryTest::_testExclusionShapes()
     QCOMPARE(multiPolygons.count(), 2);
     QCOMPARE(multiPolygons[0].count(), 4);
     QCOMPARE(multiPolygons[1].count(), 3);
+
+    // Simplifications are cached by tolerance rounded to a tenth of a meter, for the last few tolerances
+    QList<QGeoCoordinate> round;
+    for (int i = 0; i < 100; i++) {
+        round.append(QGeoCoordinate(47, 8).atDistanceAndAzimuth(1000, i * 3.6));
+    }
+    GeoZone::Data roundData;
+    roundData.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(round) } });
+    const GeoZone roundZone(roundData);
+    const QList<QList<QGeoCoordinate>> simplified = roundZone.exclusionPolygons(20.04);
+    QVERIFY(simplified.constFirst().count() < 100);
+    QVERIFY(roundZone.exclusionPolygons(19.98).isSharedWith(simplified));
+    for (qsizetype i = 1; i <= GeoZone::simplifiedCacheSize; i++) {
+        (void) roundZone.exclusionPolygons(20.0 + (10.0 * static_cast<double>(i)));
+    }
+    const QList<QList<QGeoCoordinate>> again = roundZone.exclusionPolygons(20.0);
+    QVERIFY(!again.isSharedWith(simplified));
+    QCOMPARE(again, simplified);
 }
 
 void GeoZoneGeometryTest::_testFenceCapacity()

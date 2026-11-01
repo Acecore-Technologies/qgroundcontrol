@@ -267,6 +267,12 @@ QList<QList<QPointF>> GeoZoneShape::mercatorRings(int zoomLevel) const
     }
 
     const QMutexLocker locker(&_mercatorMutex);
+    // Another thread may have made the rings of the level meanwhile
+    for (const auto &[cachedLevel, cachedRings] : _mercatorCache) {
+        if (cachedLevel == level) {
+            return cachedRings;
+        }
+    }
     _mercatorCache.append({ level, rings });
     return rings;
 }
