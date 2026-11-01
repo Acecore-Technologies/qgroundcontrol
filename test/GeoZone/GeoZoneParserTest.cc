@@ -398,6 +398,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QCOMPARE(circle.volumes[0].radius, 2 * 1852.0);
     QCOMPARE(byName.value(QStringLiteral("RAASAY")).restriction, GeoZone::Conditional);
 
+#ifndef GEOZONE_CORE_TEST
     // Zipped, like the NATS download
     const QTemporaryDir zipDir;
     QVERIFY(zipDir.isValid());
@@ -412,6 +413,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QCOMPARE(GeoZoneLoader::extractZip(zipFile.readAll(), errorString), aixmBytes);
     QCOMPARE(GeoZoneLoader::extractZip(QByteArray("PK\x03\x04" "broken"), errorString), QByteArray());
     QVERIFY(!errorString.isEmpty());
+#endif
 
     // Archives expanding beyond the limit are stopped while inflating, whatever their headers declare
     const auto deflatedZeros = [](qint64 size) {
@@ -477,20 +479,23 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(GeoZoneProviders::datasetLink(pageUrl, aixmBytes, QDate(2026, 11, 1)).isEmpty());
 
     // Area feeds of providers serving zones by area
-    GeoZoneManager manager(QTemporaryDir().path());
     const QGeoRectangle frankfurt(QGeoCoordinate(50.15, 8.55), QGeoCoordinate(50.0, 8.75));
-    const QString dipulUrl = manager.areaFeedUrl(QStringLiteral("dipul"), frankfurt);
+    const QString dipulUrl = GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), frankfurt);
     QVERIFY(dipulUrl.contains(QStringLiteral("dipul:wohngrundstuecke")));
     QVERIFY(dipulUrl.endsWith(QStringLiteral("&BBOX=8.55000,50.00000,8.75000,50.15000")));
     QCOMPARE(GeoZoneProviders::formatHint(dipulUrl), GeoZoneParser::Format::Dipul);
-    QVERIFY(manager.areaFeedUrl(QStringLiteral("france"), frankfurt).contains(QStringLiteral("BBOX=8.55000,50.00000,8.75000,50.15000,EPSG:4326")));
-    QVERIFY(manager.areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))).isEmpty());
-    QVERIFY(manager.areaFeedUrl(QStringLiteral("unknown"), frankfurt).isEmpty());
+    QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("france"), frankfurt).contains(QStringLiteral("BBOX=8.55000,50.00000,8.75000,50.15000,EPSG:4326")));
+    QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))).isEmpty());
+    QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("unknown"), frankfurt).isEmpty());
+#ifndef GEOZONE_CORE_TEST
+    GeoZoneManager manager(QTemporaryDir().path());
     QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
     QVERIFY(!manager.addArea(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))));
     QCOMPARE(failedSpy.count(), 1);
+#endif
 }
 
+#ifndef GEOZONE_CORE_TEST
 void GeoZoneParserTest::_testLiveNationalFeeds()
 {
     // Downloads the real services, only when asked since it depends on them
@@ -530,6 +535,7 @@ void GeoZoneParserTest::_testLiveNationalFeeds()
     qDebug() << "TFRs" << tfrs << "with NOTAM times" << detailed;
     QVERIFY((tfrs == 0) || (detailed > (tfrs / 2)));
 }
+#endif
 
 void GeoZoneParserTest::_testParseErrors()
 {
@@ -635,10 +641,7 @@ void GeoZoneParserTest::_testDisplayText()
     const GeoZoneParser::Result ed269 = _parseResource(QStringLiteral("ed269_test.json"));
     QCOMPARE(ed269.zones.count(), 3);
 
-    Fact *const verticalUnits = SettingsManager::instance()->unitsSettings()->verticalDistanceUnits();
-    const QVariant savedVerticalUnits = verticalUnits->rawValue();
-    const auto restoreVerticalUnits = qScopeGuard([verticalUnits, savedVerticalUnits] { verticalUnits->setRawValue(savedVerticalUnits); });
-    verticalUnits->setRawValue(UnitsSettings::VerticalDistanceUnitsMeters);
+    const auto meters = _setVerticalUnits(false);
 
     const GeoZone prohibited(ed269.zones[0]);
     QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 120 m AGL\n120 m AGL - Unlimited"));
@@ -649,7 +652,7 @@ void GeoZoneParserTest::_testDisplayText()
     const GeoZone circle(ed269.zones[1]);
     QCOMPARE(circle.verticalLimitsText(), QStringLiteral("GND - 122 m AGL (400 ft)"));
 
-    verticalUnits->setRawValue(UnitsSettings::VerticalDistanceUnitsFeet);
+    const auto feet = _setVerticalUnits(true);
     QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 394 ft AGL (120 m)\n394 ft AGL (120 m) - Unlimited"));
     QCOMPARE(circle.verticalLimitsText(), QStringLiteral("GND - 400 ft AGL"));
 
@@ -704,6 +707,7 @@ void GeoZoneParserTest::_testXmlAndPackages()
     QVERIFY(!GeoZoneParser::parse("<metadata><title>Zones</title></metadata>", result, errorString));
     QCOMPARE(errorString, QStringLiteral("Unsupported XML document (metadata)."));
 
+#ifndef GEOZONE_CORE_TEST
     // A package with the zones split into two files, one zone in both, and a metadata file
     QFile ed269File(QStringLiteral(":/unittest/ed269_test.json"));
     QVERIFY(ed269File.open(QIODevice::ReadOnly));
@@ -747,4 +751,5 @@ void GeoZoneParserTest::_testXmlAndPackages()
     const QList<GeoZoneZip::File> files = GeoZoneZip::files(archive.readAll(), { QStringLiteral(".json"), QStringLiteral(".xml") }, 1 << 20, errorString);
     QCOMPARE(files.count(), 3);
     QVERIFY(files.first().data.size() >= files.last().data.size());
+#endif
 }

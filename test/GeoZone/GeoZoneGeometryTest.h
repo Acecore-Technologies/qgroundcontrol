@@ -9,9 +9,9 @@
 
 #pragma once
 
-#include "UnitTest.h"
+#include "GeoZoneTestBase.h"
 
-class GeoZoneGeometryTest : public UnitTest
+class GeoZoneGeometryTest : public GeoZoneTestBase
 {
     Q_OBJECT
 
@@ -26,7 +26,9 @@ private slots:
     void _testAltitudeLimits();
     void _testAreaIntersection();
     void _testShapeSimplification();
+#ifndef GEOZONE_CORE_TEST
     void _testMapLayerTriangulation();
+#endif
     void _testAntimeridian();
     void _testBoxAcrossAntimeridian();
     void _testProjectionContinuity();

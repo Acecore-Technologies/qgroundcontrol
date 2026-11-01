@@ -9,9 +9,9 @@
 
 #pragma once
 
-#include "UnitTest.h"
+#include "GeoZoneTestBase.h"
 
-class GeoZoneParserTest : public UnitTest
+class GeoZoneParserTest : public GeoZoneTestBase
 {
     Q_OBJECT
 
@@ -20,7 +20,9 @@ private slots:
     void _testParseED318();
     void _testParseFaaTfr();
     void _testParseNationalFormats();
+#ifndef GEOZONE_CORE_TEST
     void _testLiveNationalFeeds();
+#endif
     void _testParseErrors();
     void _testXmlAndPackages();
     void _testParserFuzz();

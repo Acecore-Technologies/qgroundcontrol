@@ -102,4 +102,9 @@ jobs:
               status=1
             fi
           done
+          # The parser and geometry tests again, headless with the GeoZoneCore library only
+          ./Debug/GeoZoneCoreTest 2>&1 | tee GeoZoneCoreTest.log || status=1
+          if grep -h "src/GeoZone/.*runtime error" GeoZoneCoreTest.log; then
+            status=1
+          fi
           exit $status

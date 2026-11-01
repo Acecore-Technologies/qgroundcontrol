@@ -9,48 +9,55 @@
 
 #pragma once
 
-#include "GeoFenceController.h"
 #include "GeoZone.h"
-#include "GeoZoneDownloader.h"
-#include "GeoZoneAlertHistory.h"
-#include "GeoZoneAlertLog.h"
 #include "GeoZoneAuthorisations.h"
-#include "GeoZoneFenceImporter.h"
+#include "GeoZoneCatalog.h"
+#include "GeoZoneDownloader.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneGeometry.h"
-#include "GeoZoneGuidedCheck.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneLoader.h"
-#include "GeoZoneProviders.h"
-#include "GeoZoneManager.h"
-#include "GeoZoneDisplay.h"
-#include "GeoZonePlanning.h"
-#include "GeoZoneMapLayer.h"
-#include "GeoZoneMapModel.h"
-#include "GeoZoneMissionCheck.h"
-#include "GeoZonePathEvaluator.h"
-#include "GeoZoneMonitor.h"
 #include "GeoZoneParser.h"
-#include "GeoZonePlanData.h"
-#include "GeoZoneProfile.h"
-#include "GeoZoneRoutePlanner.h"
-#include "GeoZoneSettings.h"
+#include "GeoZonePathEvaluator.h"
+#include "GeoZonePolicy.h"
+#include "GeoZoneProviders.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneTerrain.h"
+#ifndef GEOZONE_CORE_TEST
+#include "GeoFenceController.h"
+#include "GeoZoneAlertHistory.h"
+#include "GeoZoneAlertLog.h"
+#include "GeoZoneDisplay.h"
+#include "GeoZoneFenceImporter.h"
+#include "GeoZoneGuidedCheck.h"
+#include "GeoZoneManager.h"
+#include "GeoZoneMapLayer.h"
+#include "GeoZoneMapModel.h"
+#include "GeoZoneMissionCheck.h"
+#include "GeoZoneMonitor.h"
+#include "GeoZonePlanData.h"
+#include "GeoZonePlanning.h"
+#include "GeoZoneProfile.h"
+#include "GeoZoneRoutePlanner.h"
+#include "GeoZoneSettings.h"
 #include "MissionController.h"
+#include "MissionSettingsItem.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
-#include "QmlObjectListModel.h"
 #include "QGCMapPolygon.h"
 #include "QGCZip.h"
+#include "QmlObjectListModel.h"
 #include "SettingsManager.h"
-#include "MissionSettingsItem.h"
 #include "SimpleMissionItem.h"
 #include "SurveyComplexItem.h"
 #include "UnitsSettings.h"
 #include "Vehicle.h"
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
+#endif
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -66,12 +73,11 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrl>
-#include <QtNetwork/QTcpServer>
-#include <QtNetwork/QTcpSocket>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 /// Fixtures and helpers shared by the geozone tests
@@ -164,8 +170,27 @@ inline double _distanceToRing(const QPointF &point, const QList<QPointF> &ring)
     return minDistance;
 }
 
+/// Shows heights in feet or in meters until the returned guard restores the previous units: those of the
+/// QGroundControl settings, or of GeoZoneEnvironment without the application
+inline QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
+{
+#ifdef GEOZONE_CORE_TEST
+    const GeoZoneEnvironment::Hooks saved = GeoZoneEnvironment::hooks();
+    GeoZoneEnvironment::Hooks hooks = saved;
+    hooks.verticalDistanceUnits = [feet]() { return feet ? QStringLiteral("ft") : QStringLiteral("m"); };
+    hooks.metersToVerticalDistanceUnits = [feet](double meters) { return feet ? (meters / 0.3048) : meters; };
+    GeoZoneEnvironment::setHooks(hooks);
+    return QScopeGuard<std::function<void()>>([saved]() { GeoZoneEnvironment::setHooks(saved); });
+#else
+    Fact *const verticalUnits = SettingsManager::instance()->unitsSettings()->verticalDistanceUnits();
+    const QVariant saved = verticalUnits->rawValue();
+    verticalUnits->setRawValue(feet ? UnitsSettings::VerticalDistanceUnitsFeet : UnitsSettings::VerticalDistanceUnitsMeters);
+    return QScopeGuard<std::function<void()>>([verticalUnits, saved]() { verticalUnits->setRawValue(saved); });
+#endif
+}
 
 
+#ifndef GEOZONE_CORE_TEST
 /// Answers requests by path: /ok with the ED-318 test file, /missing 404, /broken 500, /empty an empty 200 and
 /// /hang never. Counts the requests.
 class TestFeedServer : public QTcpServer
@@ -223,6 +248,7 @@ private:
         socket->disconnectFromHost();
     }
 };
+#endif
 
 
 } // namespace GeoZoneTestHelpers

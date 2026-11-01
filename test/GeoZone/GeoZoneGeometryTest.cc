@@ -172,15 +172,15 @@ void GeoZoneGeometryTest::_testIsActiveDuring()
     QVERIFY(night.isActiveDuring(_utc(friday.addDays(2), QTime(22, 30)), _utc(friday.addDays(2), QTime(23, 10))));
     QVERIFY(!night.isActiveDuring(_utc(friday.addDays(3), QTime(1, 1)), _utc(friday.addDays(6), QTime(21, 0))));
 
-    // The manager filters zones by the activity window
-    const QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
-    QVERIFY2(manager.loadFile(QStringLiteral(":/unittest/ed269_test.json"), errorString), qPrintable(errorString));
+    // The catalog filters zones by the activity window
+    GeoZoneSource source(QStringLiteral("ed269_test.json"), QString());
+    source.setResult(ed269, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    GeoZoneCatalog catalog;
+    catalog.rebuild({ &source });
     const GeoZonePolicy all({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown });
-    QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), all).count(), 3);
-    QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), all.activeDuring(_utc(monday.addDays(2), QTime(10, 0)))).count(), 2);
-    QCOMPARE(manager.catalog().zonesInArea(QGeoRectangle(), all.activeDuring(_utc(monday.addDays(2), QTime(10, 0)), _utc(monday.addDays(7), QTime(10, 0)))).count(), 3);
+    QCOMPARE(catalog.zonesInArea(QGeoRectangle(), all).count(), 3);
+    QCOMPARE(catalog.zonesInArea(QGeoRectangle(), all.activeDuring(_utc(monday.addDays(2), QTime(10, 0)))).count(), 2);
+    QCOMPARE(catalog.zonesInArea(QGeoRectangle(), all.activeDuring(_utc(monday.addDays(2), QTime(10, 0)), _utc(monday.addDays(7), QTime(10, 0)))).count(), 3);
 }
 
 void GeoZoneGeometryTest::_testOutwardSimplification()
@@ -381,6 +381,7 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     QVERIFY(!circle.intersectsPath({ center.atDistanceAndAzimuth(1000, 270).atDistanceAndAzimuth(600, 0), center.atDistanceAndAzimuth(1000, 90).atDistanceAndAzimuth(600, 0) }));
     QVERIFY(qAbs(entryDistance(circle, { center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }) - 500) < 1);
 
+#ifndef GEOZONE_CORE_TEST
     // Connected segments form one path, long legs get points along the great circle
     const QGeoCoordinate a(47, 8);
     const QGeoCoordinate b = a.atDistanceAndAzimuth(500, 0);
@@ -442,6 +443,7 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
     QCOMPARE(paths.count(), 1);
     QCOMPARE(paths[0].first().terrainAMSL, 310.0);
     QVERIFY(std::none_of(paths[0].cbegin(), paths[0].cend(), [](const GeoZone::Position &position) { return qIsNaN(position.terrainAMSL); }));
+#endif
 }
 
 void GeoZoneGeometryTest::_testAltitudeLimits()
@@ -637,6 +639,7 @@ void GeoZoneGeometryTest::_testShapeSimplification()
     QCOMPARE(circle.mercatorBounds().height(), circle.mercatorBounds().width());
 }
 
+#ifndef GEOZONE_CORE_TEST
 void GeoZoneGeometryTest::_testMapLayerTriangulation()
 {
     const auto area = [](const QList<QPointF> &triangles) {
@@ -701,6 +704,7 @@ void GeoZoneGeometryTest::_testMapLayerTriangulation()
     QTransform transform;
     QVERIFY(!GeoZoneMapLayer::mercatorTransform(QGeoCoordinate(), 13, [](const QGeoCoordinate &) { return QPointF(); }, transform));
 }
+#endif
 
 void GeoZoneGeometryTest::_testAntimeridian()
 {
