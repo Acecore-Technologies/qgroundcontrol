@@ -86,8 +86,10 @@ qt_add_qml_module(GeoZoneModule
         Planning/GeoZoneFenceImportDialog.qml
         Planning/GeoZoneGuidedActionCheck.qml
         Planning/GeoZoneMissionBanner.qml
+        Planning/GeoZonePlanViewOverlay.qml
         Planning/GeoZoneProfileOverlay.qml
         Planning/GeoZoneRouteDialog.qml
+        Planning/GeoZoneToolStripAction.qml
         Flight/GeoZoneAlertPopup.qml
         Flight/GeoZoneAltitudeStrip.qml
         Flight/GeoZoneIndicator.qml

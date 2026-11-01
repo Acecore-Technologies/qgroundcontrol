@@ -200,7 +200,7 @@ Item {
             if (!checkReadyForSaveUpload(false /* save */)) {
                 return
             }
-            geoZoneMissionBanner.confirmUpload(_uploadAfterGeoZoneCheck)
+            geoZoneOverlay.confirmUpload(_uploadAfterGeoZoneCheck)
         }
 
         function _uploadAfterGeoZoneCheck() {
@@ -396,20 +396,20 @@ Item {
                         insertROIAfterCurrent(coordinate)
                         _addROIOnClick = false
                     } else {
-                        geoZoneMapVisuals.showZonesAt(coordinate)
+                        geoZoneOverlay.showZonesAt(coordinate)
                     }
 
                     break
                 case _layerGeoFence:
-                    if (!geoFenceEditor.selectFenceAt(coordinate)) {
-                        geoZoneMapVisuals.showZonesAt(coordinate)
+                    if (!geoZoneOverlay.selectFenceAt(coordinate)) {
+                        geoZoneOverlay.showZonesAt(coordinate)
                     }
                     break
                 case _layerRallyPoints:
                     if (_rallyPointController.supported && addWaypointRallyPointAction.checked) {
                         _rallyPointController.addPoint(coordinate)
                     } else {
-                        geoZoneMapVisuals.showZonesAt(coordinate)
+                        geoZoneOverlay.showZonesAt(coordinate)
                     }
                     break
 
@@ -516,13 +516,6 @@ Item {
                 }
             }
 
-            GeoZoneMapVisuals {
-                id:                 geoZoneMapVisuals
-                map:                editorMap
-                highlightedZones:   geoZoneMissionBanner.crossedZones
-                fitToAddedSources:  true
-            }
-
             GeoFenceMapVisuals {
                 map:                    editorMap
                 myGeoFenceController:   _geoFenceController
@@ -570,15 +563,13 @@ Item {
             }
         }
 
-        GeoZoneMissionBanner {
-            id:                 geoZoneMissionBanner
-            anchors.top:        parent.top
-            anchors.topMargin:  _toolsMargin
-            missionController:  _missionController
-            geoFenceController: _geoFenceController
-            map:                editorMap
-            leftLimit:          toolStrip.x + toolStrip.width + _toolsMargin
-            rightLimit:         rightPanel.x - _toolsMargin
+        GeoZonePlanViewOverlay {
+            id:                     geoZoneOverlay
+            anchors.fill:           parent
+            map:                    editorMap
+            planMasterController:   _planMasterController
+            leftLimit:              toolStrip.x + toolStrip.width + _toolsMargin
+            rightLimit:             rightPanel.x - _toolsMargin
         }
 
         //-----------------------------------------------------------
@@ -684,12 +675,7 @@ Item {
                         visible:            true
                         dropPanelComponent: centerMapDropPanel
                     },
-                    ToolStripAction {
-                        text:               qsTr("Geozones")
-                        iconSource:         "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
-                        visible:            GeoZoneManager.zoneCount > 0
-                        dropPanelComponent: geoZoneDropPanel
-                    }
+                    GeoZoneToolStripAction { overlay: geoZoneOverlay }
                 ]
             }
 
@@ -817,7 +803,6 @@ Item {
             }
             // GeoFence Editor
             GeoFenceEditor {
-                id:                     geoFenceEditor
                 anchors.top:            rightControls.bottom
                 anchors.topMargin:      ScreenTools.defaultFontPixelHeight * 0.25
                 anchors.bottom:         parent.bottom
@@ -961,27 +946,6 @@ Item {
         CenterMapDropPanel {
             map:            editorMap
             fitFunctions:   mapFitFunctions
-        }
-    }
-
-    Component {
-        id: geoZoneDropPanel
-
-        GeoZoneMapPanel {
-            map:                editorMap
-            hiddenZoneCount:    geoZoneMapVisuals.hiddenZoneCount
-            showCrossedZones:   geoZoneMissionBanner.crossedZones.length > 0
-            briefingEnabled:    true
-
-            onManageRequested: {
-                dropPanel.hide()
-                mainWindow.showSettingsTool(qsTr("Geozones"))
-            }
-            onZoneSelected: dropPanel.hide()
-            onExportBriefingRequested: {
-                dropPanel.hide()
-                geoZoneMissionBanner.exportBriefing()
-            }
         }
     }
 

@@ -16,8 +16,8 @@
 /// - QGCCorePlugin::toolBarIndicators: GeoZoneIndicator.qml
 /// - SettingsPagesModel.qml: the Geozones page
 /// - MainWindow.qml: GeoZoneAlertPopup
-/// - PlanView.qml: GeoZoneMapVisuals, GeoZoneMissionBanner, the Geozones tool strip panel with the briefing export, map
-///   clicks showing zones and the upload confirmation
+/// - PlanView.qml: GeoZonePlanViewOverlay with the zones, the mission banner and the Geozones panel, the
+///   GeoZoneToolStripAction opening the panel, and calls to the overlay for map clicks and the upload confirmation
 /// - QGCFileDialog.qml: the fileName proposed when saving, for the briefing export
 /// - TerrainStatus.qml: GeoZoneProfileOverlay
 /// - FlyViewMap.qml: GeoZoneMapVisuals, map clicks showing zones and the go to confirmation
