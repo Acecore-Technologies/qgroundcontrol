@@ -30,6 +30,9 @@ public:
         ED269,
         ED318,
         FaaTfr,     ///< FAA temporary flight restrictions GeoJSON from tfr.faa.gov
+        Dipul,      ///< German geographical zones GeoJSON from the DiPUL WFS
+        FranceUas,  ///< French UAS restrictions GeoJSON of the IGN Géoplateforme WFS
+        Aixm,       ///< AIXM 5.1 airspaces, like the UK flight restriction zones from NATS
     };
 
     struct Result {
@@ -42,10 +45,11 @@ public:
         QList<GeoZone::Data> zones;
         int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry
         QByteArray contentHash;     ///< Hash of the features, which stays the same when only metadata changes
+        int missingFeatures = 0;    ///< Features of a WFS response the server left out because of its limit
     };
 
     static bool parseFile(const QString &fileName, Result &result, QString &errorString);
-    /// @param formatHint FaaTfr accepts an empty feature list from the FAA as a valid TFR list
+    /// @param formatHint WFS formats like FaaTfr accept an empty feature list from their server as a valid list
     /// @param language Code of the preferred language of localized texts, English is used otherwise
     static bool parse(const QByteArray &bytes, Result &result, QString &errorString, Format formatHint = Format::Unknown,
                       const QString &language = QString());

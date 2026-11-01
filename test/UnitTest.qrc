@@ -26,6 +26,9 @@
         <file alias="ed269_test.json">GeoZone/ed269_test.json</file>
         <file alias="ed318_test.json">GeoZone/ed318_test.json</file>
         <file alias="faa_tfr_test.json">GeoZone/faa_tfr_test.json</file>
+        <file alias="dipul_test.json">GeoZone/dipul_test.json</file>
+        <file alias="france_uas_test.json">GeoZone/france_uas_test.json</file>
+        <file alias="uk_aixm_test.xml">GeoZone/uk_aixm_test.xml</file>
         <file alias="DSCN0010.jpg">AnalyzeView/DSCN0010.jpg</file>
         <file alias="SampleULog.ulg">AnalyzeView/SampleULog.ulg</file>
         <file alias="arducopter.apj">Utilities/arducopter.apj</file>

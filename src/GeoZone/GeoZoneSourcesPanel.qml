@@ -87,6 +87,15 @@ ColumnLayout {
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
+                text:               object.warningText
+                visible:            text !== ""
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                color:              qgcPal.warningText
                 text:               qsTr("Last update failed: %1").arg(object.errorString)
                 textFormat:         Text.PlainText
                 visible:            object.errorString !== ""

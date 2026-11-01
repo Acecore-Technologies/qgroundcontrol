@@ -1,0 +1,516 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<message:AIXMBasicMessage xmlns:aixm="http://www.aixm.aero/schema/5.1"
+                          xmlns:gco="http://www.isotc211.org/2005/gco"
+                          xmlns:gmd="http://www.isotc211.org/2005/gmd"
+                          xmlns:gml="http://www.opengis.net/gml/3.2"
+                          xmlns:gmx="http://www.isotc211.org/2005/gmx"
+                          xmlns:gts="http://www.isotc211.org/2005/gts"
+                          xmlns:message="http://www.aixm.aero/schema/5.1/message"
+                          xmlns:xlink="http://www.w3.org/1999/xlink"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          gml:id="id21317"
+                          xsi:schemaLocation="http://www.aixm.aero/schema/5.1/message http://www.aixm.aero/schema/5.1/message/AIXM_BasicMessage.xsd">
+   <gml:boundedBy xsi:nil="true" nilReason="unknown"/>
+   
+   <message:hasMember xlink:type="simple">
+      <aixm:Airspace gml:id="id18015">
+         <gml:identifier codeSpace="urn:uuid:">a5a27a49-74d9-447f-b767-2017bd4360ac</gml:identifier>
+         <gml:boundedBy xsi:nil="true" nilReason="unknown"/>
+         <aixm:timeSlice>
+            <aixm:AirspaceTimeSlice gml:id="id3033">
+               <gml:validTime xlink:type="simple">
+                  <gml:TimeInstant gml:id="id16724">
+                     <gml:timePosition>2026-10-29T00:00:00Z</gml:timePosition>
+                  </gml:TimeInstant>
+               </gml:validTime>
+               <aixm:interpretation>SNAPSHOT</aixm:interpretation>
+               <aixm:featureLifetime xlink:type="simple">
+                  <gml:TimePeriod gml:id="id17793">
+                     <gml:beginPosition>2021-01-28T00:00:00Z</gml:beginPosition>
+                     <gml:endPosition indeterminatePosition="unknown"/>
+                  </gml:TimePeriod>
+               </aixm:featureLifetime>
+               <aixm:type>R</aixm:type>
+               <aixm:designator>EGR1U021A</aixm:designator>
+               <aixm:localType>FRZ</aixm:localType>
+               <aixm:name>BLACKBUSHE</aixm:name>
+               <aixm:designatorICAO>NO</aixm:designatorICAO>
+               <aixm:controlType xsi:nil="true" nilReason="unknown"/>
+               <aixm:upperLowerSeparation xsi:nil="true" nilReason="unknown"/>
+               <aixm:protectedRoute xsi:nil="true" nilReason="unknown"/>
+               <aixm:geometryComponent>
+                  <aixm:AirspaceGeometryComponent gml:id="id12270">
+                     <aixm:operation>BASE</aixm:operation>
+                     <aixm:operationSequence>1</aixm:operationSequence>
+                     <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                     <aixm:theAirspaceVolume>
+                        <aixm:AirspaceVolume gml:id="id12271">
+                           <aixm:upperLimit uom="FT">2000</aixm:upperLimit>
+                           <aixm:upperLimitReference>SFC</aixm:upperLimitReference>
+                           <aixm:lowerLimit uom="FT">0</aixm:lowerLimit>
+                           <aixm:lowerLimitReference>SFC</aixm:lowerLimitReference>
+                           <aixm:horizontalProjection>
+                              <aixm:Surface srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12272">
+                                 <gml:patches>
+                                    <gml:PolygonPatch interpolation="planar">
+                                       <gml:exterior>
+                                          <gml:Ring>
+                                             <gml:curveMember xlink:type="simple">
+                                                <gml:Curve gml:id="id12273">
+                                                   <gml:segments>
+                                                      <gml:ArcByCenterPoint interpolation="circularArcCenterPointWithRadius" numArc="1">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12274">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.32389 -0.84750</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:radius uom="[nmi_i]">2</gml:radius>
+                                                         <gml:startAngle uom="deg">-154.0349655372232291483669541776180267333984375</gml:startAngle>
+                                                         <gml:endAngle uom="deg">132.007124777892755673747160471975803375244140625</gml:endAngle>
+                                                      </gml:ArcByCenterPoint>
+                                                      <gml:GeodesicString interpolation="geodesic">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12275">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.3015972 -0.8080278</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12276">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.3003611 -0.8219556</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12277">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.2993667 -0.8316222</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12278">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.2979500 -0.8438139</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12279">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.2962278 -0.8556861</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id12280">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">51.2939528 -0.8707500</gml:pos>
+                                                               <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                      </gml:GeodesicString>
+                                                   </gml:segments>
+                                                </gml:Curve>
+                                             </gml:curveMember>
+                                          </gml:Ring>
+                                       </gml:exterior>
+                                    </gml:PolygonPatch>
+                                 </gml:patches>
+                                 <aixm:horizontalAccuracy uom="M">30</aixm:horizontalAccuracy>
+                                 <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                              </aixm:Surface>
+                           </aixm:horizontalProjection>
+                           <aixm:centreline xsi:nil="true" nilReason="unknown"/>
+                           <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                        </aixm:AirspaceVolume>
+                     </aixm:theAirspaceVolume>
+                  </aixm:AirspaceGeometryComponent>
+               </aixm:geometryComponent>
+               <aixm:annotation>
+                  <aixm:Note gml:id="id3034">
+                     <aixm:purpose>REMARK</aixm:purpose>
+                     <aixm:translatedNote>
+                        <aixm:LinguisticNote gml:id="id3035">
+                           <aixm:note lang="eng">FRZ Active H24. Unmanned aircraft flight not permitted unless permission has been granted by the relevant Air Traffic Service unit or aerodrome operator. For contact details see AIP, Part 3 - Aerodromes, Section AD 2.2</aixm:note>
+                        </aixm:LinguisticNote>
+                     </aixm:translatedNote>
+                  </aixm:Note>
+               </aixm:annotation>
+            </aixm:AirspaceTimeSlice>
+         </aixm:timeSlice>
+      </aixm:Airspace>
+   </message:hasMember>
+<message:hasMember xlink:type="simple">
+      <aixm:Airspace gml:id="id17923">
+         <gml:identifier codeSpace="urn:uuid:">da113cad-6e30-42cc-af5c-461a320e554b</gml:identifier>
+         <gml:boundedBy xsi:nil="true" nilReason="unknown"/>
+         <aixm:timeSlice>
+            <aixm:AirspaceTimeSlice gml:id="id713">
+               <gml:validTime xlink:type="simple">
+                  <gml:TimeInstant gml:id="id15999">
+                     <gml:timePosition>2026-10-29T00:00:00Z</gml:timePosition>
+                  </gml:TimeInstant>
+               </gml:validTime>
+               <aixm:interpretation>SNAPSHOT</aixm:interpretation>
+               <aixm:featureLifetime xlink:type="simple">
+                  <gml:TimePeriod gml:id="id17068">
+                     <gml:beginPosition>2018-05-24T00:00:00Z</gml:beginPosition>
+                     <gml:endPosition indeterminatePosition="unknown"/>
+                  </gml:TimePeriod>
+               </aixm:featureLifetime>
+               <aixm:type>R</aixm:type>
+               <aixm:designator>EGR312</aixm:designator>
+               <aixm:localType xsi:nil="true" nilReason="unknown"/>
+               <aixm:name>SPRINGFIELDS</aixm:name>
+               <aixm:designatorICAO>NO</aixm:designatorICAO>
+               <aixm:controlType xsi:nil="true" nilReason="unknown"/>
+               <aixm:upperLowerSeparation xsi:nil="true" nilReason="unknown"/>
+               <aixm:protectedRoute xsi:nil="true" nilReason="unknown"/>
+               <aixm:geometryComponent>
+                  <aixm:AirspaceGeometryComponent gml:id="id6389">
+                     <aixm:operation>BASE</aixm:operation>
+                     <aixm:operationSequence>1</aixm:operationSequence>
+                     <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                     <aixm:theAirspaceVolume>
+                        <aixm:AirspaceVolume gml:id="id6390">
+                           <aixm:upperLimit uom="FT">2100</aixm:upperLimit>
+                           <aixm:upperLimitReference>MSL</aixm:upperLimitReference>
+                           <aixm:lowerLimit uom="FT">0</aixm:lowerLimit>
+                           <aixm:lowerLimitReference>SFC</aixm:lowerLimitReference>
+                           <aixm:horizontalProjection>
+                              <aixm:Surface srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id6391">
+                                 <gml:patches>
+                                    <gml:PolygonPatch interpolation="planar">
+                                       <gml:exterior>
+                                          <gml:Ring>
+                                             <gml:curveMember xlink:type="simple">
+                                                <gml:Curve gml:id="id6392">
+                                                   <gml:segments>
+                                                      <gml:CircleByCenterPoint interpolation="circularArcCenterPointWithRadius" numArc="1">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id6393">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">53.77611 -2.80417</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:radius uom="[nmi_i]">2</gml:radius>
+                                                      </gml:CircleByCenterPoint>
+                                                   </gml:segments>
+                                                </gml:Curve>
+                                             </gml:curveMember>
+                                          </gml:Ring>
+                                       </gml:exterior>
+                                    </gml:PolygonPatch>
+                                 </gml:patches>
+                                 <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                 <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                              </aixm:Surface>
+                           </aixm:horizontalProjection>
+                           <aixm:centreline xsi:nil="true" nilReason="unknown"/>
+                           <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                        </aixm:AirspaceVolume>
+                     </aixm:theAirspaceVolume>
+                  </aixm:AirspaceGeometryComponent>
+               </aixm:geometryComponent>
+               <aixm:annotation>
+                  <aixm:Note gml:id="id714">
+                     <aixm:purpose>REMARK</aixm:purpose>
+                     <aixm:translatedNote>
+                        <aixm:LinguisticNote gml:id="id715">
+                           <aixm:note lang="eng">Flight permitted at not less than 1670 FT above mean sea level for the purpose of landing at Blackpool Airport.
+
+Flight permitted in airspace lying south of a straight line drawn from 534644N 0024454W to 534513N 0025044W for the purpose of landing at or taking off from Warton Aerodrome.
+
+Flight permitted for the purpose of landing at or taking off from the helicopter landing area at Springfields, with the permission of the person in charge of the installation and in accordance with any conditions to which that permission is subject.
+
+SI 1003/2016.
+
+Contact: CAA Airspace Regulation Operations, AROps@caa.co.uk.
+
+Application via CAA Customer Portal - ACOMS: https://portal.caa.co.uk.</aixm:note>
+                        </aixm:LinguisticNote>
+                     </aixm:translatedNote>
+                  </aixm:Note>
+               </aixm:annotation>
+            </aixm:AirspaceTimeSlice>
+         </aixm:timeSlice>
+      </aixm:Airspace>
+   </message:hasMember>
+<message:hasMember xlink:type="simple">
+      <aixm:Airspace gml:id="id17926">
+         <gml:identifier codeSpace="urn:uuid:">2129651f-e993-42dd-9b62-ef8d6a0db995</gml:identifier>
+         <gml:boundedBy xsi:nil="true" nilReason="unknown"/>
+         <aixm:timeSlice>
+            <aixm:AirspaceTimeSlice gml:id="id1669">
+               <gml:validTime xlink:type="simple">
+                  <gml:TimeInstant gml:id="id15875">
+                     <gml:timePosition>2026-10-29T00:00:00Z</gml:timePosition>
+                  </gml:TimeInstant>
+               </gml:validTime>
+               <aixm:interpretation>SNAPSHOT</aixm:interpretation>
+               <aixm:featureLifetime xlink:type="simple">
+                  <gml:TimePeriod gml:id="id16945">
+                     <gml:beginPosition>2018-05-24T00:00:00Z</gml:beginPosition>
+                     <gml:endPosition indeterminatePosition="unknown"/>
+                  </gml:TimePeriod>
+               </aixm:featureLifetime>
+               <aixm:type>D</aixm:type>
+               <aixm:designator>EGD710</aixm:designator>
+               <aixm:localType xsi:nil="true" nilReason="unknown"/>
+               <aixm:name>RAASAY</aixm:name>
+               <aixm:designatorICAO>NO</aixm:designatorICAO>
+               <aixm:controlType xsi:nil="true" nilReason="unknown"/>
+               <aixm:upperLowerSeparation xsi:nil="true" nilReason="unknown"/>
+               <aixm:protectedRoute xsi:nil="true" nilReason="unknown"/>
+               <aixm:geometryComponent>
+                  <aixm:AirspaceGeometryComponent gml:id="id5326">
+                     <aixm:operation>BASE</aixm:operation>
+                     <aixm:operationSequence>1</aixm:operationSequence>
+                     <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                     <aixm:theAirspaceVolume>
+                        <aixm:AirspaceVolume gml:id="id5327">
+                           <aixm:upperLimit uom="FT">1500</aixm:upperLimit>
+                           <aixm:upperLimitReference>MSL</aixm:upperLimitReference>
+                           <aixm:lowerLimit uom="FT">0</aixm:lowerLimit>
+                           <aixm:lowerLimitReference>SFC</aixm:lowerLimitReference>
+                           <aixm:horizontalProjection>
+                              <aixm:Surface srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5328">
+                                 <gml:patches>
+                                    <gml:PolygonPatch interpolation="planar">
+                                       <gml:exterior>
+                                          <gml:Ring>
+                                             <gml:curveMember xlink:type="simple">
+                                                <gml:Curve gml:id="id5329">
+                                                   <gml:segments>
+                                                      <gml:LineStringSegment interpolation="linear">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5330">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.36667 -5.82417</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5331">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5332">
+                                                                           <aixm:note lang="eng">following the line of latitude to</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5333">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.36667 -5.99306</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5334">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5335">
+                                                                           <aixm:note lang="eng">then along the east coast of Raasay and Rona in an northerly direction</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                      </gml:LineStringSegment>
+                                                   </gml:segments>
+                                                </gml:Curve>
+                                             </gml:curveMember>
+                                             <gml:curveMember xlink:type="simple"
+                                                              xlink:href="urn:uuid:95106f82-bbbb-46bd-8959-aa2d91a2dc5f"/>
+                                             <gml:curveMember xlink:type="simple">
+                                                <gml:Curve gml:id="id5336">
+                                                   <gml:segments>
+                                                      <gml:GeodesicString interpolation="geodesic">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5337">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.58333 -5.96667</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5338">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.63333 -5.96667</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5339">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5340">
+                                                                           <aixm:note lang="eng">following the line of latitude to</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                      </gml:GeodesicString>
+                                                      <gml:LineStringSegment interpolation="linear">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5341">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.63333 -5.96667</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5342">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5343">
+                                                                           <aixm:note lang="eng">following the line of latitude to</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5344">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.63333 -5.83333</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                      </gml:LineStringSegment>
+                                                      <gml:GeodesicString interpolation="geodesic">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5345">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.63333 -5.83333</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5346">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.57917 -5.83333</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5347">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5348">
+                                                                           <aixm:note lang="eng">then along the west coast of the Applecross peninsula in an southerly direction</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                      </gml:GeodesicString>
+                                                   </gml:segments>
+                                                </gml:Curve>
+                                             </gml:curveMember>
+                                             <gml:curveMember xlink:type="simple"
+                                                              xlink:href="urn:uuid:a4cebc9c-fa22-4fca-b3e9-83c73d7f981f"/>
+                                             <gml:curveMember xlink:type="simple">
+                                                <gml:Curve gml:id="id5349">
+                                                   <gml:segments>
+                                                      <gml:GeodesicString interpolation="geodesic">
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5350">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.36667 -5.82417</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5351">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5352">
+                                                                           <aixm:note lang="eng">following the line of latitude to</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                         <gml:pointProperty xlink:type="simple">
+                                                            <aixm:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="id5353">
+                                                               <gml:pos srsName="urn:ogc:def:crs:EPSG::4326">57.36667 -5.82417</gml:pos>
+                                                               <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                                               <aixm:annotation>
+                                                                  <aixm:Note gml:id="id5354">
+                                                                     <aixm:purpose>REMARK</aixm:purpose>
+                                                                     <aixm:translatedNote>
+                                                                        <aixm:LinguisticNote gml:id="id5355">
+                                                                           <aixm:note lang="eng">following the line of latitude to</aixm:note>
+                                                                        </aixm:LinguisticNote>
+                                                                     </aixm:translatedNote>
+                                                                  </aixm:Note>
+                                                               </aixm:annotation>
+                                                            </aixm:Point>
+                                                         </gml:pointProperty>
+                                                      </gml:GeodesicString>
+                                                   </gml:segments>
+                                                </gml:Curve>
+                                             </gml:curveMember>
+                                          </gml:Ring>
+                                       </gml:exterior>
+                                    </gml:PolygonPatch>
+                                 </gml:patches>
+                                 <aixm:horizontalAccuracy xsi:nil="true" nilReason="unknown"/>
+                                 <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                              </aixm:Surface>
+                           </aixm:horizontalProjection>
+                           <aixm:centreline xsi:nil="true" nilReason="unknown"/>
+                           <aixm:annotation xsi:nil="true" nilReason="unknown"/>
+                        </aixm:AirspaceVolume>
+                     </aixm:theAirspaceVolume>
+                  </aixm:AirspaceGeometryComponent>
+               </aixm:geometryComponent>
+               <aixm:activation>
+                  <aixm:AirspaceActivation gml:id="id4312">
+                     <aixm:annotation>
+                        <aixm:Note gml:id="id4313">
+                           <aixm:purpose>REMARK</aixm:purpose>
+                           <aixm:translatedNote>
+                              <aixm:LinguisticNote gml:id="id4314">
+                                 <aixm:note lang="eng">Mon-Sat SR to SS.</aixm:note>
+                              </aixm:LinguisticNote>
+                           </aixm:translatedNote>
+                        </aixm:Note>
+                     </aixm:annotation>
+                     <aixm:annotation>
+                        <aixm:Note gml:id="id4315">
+                           <aixm:propertyName>timeInterval</aixm:propertyName>
+                           <aixm:purpose>OTHER:AIXM45_MAPPING</aixm:purpose>
+                           <aixm:translatedNote>
+                              <aixm:LinguisticNote gml:id="id4316">
+                                 <aixm:note lang="eng">Activated by NOTAM. </aixm:note>
+                              </aixm:LinguisticNote>
+                           </aixm:translatedNote>
+                        </aixm:Note>
+                     </aixm:annotation>
+                     <aixm:status>AVBL_FOR_ACTIVATION</aixm:status>
+                  </aixm:AirspaceActivation>
+               </aixm:activation>
+               <aixm:annotation>
+                  <aixm:Note gml:id="id1670">
+                     <aixm:purpose>REMARK</aixm:purpose>
+                     <aixm:translatedNote>
+                        <aixm:LinguisticNote gml:id="id1671">
+                           <aixm:note lang="eng">Activity: Ordnance, Munitions and Explosives / Electronic/Optical Hazards / Unmanned Aircraft System (UAS).
+
+Service: SUAAIS: Scottish Information on 127.275 MHz.
+
+Contact: Pre-flight information: Range Control, Tel: 01397-436720.
+
+SI 2016/654.
+
+SUA Authority: DAATM (DE&amp;S).
+
+This coastline definition is a generalisation of the geographic feature; operators must not use this as a definitive boundary and are responsible for applying appropriate measures to ensure they operate within or outside of the airspace structure.</aixm:note>
+                        </aixm:LinguisticNote>
+                     </aixm:translatedNote>
+                  </aixm:Note>
+               </aixm:annotation>
+            </aixm:AirspaceTimeSlice>
+         </aixm:timeSlice>
+      </aixm:Airspace>
+   </message:hasMember>
+</message:AIXMBasicMessage>

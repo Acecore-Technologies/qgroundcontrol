@@ -60,5 +60,13 @@ public:
     /// @return The format to expect from a feed URL
     static GeoZoneParser::Format formatHint(const QString &url);
 
+    /// @return URL of the current dataset linked from a download page, like the AIRAC datasets of NATS, or an empty
+    ///         string when the data isn't such a page. The latest dataset effective today or earlier is chosen.
+    static QString datasetLink(const QString &url, const QByteArray &data, const QDate &today);
+
+    /// @return The largest XML file of a zip archive, or the data itself when it isn't a zip archive. Empty when the
+    ///         archive can't be extracted.
+    static QByteArray extractZip(const QByteArray &data, QString &errorString);
+
     static Result run(const Job &job, const GeoZoneStore &store);
 };

@@ -34,7 +34,8 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QDateTime    loadedAt        READ loadedAt       NOTIFY changed FINAL)             ///< When the file was loaded or the feed downloaded
     Q_PROPERTY(QDateTime    dataDate        READ dataDate       NOTIFY changed FINAL)             ///< When the data was issued, or the file date
     Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed FINAL)
-    Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged FINAL)     ///< Warning about outdated data, empty when current
+    Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged FINAL)
+    Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete, empty when it is complete     ///< Warning about outdated data, empty when current
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
@@ -60,6 +61,7 @@ public:
     QDateTime validTo() const { return _validTo; }
     QString detailsText() const;
     QString validityText() const { return _validityText; }
+    QString warningText() const;
     bool busy() const { return _busy; }
     QString errorString() const { return _errorString; }
 
@@ -118,6 +120,7 @@ private:
     GeoZoneParser::Format _format = GeoZoneParser::Format::Unknown;
     QString _provider;
     int _skippedCount = 0;
+    int _missingCount = 0;
     QDateTime _loadedAt;
     QDateTime _fileDate;
     QDateTime _issued;

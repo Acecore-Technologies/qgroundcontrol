@@ -119,7 +119,64 @@ QVariantList GeoZoneManager::feedPresets()
         preset(tr("Sweden (LFV)"),              QStringLiteral("https://dronechart.lfv.se/data/uas_zones_ED318.json")),
         preset(tr("United States TFRs (FAA)"),  QStringLiteral("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&outputFormat=application/json")),
         preset(tr("Switzerland (FOCA)"),        QStringLiteral("https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json")),
+        preset(tr("Germany aviation zones (DiPUL)"), _dipulUrl(_dipulAviationLayers, QGeoRectangle())),
+        preset(tr("United Kingdom FRZ (NATS)"), QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/")),
     };
+}
+
+QString GeoZoneManager::_dipulUrl(const QStringList &layers, const QGeoRectangle &area)
+{
+    QStringList typeNames;
+    for (const QString &layer : layers) {
+        typeNames.append(QStringLiteral("dipul:") + layer);
+    }
+    // WFS 1.0.0 is the version of the DiPUL server which filters several layers by a bounding box
+    QString url = QStringLiteral("https://uas-betrieb.de/geoservices/dipul/ows?service=WFS&version=1.0.0&request=GetFeature&outputFormat=application/json&typeName=%1")
+                      .arg(typeNames.join(QLatin1Char(',')));
+    if (area.isValid()) {
+        url += QStringLiteral("&BBOX=%1,%2,%3,%4").arg(area.topLeft().longitude(), 0, 'f', 5).arg(area.bottomRight().latitude(), 0, 'f', 5)
+                                                  .arg(area.bottomRight().longitude(), 0, 'f', 5).arg(area.topLeft().latitude(), 0, 'f', 5);
+    }
+    return url;
+}
+
+QVariantList GeoZoneManager::areaProviders()
+{
+    const auto provider = [](const QString &name, const QString &id, const QGeoRectangle &coverage) {
+        return QVariantMap{ { QStringLiteral("name"), name }, { QStringLiteral("id"), id }, { QStringLiteral("coverage"), QVariant::fromValue(coverage) } };
+    };
+    return QVariantList{
+        provider(tr("Germany, all zones (DiPUL)"), QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(55.2, 5.8), QGeoCoordinate(47.2, 15.1))),
+        provider(tr("France, open category (IGN)"), QStringLiteral("france"), QGeoRectangle(QGeoCoordinate(51.2, -5.3), QGeoCoordinate(41.3, 9.7))),
+    };
+}
+
+QString GeoZoneManager::areaFeedUrl(const QString &provider, const QGeoRectangle &area) const
+{
+    if (!area.isValid() || (area.width() > maxAreaDegrees) || (area.height() > maxAreaDegrees)) {
+        return QString();
+    }
+    if (provider == QStringLiteral("dipul")) {
+        return _dipulUrl(_dipulAllLayers, area);
+    }
+    if (provider == QStringLiteral("france")) {
+        return QStringLiteral("https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=TRANSPORTS.DRONES.RESTRICTIONS:carte_restriction_drones_lf"
+                              "&OUTPUTFORMAT=application/json&BBOX=%1,%2,%3,%4,EPSG:4326")
+            .arg(area.topLeft().longitude(), 0, 'f', 5).arg(area.bottomRight().latitude(), 0, 'f', 5)
+            .arg(area.bottomRight().longitude(), 0, 'f', 5).arg(area.topLeft().latitude(), 0, 'f', 5);
+    }
+    return QString();
+}
+
+bool GeoZoneManager::addArea(const QString &provider, const QGeoRectangle &area)
+{
+    const QString url = areaFeedUrl(provider, area);
+    if (url.isEmpty()) {
+        emit loadFailed(provider, tr("Geozones can be downloaded for an area up to %1 degrees wide and high. Zoom in on the map.").arg(maxAreaDegrees));
+        return false;
+    }
+    addUrl(url);
+    return true;
 }
 
 bool GeoZoneManager::visible() const
@@ -290,6 +347,17 @@ void GeoZoneManager::_downloadComplete(const GeoZoneDownloader::Result &download
         if (request != GeoZoneLoader::Request::Automatic) {
             emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
         }
+        return;
+    }
+
+    // Pages linking to the current dataset, like the AIRAC cycles of NATS, are followed
+    if (const QString datasetUrl = GeoZoneLoader::datasetLink(url, download.data, QDateTime::currentDateTimeUtc().date()); !datasetUrl.isEmpty()) {
+        qCDebug(GeoZoneManagerLog) << "Downloading dataset" << datasetUrl << "linked from" << url;
+        _setPending(1);
+        _downloader->get(datasetUrl, QString(), QString(), [this, url, generation, request](const GeoZoneDownloader::Result &dataset) {
+            _downloadComplete(dataset, url, generation, request);
+            _setPending(-1);
+        });
         return;
     }
 

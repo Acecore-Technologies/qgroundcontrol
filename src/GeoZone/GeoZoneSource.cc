@@ -15,6 +15,7 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 #include <QtQml/QQmlEngine>
 
 namespace {
@@ -62,10 +63,22 @@ GeoZoneSource::~GeoZoneSource()
 
 QString GeoZoneSource::name() const
 {
-    if (!_title.isEmpty()) {
-        return _title;
+    QString name = _title.isEmpty() ? (isFeed() ? QUrl(_url).host() : _key) : _title;
+
+    // Feeds of an area, like the map area downloaded from a WFS, are told apart by where they are
+    const QUrlQuery query(QUrl(_url).query());
+    for (const auto &[key, value] : query.queryItems()) {
+        if (key.compare(QStringLiteral("BBOX"), Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        const QStringList bounds = value.split(QLatin1Char(','));
+        if (bounds.count() >= 4) {
+            const double longitude = (bounds[0].toDouble() + bounds[2].toDouble()) / 2;
+            const double latitude = (bounds[1].toDouble() + bounds[3].toDouble()) / 2;
+            name = tr("%1, area around %2, %3").arg(name).arg(latitude, 0, 'f', 2).arg(longitude, 0, 'f', 2);
+        }
     }
-    return isFeed() ? QUrl(_url).host() : _key;
+    return name;
 }
 
 QString GeoZoneSource::formatName() const
@@ -90,6 +103,11 @@ QString GeoZoneSource::detailsText() const
         parts.append(tr("unsupported features skipped: %1").arg(_skippedCount));
     }
     return parts.join(QStringLiteral(", "));
+}
+
+QString GeoZoneSource::warningText() const
+{
+    return (_missingCount > 0) ? tr("The server left out %1 zones beyond its limit. Download a smaller area.").arg(_missingCount) : QString();
 }
 
 QString GeoZoneSource::_dateText() const
@@ -129,6 +147,7 @@ void GeoZoneSource::_setMetadata(const GeoZoneParser::Result &result, const QDat
     _format = result.format;
     _provider = result.provider;
     _skippedCount = result.skippedFeatures;
+    _missingCount = result.missingFeatures;
     _issued = result.issued;
     _validFrom = result.validFrom;
     _validTo = result.validTo;

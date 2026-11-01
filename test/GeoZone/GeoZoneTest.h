@@ -19,6 +19,8 @@ private slots:
     void _testParseED269();
     void _testParseED318();
     void _testParseFaaTfr();
+    void _testParseNationalFormats();
+    void _testLiveNationalFeeds();
     void _testParseErrors();
     void _testIsActiveAt();
     void _testDaylightEvents();

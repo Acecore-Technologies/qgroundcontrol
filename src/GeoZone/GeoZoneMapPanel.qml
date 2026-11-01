@@ -9,6 +9,7 @@
 
 import QtQuick
 import QtQuick.Layouts
+import QtPositioning
 
 import QGroundControl
 import QGroundControl.Controls
@@ -22,6 +23,7 @@ ColumnLayout {
     spacing:    ScreenTools.defaultFontPixelHeight / 2
 
     property int    hiddenZoneCount:    0       ///< Smallest zones in the map view left out to limit the number of map items
+    property var    map:                null    ///< Map whose visible area can be downloaded from providers serving zones by area
     property bool   showCrossedZones:   false   ///< See GeoZoneLegend
 
     signal manageRequested
@@ -118,6 +120,59 @@ ColumnLayout {
     GeoZoneSummary {
         Layout.preferredWidth:  root._textWidth
         hiddenZoneCount:        root.hiddenZoneCount
+    }
+
+    // Some national services serve their zones by area, the map area is downloaded and kept for offline use
+    ColumnLayout {
+        id:                     areaColumn
+        Layout.preferredWidth:  root._textWidth
+        spacing:                ScreenTools.defaultFontPixelHeight / 4
+        visible:                root.map !== null
+
+        readonly property var   _providers:     root._geoZoneManager.areaProviders
+        readonly property var   _mapArea:       root.map ? root.map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
+        readonly property bool  _areaTooLarge:  _mapArea.isValid && (_mapArea.width > 1 || _mapArea.height > 1)
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            text:               qsTr("Download zones for the map area")
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            QGCComboBox {
+                id:                 areaProviderCombo
+                Layout.fillWidth:   true
+                model:              areaColumn._providers.map(provider => provider.name)
+                // The provider covering the map center
+                Component.onCompleted: {
+                    const providers = areaColumn._providers
+                    const center = areaColumn._mapArea.center
+                    for (let i = 0; i < providers.length; i++) {
+                        if (providers[i].coverage.contains(center)) {
+                            currentIndex = i
+                            break
+                        }
+                    }
+                }
+            }
+
+            QGCButton {
+                text:       qsTr("Download")
+                enabled:    !areaColumn._areaTooLarge && !root._geoZoneManager.busy
+                onClicked:  root._geoZoneManager.addArea(areaColumn._providers[areaProviderCombo.currentIndex].id, areaColumn._mapArea)
+            }
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            color:              areaColumn._areaTooLarge ? qgcPal.warningText : qgcPal.text
+            text:               areaColumn._areaTooLarge ? qsTr("Zoom in to an area up to about 100 km wide.") :
+                                                       qsTr("Downloaded areas are kept for offline use and refreshed like feeds.")
+        }
     }
 
     QGCButton {

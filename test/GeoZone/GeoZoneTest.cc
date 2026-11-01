@@ -15,6 +15,7 @@
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneIndex.h"
+#include "GeoZoneLoader.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
@@ -31,6 +32,7 @@
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
 #include "QGCMapPolygon.h"
+#include "QGCZip.h"
 #include "SettingsManager.h"
 #include "SimpleMissionItem.h"
 #include "SurveyComplexItem.h"
@@ -308,6 +310,163 @@ void GeoZoneTest::_testParseFaaTfr()
     QVERIFY(source.validityText().isEmpty());
     source.updateValidity(result.issued.addSecs(3 * 3600));
     QCOMPARE(source.validityText(), QStringLiteral("Data is 3 hours old"));
+}
+
+void GeoZoneTest::_testParseNationalFormats()
+{
+    // German DiPUL WFS zones, mapped from their type to a restriction, with limits in meters
+    GeoZoneParser::Result dipul;
+    QString errorString;
+    QFile dipulFile(QStringLiteral(":/unittest/dipul_test.json"));
+    QVERIFY(dipulFile.open(QIODevice::ReadOnly));
+    QVERIFY2(GeoZoneParser::parse(dipulFile.readAll(), dipul, errorString, GeoZoneParser::Format::Dipul, QStringLiteral("en")), qPrintable(errorString));
+    QCOMPARE(dipul.format, GeoZoneParser::Format::Dipul);
+    QCOMPARE(dipul.zones.count(), 4);
+    const GeoZone::Data &ctr = dipul.zones[0];
+    QCOMPARE(ctr.name, QStringLiteral("Frankfurt Main (EDDF) zone 1"));
+    QCOMPARE(ctr.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(ctr.country, QStringLiteral("DEU"));
+    QCOMPARE(ctr.volumes[0].lowerLimit, 0.0);
+    QCOMPARE(ctr.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    QCOMPARE(ctr.volumes[0].upperLimit, 2500 * 0.3048);
+    QCOMPARE(ctr.volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
+    QCOMPARE(dipul.zones[1].restriction, GeoZone::Prohibited);     // Restricted area
+    const GeoZone::Data &temporary = dipul.zones[2];
+    QCOMPARE(temporary.restriction, GeoZone::Prohibited);
+    QCOMPARE(temporary.applicability.count(), 1);
+    QCOMPARE(temporary.applicability[0].end, _utc(QDate(2026, 12, 31), QTime(22, 59)));
+    QVERIFY(qAbs(temporary.volumes[0].upperLimit - 701.0) < 0.1);
+    QCOMPARE(dipul.zones[3].reasons, QStringList(QStringLiteral("EMERGENCY")));
+    QVERIFY(dipul.zones[3].message.contains(QStringLiteral("LuftVO")));
+    // An empty area is valid
+    const QByteArray emptyArea = R"({ "type": "FeatureCollection", "features": [], "totalFeatures": 0, "numberMatched": 0, "numberReturned": 0 })";
+    QVERIFY2(GeoZoneParser::parse(emptyArea, dipul, errorString, GeoZoneParser::Format::Dipul), qPrintable(errorString));
+    QVERIFY(dipul.zones.isEmpty());
+    QVERIFY(!GeoZoneParser::parse(emptyArea, dipul, errorString));
+
+    // French IGN restrictions, prohibited entirely or above their maximum height, from a limited WFS response
+    GeoZoneParser::Result france;
+    QFile franceFile(QStringLiteral(":/unittest/france_uas_test.json"));
+    QVERIFY(franceFile.open(QIODevice::ReadOnly));
+    QVERIFY2(GeoZoneParser::parse(franceFile.readAll(), france, errorString), qPrintable(errorString));
+    QCOMPARE(france.format, GeoZoneParser::Format::FranceUas);
+    QCOMPARE(france.missingFeatures, 8);
+    QCOMPARE(france.zones.count(), 2);
+    QCOMPARE(france.zones[0].name, QStringLiteral("Vol interdit"));
+    QVERIFY(std::isnan(france.zones[0].volumes[0].lowerLimit));
+    QVERIFY(france.zones[0].restrictionConditions.contains(QStringLiteral("agglomération")));
+    QCOMPARE(france.zones[1].volumes[0].lowerLimit, 50.0);
+    QCOMPARE(france.zones[1].volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    const GeoZone limited(france.zones[1]);
+    const QGeoCoordinate inside(48.81, 2.41);
+    QVERIFY(!limited.contains(GeoZone::Position{ inside, 340, 300 }));
+    QVERIFY(limited.contains(GeoZone::Position{ inside, 360, 300 }));
+    GeoZoneSource source(QStringLiteral("france"), QStringLiteral("https://data.geopf.fr/wfs"));
+    source.setResult(france, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    QVERIFY(source.warningText().contains(QStringLiteral("8")));
+    GeoZoneSource areaSource(QStringLiteral("area"), QStringLiteral("https://data.geopf.fr/wfs/ows?SERVICE=WFS&BBOX=2.25,48.8,2.45,48.9,EPSG:4326"));
+    areaSource.setResult(france, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    QCOMPARE(areaSource.name(), QStringLiteral("UAS restrictions (France), area around 48.85, 2.35"));
+
+    // UK flight restriction zones in AIXM 5.1: arcs and geodesic strings, a circle and a danger area
+    GeoZoneParser::Result aixm;
+    QFile aixmFile(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(aixmFile.open(QIODevice::ReadOnly));
+    const QByteArray aixmBytes = aixmFile.readAll();
+    QVERIFY2(GeoZoneParser::parse(aixmBytes, aixm, errorString), qPrintable(errorString));
+    QCOMPARE(aixm.format, GeoZoneParser::Format::Aixm);
+    QCOMPARE(aixm.zones.count(), 3);
+    QMap<QString, GeoZone::Data> byName;
+    for (const GeoZone::Data &data : std::as_const(aixm.zones)) {
+        byName.insert(data.name, data);
+    }
+    const GeoZone::Data &frz = byName.value(QStringLiteral("BLACKBUSHE"));
+    QCOMPARE(frz.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(frz.country, QStringLiteral("GBR"));
+    QVERIFY(frz.volumes[0].feet);
+    QCOMPARE(frz.volumes[0].upperLimit, 2000.0);
+    QCOMPARE(frz.volumes[0].upperReference, GeoZone::VerticalReference::Ground);
+    // The arc of 2 NM around the aerodrome reference point covers most of the boundary
+    const GeoZone frzZone(frz);
+    const QGeoCoordinate aerodrome(51.32389, -0.84750);
+    QVERIFY(frzZone.contains(aerodrome.atDistanceAndAzimuth(3500, 0)));
+    QVERIFY(!frzZone.contains(aerodrome.atDistanceAndAzimuth(4000, 0)));
+    const GeoZone::Data &circle = byName.value(QStringLiteral("SPRINGFIELDS"));
+    QVERIFY(circle.volumes[0].isCircle);
+    QCOMPARE(circle.volumes[0].radius, 2 * 1852.0);
+    QCOMPARE(byName.value(QStringLiteral("RAASAY")).restriction, GeoZone::Conditional);
+
+    // Zipped, like the NATS download
+    const QTemporaryDir zipDir;
+    QVERIFY(zipDir.isValid());
+    QVERIFY(QDir(zipDir.path()).mkpath(QStringLiteral("content")));
+    QFile xmlFile(zipDir.filePath(QStringLiteral("content/data.xml")));
+    QVERIFY(xmlFile.open(QIODevice::WriteOnly));
+    QCOMPARE(xmlFile.write(aixmBytes), aixmBytes.size());
+    xmlFile.close();
+    QVERIFY(QGCZip::zipDirectory(zipDir.filePath(QStringLiteral("content")), zipDir.filePath(QStringLiteral("data.zip"))));
+    QFile zipFile(zipDir.filePath(QStringLiteral("data.zip")));
+    QVERIFY(zipFile.open(QIODevice::ReadOnly));
+    QCOMPARE(GeoZoneLoader::extractZip(zipFile.readAll(), errorString), aixmBytes);
+    QCOMPARE(GeoZoneLoader::extractZip(QByteArray("PK\x03\x04" "broken"), errorString), QByteArray());
+    QVERIFY(!errorString.isEmpty());
+
+    // The NATS page links the datasets of the current and the next AIRAC cycle
+    const QByteArray page = "<!DOCTYPE html><html><body>"
+        "<a href=\"/cms-nats/export/sites/default/en/Publications/digital-datasets/UAS_AREA_1/EG_UAS_FR_DS_AREA1_FULL_20261029_XML.zip\">XML</a>"
+        "<a href=\"/cms-nats/export/sites/default/en/Publications/digital-datasets/UAS_AREA_1/EG_UAS_FR_DS_AREA1_FULL_20261126_XML.zip\">XML</a>"
+        "</body></html>";
+    const QString pageUrl = QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/");
+    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 11, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
+    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 11, 26)).startsWith(QStringLiteral("https://nats-uk.ead-it.com/cms-nats/export/")));
+    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 11, 26)).endsWith(QStringLiteral("FULL_20261126_XML.zip")));
+    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, page, QDate(2026, 1, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
+    QVERIFY(GeoZoneLoader::datasetLink(pageUrl, aixmBytes, QDate(2026, 11, 1)).isEmpty());
+
+    // Area feeds of providers serving zones by area
+    GeoZoneManager manager(QTemporaryDir().path());
+    const QGeoRectangle frankfurt(QGeoCoordinate(50.15, 8.55), QGeoCoordinate(50.0, 8.75));
+    const QString dipulUrl = manager.areaFeedUrl(QStringLiteral("dipul"), frankfurt);
+    QVERIFY(dipulUrl.contains(QStringLiteral("dipul:wohngrundstuecke")));
+    QVERIFY(dipulUrl.endsWith(QStringLiteral("&BBOX=8.55000,50.00000,8.75000,50.15000")));
+    QCOMPARE(GeoZoneLoader::formatHint(dipulUrl), GeoZoneParser::Format::Dipul);
+    QVERIFY(manager.areaFeedUrl(QStringLiteral("france"), frankfurt).contains(QStringLiteral("BBOX=8.55000,50.00000,8.75000,50.15000,EPSG:4326")));
+    QVERIFY(manager.areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))).isEmpty());
+    QVERIFY(manager.areaFeedUrl(QStringLiteral("unknown"), frankfurt).isEmpty());
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    QVERIFY(!manager.addArea(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))));
+    QCOMPARE(failedSpy.count(), 1);
+}
+
+void GeoZoneTest::_testLiveNationalFeeds()
+{
+    // Downloads the real services, only when asked since it depends on them
+    if (qEnvironmentVariableIsEmpty("QGC_GEOZONE_LIVE_TEST")) {
+        QSKIP("Set QGC_GEOZONE_LIVE_TEST to download the national services");
+    }
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.path());
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    for (const QVariant &preset : GeoZoneManager::feedPresets()) {
+        const QString url = preset.toMap().value(QStringLiteral("url")).toString();
+        if (url.contains(QStringLiteral("uas-betrieb.de")) || url.contains(QStringLiteral("ead-it.com"))) {
+            manager.addUrl(url);
+        }
+    }
+    QVERIFY(manager.addArea(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(50.15, 8.55), QGeoCoordinate(50.0, 8.75))));
+    QVERIFY(manager.addArea(QStringLiteral("france"), QGeoRectangle(QGeoCoordinate(48.9, 2.25), QGeoCoordinate(48.8, 2.45))));
+    QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 120000);
+    for (const QVariantList &failure : std::as_const(failedSpy)) {
+        qWarning() << failure;
+    }
+    QCOMPARE(failedSpy.count(), 0);
+    QCOMPARE(manager.sources()->count(), 4);
+    for (int i = 0; i < manager.sources()->count(); i++) {
+        const GeoZoneSource *const source = manager.sources()->value<GeoZoneSource*>(i);
+        qDebug() << source->name() << source->detailsText() << source->warningText();
+        QVERIFY2(source->zoneCount() > 0, qPrintable(source->key()));
+    }
 }
 
 void GeoZoneTest::_testParseErrors()

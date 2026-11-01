@@ -968,6 +968,7 @@ Item {
         id: geoZoneDropPanel
 
         GeoZoneMapPanel {
+            map:                editorMap
             hiddenZoneCount:    geoZoneMapVisuals.hiddenZoneCount
             showCrossedZones:   geoZoneMissionBanner.crossedZones.length > 0
 

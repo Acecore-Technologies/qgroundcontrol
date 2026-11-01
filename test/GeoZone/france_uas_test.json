@@ -1,0 +1,91 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "carte_restriction_drones_lf.49414",
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        2.3,
+        48.85
+       ],
+       [
+        2.32,
+        48.85
+       ],
+       [
+        2.32,
+        48.870000000000005
+       ],
+       [
+        2.3,
+        48.870000000000005
+       ],
+       [
+        2.3,
+        48.85
+       ]
+      ]
+     ]
+    ]
+   },
+   "geometry_name": "the_geom",
+   "properties": {
+    "limite": "Vol interdit *",
+    "remarque": "Évolution interdite en espace public en agglomération sauf conformément à l'arrêté Espace."
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "carte_restriction_drones_lf.1",
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        2.4,
+        48.8
+       ],
+       [
+        2.42,
+        48.8
+       ],
+       [
+        2.42,
+        48.82
+       ],
+       [
+        2.4,
+        48.82
+       ],
+       [
+        2.4,
+        48.8
+       ]
+      ]
+     ]
+    ]
+   },
+   "geometry_name": "the_geom",
+   "properties": {
+    "limite": "Hauteur maximale de vol de 50 m *",
+    "remarque": null
+   }
+  }
+ ],
+ "totalFeatures": 10,
+ "numberMatched": 10,
+ "numberReturned": 2,
+ "timeStamp": "2026-10-31T21:00:00.000Z",
+ "crs": {
+  "type": "name",
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::4326"
+  }
+ }
+}
