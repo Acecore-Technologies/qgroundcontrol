@@ -238,13 +238,19 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QVERIFY(vehicle);
     QTRY_VERIFY(monitor.monitoring());
 
-    // On the ground the CTRs are entered only without terrain data. Climbing 300 m enters them either way.
+    // A parked vehicle is on the ground below the CTRs, even before terrain data is received
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
+    QVERIFY(!vehicle->armed());
+    QTest::qWait(1500);
+    QVERIFY(!monitor.inside());
+    QVERIFY(spiedAlerts(alertSpy).filter(QStringLiteral("Entered")).isEmpty());
+
+    // Climbing 300 m enters the CTRs, MockLink reports the arming with its next heartbeat
     vehicle->sendMavCommand(vehicle->defaultComponentId(), MAV_CMD_NAV_TAKEOFF, false /* showError */, 0, 0, 0, 0, 0, 0, 300);
-    // MockLink sends the first position about 10 s after it starts
     QTRY_COMPARE_WITH_TIMEOUT(vehicle->altitudeRelative()->rawValue().toInt(), 300, 30000);
     const QStringList ctrs = { QStringLiteral("CTR0004"), QStringLiteral("CTR0015") };
-    QTRY_COMPARE_WITH_TIMEOUT(nearbyIdentifiers(monitor), ctrs, 5000);
-    QVERIFY(monitor.inside());
+    QTRY_VERIFY_WITH_TIMEOUT(monitor.inside(), 5000);
+    QCOMPARE(nearbyIdentifiers(monitor), ctrs);
 
     // Guided commands name the zones they would enter, not those the vehicle is in
     const QString airportWarning = monitor.gotoWarning(vehicle, coordinate(kAirport.east, kAirport.north));

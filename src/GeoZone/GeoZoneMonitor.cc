@@ -266,10 +266,12 @@ GeoZone::Position GeoZoneMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCo
     position.altitudeAMSL = altitudeAMSL;
 
     // Without terrain data limits above ground can't be excluded. The height above home is not used instead
-    // since it misses zones over rising ground.
+    // since it misses zones over rising ground. A disarmed vehicle is on the ground.
     const double heightAboveTerrain = vehicle->altitudeAboveTerr()->rawValue().toDouble();
     if (!qIsNaN(heightAboveTerrain)) {
         position.terrainAMSL = altitudeAMSL - heightAboveTerrain;
+    } else if (!vehicle->armed()) {
+        position.terrainAMSL = altitudeAMSL;
     }
     return position;
 }
