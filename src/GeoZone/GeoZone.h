@@ -44,6 +44,7 @@ class GeoZone : public QObject
     Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
     Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT FINAL)
     Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT FINAL)
+    Q_PROPERTY(QGeoRectangle    boundingBox             READ boundingBox            CONSTANT FINAL)
     Q_PROPERTY(bool             active                  READ active                 NOTIFY activeChanged FINAL)
     Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT FINAL)   ///< Key of the GeoZoneSource
     Q_PROPERTY(QString          sourceText              READ sourceText             NOTIFY sourceTextChanged FINAL)   ///< File or feed the zone was loaded from, with its date

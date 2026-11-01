@@ -50,4 +50,5 @@ private slots:
     void _testShapeSimplification();
     void _testMapModel();
     void _testMapModelShapeLimit();
+    void _testZoneSearch();
 };

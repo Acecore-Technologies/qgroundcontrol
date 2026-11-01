@@ -29,6 +29,14 @@ GeoZoneMapItem::GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent)
 {
 }
 
+void GeoZoneMapItem::setHighlighted(bool highlighted)
+{
+    if (highlighted != _highlighted) {
+        _highlighted = highlighted;
+        emit highlightedChanged();
+    }
+}
+
 void GeoZoneMapItem::setZoomLevel(int zoomLevel)
 {
     // Only called while the shape exists, the item is removed before its zone's shapes are deleted
@@ -202,6 +210,7 @@ void GeoZoneMapModel::_syncItems(QmlObjectListModel *model, const QList<const Ge
         if (!_items.contains(shape)) {
             GeoZoneMapItem *const item = new GeoZoneMapItem(shape, this);
             item->setZoomLevel(zoomLevel);
+            item->setHighlighted(_highlightedZones.contains(item->zone()));
             _items.insert(shape, item);
             newItems.append(item);
         }
@@ -243,6 +252,19 @@ void GeoZoneMapModel::_clear()
     }
     _items.clear();
     _setHiddenZoneCount(0);
+}
+
+void GeoZoneMapModel::setHighlightedZones(const QList<QObject*> &zones)
+{
+    if (zones == _highlightedZones) {
+        return;
+    }
+    _highlightedZones = zones;
+    const QSet<QObject*> highlighted(zones.cbegin(), zones.cend());
+    for (GeoZoneMapItem *item : std::as_const(_items)) {
+        item->setHighlighted(highlighted.contains(item->zone()));
+    }
+    emit highlightedZonesChanged();
 }
 
 void GeoZoneMapModel::_removeSource(GeoZoneSource *source)

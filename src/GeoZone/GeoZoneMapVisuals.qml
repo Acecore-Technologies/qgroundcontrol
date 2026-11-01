@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtLocation
 import QtPositioning
@@ -21,15 +23,17 @@ Item {
     id: _root
 
     property var    map
-    property real   labelMinZoomLevel:  11  ///< Zone labels are only shown from this zoom level up
-    property var    highlightedZones:   []  ///< Zones drawn with a white border
+    property bool   showZones:          true    ///< False hides the zones on this map, like the small picture in picture map
+    property real   labelMinZoomLevel:  11      ///< Zone labels are only shown from this zoom level up
+    property var    highlightedZones:   []      ///< Zones drawn with a white border
     property bool   fitToAddedSources:  false   ///< Moves the map to the zones of files and feeds the user adds when they are out of view or too small to see
 
     readonly property int hiddenZoneCount: _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
 
     readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
-    readonly property bool  _showZones:         _geoZoneManager.visible && map.visible // Items are not kept for maps in hidden views
+    readonly property bool  _showZones:         showZones && _geoZoneManager.visible && map.visible // Items are not kept for maps in hidden views
     readonly property bool  _showLabels:        _showZones && map.zoomLevel >= labelMinZoomLevel
+
     function _fillColor(zone) {
         return GeoZoneStyle.fillColor(zone.restriction, zone.active)
     }
@@ -45,8 +49,22 @@ Item {
         }
     }
 
-    function _showZoneInfo(zone) {
-        geoZoneInfoDialogComponent.createObject(mainWindow, { geoZone: zone }).open()
+    function _showZoneInfo(zone, zones) {
+        geoZoneInfoDialogComponent.createObject(mainWindow, { geoZone: zone, zones: zones ? zones : [] }).open()
+    }
+
+    /// Shows the details of the shown zones at the coordinate, with a choice where several overlap
+    /// @return true if there are zones at the coordinate
+    function showZonesAt(coordinate) {
+        if (!_showZones) {
+            return false
+        }
+        const zones = _geoZoneManager.zonesAt(coordinate)
+        if (zones.length === 0) {
+            return false
+        }
+        _showZoneInfo(zones[0], zones)
+        return true
     }
 
     Component {
@@ -72,7 +90,7 @@ Item {
     }
 
     Connections {
-        target:     _geoZoneManager
+        target:     _root._geoZoneManager
         enabled:    _root.fitToAddedSources
         function onSourceAdded(source) {
             _root._boxToFit = source.boundingBox
@@ -80,15 +98,35 @@ Item {
         }
     }
 
+    // Zones picked in a search are shown on the visible map
+    Connections {
+        target:     _root._geoZoneManager
+        enabled:    _root.map.visible && _root.showZones
+        function onShowZoneRequested(zone) {
+            _root._geoZoneManager.visible = true
+            const box = zone.boundingBox
+            if (box.isValid) {
+                // At least about a kilometer across, so small zones are shown with their surroundings
+                const minimumSize = 0.01
+                const fitBox = QtPositioning.rectangle(box.center, Math.max(box.width, minimumSize), Math.max(box.height, minimumSize))
+                _root.map.fitViewportToGeoShape(fitBox, ScreenTools.defaultFontPixelHeight * 4)
+            }
+            _root._showZoneInfo(zone)
+        }
+    }
+
     // Sources can be added while the map's view is hidden
     Connections {
-        target:     map
+        target:     _root.map
         enabled:    _root._boxToFit !== null
         function onVisibleChanged() { _root._fitAddedSource() }
     }
 
     // Only shapes in or near the view are created, see GeoZoneMapModel
-    GeoZoneMapModel { id: _mapModel }
+    GeoZoneMapModel {
+        id:                 _mapModel
+        highlightedZones:   _root.highlightedZones
+    }
 
     function _updateView() {
         _mapModel.setView(_showZones ? map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle(), map.zoomLevel, _showLabels)
@@ -111,7 +149,7 @@ Item {
     on_ShowLabelsChanged:   _scheduleViewUpdate()
 
     Connections {
-        target:                             map
+        target:                             _root.map
         function onVisibleRegionChanged()   { _root._scheduleViewUpdate() }
     }
 
@@ -122,13 +160,13 @@ Item {
         model: _mapModel.polygons
 
         delegate: MapPolygon {
+            required property var object
+
             geoShape:       object.geoShape
             color:          _root._fillColor(object.zone)
-            border.color:   _highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.zone.restriction)
-            border.width:   _highlighted ? 3 : (object.zone.active ? 2 : 1)
+            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.zone.restriction)
+            border.width:   object.highlighted ? 3 : (object.zone.active ? 2 : 1)
             z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
-
-            readonly property bool _highlighted: _root.highlightedZones.indexOf(object.zone) >= 0
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
@@ -139,14 +177,14 @@ Item {
         model: _mapModel.circles
 
         delegate: MapCircle {
+            required property var object
+
             center:         object.center
             radius:         object.radius
             color:          _root._fillColor(object.zone)
-            border.color:   _highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.zone.restriction)
-            border.width:   _highlighted ? 3 : (object.zone.active ? 2 : 1)
+            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.zone.restriction)
+            border.width:   object.highlighted ? 3 : (object.zone.active ? 2 : 1)
             z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.zone.restriction)
-
-            readonly property bool _highlighted: _root.highlightedZones.indexOf(object.zone) >= 0
         }
 
         onObjectAdded:      (index, object) => _root.map.addMapItem(object)
@@ -158,31 +196,33 @@ Item {
         model: _mapModel.labelZones
 
         delegate: MapQuickItem {
+            id:             labelItem
             coordinate:     object.center
             anchorPoint.x:  sourceItem.width / 2
             anchorPoint.y:  sourceItem.height / 2
             z:              QGroundControl.zOrderMapItems - 1
 
-            readonly property var _zone: object
+            required property var object
 
             sourceItem: Rectangle {
                 width:          zoneLabel.contentWidth + ScreenTools.defaultFontPixelWidth
                 height:         zoneLabel.contentHeight + ScreenTools.defaultFontPixelHeight / 4
                 radius:         height / 4
                 color:          Qt.rgba(0, 0, 0, 0.6)
-                border.color:   GeoZoneStyle.restrictionColor(_zone.restriction)
+                border.color:   GeoZoneStyle.restrictionColor(labelItem.object.restriction)
 
                 QGCLabel {
                     id:                 zoneLabel
                     anchors.centerIn:   parent
-                    text:               _zone.name !== "" ? _zone.name : _zone.identifier
+                    text:               labelItem.object.displayName
+                    textFormat:         Text.PlainText
                     color:              "white"
                     font.pointSize:     ScreenTools.smallFontPointSize
                 }
 
                 QGCMouseArea {
                     anchors.fill:   parent
-                    onClicked:      _root._showZoneInfo(_zone)
+                    onClicked:      _root._showZoneInfo(labelItem.object)
                 }
             }
         }

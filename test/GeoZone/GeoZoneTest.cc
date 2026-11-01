@@ -1748,6 +1748,58 @@ void GeoZoneTest::_testMapModel()
     QCOMPARE(model.circles()->count(), 0);
 }
 
+void GeoZoneTest::_testZoneSearch()
+{
+    const QGeoCoordinate center(47, 8);
+    QJsonObject airport = _circleFeature(QStringLiteral("LSZH"), QStringLiteral("CONDITIONAL"), center, 2000);
+    airport[QStringLiteral("name")] = QStringLiteral("Zurich airport");
+    QJsonObject prison = _circleFeature(QStringLiteral("GZW1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(500, 90), 300);
+    prison[QStringLiteral("name")] = QStringLiteral("Prison Zurich West");
+    QJsonObject far = _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(46, 7), 300);
+    far[QStringLiteral("name")] = QStringLiteral("Bern area");
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ airport, prison, far }), errorString), qPrintable(errorString));
+
+    const auto identifiers = [](const QList<QObject*> &zones) {
+        QStringList result;
+        for (const QObject *zone : zones) {
+            result.append(qobject_cast<const GeoZone*>(zone)->identifier());
+        }
+        return result;
+    };
+
+    // Overlapping zones at a point, the most restrictive first
+    QCOMPARE(identifiers(manager.zonesAt(center.atDistanceAndAzimuth(500, 90))), QStringList({ QStringLiteral("GZW1"), QStringLiteral("LSZH") }));
+    QCOMPARE(identifiers(manager.zonesAt(center)), QStringList({ QStringLiteral("LSZH") }));
+    QVERIFY(manager.zonesAt(QGeoCoordinate(48, 9)).isEmpty());
+
+    // Names or identifiers containing the text, those starting with it first, then the most restrictive
+    QCOMPARE(identifiers(manager.searchZones(QStringLiteral("zurich"))), QStringList({ QStringLiteral("LSZH"), QStringLiteral("GZW1") }));
+    QCOMPARE(identifiers(manager.searchZones(QStringLiteral("I"))), QStringList({ QStringLiteral("GZW1"), QStringLiteral("LSZH") }));
+    QCOMPARE(identifiers(manager.searchZones(QStringLiteral("fa"))), QStringList({ QStringLiteral("FAR") }));
+    QCOMPARE(manager.searchZones(QStringLiteral("zurich"), 1).count(), 1);
+    QVERIFY(manager.searchZones(QStringLiteral("  ")).isEmpty());
+
+    QSignalSpy showSpy(&manager, &GeoZoneManager::showZoneRequested);
+    manager.showZone(manager.zones()->get(0));
+    manager.showZone(&manager);
+    QCOMPARE(showSpy.count(), 1);
+
+    // Highlighted zones are marked on their map items
+    GeoZoneMapModel model(&manager);
+    model.setView(QGeoRectangle(center.atDistanceAndAzimuth(5000, 315), center.atDistanceAndAzimuth(5000, 135)), 12, false);
+    QCOMPARE(model.circles()->count(), 2);
+    QObject *const prisonZone = manager.searchZones(QStringLiteral("GZW1")).first();
+    model.setHighlightedZones({ prisonZone });
+    for (int i = 0; i < model.circles()->count(); i++) {
+        const GeoZoneMapItem *const item = model.circles()->value<GeoZoneMapItem*>(i);
+        QCOMPARE(item->highlighted(), item->zone() == prisonZone);
+    }
+}
+
 void GeoZoneTest::_testMapModelShapeLimit()
 {
     // More zones in view than can be shown, with growing radius

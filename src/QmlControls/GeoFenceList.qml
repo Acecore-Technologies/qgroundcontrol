@@ -73,8 +73,11 @@ Column {
 
     /// Selects the fence for editing and shows it on the map when it is out of view or too small to see
     function selectFence(fence) {
-        geoFenceController.clearAllInteractive()
-        fence.interactive = true
+        // Selecting the selected fence again would recreate its editing handles
+        if (!fence.interactive) {
+            geoFenceController.clearAllInteractive()
+            fence.interactive = true
+        }
 
         var box
         if (fence.path !== undefined) {
@@ -128,8 +131,11 @@ Column {
         if (fences.length === 0) {
             return false
         }
-        geoFenceController.clearAllInteractive()
-        fences[(selected + 1) % fences.length].interactive = true
+        var next = fences[(selected + 1) % fences.length]
+        if (!next.interactive) {
+            geoFenceController.clearAllInteractive()
+            next.interactive = true
+        }
         return true
     }
 
@@ -230,14 +236,25 @@ Column {
                 visible:        importedCount > 0 && drawnCount > 0
             }
 
+            // Each model is listed in both groups, the rows of the other group are inactive loaders
             Repeater {
                 model: _polygons
-                delegate: FenceRow { list: control; fence: object; fenceIndex: index; isCircle: false; visible: !object.geoZone }
+                delegate: Loader {
+                    width:              listColumn.width
+                    active:             !object.geoZone
+                    visible:            active
+                    sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: false }
+                }
             }
 
             Repeater {
                 model: _circles
-                delegate: FenceRow { list: control; fence: object; fenceIndex: index; isCircle: true; visible: !object.geoZone }
+                delegate: Loader {
+                    width:              listColumn.width
+                    active:             !object.geoZone
+                    visible:            active
+                    sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: true }
+                }
             }
 
             SectionHeader {
@@ -251,12 +268,22 @@ Column {
 
             Repeater {
                 model: _polygons
-                delegate: FenceRow { list: control; fence: object; fenceIndex: index; isCircle: false; visible: object.geoZone && importedSection.checked }
+                delegate: Loader {
+                    width:              listColumn.width
+                    active:             object.geoZone && importedSection.checked
+                    visible:            active
+                    sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: false }
+                }
             }
 
             Repeater {
                 model: _circles
-                delegate: FenceRow { list: control; fence: object; fenceIndex: index; isCircle: true; visible: object.geoZone && importedSection.checked }
+                delegate: Loader {
+                    width:              listColumn.width
+                    active:             object.geoZone && importedSection.checked
+                    visible:            active
+                    sourceComponent:    FenceRow { list: control; fence: object; fenceIndex: index; isCircle: true }
+                }
             }
         }
     }
@@ -319,7 +346,6 @@ Column {
 
                 // Type of fence
                 Canvas {
-                    id:                     typeIcon
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight
                     Layout.preferredHeight: ScreenTools.defaultFontPixelHeight
                     Layout.alignment:       Qt.AlignVCenter
@@ -372,6 +398,7 @@ Column {
                         elide:              Text.ElideRight
                         color:              row._textColor
                         text:               row.fence.name !== "" ? row.fence.name : row._numberText
+                        textFormat:         Text.PlainText
                     }
 
                     QGCLabel {
@@ -380,6 +407,7 @@ Column {
                         font.pointSize:     ScreenTools.smallFontPointSize
                         color:              row._textColor
                         text:               row.fence.name !== "" ? qsTr("%1, %2").arg(row._numberText).arg(row._sizeText) : row._sizeText
+                        textFormat:         Text.PlainText
                     }
                 }
 

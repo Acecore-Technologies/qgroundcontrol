@@ -17,7 +17,6 @@ import QGroundControl.ScreenTools
 
 /// Geozone files and feeds: lists the loaded sources and adds, refreshes and removes them
 ColumnLayout {
-    id:         control
     spacing:    _margin
 
     readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
@@ -48,6 +47,7 @@ ColumnLayout {
                     Layout.fillWidth:   true
                     elide:              Text.ElideRight
                     text:               object.name
+                    textFormat:         Text.PlainText
                 }
 
                 QGCButton {
@@ -60,7 +60,8 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.detailsText !== "" ? object.detailsText : qsTr("Loading...")
+                text:               object.detailsText !== "" ? object.detailsText : (object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
+                textFormat:         Text.PlainText
             }
 
             QGCLabel {
@@ -87,6 +88,7 @@ ColumnLayout {
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
                 text:               qsTr("Last update failed: %1").arg(object.errorString)
+                textFormat:         Text.PlainText
                 visible:            object.errorString !== ""
             }
         }
@@ -207,7 +209,7 @@ ColumnLayout {
             enabled:            _hasFeeds && !_geoZoneManager.busy
             onClicked:          _geoZoneManager.refreshFeeds()
 
-            property bool _hasFeeds: {
+            readonly property bool _hasFeeds: {
                 for (var i = 0; i < _geoZoneManager.sources.count; i++) {
                     if (_geoZoneManager.sources.get(i).url !== "") {
                         return true

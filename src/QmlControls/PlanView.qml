@@ -387,6 +387,7 @@ Item {
                 	QGroundControl.utmspManager.utmspVehicle.updateLastCoordinates(coordinate.latitude, coordinate.longitude)
                 }
                 
+                // Clicks which don't add or select an item show the geozones at the location
                 switch (_editingLayer) {
                 case _layerMission:
                     if (addWaypointRallyPointAction.checked) {
@@ -394,15 +395,21 @@ Item {
                     } else if (_addROIOnClick) {
                         insertROIAfterCurrent(coordinate)
                         _addROIOnClick = false
+                    } else {
+                        geoZoneMapVisuals.showZonesAt(coordinate)
                     }
 
                     break
                 case _layerGeoFence:
-                    geoFenceEditor.selectFenceAt(coordinate)
+                    if (!geoFenceEditor.selectFenceAt(coordinate)) {
+                        geoZoneMapVisuals.showZonesAt(coordinate)
+                    }
                     break
                 case _layerRallyPoints:
                     if (_rallyPointController.supported && addWaypointRallyPointAction.checked) {
                         _rallyPointController.addPoint(coordinate)
+                    } else {
+                        geoZoneMapVisuals.showZonesAt(coordinate)
                     }
                     break
 
@@ -967,6 +974,7 @@ Item {
                 dropPanel.hide()
                 mainWindow.showSettingsTool(qsTr("Geozones"))
             }
+            onZoneSelected: dropPanel.hide()
         }
     }
 

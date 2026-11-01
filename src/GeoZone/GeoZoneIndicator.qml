@@ -122,6 +122,16 @@ Item {
 
                         GeoZoneLegend { }
 
+                        QGCLabel {
+                            text:           qsTr("Click a zone on the map for its details.")
+                            font.pointSize: ScreenTools.smallFontPointSize
+                        }
+
+                        GeoZoneSearch {
+                            Layout.fillWidth:   true
+                            onZoneSelected:     mainWindow.closeIndicatorDrawer()
+                        }
+
                         GeoZoneSummary {
                             Layout.fillWidth: true
                         }

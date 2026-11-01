@@ -24,6 +24,7 @@ ColumnLayout {
     property bool   showCrossedZones:   false   ///< See GeoZoneLegend
 
     signal manageRequested
+    signal zoneSelected     ///< A zone picked in the search is shown on the map
 
     readonly property var   _geoZoneManager:    QGroundControl.geoZoneManager
     readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 32
@@ -31,8 +32,8 @@ ColumnLayout {
     QGCCheckBoxSlider {
         Layout.fillWidth:   true
         text:               qsTr("Show geozones")
-        checked:            _geoZoneManager.visible
-        onClicked:          _geoZoneManager.visible = checked
+        checked:            root._geoZoneManager.visible
+        onClicked:          root._geoZoneManager.visible = checked
     }
 
     GeoZoneLegend {
@@ -40,12 +41,19 @@ ColumnLayout {
     }
 
     QGCLabel {
-        text:           qsTr("Click a zone name on the map for details.")
-        font.pointSize: ScreenTools.smallFontPointSize
+        Layout.preferredWidth:  root._textWidth
+        text:                   qsTr("Click a zone on the map for its details, when not adding items.")
+        wrapMode:               Text.WordWrap
+        font.pointSize:         ScreenTools.smallFontPointSize
+    }
+
+    GeoZoneSearch {
+        Layout.preferredWidth:  root._textWidth
+        onZoneSelected:         root.zoneSelected()
     }
 
     GeoZoneSummary {
-        Layout.preferredWidth:  _textWidth
+        Layout.preferredWidth:  root._textWidth
         hiddenZoneCount:        root.hiddenZoneCount
     }
 

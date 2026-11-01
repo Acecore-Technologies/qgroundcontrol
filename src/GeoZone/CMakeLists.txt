@@ -58,6 +58,7 @@ qt_add_qml_module(GeoZoneModule
         GeoZoneMapVisuals.qml
         GeoZoneMissionBanner.qml
         GeoZoneProfileOverlay.qml
+        GeoZoneSearch.qml
         GeoZoneSettingsPage.qml
         GeoZoneSourcesPanel.qml
         GeoZoneStyle.qml

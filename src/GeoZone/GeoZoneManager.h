@@ -101,6 +101,17 @@ public:
     ///         preferring the most restrictive
     Q_INVOKABLE QList<QObject*> labelZones(const QGeoRectangle &region) const;
 
+    /// @return Zones whose horizontal projection contains the coordinate at any altitude, the most restrictive and
+    ///         active first
+    Q_INVOKABLE QList<QObject*> zonesAt(const QGeoCoordinate &coordinate) const;
+
+    /// @return Zones whose name or identifier contains the text, ignoring case, limited to maxResults. Names
+    ///         starting with the text come first, then the most restrictive.
+    Q_INVOKABLE QList<QObject*> searchZones(const QString &text, int maxResults = 50) const;
+
+    /// Asks the visible map to show the zone and its details
+    Q_INVOKABLE void showZone(QObject *zone) { if (qobject_cast<GeoZone*>(zone)) { emit showZoneRequested(zone); } }
+
     /// @return Zones matching one of the restrictions which intersect the area. An invalid area matches all zones.
     /// @param activeFrom When valid, only zones active at this time or, with a valid activeTo, at any time until activeTo
     QList<GeoZone*> zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
@@ -137,6 +148,7 @@ signals:
     /// The zones of the source changed, zones() and the queries include them unless it was removed
     void zonesChanged(GeoZoneSource *source);
     void boundingBoxChanged();
+    void showZoneRequested(QObject *zone);
     void visibleChanged(bool visible);
     void busyChanged(bool busy);
     void progressChanged();

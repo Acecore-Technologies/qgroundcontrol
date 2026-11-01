@@ -683,6 +683,67 @@ QList<QObject*> GeoZoneManager::labelZones(const QGeoRectangle &region) const
     return QList<QObject*>(candidates.cbegin(), candidates.cend());
 }
 
+QList<QObject*> GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
+{
+    QList<GeoZone*> zones;
+    if (!coordinate.isValid()) {
+        return {};
+    }
+    for (const int index : _index.query(coordinate.latitude(), coordinate.longitude(), coordinate.latitude(), coordinate.longitude())) {
+        GeoZone *const zone = _zoneList[index];
+        const QList<GeoZone::Volume> &volumes = zone->data().volumes;
+        if (std::any_of(volumes.cbegin(), volumes.cend(), [&coordinate](const GeoZone::Volume &volume) { return GeoZone::volumeContains(volume, coordinate); })) {
+            zones.append(zone);
+        }
+    }
+    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
+        if (a->active() != b->active()) {
+            return a->active();
+        }
+        return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
+    });
+    return QList<QObject*>(zones.cbegin(), zones.cend());
+}
+
+QList<QObject*> GeoZoneManager::searchZones(const QString &text, int maxResults) const
+{
+    const QString query = text.trimmed();
+    if (query.isEmpty() || (maxResults <= 0)) {
+        return {};
+    }
+
+    struct Match {
+        GeoZone *zone;
+        bool prefix;
+    };
+    QList<Match> matches;
+    for (GeoZone *zone : _zoneList) {
+        const QString name = zone->displayName();
+        if (name.startsWith(query, Qt::CaseInsensitive) || zone->identifier().startsWith(query, Qt::CaseInsensitive)) {
+            matches.append({ zone, true });
+        } else if (name.contains(query, Qt::CaseInsensitive) || zone->identifier().contains(query, Qt::CaseInsensitive)) {
+            matches.append({ zone, false });
+        }
+    }
+    std::stable_sort(matches.begin(), matches.end(), [](const Match &a, const Match &b) {
+        if (a.prefix != b.prefix) {
+            return a.prefix;
+        }
+        const int severityA = GeoZone::restrictionSeverity(a.zone->restriction());
+        const int severityB = GeoZone::restrictionSeverity(b.zone->restriction());
+        if (severityA != severityB) {
+            return severityA < severityB;
+        }
+        return a.zone->displayName().compare(b.zone->displayName(), Qt::CaseInsensitive) < 0;
+    });
+
+    QList<QObject*> zones;
+    for (qsizetype i = 0; i < (std::min)(matches.count(), qsizetype{ maxResults }); i++) {
+        zones.append(matches[i].zone);
+    }
+    return zones;
+}
+
 QList<GeoZone*> GeoZoneManager::zonesInArea(const QList<GeoZone::Restriction> &restrictions, const QGeoRectangle &area,
                                             const QDateTime &activeFrom, const QDateTime &activeTo) const
 {

@@ -33,6 +33,7 @@ class GeoZoneMapItem : public QObject
     Q_PROPERTY(QGeoShape        geoShape    READ geoShape   NOTIFY geoShapeChanged FINAL) ///< Polygon including holes
     Q_PROPERTY(QGeoCoordinate   center      READ center     CONSTANT FINAL)               ///< Circle only
     Q_PROPERTY(double           radius      READ radius     CONSTANT FINAL)               ///< Circle only, meters
+    Q_PROPERTY(bool             highlighted READ highlighted NOTIFY highlightedChanged FINAL) ///< The zone is one of the model's highlightedZones
 
 public:
     GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent = nullptr);
@@ -43,11 +44,14 @@ public:
     QGeoShape geoShape() const { return _geoShape; }
     QGeoCoordinate center() const { return _center; }
     double radius() const { return _radius; }
+    bool highlighted() const { return _highlighted; }
+    void setHighlighted(bool highlighted);
 
     void setZoomLevel(int zoomLevel);
 
 signals:
     void geoShapeChanged();
+    void highlightedChanged();
 
 private:
     const GeoZoneShape *_shape = nullptr;
@@ -55,6 +59,7 @@ private:
     QGeoCoordinate _center;
     double _radius = 0;
     bool _isCircle = false;
+    bool _highlighted = false;
     int _zoomLevel = -1;
     QGeoShape _geoShape;
 };
@@ -71,6 +76,7 @@ class GeoZoneMapModel : public QObject
     Q_PROPERTY(QmlObjectListModel*  circles         READ circles            CONSTANT FINAL)                       ///< GeoZoneMapItem circles
     Q_PROPERTY(QmlObjectListModel*  labelZones      READ labelZones         CONSTANT FINAL)                       ///< GeoZone objects to label
     Q_PROPERTY(int                  hiddenZoneCount READ hiddenZoneCount    NOTIFY hiddenZoneCountChanged FINAL)  ///< Zones in view not shown because of the limit
+    Q_PROPERTY(QList<QObject*>      highlightedZones READ highlightedZones  WRITE setHighlightedZones NOTIFY highlightedZonesChanged FINAL)  ///< GeoZone objects drawn highlighted
 
 public:
     static constexpr int maxShapeCount = 2000;
@@ -87,9 +93,12 @@ public:
     QmlObjectListModel *circles() const { return _circles; }
     QmlObjectListModel *labelZones() const { return _labelZones; }
     int hiddenZoneCount() const { return _hiddenZoneCount; }
+    QList<QObject*> highlightedZones() const { return _highlightedZones; }
+    void setHighlightedZones(const QList<QObject*> &zones);
 
 signals:
     void hiddenZoneCountChanged(int hiddenZoneCount);
+    void highlightedZonesChanged();
 
 private slots:
     void _clear();
@@ -106,6 +115,7 @@ private:
     QmlObjectListModel *_labelZones = nullptr;
     QHash<const GeoZoneShape*, GeoZoneMapItem*> _items;
     int _hiddenZoneCount = 0;
+    QList<QObject*> _highlightedZones;
 
     QGeoRectangle _visibleRegion;
     double _zoomLevel = 0;

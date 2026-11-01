@@ -52,7 +52,8 @@ Rectangle {
             uploadFunction()
             return
         }
-        var names = prohibitedZones.slice(0, 5).map(zone => zone.name !== "" ? zone.name : zone.identifier).join(", ")
+        // The message dialog detects rich text, so markup in names from the files is defused
+        var names = prohibitedZones.slice(0, 5).map(zone => zone.displayName.replace(/</g, "\u2039").replace(/>/g, "\u203A")).join(", ")
         if (prohibitedZones.length > 5) {
             names += qsTr(" and %1 more").arg(prohibitedZones.length - 5)
         }
@@ -81,6 +82,7 @@ Rectangle {
             horizontalAlignment:    Text.AlignHCenter
             color:                  qgcPal.warningText
             text:                   check.warningText
+            textFormat:             Text.PlainText
             visible:                text !== ""
         }
 
@@ -91,6 +93,7 @@ Rectangle {
             horizontalAlignment:    Text.AlignHCenter
             color:                  qgcPal.warningText
             text:                   control._outdatedText
+            textFormat:             Text.PlainText
             visible:                text !== ""
         }
 
@@ -100,6 +103,7 @@ Rectangle {
             wrapMode:               Text.WordWrap
             horizontalAlignment:    Text.AlignHCenter
             text:                   check.infoText
+            textFormat:             Text.PlainText
             visible:                text !== ""
         }
 

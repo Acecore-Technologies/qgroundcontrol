@@ -334,7 +334,9 @@ FlightMap {
     }
 
     GeoZoneMapVisuals {
-        map: _root
+        id:         geoZoneMapVisuals
+        map:        _root
+        showZones:  _root.pipState.state !== _root.pipState.pipState
     }
 
     GeoFenceMapVisuals {
@@ -750,6 +752,19 @@ FlightMap {
                         }
                     }
 
+                    QGCButton {
+                        Layout.fillWidth:   true
+                        text:               qsTr("Geozones here (%1)").arg(_zoneCount)
+                        visible:            _zoneCount > 0
+                        onClicked: {
+                            mapClickDropPanel.close()
+                            geoZoneMapVisuals.showZonesAt(mapClickCoord)
+                        }
+
+                        readonly property int _zoneCount: geoZoneMapVisuals.showZones && QGroundControl.geoZoneManager.visible ?
+                                                              QGroundControl.geoZoneManager.zonesAt(mapClickCoord).length : 0
+                    }
+
                     ColumnLayout {
                         spacing: 0
                         QGCLabel { text: qsTr("Lat: %1").arg(mapClickCoord.latitude.toFixed(6)) }
@@ -772,6 +787,8 @@ FlightMap {
             position = _root.mapToItem(globals.parent, position)
             var dropPanel = mapClickDropPanelComponent.createObject(mainWindow, { mapClickCoord: clickCoord, clickRect: Qt.rect(position.x, position.y, 0, 0) })
             dropPanel.open()
+        } else if (!globals.guidedControllerFlyView.guidedUIVisible) {
+            geoZoneMapVisuals.showZonesAt(_root.toCoordinate(Qt.point(position.x, position.y), false /* clipToViewPort */))
         }
     }
 
