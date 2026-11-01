@@ -29,8 +29,10 @@ GeoZoneReturnModel::Destinations GeoZoneReturnDestinations::fromMission(const QL
     using Kind = GeoZoneMissionItem::Kind;
     GeoZoneReturnModel::Destinations destinations;
 
+    // Returning along the mission in reverse, PX4 lands at home once it reaches a takeoff instead of flying to it, see
+    // RtlMissionFastReverse::setActiveMissionItems
     for (const GeoZoneMissionItem &item : items) {
-        if (item.flies) {
+        if (item.flies && (item.kind != GeoZoneMissionItem::Kind::Takeoff)) {
             destinations.firstWaypoint = positionOf(item.entry);
             break;
         }

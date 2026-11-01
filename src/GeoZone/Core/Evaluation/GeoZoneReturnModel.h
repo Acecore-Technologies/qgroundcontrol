@@ -118,7 +118,7 @@ public:
         GeoZone::Position home;                 ///< The home altitude is the ground there
         QList<GeoZone::Position> rallyPoints;
         QList<Landing> landings;
-        GeoZone::Position firstWaypoint;        ///< PX4 returns along the mission in reverse to it, invalid without mission
+        GeoZone::Position firstWaypoint;        ///< PX4 returns along the mission in reverse to it, the first after the takeoff, invalid without mission
         QList<GeoZone::Position> returnPath;    ///< Positions after an ArduPlane DO_RETURN_PATH_START, up to the landing
         GeoZone::Position breachReturnPoint;    ///< Of the fence, invalid without
     };

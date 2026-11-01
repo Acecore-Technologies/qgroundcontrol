@@ -19,7 +19,8 @@
 class GeoZoneReturnDestinations
 {
 public:
-    /// @return The destinations the mission has: the first waypoint PX4 returns to along the mission in reverse, the
+    /// @return The destinations the mission has: the first waypoint after the takeoff, which PX4 returns to along the
+    ///         mission in reverse before flying home, the
     ///         landing sequences from their DO_LAND_START or landing pattern, and the positions after an ArduPlane
     ///         DO_RETURN_PATH_START up to its landing. Home, the rally points and the breach return point are the plan's,
     ///         left invalid and empty. The coordinates are without altitude, the altitudes those of the items.

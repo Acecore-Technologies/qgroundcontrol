@@ -620,6 +620,13 @@ void GeoZoneReturnTest::_testMissionDestinations()
     QVERIFY(near(destinations.returnPath[0], position(500, 500, 60)));
     QVERIFY(near(destinations.returnPath[1], position(200, 200, 30)));
 
+    // PX4 doesn't fly back to the takeoff, it lands at home once the return along the mission reaches it
+    QList<GeoZoneMissionItem> takeoffFirst = items;
+    takeoffFirst.prepend(item(Kind::Takeoff, 0, position(0, 0, 30)));
+    QVERIFY(near(GeoZoneReturnDestinations::fromMission(takeoffFirst).firstWaypoint, position(1000, 0, 50)));
+    takeoffFirst[0].kind = Kind::Other;
+    QVERIFY(near(GeoZoneReturnDestinations::fromMission(takeoffFirst).firstWaypoint, position(0, 0, 30)));
+
     // A DO_LAND_START without a coordinate is marked by its first position, a landing pattern is a sequence of its own
     landStart.marker = QGeoCoordinate();
     GeoZoneMissionItem pattern = item(Kind::LandingPattern, 6, position(-1000, 0, 80));
