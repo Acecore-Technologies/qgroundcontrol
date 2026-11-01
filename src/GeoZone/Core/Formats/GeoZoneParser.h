@@ -35,7 +35,7 @@ public:
     /// GeoZoneParserUtils which changes the result for the same bytes: the zones and their fields, texts, issues and
     /// hashes, or the metadata. Stored sources are restored from parse caches of the same version only, the others
     /// are parsed again, see GeoZoneParseCache.
-    static constexpr quint16 version = 2;
+    static constexpr quint16 version = 4;
 
     enum class Format {
         Unknown,

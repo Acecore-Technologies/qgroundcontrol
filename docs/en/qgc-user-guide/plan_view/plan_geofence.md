@@ -136,6 +136,14 @@ The indicator lists the **Recent Alerts** of the session, newest first, followed
 
 Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 geoid, within a few meters.
 
+How a zone boundary runs between two published points depends on the format. For long edges, especially at high latitudes, a great circle (geodesic) and a line straight in latitude and longitude can be several hundred meters apart:
+
+- **ED-269, ED-318, DiPUL and IGN GeoJSON**: straight in latitude and longitude, as GeoJSON defines its lines (RFC 7946, section 3.1.1). ED-269 polygons are GeoJSON polygons and ED-318 uses the GeoJSON geometries; neither standard defines its edges otherwise.
+- **AIXM 5.1**: `GeodesicString` segments are great circles. `LineStringSegment` segments in EPSG:4326 are straight in latitude and longitude, which the AIXM coding guidelines use for boundaries along parallels. Arcs (`ArcByCenterPoint`) are circles of the published radius around their center, with their angles taken as bearings.
+- **FAA TFRs**: the NOTAM details code the boundary points of each TFR as great circle points (`GRC`), so its edges are great circles when the details are available, and straight otherwise. Circular TFRs are published as 36-sided polygons, whose sides cut slightly inside the circle (by about 7 m for a radius of 1 NM).
+
+Edges are checked as straight lines in latitude and longitude, so when zones are loaded, great circle edges get extra points on their great circle (up to 1023 per edge) and arcs a point every few degrees, keeping the boundary used by the checks, maps and fences within 1 m of the published one. On maps, long straight edges get extra points too, since the map projection would otherwise move them.
+
 Limits published as flight levels (pressure altitude, `STD`) are approximate: their height depends on the air pressure and temperature. They are converted to heights above mean sea level with the **QNH** setting, as an altimeter set to it would read them in the ICAO standard atmosphere: the pressure altitude less 44330.8 m × (1 − (QNH / 1013.25 hPa)^0.190263), about 8.3 m lower per hPa below 1013.25 hPa. The zone details show both, like "FL 95 ≈ 2810 m AMSL (QNH 1003 hPa)". Since flight levels are lower in air colder than standard (by about 4 % of their height per 10 °C), the checks, alerts, altitude profile and strip lower floors and raise ceilings given as flight levels by 4 % of their height. Set the local QNH before planning or flying near such zones; a change applies at once to the checks and alerts.
 
 ### Pre-flight Briefing

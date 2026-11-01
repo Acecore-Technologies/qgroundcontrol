@@ -67,6 +67,9 @@ public:
     static QPointF toMercator(const QGeoCoordinate &coordinate);
     /// @param lonLat x is longitude and y latitude in degrees
     static QPointF toMercator(const QPointF &lonLat);
+    /// @return The ring in mercator coordinates. Its edges are straight in latitude and longitude, which curve in
+    ///         mercator, so long edges get points in between keeping the outline within 1 m of where the zone queries
+    ///         take it.
     static QList<QPointF> toMercator(const GeoZone::Ring &ring);
     static QGeoCoordinate fromMercator(const QPointF &point);
 

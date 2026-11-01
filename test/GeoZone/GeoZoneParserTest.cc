@@ -942,6 +942,130 @@ void GeoZoneParserTest::_testRingValidation()
     QCOMPARE(readBack.zones.first().volumes.first().rings, volume.rings);
 }
 
+void GeoZoneParserTest::_testEdgeInterpolation_data()
+{
+    QTest::addColumn<QByteArray>("document");
+    QTest::addColumn<bool>("greatCircles");
+
+    // The same zone between 60N and 61N, 111 km wide, in each format
+    const QList<QGeoCoordinate> ring = { QGeoCoordinate(60, 10), QGeoCoordinate(60, 12), QGeoCoordinate(61, 12), QGeoCoordinate(61, 10) };
+    QJsonArray positions;
+    for (const QGeoCoordinate &vertex : ring + QList<QGeoCoordinate>{ ring.first() }) {
+        positions.append(QJsonArray{ vertex.longitude(), vertex.latitude() });
+    }
+    const QJsonObject polygon{ { "type", "Polygon" }, { "coordinates", QJsonArray{ positions } } };
+    const auto json = [](const QJsonObject &root) { return QJsonDocument(root).toJson(QJsonDocument::Compact); };
+
+    // GeoJSON lines are straight in latitude and longitude (RFC 7946 3.1.1), ED-269 polygons are GeoJSON polygons
+    QTest::newRow("ED-269") << json(QJsonObject{ { "features", QJsonArray{ _polygonFeature(QStringLiteral("Z"), QStringLiteral("PROHIBITED"), ring) } } }) << false;
+    QTest::newRow("ED-318") << json(QJsonObject{ { "type", "FeatureCollection" }, { "features", QJsonArray{ QJsonObject{
+        { "type", "Feature" }, { "properties", QJsonObject{ { "identifier", "Z" }, { "type", "PROHIBITED" } } }, { "geometry", polygon } } } } }) << false;
+
+    // AIXM geodesic strings are great circles, line string segments in EPSG:4326 straight in latitude and longitude
+    const QString aixm = QStringLiteral(R"(<message:AIXMBasicMessage xmlns:message="http://www.aixm.aero/schema/5.1/message"
+        xmlns:aixm="http://www.aixm.aero/schema/5.1" xmlns:gml="http://www.opengis.net/gml/3.2"><message:hasMember><aixm:Airspace gml:id="A">
+        <aixm:timeSlice><aixm:AirspaceTimeSlice gml:id="T"><aixm:type>P</aixm:type><aixm:designator>Z</aixm:designator>
+        <aixm:geometryComponent><aixm:AirspaceGeometryComponent><aixm:theAirspaceVolume><aixm:AirspaceVolume gml:id="V">
+        <aixm:horizontalProjection><aixm:Surface gml:id="S" srsName="urn:ogc:def:crs:EPSG::4326"><gml:patches><gml:PolygonPatch><gml:exterior>
+        <gml:Ring><gml:curveMember><gml:Curve gml:id="C"><gml:segments><gml:%1><gml:posList>60 10 60 12 61 12 61 10 60 10</gml:posList></gml:%1>
+        </gml:segments></gml:Curve></gml:curveMember></gml:Ring></gml:exterior></gml:PolygonPatch></gml:patches></aixm:Surface></aixm:horizontalProjection>
+        </aixm:AirspaceVolume></aixm:theAirspaceVolume></aixm:AirspaceGeometryComponent></aixm:geometryComponent>
+        </aixm:AirspaceTimeSlice></aixm:timeSlice></aixm:Airspace></message:hasMember></message:AIXMBasicMessage>)");
+    QTest::newRow("AIXM geodesic string") << aixm.arg(QStringLiteral("GeodesicString")).toUtf8() << true;
+    QTest::newRow("AIXM line string") << aixm.arg(QStringLiteral("LineStringSegment")).toUtf8() << false;
+
+    // FAA TFRs are GeoJSON, whose NOTAM details give the vertices of the merged areas as great circle points
+    const QJsonObject tfrRoot{ { "type", "FeatureCollection" }, { "totalFeatures", 1 }, { "timeStamp", "2026-10-31T12:00:00Z" }, { "features", QJsonArray{ QJsonObject{
+        { "type", "Feature" }, { "geometry", polygon },
+        { "properties", QJsonObject{ { "NOTAM_KEY", "6/0001-1-FDC-F" }, { "TITLE", "TEST" }, { "LAST_MODIFICATION_DATETIME", "202610311200" } } } } } } };
+    QByteArray vertices;
+    for (const QGeoCoordinate &vertex : ring + QList<QGeoCoordinate>{ ring.first() }) {
+        vertices += QStringLiteral("<Avx><codeDatum>WGE</codeDatum><codeType>%3</codeType><geoLat>%1N</geoLat><geoLong>%2E</geoLong></Avx>")
+                        .arg(vertex.latitude()).arg(vertex.longitude()).toUtf8();
+    }
+    const QByteArray detail = R"(<XNOTAM-Update><Group><Add><Not><TfrNot><TFRAreaGroup><aseTFRArea><txtName>Area A</txtName>
+        <codeDistVerUpper>ALT</codeDistVerUpper><valDistVerUpper>3000</valDistVerUpper><uomDistVerUpper>FT</uomDistVerUpper>
+        <codeDistVerLower>HEI</codeDistVerLower><valDistVerLower>0</valDistVerLower><uomDistVerLower>FT</uomDistVerLower></aseTFRArea>
+        <abdMergedArea><AbdUid><AseUid><codeType>RAS</codeType><codeId>1</codeId></AseUid></AbdUid>)" + vertices + R"(</abdMergedArea>
+        </TFRAreaGroup></TfrNot></Not></Add></Group></XNOTAM-Update>)";
+    const auto tfr = [&tfrRoot, &detail](const QString &codeType) {
+        return GeoZoneParser::composite(tfrRoot, { { QStringLiteral("6/0001"), { QStringLiteral("202610311200"), QString::fromUtf8(detail).arg(codeType).toUtf8() } } });
+    };
+    QTest::newRow("FAA TFR great circles") << tfr(QStringLiteral("GRC")) << true;
+    QTest::newRow("FAA TFR rhumb lines") << tfr(QStringLiteral("RHL")) << false;
+    QTest::newRow("FAA TFR without details") << json(tfrRoot) << false;
+}
+
+void GeoZoneParserTest::_testEdgeInterpolation()
+{
+    QFETCH(QByteArray, document);
+    QFETCH(bool, greatCircles);
+
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(document, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 1);
+    QVERIFY(result.issues.isEmpty());
+    const GeoZone::Ring &published = result.zones.first().volumes.first().rings.first();
+    const GeoZone zone(result.zones.first());
+    if (greatCircles) {
+        // The east-west edges are great circles 420 m and 411 m north of the parallels in the middle, which get points
+        // on them, the meridians none
+        QVERIFY((published.count() > 20) && (published.count() < 200));
+        QVERIFY(!zone.contains(QGeoCoordinate(60.003, 11)));
+        QVERIFY(zone.contains(QGeoCoordinate(60.0045, 11)));
+        QVERIFY(zone.contains(QGeoCoordinate(61.0033, 11)));
+        QVERIFY(!zone.contains(QGeoCoordinate(61.0045, 11)));
+        QVERIFY(qAbs(zone.box().north() - 61.0037) < 0.0001);
+    } else {
+        // Along the parallels
+        QCOMPARE(published.count(), 4);
+        QVERIFY(!zone.contains(QGeoCoordinate(59.9999, 11)));
+        QVERIFY(zone.contains(QGeoCoordinate(60.0001, 11)));
+        QVERIFY(zone.contains(QGeoCoordinate(60.9999, 11)));
+        QVERIFY(!zone.contains(QGeoCoordinate(61.0001, 11)));
+        QCOMPARE(zone.box().north(), 61.0);
+    }
+    QCOMPARE(zone.box().south(), 60.0);
+}
+
+void GeoZoneParserTest::_testAixmArcs()
+{
+    // Arcs get points close enough that the chords stay within 1 m of them: a 20 NM arc every 0.84 degrees
+    const QString aixm = QStringLiteral(R"(<message:AIXMBasicMessage xmlns:message="http://www.aixm.aero/schema/5.1/message"
+        xmlns:aixm="http://www.aixm.aero/schema/5.1" xmlns:gml="http://www.opengis.net/gml/3.2"><message:hasMember><aixm:Airspace gml:id="A">
+        <aixm:timeSlice><aixm:AirspaceTimeSlice gml:id="T"><aixm:type>D</aixm:type><aixm:designator>ARC</aixm:designator>
+        <aixm:geometryComponent><aixm:AirspaceGeometryComponent><aixm:theAirspaceVolume><aixm:AirspaceVolume gml:id="V">
+        <aixm:horizontalProjection><aixm:Surface gml:id="S"><gml:patches><gml:PolygonPatch><gml:exterior><gml:Ring><gml:curveMember>
+        <gml:Curve gml:id="C"><gml:segments>
+        <gml:GeodesicString><gml:posList>52 0 52.33287 0</gml:posList></gml:GeodesicString>
+        <gml:ArcByCenterPoint numArc="1"><gml:pos>52 0</gml:pos><gml:radius uom="[nmi_i]">20</gml:radius>
+        <gml:startAngle uom="deg">0</gml:startAngle><gml:endAngle uom="deg">90</gml:endAngle></gml:ArcByCenterPoint>
+        <gml:GeodesicString><gml:posList>52 0.54 52 0</gml:posList></gml:GeodesicString>
+        </gml:segments></gml:Curve></gml:curveMember></gml:Ring></gml:exterior></gml:PolygonPatch></gml:patches></aixm:Surface>
+        </aixm:horizontalProjection></aixm:AirspaceVolume></aixm:theAirspaceVolume></aixm:AirspaceGeometryComponent></aixm:geometryComponent>
+        </aixm:AirspaceTimeSlice></aixm:timeSlice></aixm:Airspace></message:hasMember></message:AIXMBasicMessage>)");
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(aixm.toUtf8(), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 1);
+    const QList<QGeoCoordinate> vertices = GeoZone::toCoordinates(result.zones.first().volumes.first().rings.first());
+    const QGeoCoordinate center(52, 0);
+    const double radius = 20 * 1852;
+    int arcVertices = 0;
+    for (qsizetype i = 0; i < vertices.count(); i++) {
+        const QGeoCoordinate &from = vertices[i];
+        const QGeoCoordinate &to = vertices[(i + 1) % vertices.count()];
+        if ((qAbs(center.distanceTo(from) - radius) > 0.01) || (qAbs(center.distanceTo(to) - radius) > 0.01)) {
+            continue;
+        }
+        arcVertices++;
+        const QGeoCoordinate middle = from.atDistanceAndAzimuth(from.distanceTo(to) / 2, from.azimuthTo(to));
+        QVERIFY2((radius - center.distanceTo(middle)) <= GeoZoneGeometry::kGreatCircleToleranceMeters, qPrintable(QString::number(radius - center.distanceTo(middle))));
+    }
+    QVERIFY((arcVertices > 100) && (arcVertices < 200));
+}
+
 void GeoZoneParserTest::_testRejectedAixmGeometry()
 {
     // AIXM volumes are checked like the others: a circle without radius leaves its airspace without volume
@@ -1059,7 +1183,8 @@ void GeoZoneParserTest::_testFuzzFindings()
     for (const QString &endAngle : { QStringLiteral("1e6"), QStringLiteral("1e12") }) {
         QVERIFY2(GeoZoneParser::parse(aixm.arg(endAngle).toUtf8(), result, errorString), qPrintable(errorString));
         QCOMPARE(result.zones.count(), 1);
-        QVERIFY(qAbs(result.zones[0].volumes[0].rings[0].count() - 120) <= 1);
+        // One turn, with a point every 2.66 degrees keeping the chords of the 2 NM arc within 1 m of it
+        QVERIFY(qAbs(result.zones[0].volumes[0].rings[0].count() - 136) <= 1);
         QVERIFY(GeoZone(result.zones[0]).contains(QGeoCoordinate(51.3, -0.8)));
     }
     for (const QString &endAngle : { QStringLiteral("inf"), QStringLiteral("nan") }) {

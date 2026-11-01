@@ -64,17 +64,22 @@ enum class RingProblem {
 RingProblem _normalizeRing(GeoZone::Ring &ring, bool outer, bool &selfIntersecting)
 {
     selfIntersecting = false;
-    GeoZone::Ring distinct;
-    distinct.reserve(ring.count());
-    for (const QPointF &vertex : std::as_const(ring)) {
-        if (distinct.isEmpty() || !_samePosition(distinct.constLast(), vertex)) {
-            distinct.append(vertex);
+    const auto duplicate = [&ring](qsizetype i) { return _samePosition(ring[i], ring[(i + 1) % ring.count()]); };
+    qsizetype first = 0;
+    while ((first < ring.count()) && !duplicate(first)) {
+        first++;
+    }
+    if (first < ring.count()) {
+        GeoZone::Ring distinct;
+        distinct.reserve(ring.count());
+        for (const QPointF &vertex : std::as_const(ring)) {
+            if (distinct.isEmpty() || !_samePosition(distinct.constLast(), vertex)) {
+                distinct.append(vertex);
+            }
         }
-    }
-    while ((distinct.count() > 1) && _samePosition(distinct.constLast(), distinct.constFirst())) {
-        distinct.removeLast();
-    }
-    if (distinct.count() != ring.count()) {
+        while ((distinct.count() > 1) && _samePosition(distinct.constLast(), distinct.constFirst())) {
+            distinct.removeLast();
+        }
         ring = distinct;
     }
     if (ring.count() < 3) {
@@ -82,7 +87,7 @@ RingProblem _normalizeRing(GeoZone::Ring &ring, bool outer, bool &selfIntersecti
     }
 
     // The planar geometry of the zones doesn't hold at the poles. A ring around a pole winds once around the world, so
-    // its longitudes don't come back to where they started.
+    // its longitudes don't come back to where they started. A great circle edge going over a pole got a point near it.
     double winding = 0;
     for (qsizetype i = 0; i < ring.count(); i++) {
         if (std::abs(ring[i].y()) > kMaxPolygonLatitude) {
@@ -462,6 +467,25 @@ void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volume
 bool _validRadius(double radius)
 {
     return (radius > 0) && (radius <= kMaxRadiusMeters);
+}
+
+void _densifyGreatCircles(QList<GeoZone::Volume> &volumes)
+{
+    for (GeoZone::Volume &volume : volumes) {
+        if (volume.isCircle) {
+            continue;
+        }
+        for (GeoZone::Ring &ring : volume.rings) {
+            // Rings going out and back between two points, which are rejected, would get area
+            qsizetype edges = 0;
+            for (qsizetype i = 0; i < ring.count(); i++) {
+                edges += (ring[i] != ring[(i + 1) % ring.count()]) ? 1 : 0;
+            }
+            if (edges >= 3) {
+                ring = GeoZoneGeometry::densifyGreatCircles(ring, kMaxRingVertices);
+            }
+        }
+    }
 }
 
 bool _normalizeVolumes(GeoZone::Data &zone)

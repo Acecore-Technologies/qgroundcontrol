@@ -1208,6 +1208,120 @@ void GeoZoneGeometryTest::_testBoxAcrossAntimeridian()
     QVERIFY(qAbs(wide->distanceTo(GeoZone::Position{ nearEastEnd }, 0, 5000) - eastDistance) < (eastDistance * 0.01));
 }
 
+void GeoZoneGeometryTest::_testGreatCircleEdges_data()
+{
+    QTest::addColumn<QList<QPointF>>("ring");
+    QTest::addColumn<QList<bool>>("greatCircleEdges");
+    QTest::addColumn<QList<int>>("minPoints");     ///< Added to each edge
+    QTest::addColumn<QList<int>>("maxPoints");
+    QTest::addColumn<int>("maxVertices");
+    QTest::addColumn<bool>("withinTolerance");
+
+    constexpr int maxVertices = 200000;
+    // About 1 by 1 km, which is within 1 m of the great circles at any latitude below the pole limit
+    QTest::newRow("short edges") << QList<QPointF>({ { 10, 60 }, { 10.02, 60 }, { 10.02, 60.01 }, { 10, 60.01 } }) << QList<bool>() << QList<int>{ 0, 0, 0, 0 } << QList<int>{ 0, 0, 0, 0 } << maxVertices << true;
+    // 111 km east-west edges at 60N, whose great circles are 420 m north of them, meridians are great circles
+    QTest::newRow("high latitude") << QList<QPointF>({ { 10, 60 }, { 12, 60 }, { 12, 61 }, { 10, 61 } }) << QList<bool>() << QList<int>{ 15, 0, 15, 0 } << QList<int>{ 63, 0, 63, 0 } << maxVertices << true;
+    QTest::newRow("equator and meridian") << QList<QPointF>({ { 0, 0 }, { 20, 0 }, { 20, 10 } }) << QList<bool>() << QList<int>{ 0, 0, 1 } << QList<int>{ 0, 0, 1023 } << maxVertices << true;
+    // The great circle crossing the equator is on both sides of the edge, which meet at its middle
+    QTest::newRow("across the equator") << QList<QPointF>({ { 0, -10 }, { 10, 10 }, { 0, 10 } }) << QList<bool>() << QList<int>{ 2, 1, 0 } << QList<int>{ 1023, 1023, 0 } << maxVertices << true;
+    QTest::newRow("across the antimeridian") << QList<QPointF>({ { 179, 70 }, { -179, 70 }, { -179, 71 }, { 179, 71 } }) << QList<bool>() << QList<int>{ 15, 0, 15, 0 } << QList<int>{ 63, 0, 63, 0 } << maxVertices << true;
+    // Only the great circle edges of a ring with others straight in latitude and longitude, like the parallels of AIXM
+    QTest::newRow("some edges") << QList<QPointF>({ { 10, 60 }, { 12, 60 }, { 12, 61 }, { 10, 61 } }) << QList<bool>{ false, false, true, false }
+                                << QList<int>{ 0, 0, 15, 0 } << QList<int>{ 0, 0, 63, 0 } << maxVertices << true;
+    // The point count is bounded by the vertex limit of the ring and the subdivision limit of each edge
+    QTest::newRow("vertex limit") << QList<QPointF>({ { 0, 45 }, { 60, 45 }, { 60, 50 } }) << QList<bool>() << QList<int>{ 0, 0, 0 } << QList<int>{ 7, 7, 7 } << 10 << false;
+    QTest::newRow("subdivision limit") << QList<QPointF>({ { -80, 60 }, { 80, 60 }, { 0, 10 } }) << QList<bool>() << QList<int>{ 1023, 1, 1 } << QList<int>{ 1023, 1023, 1023 } << maxVertices << false;
+}
+
+void GeoZoneGeometryTest::_testGreatCircleEdges()
+{
+    QFETCH(QList<QPointF>, ring);
+    QFETCH(QList<bool>, greatCircleEdges);
+    QFETCH(QList<int>, minPoints);
+    QFETCH(QList<int>, maxPoints);
+    QFETCH(int, maxVertices);
+    QFETCH(bool, withinTolerance);
+
+    const QList<QPointF> &original = ring;
+    const QList<QPointF> densified = GeoZoneGeometry::densifyGreatCircles(original, maxVertices, greatCircleEdges);
+    QVERIFY(densified.count() <= maxVertices);
+    if (densified.count() == original.count()) {
+        QVERIFY(densified.isSharedWith(original));
+    }
+
+    // The vertices are kept in order, with the added points between them
+    QList<qsizetype> indexes;
+    for (const QPointF &vertex : original) {
+        indexes.append(densified.indexOf(vertex, indexes.isEmpty() ? 0 : (indexes.last() + 1)));
+        QVERIFY(indexes.last() >= 0);
+    }
+    QCOMPARE(indexes.first(), 0);
+    for (const QPointF &point : densified) {
+        QVERIFY((point.x() >= -180) && (point.x() <= 180));
+    }
+
+    double north = -90;
+    for (qsizetype i = 0; i < original.count(); i++) {
+        const qsizetype end = (i + 1 < original.count()) ? indexes[i + 1] : densified.count();
+        const qsizetype added = end - indexes[i] - 1;
+        QVERIFY2((added >= minPoints[i]) && (added <= maxPoints[i]), qPrintable(QStringLiteral("edge %1: %2 points").arg(i).arg(added)));
+
+        // The great circle, from the azimuth and distance between the vertices, is within the tolerance of the chain
+        // of edges replacing the edge
+        QList<QPointF> chain = densified.mid(indexes[i], added + 1);
+        chain.append(original[(i + 1) % original.count()]);
+        const QGeoCoordinate from = GeoZone::toCoordinate(original[i]);
+        const QGeoCoordinate to = GeoZone::toCoordinate(original[(i + 1) % original.count()]);
+        for (int k = 1; k < 64; k++) {
+            const QGeoCoordinate onCircle = from.atDistanceAndAzimuth(from.distanceTo(to) * k / 64, from.azimuthTo(to));
+            if (greatCircleEdges.value(i, true)) {
+                north = (std::max)(north, onCircle.latitude());
+            }
+            const GeoZoneGeometry::LocalProjection projection(onCircle);
+            double distance = qInf();
+            for (qsizetype j = 0; (j + 1) < chain.count(); j++) {
+                distance = (std::min)(distance, GeoZoneGeometry::distanceToSegment(QPointF(), projection.lonLatToLocal(chain[j]), projection.lonLatToLocal(chain[j + 1])));
+            }
+            if (withinTolerance && greatCircleEdges.value(i, true)) {
+                QVERIFY2(distance <= (GeoZoneGeometry::kGreatCircleToleranceMeters * 1.05), qPrintable(QStringLiteral("edge %1 at %2/64: %3 m").arg(i).arg(k).arg(distance)));
+            }
+        }
+    }
+
+    // Bounding boxes include the bulge of the great circles towards the pole
+    if (withinTolerance) {
+        QVERIFY(GeoZoneBox::fromLonLatPath(densified).north() >= (north - (GeoZoneGeometry::kGreatCircleToleranceMeters / 111000)));
+    }
+}
+
+void GeoZoneGeometryTest::_testMercatorEdges()
+{
+    // Maps draw in mercator, where edges straight in latitude and longitude curve, so long ones get points following
+    // them within 1 m. A diagonal edge from 60N to 61N is 190 m off its mercator chord in the middle, east-west edges
+    // and meridians, which are straight in mercator too, stay as they are.
+    const GeoZone::Ring ring = { { 10, 60 }, { 11, 61 }, { 10, 61 } };
+    const QList<QPointF> mercator = GeoZoneShape::toMercator(ring);
+    QCOMPARE(mercator.first(), GeoZoneShape::toMercator(ring[0]));
+    const qsizetype second = mercator.indexOf(GeoZoneShape::toMercator(ring[1]));
+    QVERIFY((second > 10) && (second < 40));
+    QCOMPARE(mercator.count(), second + 2);
+    for (int i = 1; i < 64; i++) {
+        const QPointF lonLat = ring[0] + ((ring[1] - ring[0]) * (i / 64.0));
+        const QPointF point = GeoZoneShape::toMercator(lonLat);
+        double distance = qInf();
+        for (qsizetype j = 0; j < second; j++) {
+            distance = (std::min)(distance, GeoZoneGeometry::distanceToSegment(point, mercator[j], mercator[j + 1]));
+        }
+        // Normalized mercator units are the earth's circumference at the equator
+        QVERIFY2((distance * 40075016.686 * std::cos(qDegreesToRadians(lonLat.y()))) <= 1.0, qPrintable(QString::number(i)));
+    }
+
+    // Short edges stay as they are
+    const GeoZone::Ring small = { { 10, 60 }, { 10.01, 60 }, { 10.01, 60.005 } };
+    QCOMPARE(GeoZoneShape::toMercator(small).count(), 3);
+}
+
 void GeoZoneGeometryTest::_testProjectionContinuity()
 {
     // Paths continue from point to point across the antimeridian, even past 180 degrees from the origin

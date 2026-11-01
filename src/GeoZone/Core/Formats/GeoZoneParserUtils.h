@@ -82,6 +82,11 @@ void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volume
 
 bool _validRadius(double radius);
 
+/// Adds points on the great circles of the polygon edges of the volumes, for formats whose edges are geodesics, see
+/// GeoZoneGeometry::densifyGreatCircles. Polygon edges are otherwise straight in latitude and longitude, like in
+/// GeoJSON (RFC 7946 section 3.1.1), which is how the zone queries take them.
+void _densifyGreatCircles(QList<GeoZone::Volume> &volumes);
+
 /// Checks and normalizes the volumes of a parsed zone, adding the problems found to its issues. Consecutive duplicate
 /// vertices and the closing vertex are removed. Polygons with fewer than 3 distinct points, without area, or touching
 /// or enclosing a pole are dropped, as are circles without a valid radius; invalid holes are dropped, which enlarges

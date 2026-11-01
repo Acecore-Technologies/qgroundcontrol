@@ -12,6 +12,7 @@
 #include "GeoZoneParserUtils.h"
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QtMath>
 #include <QtCore/QXmlStreamReader>
 
 #include <algorithm>
@@ -65,7 +66,9 @@ void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmL
 }
 
 /// Parses the airspaces of an AIXM 5.1 message, like the UK flight restriction zones. Boundaries of geodesic strings,
-/// line strings, arcs and circles by center point are supported, arcs use bearings for their angles.
+/// line strings, arcs and circles by center point are supported. As in the AIXM coding guidelines, geodesic strings are
+/// great circles, line strings in EPSG:4326 are straight in latitude and longitude, like parallels, and arcs are circles
+/// around their center whose angles are bearings.
 bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString)
 {
     result.format = GeoZoneParser::Format::Aixm;
@@ -85,6 +88,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
     AixmLimit lower;
     AixmLimit upper;
     QList<QGeoCoordinate> ring;
+    QList<bool> geodesicEdges;  ///< Of the edges from each ring vertex to the next, see GeoZoneGeometry::densifyGreatCircles
     bool circleOnly = true;
     QString segment;
     QList<QGeoCoordinate> points;
@@ -92,10 +96,15 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
     double startAngle = qQNaN();
     double endAngle = qQNaN();
 
-    const auto appendPoints = [&ring](const QList<QGeoCoordinate> &newPoints) {
-        for (const QGeoCoordinate &point : newPoints) {
-            if (ring.isEmpty() || (ring.constLast().distanceTo(point) > 0.01)) {
-                ring.append(point);
+    // The edges within a geodesic string are great circles, the others, like the one joining two segments which don't
+    // meet, are straight
+    const auto appendPoints = [&ring, &geodesicEdges](const QList<QGeoCoordinate> &newPoints, bool geodesic) {
+        for (qsizetype i = 0; i < newPoints.count(); i++) {
+            if (ring.isEmpty() || (ring.constLast().distanceTo(newPoints[i]) > 0.01)) {
+                if (!ring.isEmpty()) {
+                    geodesicEdges.append(geodesic && (i > 0));
+                }
+                ring.append(newPoints[i]);
             }
         }
     };
@@ -143,6 +152,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 lower = AixmLimit();
                 upper = AixmLimit();
                 ring.clear();
+                geodesicEdges.clear();
                 circleOnly = true;
             } else if (!inVolume && (name == QLatin1String("type")) && type.isEmpty()) {
                 type = reader.readElementText().trimmed();
@@ -193,18 +203,22 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     // The sweep is signed, clockwise when the end bearing is larger. Arcs of more than a turn are
                     // malformed, they end after one.
                     const double sweep = std::clamp(endAngle - startAngle, -360.0, 360.0);
-                    const int steps = (std::max)(1, static_cast<int>(std::ceil(std::abs(sweep) / 3)));
+                    // Points close enough that the chords between them stay within the tolerance of the arc, every 3
+                    // degrees at least
+                    const double tolerance = GeoZoneGeometry::kGreatCircleToleranceMeters;
+                    const double maxStep = (radius > tolerance) ? (std::min)(3.0, qRadiansToDegrees(2 * std::acos(1 - (tolerance / radius)))) : 3.0;
+                    const int steps = std::clamp(static_cast<int>(std::ceil(std::abs(sweep) / maxStep)), 1, 3600);
                     QList<QGeoCoordinate> arc;
                     for (int i = 0; i <= steps; i++) {
                         arc.append(points.constFirst().atDistanceAndAzimuth(radius, startAngle + (sweep * i / steps)));
                     }
-                    appendPoints(arc);
+                    appendPoints(arc, false);
                     circleOnly = false;
                 } else if ((segment == QLatin1String("CircleByCenterPoint")) && !points.isEmpty()) {
                     volume.center = points.constFirst();
                     volume.radius = radius;
                 } else {
-                    appendPoints(points);
+                    appendPoints(points, segment == QLatin1String("GeodesicString"));
                     circleOnly = false;
                 }
                 segment.clear();
@@ -219,11 +233,15 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     _appendVolume(volume, zone.volumes);
                 } else {
                     if ((ring.count() > 1) && (ring.constFirst().distanceTo(ring.constLast()) < 1)) {
+                        // The edge to the last vertex now closes the ring
                         ring.removeLast();
+                    } else {
+                        geodesicEdges.append(false);
                     }
                     if (!ring.isEmpty() && (ring.count() <= kMaxRingVertices)) {
                         volume.isCircle = false;
-                        volume.rings = { GeoZone::toRing(ring) };
+                        const GeoZone::Ring published = GeoZone::toRing(ring);
+                        volume.rings = { (ring.count() >= 3) ? GeoZoneGeometry::densifyGreatCircles(published, kMaxRingVertices, geodesicEdges) : published };
                         _appendVolume(volume, zone.volumes);
                     }
                 }

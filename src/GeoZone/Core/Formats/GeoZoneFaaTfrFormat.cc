@@ -27,6 +27,8 @@ struct TfrDetail {
     QList<GeoZone::TimePeriod> periods;     ///< Empty when the NOTAM gives none
     GeoZone::Volume limits;                 ///< Lowest floor and highest ceiling of its areas
     bool valid = false;
+    /// The merged areas, which the WFS polygons follow, give each of their vertices as a great circle point (GRC)
+    bool greatCircleEdges = false;
 };
 
 QDateTime _tfrTime(const QString &text)
@@ -58,6 +60,10 @@ TfrDetail _tfrDetail(const QByteArray &xml)
     GeoZone::TimePeriod schedule;
     bool inArea = false;
     bool inSchedule = false;
+    bool inMergedArea = false;
+    bool inVertex = false;
+    int greatCircleVertices = 0;
+    int otherVertices = 0;
 
     QXmlStreamReader reader(xml);
     while (!reader.atEnd()) {
@@ -67,6 +73,13 @@ TfrDetail _tfrDetail(const QByteArray &xml)
             if (name == QLatin1String("TFRAreaGroup")) {
                 inArea = true;
                 areas.append(Area());
+            } else if (name == QLatin1String("abdMergedArea")) {
+                inMergedArea = true;
+            } else if (inMergedArea && (name == QLatin1String("Avx"))) {
+                inVertex = true;
+            } else if (inVertex && (name == QLatin1String("codeType"))) {
+                // Like in AIXM 4.5: GRC great circle, RHL rhumb line, CWA and CCA arcs, FNT border
+                ((reader.readElementText().trimmed() == QLatin1String("GRC")) ? greatCircleVertices : otherVertices)++;
             } else if (name == QLatin1String("ScheduleGroup")) {
                 inSchedule = true;
                 schedule = GeoZone::TimePeriod();
@@ -100,6 +113,10 @@ TfrDetail _tfrDetail(const QByteArray &xml)
                 }
             } else if (name == QLatin1String("TFRAreaGroup")) {
                 inArea = false;
+            } else if (name == QLatin1String("abdMergedArea")) {
+                inMergedArea = false;
+            } else if (name == QLatin1String("Avx")) {
+                inVertex = false;
             }
         }
     }
@@ -108,6 +125,7 @@ TfrDetail _tfrDetail(const QByteArray &xml)
     }
 
     detail.valid = true;
+    detail.greatCircleEdges = (greatCircleVertices >= 3) && (otherVertices == 0);
     if (!areaPeriods.isEmpty()) {
         detail.periods = areaPeriods;
     } else if (notamStart.isValid() || notamEnd.isValid()) {
@@ -198,6 +216,10 @@ bool _faaTfrFeature(const QJsonObject &feature, const GeoZoneParser::Companions 
     }
 
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    // The GeoJSON edges are straight in latitude and longitude unless the NOTAM says they are great circles
+    if (detail.greatCircleEdges) {
+        _densifyGreatCircles(zone.volumes);
+    }
     return !zone.volumes.isEmpty();
 }
 

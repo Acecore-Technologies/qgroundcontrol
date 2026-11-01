@@ -25,6 +25,7 @@ namespace {
 
 constexpr double kEarthRadiusMeters = 6371008.8;
 constexpr double kDegreesToRadians = M_PI / 180.0;
+constexpr double kMetersPerDegree = kEarthRadiusMeters * kDegreesToRadians;
 
 double _cross(const QPointF &a, const QPointF &b)
 {
@@ -366,6 +367,52 @@ void _findCrossings(const QList<QPointF> &expanded, const QList<QPointF> &origin
     }
 }
 
+struct Vector3 {
+    double x = 0;
+    double y = 0;
+    double z = 0;
+};
+
+/// @return Unit vector of the point, x longitude and y latitude in degrees
+Vector3 _toVector(const QPointF &lonLat)
+{
+    const double latitude = lonLat.y() * kDegreesToRadians;
+    const double longitude = lonLat.x() * kDegreesToRadians;
+    return { std::cos(latitude) * std::cos(longitude), std::cos(latitude) * std::sin(longitude), std::sin(latitude) };
+}
+
+/// Fast upper bound of greatCircleDeviation for short edges. In latitude and longitude great circles curve away from
+/// a straight edge by up to its length squared times the tangent of the latitude over 4 earth radii, half that for
+/// east-west edges. This is twice that, at the higher latitude of the edge.
+double _greatCircleDeviationBound(const QPointF &from, const QPointF &to)
+{
+    // Edges shorter than about 150 m skip the tangent, 573 is the tangent of 89.9 degrees
+    constexpr double shortSquared = 2 * kEarthRadiusMeters / 573.0;
+    const double north = (to.y() - from.y()) * kMetersPerDegree;
+    const double east = std::remainder(to.x() - from.x(), 360.0) * kMetersPerDegree * std::cos(from.y() * kDegreesToRadians);
+    const double lengthSquared = (north * north) + (east * east);
+    if (lengthSquared < shortSquared) {
+        return lengthSquared / shortSquared;
+    }
+    const double latitude = (std::min)((std::max)(std::abs(from.y()), std::abs(to.y())), 89.9);
+    return lengthSquared * std::tan(latitude * kDegreesToRadians) / (2 * kEarthRadiusMeters);
+}
+
+/// Adds the points between from and to, exclusive, to the ring while it has fewer than maxVertices
+/// @param to Continuous from from, the shorter way
+void _densifyEdge(const QPointF &from, const QPointF &to, double tolerance, int depth, qsizetype maxVertices, QList<QPointF> &ring)
+{
+    if ((depth <= 0) || (ring.count() >= maxVertices) || (greatCircleDeviation(from, to) <= tolerance)) {
+        return;
+    }
+    const QPointF middle = greatCircleInterpolate(from, to, 0.5);
+    _densifyEdge(from, middle, tolerance, depth - 1, maxVertices, ring);
+    if (ring.count() < maxVertices) {
+        ring.append(QPointF(std::remainder(middle.x(), 360.0), middle.y()));
+    }
+    _densifyEdge(middle, to, tolerance, depth - 1, maxVertices, ring);
+}
+
 } // namespace
 
 LocalProjection::LocalProjection(const QGeoCoordinate &origin)
@@ -627,6 +674,25 @@ bool isSimple(const QList<QPointF> &ring)
         }
     }
 
+    const auto adjacent = [count](qsizetype i, qsizetype j) { return (j == ((i + 1) % count)) || (i == ((j + 1) % count)); };
+    constexpr qsizetype smallRing = 32;
+    if (count <= smallRing) {
+        for (qsizetype i = 0; i < count; i++) {
+            const QPointF &a1 = ring[i];
+            const QPointF &a2 = ring[(i + 1) % count];
+            for (qsizetype j = i + 2; j < count; j++) {
+                const QPointF &b1 = ring[j];
+                const QPointF &b2 = ring[(j + 1) % count];
+                const bool apart = ((std::max)(a1.x(), a2.x()) < (std::min)(b1.x(), b2.x())) || ((std::max)(b1.x(), b2.x()) < (std::min)(a1.x(), a2.x())) ||
+                                   ((std::max)(a1.y(), a2.y()) < (std::min)(b1.y(), b2.y())) || ((std::max)(b1.y(), b2.y()) < (std::min)(a1.y(), a2.y()));
+                if (!apart && !adjacent(i, j) && segmentsIntersect(a1, a2, b1, b2)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     // Sweep over the edges in the order of their west end, testing each against the following edges which overlap it
     // in x, so that large rings don't take a test of all pairs
     QList<QRectF> bounds;
@@ -642,8 +708,7 @@ bool isSimple(const QList<QPointF> &ring)
         const QRectF &box = bounds[i];
         for (qsizetype l = k + 1; (l < count) && (bounds[order[l]].left() <= box.right()); l++) {
             const qsizetype j = order[l];
-            const bool adjacent = (j == ((i + 1) % count)) || (i == ((j + 1) % count));
-            if (adjacent || (bounds[j].top() > box.bottom()) || (bounds[j].bottom() < box.top())) {
+            if (adjacent(i, j) || (bounds[j].top() > box.bottom()) || (bounds[j].bottom() < box.top())) {
                 continue;
             }
             if (segmentsIntersect(ring[i], ring[(i + 1) % count], ring[j], ring[(j + 1) % count])) {
@@ -787,6 +852,64 @@ QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double 
     }
 
     return ring;
+}
+
+QPointF greatCircleInterpolate(const QPointF &from, const QPointF &to, double fraction)
+{
+    const double longitudeDelta = std::remainder(to.x() - from.x(), 360.0);
+    const QPointF straight(from.x() + (longitudeDelta * fraction), from.y() + ((to.y() - from.y()) * fraction));
+    const Vector3 a = _toVector(from);
+    const Vector3 b = _toVector(to);
+    const Vector3 normal{ (a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x) };
+    const double sine = std::sqrt((normal.x * normal.x) + (normal.y * normal.y) + (normal.z * normal.z));
+    // The same or opposite points have no single great circle
+    if (sine < 1e-12) {
+        return straight;
+    }
+    const double angle = std::atan2(sine, (a.x * b.x) + (a.y * b.y) + (a.z * b.z));
+    const double weightA = std::sin((1 - fraction) * angle) / sine;
+    const double weightB = std::sin(fraction * angle) / sine;
+    const Vector3 point{ (weightA * a.x) + (weightB * b.x), (weightA * a.y) + (weightB * b.y), (weightA * a.z) + (weightB * b.z) };
+    const double longitude = std::atan2(point.y, point.x) / kDegreesToRadians;
+    const double latitude = std::atan2(point.z, std::hypot(point.x, point.y)) / kDegreesToRadians;
+    return QPointF(longitude + (360.0 * std::round((straight.x() - longitude) / 360.0)), latitude);
+}
+
+double greatCircleDeviation(const QPointF &from, const QPointF &to)
+{
+    double deviation = 0;
+    for (const double fraction : { 0.25, 0.5, 0.75 }) {
+        // Measured around the point, where the projection keeps distances. It is affine in latitude and longitude, so
+        // the edge stays straight in it.
+        const QPointF point = greatCircleInterpolate(from, to, fraction);
+        const LocalProjection projection(QGeoCoordinate(point.y(), std::remainder(point.x(), 360.0)));
+        deviation = (std::max)(deviation, distanceToSegment(QPointF(), projection.lonLatToLocal(from), projection.lonLatToLocal(to)));
+    }
+    return deviation;
+}
+
+QList<QPointF> densifyGreatCircles(const QList<QPointF> &ring, qsizetype maxVertices, const QList<bool> &greatCircleEdges, double toleranceMeters)
+{
+    const qsizetype count = ring.count();
+    QList<QPointF> result;
+    qsizetype copied = 0;
+    for (qsizetype i = 0; (count > 1) && (i < count); i++) {
+        const QPointF &from = ring[i];
+        const QPointF &next = ring[(i + 1) % count];
+        const QPointF to(from.x() + std::remainder(next.x() - from.x(), 360.0), next.y());
+        if (!greatCircleEdges.value(i, greatCircleEdges.isEmpty()) || (_greatCircleDeviationBound(from, to) <= toleranceMeters)) {
+            continue;
+        }
+        result.append(ring.mid(copied, (i + 1) - copied));
+        copied = i + 1;
+        // Room is kept for the vertices still to copy
+        _densifyEdge(from, to, toleranceMeters, kMaxGreatCircleSubdivisions, maxVertices - (count - copied), result);
+    }
+    if (copied == 0) {
+        return ring;
+    }
+    result.append(ring.mid(copied));
+    return result;
 }
 
 double geoidHeight(const QGeoCoordinate &coordinate)

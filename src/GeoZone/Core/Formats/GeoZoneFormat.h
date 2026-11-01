@@ -20,6 +20,8 @@
 /// GEOZONE_REGISTER_FORMAT and listed in formats(), a GeoZoneParser::Format value, and its services in
 /// GeoZoneProviders::services(). Changing the zones a format makes from the same document takes a new
 /// GeoZoneParser::version, so that stored sources are parsed again instead of restored from their parse caches.
+/// Polygon edges are taken straight in latitude and longitude, like GeoJSON lines. Formats whose specification makes
+/// them geodesics add points on their great circles, see GeoZoneParserUtils::_densifyGreatCircles.
 class GeoZoneFormat
 {
 public:

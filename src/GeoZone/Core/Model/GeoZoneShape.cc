@@ -85,10 +85,33 @@ QPointF GeoZoneShape::toMercator(const QPointF &lonLat)
 
 QList<QPointF> GeoZoneShape::toMercator(const GeoZone::Ring &ring)
 {
+    // A straight edge in latitude and longitude is straight in x, but y grows with the latitude like the log of
+    // tan(45 + latitude / 2) degrees. Across the mercator chord, the edge is off it by up to the change of latitude
+    // squared, in radians, times the earth radius and the tangent of the latitude over 8, in meters on the ground,
+    // times the sine of the angle between the chord and the meridians.
+    constexpr double maxDeviationMeters = 1;
+    constexpr double earthRadiusMeters = kEarthCircumferenceMeters / (2 * M_PI);
+    constexpr int maxPieces = 1024;
     QList<QPointF> points;
     points.reserve(ring.count());
-    for (const QPointF &vertex : ring) {
-        points.append(toMercator(vertex));
+    for (qsizetype i = 0; i < ring.count(); i++) {
+        const QPointF &from = ring[i];
+        const QPointF start = toMercator(from);
+        points.append(start);
+        const QPointF &next = ring[(i + 1) % ring.count()];
+        const QPointF delta(std::remainder(next.x() - from.x(), 360.0), next.y() - from.y());
+        const double latitudeChange = qDegreesToRadians(delta.y());
+        if ((std::abs(latitudeChange) < 1e-4) || (delta.x() == 0)) {
+            continue;
+        }
+        const QPointF chord = toMercator(from + delta) - start;
+        const double sine = std::abs(chord.x()) / std::hypot(chord.x(), chord.y());
+        const double latitude = qDegreesToRadians((std::min)((std::max)(std::abs(from.y()), std::abs(next.y())), kMaxMercatorLatitude));
+        const double deviation = earthRadiusMeters * std::tan(latitude) * latitudeChange * latitudeChange * sine / 8;
+        const int pieces = std::clamp(static_cast<int>(std::ceil(std::sqrt(deviation / maxDeviationMeters))), 1, maxPieces);
+        for (int piece = 1; piece < pieces; piece++) {
+            points.append(toMercator(from + (delta * (static_cast<double>(piece) / pieces))));
+        }
     }
     return points;
 }
