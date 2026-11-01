@@ -18,6 +18,7 @@
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneProvenance.h"
 
 class GeoZoneStore;
 
@@ -53,6 +54,7 @@ public:
         QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
         QString responseMember;     ///< Member of a downloaded JSON response holding the zones, see GeoZoneService::responseMember
         QGeoRectangle area;         ///< Area of interest the feed was downloaded for, invalid when it doesn't take one
+        GeoZoneProvenance provenance;   ///< Of the data, completed with the hash of the stored copy
         Request request = Request::Automatic;
         GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops parsing or before storing
     };
@@ -64,6 +66,8 @@ public:
         QString storeError;
         bool cancelled = false;     ///< The job was canceled, nothing was stored
         bool fromCache = false;     ///< The result was read from the parse cache of the stored copy
+        QByteArray contentHash;     ///< GeoZoneParseCache::hash of the content parsed, empty when read from the cache
+        qint64 contentSize = -1;
     };
 
     /// @return Job loading a local file or file: URL, keyed by fileKey

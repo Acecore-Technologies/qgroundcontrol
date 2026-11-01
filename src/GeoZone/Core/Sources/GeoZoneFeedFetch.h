@@ -20,13 +20,15 @@
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneProvenance.h"
 #include "GeoZoneService.h"
 
 class GeoZoneFormat;
 
 /// Downloads one feed for loading, in stages: the OAuth2 token of its service, the feed URL, which may be a page
 /// linking to the current dataset, then that dataset, the further pages of a WFS response the server limited, and the
-/// companion documents the format of the document refers to. The result is a document ready to load, the confirmation that the stored copy is current,
+/// companion documents the format of the document refers to. The document is checked against the SHA-256 its
+/// publisher gives in a digest header or a .sha256 file, see GeoZoneService::sha256Url. The result is a document ready to load, the confirmation that the stored copy is current,
 /// or a failure. Canceling stops the downloads and drops whatever arrives later.
 class GeoZoneFeedFetch : public QObject
 {
@@ -38,6 +40,7 @@ public:
         Token,          ///< Requesting an OAuth2 token of the service
         Feed,           ///< Downloading the feed URL
         Dataset,        ///< Downloading the dataset the feed's page linked to
+        Integrity,      ///< Downloading the SHA-256 the service publishes of the document
         Pages,          ///< Downloading the further pages of a WFS response
         Companions,     ///< Downloading the companion documents of the features
         Finished,       ///< finished was emitted, or the fetch was canceled
@@ -75,6 +78,11 @@ public:
         QString requestUrl;         ///< URL requested, the URL template filled with the area and time of interest
         QString accessToken;        ///< OAuth2 token requested by the fetch, empty when it requested none
         QDateTime tokenExpiresAt;
+        QString finalUrl;           ///< URL which answered with the document after the redirects
+        QStringList redirects;      ///< URLs which redirected to it
+        QByteArray sha256;          ///< SHA-256 of the document as received
+        GeoZoneProvenance::Integrity integrity = GeoZoneProvenance::Integrity::Unchecked;  ///< Failed fails the fetch
+        QString integrityText;      ///< Which SHA-256 the document was checked against
     };
 
     /// @param downloader Shared with other fetches, each cancels its own downloads
@@ -113,8 +121,10 @@ private:
     void _fetchFeed();
     void _feedReceived(const GeoZoneDownloader::Result &download);
     void _datasetReceived(const GeoZoneDownloader::Result &download);
-    /// Continues with the further pages of the document, then its companions
+    /// Checks the document's integrity, then continues with its further pages and its companions
     void _documentReceived(const GeoZoneDownloader::Result &download);
+    void _sha256Received(const QString &url, const GeoZoneDownloader::Result &download);
+    void _fetchRest();
     /// @return false when the response isn't a WFS response the server limited
     bool _startPages();
     void _fetchNextPage();

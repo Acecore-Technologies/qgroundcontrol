@@ -99,6 +99,20 @@ void GeoZoneSource::setArea(const QGeoRectangle &area)
     }
 }
 
+void GeoZoneSource::setProvenance(const GeoZoneProvenance &provenance)
+{
+    _provenance = provenance;
+    emit changed();
+}
+
+void GeoZoneSource::setIntegrityFailed(bool failed)
+{
+    if (failed != _integrityFailed) {
+        _integrityFailed = failed;
+        emit changed();
+    }
+}
+
 QString GeoZoneSource::name() const
 {
     if (!_service.name.isEmpty()) {

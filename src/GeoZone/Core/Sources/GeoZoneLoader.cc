@@ -304,7 +304,10 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     // The parse cache identifies the stored copy by its size and hash
     const bool writeCache = parsed && (job.fromStore || !job.storedFileName.isEmpty());
     const qint64 contentSize = content.size();
-    const QByteArray contentHash = writeCache ? GeoZoneParseCache::hash(content) : QByteArray();
+    // The hash also identifies the data in its provenance
+    const QByteArray contentHash = parsed ? GeoZoneParseCache::hash(content) : QByteArray();
+    loadResult.contentHash = contentHash;
+    loadResult.contentSize = parsed ? contentSize : -1;
     content.clear();
     if (mapped) {
         (void) file.unmap(mapped);

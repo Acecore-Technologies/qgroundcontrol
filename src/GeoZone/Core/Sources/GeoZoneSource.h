@@ -18,6 +18,7 @@
 
 #include "GeoZoneBox.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneProvenance.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneService.h"
 
@@ -54,6 +55,10 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(bool         credentialsMissing  READ credentialsMissing NOTIFY serviceChanged FINAL)    ///< The secret the service requires isn't known, like after importing a pack
     Q_PROPERTY(bool         followsArea     READ followsArea    NOTIFY serviceChanged FINAL)        ///< The service downloads the zones around the mission and the vehicle
     Q_PROPERTY(QGeoRectangle area           READ area           NOTIFY changed FINAL)               ///< Area the zones were downloaded for, invalid unless followsArea
+    Q_PROPERTY(QString      provenanceText  READ provenanceText NOTIFY changed FINAL)               ///< See GeoZoneProvenance::summary
+    Q_PROPERTY(bool         verified        READ verified       NOTIFY changed FINAL)               ///< The data matches the SHA-256 its publisher gave
+    Q_PROPERTY(bool         integrityFailed READ integrityFailed NOTIFY changed FINAL)              ///< The last download didn't match the SHA-256 its publisher gave, and wasn't loaded
+    Q_PROPERTY(bool         imported        READ imported       NOTIFY changed FINAL)               ///< The data was imported from an offline pack
 
 public:
     GeoZoneSource(const QString &key, const QString &url, QObject *parent = nullptr);
@@ -143,6 +148,15 @@ public:
     QGeoRectangle area() const { return _area; }
     void setArea(const QGeoRectangle &area);
 
+    /// Where and how the data was obtained
+    const GeoZoneProvenance &provenance() const { return _provenance; }
+    void setProvenance(const GeoZoneProvenance &provenance);
+    QString provenanceText() const { return _provenance.summary(); }
+    bool verified() const { return _provenance.integrity == GeoZoneProvenance::Integrity::Verified; }
+    bool imported() const { return _provenance.imported; }
+    bool integrityFailed() const { return _integrityFailed; }
+    void setIntegrityFailed(bool failed);
+
 signals:
     void changed();
     void validityChanged();
@@ -188,6 +202,8 @@ private:
     GeoZoneService _service;
     bool _credentialsMissing = false;
     QGeoRectangle _area;
+    GeoZoneProvenance _provenance;
+    bool _integrityFailed = false;
 
     QList<GeoZone*> _zones;
     QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones

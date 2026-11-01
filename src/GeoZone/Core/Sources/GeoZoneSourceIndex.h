@@ -40,6 +40,7 @@ public:
         QDateTime checkedAt;    ///< When the server last confirmed the stored copy current, at least loadedAt
         QJsonObject service;    ///< See GeoZoneService::toJson, empty for plain feeds and files. Holds no secrets.
         QGeoRectangle area;     ///< Area of interest the feed was downloaded for, invalid when its service takes none
+        QJsonObject provenance; ///< See GeoZoneProvenance::toJson
     };
 
     enum class Status : quint8 {

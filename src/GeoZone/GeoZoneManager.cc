@@ -24,6 +24,8 @@
 
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QDir>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QSaveFile>
 #include <QtCore/QLocale>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
@@ -115,6 +117,19 @@ void GeoZoneManager::_activeVehicleChanged(Vehicle *vehicle)
 QStringList GeoZoneManager::fileDialogFilters() const
 {
     return QStringList(tr("ED-269/ED-318 Geozone Files (*.json *.geojson)"));
+}
+
+bool GeoZoneManager::exportProvenance(const QString &fileName)
+{
+    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+    QSaveFile file(localFileName);
+    const QByteArray json = QJsonDocument(provenanceReport()).toJson();
+    if (!file.open(QIODevice::WriteOnly) || (file.write(json) != json.size()) || !file.commit()) {
+        emit fileOperationFinished(false, tr("The geozone source provenance could not be saved to %1: %2").arg(localFileName, file.errorString()));
+        return false;
+    }
+    emit fileOperationFinished(true, tr("The geozone source provenance was saved to %1.").arg(localFileName));
+    return true;
 }
 
 bool GeoZoneManager::addArea(const QString &provider, const QGeoRectangle &area)

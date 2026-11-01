@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QHash>
+#include <QtCore/QJsonObject>
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtPositioning/QGeoCoordinate>
@@ -81,6 +82,12 @@ public:
     static QGeoRectangle expanded(const QGeoRectangle &area, double margin);
 
     static constexpr double defaultAreaMargin = 5000;
+
+    /// @return Description of a source for briefings and offline packs: its origin, dates, service and provenance.
+    ///         Holds no secrets.
+    static QJsonObject sourceReport(const GeoZoneSource &source);
+    /// @return The reports of the sources, see sourceReport, and when it was made
+    QJsonObject provenanceReport() const;
     /// Downloads all feeds again. Failures keep the previous data.
     void refreshFeeds();
     /// Removes a source, its stored copy, and cancels its downloads

@@ -216,6 +216,64 @@ void GeoZoneFeedFetch::_documentReceived(const GeoZoneDownloader::Result &downlo
     _result.filePath = download.filePath;
     _result.etag = download.etag;
     _result.lastModified = download.lastModified;
+    _result.finalUrl = download.finalUrl;
+    _result.redirects = download.redirects;
+    _result.sha256 = download.sha256;
+
+    // Servers may send the SHA-256 of the data in a digest header
+    QString headerName;
+    const QByteArray headerSha256 = GeoZoneProvenance::digestHeaderSha256(download.headers, headerName);
+    if (!headerSha256.isEmpty()) {
+        if (headerSha256 != download.sha256) {
+            _result.integrity = GeoZoneProvenance::Integrity::Failed;
+            _finish(Result::Status::Failed, tr("The integrity check failed: the SHA-256 of the data doesn't match its %1 header.").arg(headerName));
+            return;
+        }
+        _result.integrity = GeoZoneProvenance::Integrity::Verified;
+        _result.integrityText = tr("%1 header").arg(headerName);
+    }
+
+    if (_request.service.sha256Url.isEmpty()) {
+        _fetchRest();
+        return;
+    }
+    _stage = Stage::Integrity;
+    QString sha256Url = _request.service.sha256Url;
+    (void) sha256Url.replace(QStringLiteral("{url}"), _requestUrl);
+    sha256Url = _request.service.requestUrl(sha256Url, _request.area, _request.time);
+    _get(sha256Url, QString(), QString(), [this, sha256Url](const GeoZoneDownloader::Result &sha256) { _sha256Received(sha256Url, sha256); },
+         _optionsFor(sha256Url));
+}
+
+void GeoZoneFeedFetch::_sha256Received(const QString &url, const GeoZoneDownloader::Result &download)
+{
+    const QByteArray content = (download.status == GeoZoneDownloader::Result::Status::Ok) ? GeoZoneDownloader::readFile(download.filePath, 4096) : QByteArray();
+    if (!download.filePath.isEmpty()) {
+        (void) QFile::remove(download.filePath);
+    }
+    // Data which can't be verified isn't loaded, like data which doesn't match
+    _result.integrity = GeoZoneProvenance::Integrity::Failed;
+    if (download.status != GeoZoneDownloader::Result::Status::Ok) {
+        _finish(Result::Status::Failed, tr("The integrity check failed: the SHA-256 of the data could not be downloaded from %1. %2").arg(download.finalUrl, download.errorString));
+        return;
+    }
+    const QByteArray expected = GeoZoneProvenance::parseSha256File(content);
+    if (expected.isEmpty()) {
+        _finish(Result::Status::Failed, tr("The integrity check failed: %1 has no SHA-256.").arg(download.finalUrl));
+        return;
+    }
+    if (expected != _result.sha256) {
+        _finish(Result::Status::Failed, tr("The integrity check failed: the SHA-256 of the data doesn't match %1.").arg(download.finalUrl));
+        return;
+    }
+    qCDebug(GeoZoneSourceLog) << "SHA-256 verified" << url;
+    _result.integrity = GeoZoneProvenance::Integrity::Verified;
+    _result.integrityText = download.finalUrl;
+    _fetchRest();
+}
+
+void GeoZoneFeedFetch::_fetchRest()
+{
     if (!_startPages()) {
         _fetchCompanions();
     }

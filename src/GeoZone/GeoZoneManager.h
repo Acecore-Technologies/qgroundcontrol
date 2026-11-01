@@ -98,6 +98,11 @@ public:
     /// Downloads all feeds again. Failures keep the previous data.
     Q_INVOKABLE void refreshFeeds() { _repository->refreshFeeds(); }
 
+    /// @return Where and how the data of the sources was obtained, see GeoZoneSourceRepository::provenanceReport
+    QJsonObject provenanceReport() const { return _repository->provenanceReport(); }
+    /// Writes provenanceReport as a JSON file, for briefings. fileOperationFinished tells the outcome.
+    Q_INVOKABLE bool exportProvenance(const QString &fileName);
+
     /// Removes a source, its zones and its stored copy
     Q_INVOKABLE void removeSource(int index) { _repository->removeSource(index); }
 
@@ -186,6 +191,7 @@ signals:
     void loadFailed(const QString &key, const QString &message);   ///< Loading or downloading a source requested by the user failed
     void storageFailed(const QString &message); ///< Stored copies can't be read or written, emitted once per session
     void outdatedDataFound(const QString &message); ///< Some sources have outdated data after the startup refresh
+    void fileOperationFinished(bool success, const QString &message);  ///< An export or import the user asked for finished
 
 private slots:
     void _updateActive();

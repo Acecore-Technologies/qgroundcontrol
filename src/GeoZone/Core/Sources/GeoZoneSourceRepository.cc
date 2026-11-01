@@ -17,6 +17,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
+#include <QtCore/QJsonArray>
 #include <QtCore/QLocale>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QUrl>
@@ -369,6 +370,18 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
         job.responseMember = fetch->request().service.effectiveResponseMember();
         job.area = fetch->request().area;
+        GeoZoneProvenance &provenance = job.provenance;
+        provenance.providerId = fetch->request().service.id.isEmpty() ? GeoZoneProviders::serviceId(url) : fetch->request().service.id;
+        provenance.requestUrl = result.requestUrl;
+        provenance.finalUrl = result.finalUrl;
+        provenance.redirects = result.redirects;
+        provenance.etag = result.etag;
+        provenance.lastModified = result.lastModified;
+        provenance.fetchedAt = job.loadedAt;
+        provenance.sha256 = result.sha256;
+        provenance.area = job.area;
+        provenance.integrity = result.integrity;
+        provenance.integrityText = result.integrityText;
         job.sourcePath = result.filePath;
         job.pagePaths = result.pagePaths;
         job.downloaded = true;
@@ -403,6 +416,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     if (existing) {
         existing->setBusy(false);
         existing->setErrorString(error);
+        existing->setIntegrityFailed(result.integrity == GeoZoneProvenance::Integrity::Failed);
         _scheduler->refreshFailed(*existing);
     }
     if (!existing) {
@@ -527,6 +541,17 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     if (job.checkedAt > job.loadedAt) {
         source->setCheckedAt(job.checkedAt);
     }
+    if (!job.fromStore) {
+        GeoZoneProvenance provenance = job.provenance;
+        if (provenance.isEmpty()) {
+            provenance.requestUrl = job.url.isEmpty() ? QUrl::fromLocalFile(job.key).toString() : job.url;
+            provenance.fetchedAt = job.loadedAt;
+        }
+        provenance.contentHash = loadResult.contentHash;
+        provenance.size = loadResult.contentSize;
+        source->setProvenance(provenance);
+        source->setIntegrityFailed(false);
+    }
     source->setErrorString(QString());
     _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
     // Companions of the stored copy are reused for the next download
@@ -585,6 +610,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     entry.checkedAt = job.loadedAt;
     if (const GeoZoneSource *const source = this->source(job.key)) {
         entry.enabled = source->enabled();
+        entry.provenance = source->provenance().toJson();
     }
     entry.service = _services.contains(job.key) ? _services.value(job.key).toJson() : QJsonObject();
     if (job.downloaded) {
@@ -742,6 +768,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         placeholder->setValidators(job.etag, job.lastModified);
         placeholder->setDatasetUrl(job.datasetUrl);
         placeholder->setArea(entry.area);
+        placeholder->setProvenance(GeoZoneProvenance::fromJson(entry.provenance));
         if (!entry.service.isEmpty()) {
             const GeoZoneService service = GeoZoneService::fromJson(entry.service);
             _services.insert(entry.key, service);
@@ -791,6 +818,58 @@ void GeoZoneSourceRepository::_saveIndex()
     if (!_index.save(keys, errorString)) {
         _reportStorageError(tr("The list of geozone sources could not be saved, sources may be missing at the next start. %1").arg(errorString));
     }
+}
+
+QJsonObject GeoZoneSourceRepository::sourceReport(const GeoZoneSource &source)
+{
+    const auto time = [](const QDateTime &dateTime) { return dateTime.toUTC().toString(Qt::ISODate); };
+    QJsonObject report{
+        { QStringLiteral("key"), source.key() },
+        { QStringLiteral("name"), source.name() },
+        { QStringLiteral("format"), source.formatName() },
+        { QStringLiteral("zoneCount"), source.zoneCount() },
+        { QStringLiteral("enabled"), source.enabled() },
+    };
+    if (source.isFeed()) {
+        report.insert(QStringLiteral("url"), source.url());
+    }
+    if (!source.provider().isEmpty()) {
+        report.insert(QStringLiteral("provider"), source.provider());
+    }
+    const std::pair<const char*, QDateTime> dates[] = {
+        { "dataDate", source.dataDate() }, { "validFrom", source.validFrom() }, { "validTo", source.validTo() },
+        { "loadedAt", source.loadedAt() }, { "checkedAt", source.checkedAt() },
+    };
+    for (const auto &[name, date] : dates) {
+        if (date.isValid()) {
+            report.insert(QLatin1String(name), time(date));
+        }
+    }
+    if (!source.service().isEmpty()) {
+        // The user of a service, like an OAuth2 client id, is left out with the secrets
+        QJsonObject service = source.service().toJson();
+        service.remove(QStringLiteral("user"));
+        report.insert(QStringLiteral("service"), service);
+    }
+    if (!source.provenance().isEmpty()) {
+        report.insert(QStringLiteral("provenance"), source.provenance().toJson());
+    }
+    if (source.integrityFailed()) {
+        report.insert(QStringLiteral("integrityFailed"), true);
+    }
+    return report;
+}
+
+QJsonObject GeoZoneSourceRepository::provenanceReport() const
+{
+    QJsonArray sources;
+    for (const GeoZoneSource *const source : _sources) {
+        sources.append(sourceReport(*source));
+    }
+    return QJsonObject{
+        { QStringLiteral("generatedAt"), GeoZoneEnvironment::currentDateTimeUtc().toString(Qt::ISODate) },
+        { QStringLiteral("sources"), sources },
+    };
 }
 
 void GeoZoneSourceRepository::updateValidity()

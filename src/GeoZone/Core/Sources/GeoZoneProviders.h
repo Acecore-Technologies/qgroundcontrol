@@ -69,6 +69,8 @@ public:
 
     /// @return The format to expect from a URL, Unknown for URLs of unknown services
     static GeoZoneParser::Format formatHint(const QString &url);
+    /// @return Service::id of the service of a URL, empty for URLs of unknown services
+    static QString serviceId(const QString &url);
 
     /// @return URL of the current dataset linked from a download page, like the AIRAC datasets of NATS, or an empty
     ///         string when the data isn't such a page. The latest dataset effective today or earlier is chosen.

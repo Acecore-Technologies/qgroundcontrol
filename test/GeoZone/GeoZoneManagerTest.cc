@@ -1534,6 +1534,161 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
     QVERIFY(crossing.contains(QGeoCoordinate(-17.0, -179.99)));
 }
 
+void GeoZoneManagerTest::_testProvenance()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.redirects.insert("/latest", "/v2/zones.json");
+    server.files.insert("/v2/zones.json", server.body);
+    server.etags.insert("/v2/zones.json", "\"p1\"");
+    server.headers.insert("/v2/zones.json", "Last-Modified: Sat, 31 Oct 2026 10:00:00 GMT\r\n");
+    const QString url = server.url(QStringLiteral("/latest"));
+
+    const QTemporaryDir storageDir;
+    const QTemporaryDir exportDir;
+    QVERIFY(storageDir.isValid() && exportDir.isValid());
+    QJsonObject report;
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!manager.busy());
+        const GeoZoneSource *const feed = manager.source(url);
+        QVERIFY(feed);
+
+        // The redirects, validators, hashes and time of the download are recorded
+        const GeoZoneProvenance &provenance = feed->provenance();
+        QCOMPARE(provenance.requestUrl, url);
+        QCOMPARE(provenance.finalUrl, server.url(QStringLiteral("/v2/zones.json")));
+        QCOMPARE(provenance.redirects, QStringList({ url }));
+        QCOMPARE(provenance.etag, QStringLiteral("\"p1\""));
+        QCOMPARE(provenance.lastModified, QStringLiteral("Sat, 31 Oct 2026 10:00:00 GMT"));
+        QCOMPARE(provenance.fetchedAt, environment.now());
+        QCOMPARE(provenance.sha256, QCryptographicHash::hash(server.body, QCryptographicHash::Sha256));
+        QCOMPARE(provenance.contentHash, GeoZoneParseCache::hash(server.body));
+        QCOMPARE(provenance.size, server.body.size());
+        QCOMPARE(provenance.integrity, GeoZoneProvenance::Integrity::Unchecked);
+        QVERIFY(!feed->verified());
+        QVERIFY2(feed->provenanceText().contains(QStringLiteral("redirected from 127.0.0.1")), qPrintable(feed->provenanceText()));
+        QVERIFY(feed->provenanceText().contains(QStringLiteral("SHA-256 %1").arg(QString::fromLatin1(provenance.sha256.toHex().left(12)))));
+
+        // Files have their provenance too
+        const QTemporaryDir sourceDir;
+        const QString fileName = _writeFeatures(sourceDir, QStringLiteral("zones.json"), QJsonArray{
+            _circleFeature(QStringLiteral("F1"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 500) });
+        QString errorString;
+        QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+        const GeoZoneSource *const file = manager.source(GeoZoneLoader::fileKey(fileName));
+        QCOMPARE(file->provenance().requestUrl, QUrl::fromLocalFile(GeoZoneLoader::fileKey(fileName)).toString());
+        QCOMPARE(file->provenance().contentHash.size(), 32);
+        QVERIFY(file->provenance().sha256.isEmpty());
+
+        // The report for briefings
+        QVERIFY(manager.exportProvenance(exportDir.filePath(QStringLiteral("provenance.json"))));
+        QFile exported(exportDir.filePath(QStringLiteral("provenance.json")));
+        QVERIFY(exported.open(QIODevice::ReadOnly));
+        report = QJsonDocument::fromJson(exported.readAll()).object();
+        QCOMPARE(report, manager.provenanceReport());
+        QCOMPARE(report.value("sources").toArray().count(), 2);
+        const QJsonObject feedReport = report.value("sources").toArray().first().toObject();
+        QCOMPARE(feedReport.value("url").toString(), url);
+        QCOMPARE(feedReport.value("zoneCount").toInt(), 3);
+        QCOMPARE(feedReport.value("format").toString(), QStringLiteral("ED-318"));
+        const QJsonObject provenanceReport = feedReport.value("provenance").toObject();
+        QCOMPARE(provenanceReport.value("finalUrl").toString(), server.url(QStringLiteral("/v2/zones.json")));
+        QCOMPARE(provenanceReport.value("sha256").toString(), QString::fromLatin1(provenance.sha256.toHex()));
+        QCOMPARE(provenanceReport.value("blake2b256").toString(), QString::fromLatin1(provenance.contentHash.toHex()));
+        QCOMPARE(provenanceReport.value("fetchedAt").toString(), environment.now().toString(Qt::ISODate));
+        QCOMPARE(provenanceReport.value("integrity").toString(), QStringLiteral("unchecked"));
+    }
+
+    // The provenance is kept with the stored copies
+    GeoZoneManager restarted(storageDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QVERIFY(restarted.source(url));
+    QCOMPARE(restarted.source(url)->provenance().toJson(), report.value("sources").toArray().first().toObject().value("provenance").toObject());
+    QCOMPARE(GeoZoneProvenance::fromJson(restarted.source(url)->provenance().toJson()).toJson(), restarted.source(url)->provenance().toJson());
+}
+
+void GeoZoneManagerTest::_testIntegrity()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const QByteArray sha256 = QCryptographicHash::hash(server.body, QCryptographicHash::Sha256);
+    server.files.insert("/digest", server.body);
+    server.headers.insert("/digest", "Repr-Digest: sha-256=:" + sha256.toBase64() + ":\r\n");
+    server.files.insert("/tampered", server.body);
+    server.headers.insert("/tampered", "Digest: SHA-256=" + QCryptographicHash::hash("other", QCryptographicHash::Sha256).toBase64() + "\r\n");
+    server.files.insert("/signed.json", server.body);
+    server.files.insert("/signed.json.sha256", sha256.toHex() + "  signed.json\n");
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+
+    // A digest header matching the data verifies it
+    manager.addUrl(server.url(QStringLiteral("/digest")));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    const GeoZoneSource *const digest = manager.source(server.url(QStringLiteral("/digest")));
+    QVERIFY(digest->verified());
+    QCOMPARE(digest->provenance().integrityText, QStringLiteral("repr-digest header"));
+    QVERIFY(digest->provenanceText().contains(QStringLiteral("verified")));
+
+    // Data which doesn't match isn't loaded
+    manager.addUrl(server.url(QStringLiteral("/tampered")));
+    QVERIFY(failedSpy.wait(10000));
+    QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("The integrity check failed: the SHA-256 of the data doesn't match its digest header.")),
+             qPrintable(failedSpy.last()[1].toString()));
+    QVERIFY(!manager.source(server.url(QStringLiteral("/tampered"))));
+
+    // The SHA-256 a service publishes next to its data
+    GeoZoneService service;
+    service.id = QStringLiteral("signed-test");
+    service.sha256Url = QStringLiteral("{url}.sha256");
+    const QString signedUrl = server.url(QStringLiteral("/signed.json"));
+    manager.addService(signedUrl, service.toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    GeoZoneSource *const signedFeed = manager.source(signedUrl);
+    QVERIFY(signedFeed->verified());
+    QCOMPARE(signedFeed->provenance().integrityText, server.url(QStringLiteral("/signed.json.sha256")));
+    QCOMPARE(signedFeed->provenance().providerId, QStringLiteral("signed-test"));
+    QVERIFY(!signedFeed->integrityFailed());
+
+    // A refresh which doesn't match keeps the verified zones and marks the source
+    server.files.insert("/signed.json.sha256", QCryptographicHash::hash("other", QCryptographicHash::Sha256).toHex());
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(signedFeed->integrityFailed());
+    QVERIFY2(signedFeed->errorString().contains(QStringLiteral("doesn't match %1").arg(server.url(QStringLiteral("/signed.json.sha256")))), qPrintable(signedFeed->errorString()));
+    QVERIFY(signedFeed->verified());
+    QCOMPARE(signedFeed->zoneCount(), 3);
+    QVERIFY(GeoZoneSourceRepository::sourceReport(*signedFeed).value("integrityFailed").toBool());
+
+    // As does a SHA-256 which can't be read
+    server.files.remove("/signed.json.sha256");
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(signedFeed->integrityFailed());
+    QVERIFY(signedFeed->errorString().contains(QStringLiteral("could not be downloaded")));
+    server.files.insert("/signed.json.sha256", "not a hash");
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(signedFeed->errorString().contains(QStringLiteral("has no SHA-256")));
+
+    server.files.insert("/signed.json.sha256", sha256.toHex().toUpper());
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(!signedFeed->integrityFailed());
+    QVERIFY(signedFeed->errorString().isEmpty());
+}
+
 void GeoZoneManagerTest::_testManagerStartup()
 {
     const ScopedEnvironment environment;

@@ -201,6 +201,28 @@ GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
     return GeoZoneParser::Format::Unknown;
 }
 
+QString GeoZoneProviders::serviceId(const QString &url)
+{
+    const QList<Service> all = services();
+    for (const Service &service : all) {
+        if (!service.feedUrl.isEmpty() && (service.feedUrl == url)) {
+            return service.id;
+        }
+    }
+    // Services sharing a host are told apart by whether the URL is that of an area
+    const QString host = QUrl(url).host();
+    const bool area = url.contains(QStringLiteral("bbox="), Qt::CaseInsensitive);
+    QString id;
+    for (const Service &service : all) {
+        if ((host == service.host) || host.endsWith(QLatin1Char('.') + service.host)) {
+            if (id.isEmpty() || (area && service.areaUrl)) {
+                id = service.id;
+            }
+        }
+    }
+    return id;
+}
+
 QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data, const QDate &today)
 {
     const QByteArray start = data.left(1024).trimmed().toLower();
