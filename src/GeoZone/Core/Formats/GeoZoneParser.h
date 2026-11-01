@@ -35,7 +35,7 @@ public:
     /// GeoZoneParserUtils which changes the result for the same bytes: the zones and their fields, texts, issues and
     /// hashes, or the metadata. Stored sources are restored from parse caches of the same version only, the others
     /// are parsed again, see GeoZoneParseCache.
-    static constexpr quint16 version = 1;
+    static constexpr quint16 version = 2;
 
     enum class Format {
         Unknown,
@@ -62,10 +62,10 @@ public:
         QDateTime validFrom;
         QDateTime validTo;
         QList<GeoZone::Data> zones;
-        int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry
+        int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry, see issues
         QByteArray contentHash;     ///< Hash of the features, which stays the same when only metadata changes
         int missingFeatures = 0;    ///< Features of a WFS response the server left out because of its limit
-        QMap<QString, int> issues;  ///< Problems found in the zones, with the number of zones having each
+        QMap<QString, int> issues;  ///< Problems found in the zones, with the number of zones having each, including those skipped for their geometry
         Companions companions;      ///< Of a composite document, see composite()
     };  // Fields added here must be serialized, see operator<<
 
@@ -93,6 +93,10 @@ private:
     static bool _parseXml(const QByteArray &xml, Result &result, QString &errorString, const Options &options);
     /// @return true if the options accept documents in the format
     static bool _acceptsFormat(const GeoZoneFormat *format, const Options &options, QString &errorString);
+    /// Checks the geometry of a parsed zone, see GeoZoneParserUtils::_normalizeVolumes, and adds it to the result with
+    /// its issues. The issues of a zone left without volumes are counted too.
+    /// @return false if the zone has no usable volume
+    static bool _addZone(GeoZone::Data &zone, Result &result);
 };
 
 /// Binary serialization of parse results, see GeoZoneParseCache

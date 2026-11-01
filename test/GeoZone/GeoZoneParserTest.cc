@@ -816,6 +816,151 @@ void GeoZoneParserTest::_testParseErrors()
     QCOMPARE(result.skippedFeatures, 1);
 }
 
+void GeoZoneParserTest::_testRingValidation_data()
+{
+    QTest::addColumn<QJsonObject>("projection");
+    QTest::addColumn<int>("vertices");          ///< Of the outer ring, 0 when the volume is rejected
+    QTest::addColumn<int>("holes");
+    QTest::addColumn<QString>("issue");
+    QTest::addColumn<QGeoCoordinate>("inside");
+    QTest::addColumn<QGeoCoordinate>("outside");
+
+    const auto polygon = [](const QList<QList<QPointF>> &rings) {
+        QJsonArray coordinates;
+        for (const QList<QPointF> &ring : rings) {
+            QJsonArray positions;
+            for (const QPointF &vertex : ring) {
+                positions.append(QJsonArray{ vertex.x(), vertex.y() });
+            }
+            coordinates.append(positions);
+        }
+        return QJsonObject{ { "type", "Polygon" }, { "coordinates", coordinates } };
+    };
+    const auto circle = [](double radius) { return QJsonObject{ { "type", "Circle" }, { "center", QJsonArray{ 8, 47 } }, { "radius", radius } }; };
+    const QList<QPointF> square = { { 8, 47 }, { 8.01, 47 }, { 8.01, 47.01 }, { 8, 47.01 } };
+    const QGeoCoordinate none;
+    const QString fewPoints = QStringLiteral("Polygon with fewer than 3 distinct points ignored");
+    const QString noArea = QStringLiteral("Polygon without area ignored");
+    const QString pole = QStringLiteral("Polygon touching or enclosing a pole ignored");
+    const QString crossing = QStringLiteral("Polygon boundary crossing itself, areas it encloses twice are outside the zone");
+
+    // Rings are stored unclosed, without consecutive duplicates closer than 1 cm, the outer one counterclockwise
+    QTest::newRow("closed") << polygon({ square + QList<QPointF>{ square.first() } }) << 4 << 0 << QString() << QGeoCoordinate(47.005, 8.005) << none;
+    QTest::newRow("unclosed") << polygon({ square }) << 4 << 0 << QString() << QGeoCoordinate(47.005, 8.005) << none;
+    QTest::newRow("duplicates") << polygon({ { { 8, 47 }, { 8, 47 }, { 8.01, 47 }, { 8.01, 47.00000001 }, { 8.01, 47.01 }, { 8, 47.01 }, { 8, 47 }, { 8, 47 } } })
+                                << 4 << 0 << QString() << QGeoCoordinate(47.005, 8.005) << none;
+    QTest::newRow("clockwise") << polygon({ { square[3], square[2], square[1], square[0] } }) << 4 << 0 << QString() << QGeoCoordinate(47.005, 8.005) << none;
+    // Holes are clockwise, invalid ones are dropped and covered by the zone
+    QTest::newRow("hole") << polygon({ square, { { 8.004, 47.004 }, { 8.006, 47.004 }, { 8.006, 47.006 }, { 8.004, 47.006 } } }) << 4 << 1 << QString()
+                          << QGeoCoordinate(47.002, 8.002) << QGeoCoordinate(47.005, 8.005);
+    QTest::newRow("invalid hole") << polygon({ square, { { 8.004, 47.004 }, { 8.006, 47.004 }, { 8.004, 47.004 } } }) << 4 << 0
+                                  << QStringLiteral("Invalid polygon hole ignored, the zone covers it") << QGeoCoordinate(47.004, 8.005) << none;
+    // Degenerate rings
+    QTest::newRow("two points") << polygon({ { { 8, 47 }, { 8.01, 47 }, { 8.01, 47 } } }) << 0 << 0 << fewPoints << none << none;
+    QTest::newRow("one point") << polygon({ { { 8, 47 }, { 8, 47.00000001 }, { 8, 47 } } }) << 0 << 0 << fewPoints << none << none;
+    QTest::newRow("collinear") << polygon({ { { 8, 47 }, { 8.01, 47 }, { 8.02, 47 } } }) << 0 << 0 << noArea << none << none;
+    QTest::newRow("folded back") << polygon({ { { 8, 47 }, { 8.02, 47 }, { 8.01, 47 } } }) << 0 << 0 << noArea << none << none;
+    QTest::newRow("tiny") << polygon({ { { 8, 47 }, { 8.00001, 47 }, { 8, 47.00001 } } }) << 0 << 0 << noArea << none << none;
+    // The poles: a ring through one, and one winding around one
+    QTest::newRow("pole vertex") << polygon({ { { 0, 80 }, { 90, 90 }, { 180, 80 } } }) << 0 << 0 << pole << none << none;
+    QTest::newRow("around pole") << polygon({ { { -180, 85 }, { -90, 85 }, { 0, 85 }, { 90, 85 } } }) << 0 << 0 << pole << none << none;
+    QTest::newRow("south polar") << polygon({ { { 0, -89.95 }, { 1, -89.95 }, { 1, -89 } } }) << 0 << 0 << pole << none << none;
+    // Crossing rings are kept with the even-odd rule: both lobes of a bow tie are inside, the center of a pentagram
+    // which its boundary winds around twice is outside
+    QTest::newRow("bow tie") << polygon({ { { 8, 47 }, { 8.01, 47.01 }, { 8.01, 47 }, { 8, 47.01 } } }) << 4 << 0 << crossing
+                             << QGeoCoordinate(47.005, 8.009) << QGeoCoordinate(47.002, 8.005);
+    QList<QPointF> pentagram;
+    for (int i = 0; i < 5; i++) {
+        const double angle = qDegreesToRadians(90.0 + (i * 144.0));
+        pentagram.append(QPointF(8 + (0.01 * std::cos(angle)), 47 + (0.01 * std::sin(angle))));
+    }
+    QTest::newRow("pentagram") << polygon({ pentagram }) << 5 << 0 << crossing << QGeoCoordinate(47.0085, 8) << QGeoCoordinate(47, 8);
+    // Circles need a positive radius
+    QTest::newRow("circle") << circle(100) << 0 << 0 << QString() << QGeoCoordinate(47, 8) << none;
+    QTest::newRow("zero radius") << circle(0) << 0 << 0 << QStringLiteral("Circle without a valid radius ignored") << none << none;
+    QTest::newRow("negative radius") << circle(-100) << 0 << 0 << QStringLiteral("Circle without a valid radius ignored") << none << none;
+}
+
+void GeoZoneParserTest::_testRingValidation()
+{
+    QFETCH(QJsonObject, projection);
+    QFETCH(int, vertices);
+    QFETCH(int, holes);
+    QFETCH(QString, issue);
+    QFETCH(QGeoCoordinate, inside);
+    QFETCH(QGeoCoordinate, outside);
+
+    // With a valid zone, so that the file loads when the tested one is rejected
+    const QJsonObject tested{ { "identifier", "TESTED" }, { "restriction", "PROHIBITED" },
+                              { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", projection } } } } };
+    const QJsonArray features{ tested, _circleFeature(QStringLiteral("VALID"), QStringLiteral("PROHIBITED"), QGeoCoordinate(40, 8), 100) };
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(QJsonDocument(QJsonObject{ { "features", features } }).toJson(QJsonDocument::Compact), result, errorString), qPrintable(errorString));
+
+    const bool rejected = !inside.isValid();
+    QCOMPARE(result.zones.count(), rejected ? 1 : 2);
+    QCOMPARE(result.skippedFeatures, rejected ? 1 : 0);
+    const QMap<QString, int> issues = issue.isEmpty() ? QMap<QString, int>() : QMap<QString, int>{ { issue, 1 } };
+    QCOMPARE(result.issues, issues);
+    if (rejected) {
+        return;
+    }
+
+    const GeoZone::Data &data = result.zones.first();
+    QCOMPARE(data.issues, issue.isEmpty() ? QStringList() : QStringList{ issue });
+    const GeoZone::Volume &volume = data.volumes.first();
+    if (!volume.isCircle) {
+        QCOMPARE(volume.rings.first().count(), vertices);
+        QCOMPARE(volume.rings.count(), holes + 1);
+        QVERIFY(volume.rings.first().first() != volume.rings.first().last());
+        if (issue != QStringLiteral("Polygon boundary crossing itself, areas it encloses twice are outside the zone")) {
+            QVERIFY(GeoZoneGeometry::signedArea(volume.rings.first()) > 0);
+        }
+        for (qsizetype i = 1; i < volume.rings.count(); i++) {
+            QVERIFY(GeoZoneGeometry::signedArea(volume.rings[i]) < 0);
+        }
+    }
+    const GeoZone zone(data);
+    QVERIFY(zone.contains(inside));
+    QVERIFY(!outside.isValid() || !zone.contains(outside));
+
+    // The checks are kept by the parse cache
+    QByteArray bytes;
+    {
+        QDataStream stream(&bytes, QIODevice::WriteOnly);
+        stream.setVersion(GeoZoneParseCache::streamVersion);
+        stream << result;
+    }
+    GeoZoneParser::Result readBack;
+    QDataStream stream(bytes);
+    stream.setVersion(GeoZoneParseCache::streamVersion);
+    stream >> readBack;
+    QCOMPARE(stream.status(), QDataStream::Ok);
+    QCOMPARE(readBack.issues, result.issues);
+    QCOMPARE(readBack.skippedFeatures, result.skippedFeatures);
+    QCOMPARE(readBack.zones.first().volumes.first().rings, volume.rings);
+}
+
+void GeoZoneParserTest::_testRejectedAixmGeometry()
+{
+    // AIXM volumes are checked like the others: a circle without radius leaves its airspace without volume
+    QFile file(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QByteArray bytes = file.readAll();
+    const QByteArray radius = "<gml:radius uom=\"[nmi_i]\">2</gml:radius>";
+    const qsizetype circleRadius = bytes.lastIndexOf(radius);
+    QVERIFY(circleRadius > bytes.indexOf("CircleByCenterPoint"));
+    bytes.replace(circleRadius, radius.size(), "<gml:radius uom=\"[nmi_i]\">0</gml:radius>");
+
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(bytes, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 2);
+    QCOMPARE(result.skippedFeatures, 1);
+    QCOMPARE(result.issues, (QMap<QString, int>{ { QStringLiteral("Circle without a valid radius ignored"), 1 } }));
+}
+
 void GeoZoneParserTest::_testParserFuzz()
 {
     // Mutated documents must load or fail cleanly, and loaded zones must be usable

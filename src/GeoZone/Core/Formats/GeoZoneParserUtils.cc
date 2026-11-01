@@ -15,10 +15,100 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimeZone>
+#include <QtCore/QtMath>
 
+#include <algorithm>
 #include <cmath>
 
 namespace GeoZoneParserUtils {
+
+namespace {
+
+constexpr double kMetersPerDegree = 6371008.8 * M_PI / 180.0;
+
+bool _samePosition(const QPointF &a, const QPointF &b)
+{
+    const double north = (b.y() - a.y()) * kMetersPerDegree;
+    const double east = std::remainder(b.x() - a.x(), 360.0) * kMetersPerDegree * std::cos(qDegreesToRadians(a.y()));
+    return ((north * north) + (east * east)) < (kDuplicateVertexMeters * kDuplicateVertexMeters);
+}
+
+/// @return Largest distance of the points from the line through the first one and the one farthest from it
+double _width(const QList<QPointF> &points)
+{
+    const QPointF &origin = points.constFirst();
+    QPointF axis;
+    for (const QPointF &point : points) {
+        if (QPointF::dotProduct(point - origin, point - origin) > QPointF::dotProduct(axis, axis)) {
+            axis = point - origin;
+        }
+    }
+    const double length = std::hypot(axis.x(), axis.y());
+    double width = 0;
+    for (const QPointF &point : points) {
+        const QPointF offset = point - origin;
+        width = (std::max)(width, (length > 0) ? (std::abs((axis.x() * offset.y()) - (axis.y() * offset.x())) / length) : 0.0);
+    }
+    return width;
+}
+
+enum class RingProblem {
+    None,
+    TooFewPoints,
+    NoArea,
+    Pole,
+};
+
+/// Removes the duplicate vertices of the ring, checks it and orients it, counterclockwise when outer
+/// @param selfIntersecting Set when the ring crosses or touches itself
+RingProblem _normalizeRing(GeoZone::Ring &ring, bool outer, bool &selfIntersecting)
+{
+    selfIntersecting = false;
+    GeoZone::Ring distinct;
+    distinct.reserve(ring.count());
+    for (const QPointF &vertex : std::as_const(ring)) {
+        if (distinct.isEmpty() || !_samePosition(distinct.constLast(), vertex)) {
+            distinct.append(vertex);
+        }
+    }
+    while ((distinct.count() > 1) && _samePosition(distinct.constLast(), distinct.constFirst())) {
+        distinct.removeLast();
+    }
+    if (distinct.count() != ring.count()) {
+        ring = distinct;
+    }
+    if (ring.count() < 3) {
+        return RingProblem::TooFewPoints;
+    }
+
+    // The planar geometry of the zones doesn't hold at the poles. A ring around a pole winds once around the world, so
+    // its longitudes don't come back to where they started.
+    double winding = 0;
+    for (qsizetype i = 0; i < ring.count(); i++) {
+        if (std::abs(ring[i].y()) > kMaxPolygonLatitude) {
+            return RingProblem::Pole;
+        }
+        winding += std::remainder(ring[(i + 1) % ring.count()].x() - ring[i].x(), 360.0);
+    }
+    if (std::abs(winding) > 180) {
+        return RingProblem::Pole;
+    }
+
+    const GeoZoneGeometry::LocalProjection projection(GeoZoneBox::fromLonLatPath(ring).center());
+    const QList<QPointF> points = projection.lonLatToLocal(ring);
+    const double area = GeoZoneGeometry::signedArea(points);
+    selfIntersecting = !GeoZoneGeometry::isSimple(points);
+    // A ring crossing itself may enclose area even when the parts it winds around in opposite directions cancel out
+    if ((std::abs(area) < kMinRingAreaSquareMeters) && (!selfIntersecting || (_width(points) < 1))) {
+        return RingProblem::NoArea;
+    }
+    if (outer ? (area < 0) : (area > 0)) {
+        std::reverse(ring.begin(), ring.end());
+    }
+    return RingProblem::None;
+}
+
+} // namespace
 
 /// Preferred language of localized texts for the parse running on this thread
 thread_local QString t_language;
@@ -339,7 +429,7 @@ bool _ring(const QJsonValue &value, GeoZone::Ring &ring)
     if ((ring.count() > 1) && (ring.first() == ring.last())) {
         ring.removeLast();
     }
-    return ring.count() >= 3;
+    return !ring.isEmpty();
 }
 
 bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume)
@@ -374,6 +464,56 @@ bool _validRadius(double radius)
     return (radius > 0) && (radius <= kMaxRadiusMeters);
 }
 
+bool _normalizeVolumes(GeoZone::Data &zone)
+{
+    QList<GeoZone::Volume> volumes;
+    volumes.reserve(zone.volumes.count());
+    for (GeoZone::Volume volume : std::as_const(zone.volumes)) {
+        if (volume.isCircle) {
+            if (volume.center.isValid() && _validRadius(volume.radius)) {
+                volumes.append(volume);
+            } else {
+                zone.issues.append(GeoZoneParser::tr("Circle without a valid radius ignored"));
+            }
+            continue;
+        }
+
+        bool selfIntersecting = false;
+        const RingProblem problem = volume.rings.isEmpty() ? RingProblem::TooFewPoints : _normalizeRing(volume.rings.first(), true, selfIntersecting);
+        if (problem != RingProblem::None) {
+            switch (problem) {
+            case RingProblem::TooFewPoints:
+                zone.issues.append(GeoZoneParser::tr("Polygon with fewer than 3 distinct points ignored"));
+                break;
+            case RingProblem::NoArea:
+                zone.issues.append(GeoZoneParser::tr("Polygon without area ignored"));
+                break;
+            case RingProblem::Pole:
+                zone.issues.append(GeoZoneParser::tr("Polygon touching or enclosing a pole ignored"));
+                break;
+            case RingProblem::None:
+                break;
+            }
+            continue;
+        }
+        for (qsizetype i = volume.rings.count() - 1; i > 0; i--) {
+            bool holeIntersecting = false;
+            if (_normalizeRing(volume.rings[i], false, holeIntersecting) == RingProblem::None) {
+                selfIntersecting = selfIntersecting || holeIntersecting;
+            } else {
+                volume.rings.removeAt(i);
+                zone.issues.append(GeoZoneParser::tr("Invalid polygon hole ignored, the zone covers it"));
+            }
+        }
+        if (selfIntersecting) {
+            zone.issues.append(GeoZoneParser::tr("Polygon boundary crossing itself, areas it encloses twice are outside the zone"));
+        }
+        volumes.append(volume);
+    }
+    zone.volumes = volumes;
+    return !zone.volumes.isEmpty();
+}
+
 /// Adds the volumes described by a GeoJSON-like horizontal geometry. Vertical limits are copied from volumeTemplate.
 void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes)
 {
@@ -396,7 +536,7 @@ void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volum
         GeoZone::Volume volume = volumeTemplate;
         volume.isCircle = true;
         volume.radius = _number(geometry.value(QStringLiteral("radius"))) * radiusScale;
-        if (_position(geometry.value(QStringLiteral("center")), volume.center) && _validRadius(volume.radius)) {
+        if (_position(geometry.value(QStringLiteral("center")), volume.center)) {
             _appendVolume(volume, volumes);
         }
     } else if (type == QStringLiteral("Point")) {
@@ -408,7 +548,7 @@ void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volum
         GeoZone::Volume volume = volumeTemplate;
         volume.isCircle = true;
         volume.radius = _number(extent.value(QStringLiteral("radius"))) * radiusScale;
-        if (_position(geometry.value(QStringLiteral("coordinates")), volume.center) && _validRadius(volume.radius)) {
+        if (_position(geometry.value(QStringLiteral("coordinates")), volume.center)) {
             _appendVolume(volume, volumes);
         }
     } else {

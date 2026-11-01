@@ -98,7 +98,32 @@ bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &er
         }
         return false;
     }
+
+    const QList<GeoZone::Data> zones = result.zones;
+    result.zones.clear();
+    for (GeoZone::Data zone : zones) {
+        if (!_addZone(zone, result)) {
+            result.skippedFeatures++;
+        }
+    }
+    if (result.zones.isEmpty()) {
+        errorString = tr("No geozones with a supported geometry were found in the %1 file.").arg(formatToString(result.format));
+        return false;
+    }
     return true;
+}
+
+bool GeoZoneParser::_addZone(GeoZone::Data &zone, Result &result)
+{
+    const bool usable = _normalizeVolumes(zone);
+    zone.issues.removeDuplicates();
+    for (const QString &issue : std::as_const(zone.issues)) {
+        result.issues[issue]++;
+    }
+    if (usable) {
+        result.zones.append(zone);
+    }
+    return usable;
 }
 
 bool GeoZoneParser::_acceptsFormat(const GeoZoneFormat *format, const Options &options, QString &errorString)
@@ -202,13 +227,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         GeoZone::Data zone;
         zone.contentHash = QCryptographicHash::hash(QCborValue::fromJsonValue(featureValue).toCbor(), QCryptographicHash::Sha1);
         contentHash.addData(zone.contentHash);
-        if (format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone)) {
-            zone.issues.removeDuplicates();
-            for (const QString &issue : std::as_const(zone.issues)) {
-                result.issues[issue]++;
-            }
-            result.zones.append(zone);
-        } else {
+        if (!format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone) || !_addZone(zone, result)) {
             qCDebug(GeoZoneParserLog) << "Skipping feature without usable geometry" << zone.identifier;
             result.skippedFeatures++;
         }

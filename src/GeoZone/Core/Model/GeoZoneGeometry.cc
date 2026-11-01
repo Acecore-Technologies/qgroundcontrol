@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <utility>
 
 namespace GeoZoneGeometry {
@@ -624,11 +625,28 @@ bool isSimple(const QList<QPointF> &ring)
         if ((_orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
             return false;
         }
-        for (qsizetype j = i + 2; j < count; j++) {
-            if ((i == 0) && (j == count - 1)) {
+    }
+
+    // Sweep over the edges in the order of their west end, testing each against the following edges which overlap it
+    // in x, so that large rings don't take a test of all pairs
+    QList<QRectF> bounds;
+    bounds.reserve(count);
+    for (qsizetype i = 0; i < count; i++) {
+        bounds.append(_segmentBounds(ring[i], ring[(i + 1) % count]));
+    }
+    QList<qsizetype> order(count);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&bounds](qsizetype a, qsizetype b) { return bounds[a].left() < bounds[b].left(); });
+    for (qsizetype k = 0; k < count; k++) {
+        const qsizetype i = order[k];
+        const QRectF &box = bounds[i];
+        for (qsizetype l = k + 1; (l < count) && (bounds[order[l]].left() <= box.right()); l++) {
+            const qsizetype j = order[l];
+            const bool adjacent = (j == ((i + 1) % count)) || (i == ((j + 1) % count));
+            if (adjacent || (bounds[j].top() > box.bottom()) || (bounds[j].bottom() < box.top())) {
                 continue;
             }
-            if (segmentsIntersect(a1, a2, ring[j], ring[(j + 1) % count])) {
+            if (segmentsIntersect(ring[i], ring[(i + 1) % count], ring[j], ring[(j + 1) % count])) {
                 return false;
             }
         }

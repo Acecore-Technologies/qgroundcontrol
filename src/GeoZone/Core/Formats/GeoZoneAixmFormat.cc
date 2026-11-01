@@ -200,7 +200,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     }
                     appendPoints(arc);
                     circleOnly = false;
-                } else if ((segment == QLatin1String("CircleByCenterPoint")) && !points.isEmpty() && (radius > 0)) {
+                } else if ((segment == QLatin1String("CircleByCenterPoint")) && !points.isEmpty()) {
                     volume.center = points.constFirst();
                     volume.radius = radius;
                 } else {
@@ -213,14 +213,15 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
             } else if (name == QLatin1String("AirspaceVolume")) {
                 inVolume = false;
                 _setAixmLimits(volume, lower, upper);
-                if (circleOnly && volume.center.isValid() && _validRadius(volume.radius)) {
+                // Invalid radii and rings are reported by GeoZoneParser
+                if (circleOnly && volume.center.isValid()) {
                     volume.isCircle = true;
                     _appendVolume(volume, zone.volumes);
                 } else {
                     if ((ring.count() > 1) && (ring.constFirst().distanceTo(ring.constLast()) < 1)) {
                         ring.removeLast();
                     }
-                    if ((ring.count() >= 3) && (ring.count() <= kMaxRingVertices)) {
+                    if (!ring.isEmpty() && (ring.count() <= kMaxRingVertices)) {
                         volume.isCircle = false;
                         volume.rings = { GeoZone::toRing(ring) };
                         _appendVolume(volume, zone.volumes);

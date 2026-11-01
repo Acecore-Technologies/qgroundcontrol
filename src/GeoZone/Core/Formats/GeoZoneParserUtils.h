@@ -24,6 +24,10 @@ inline constexpr double kUnlimitedSentinel = 99999.0;   ///< Upper limit of airs
 inline constexpr qsizetype kMaxRingVertices = 200000;
 inline constexpr qsizetype kMaxVolumesPerZone = 10000;
 inline constexpr double kMaxRadiusMeters = 1000000;
+// Geometry checks of _normalizeVolumes
+inline constexpr double kDuplicateVertexMeters = 0.01;      ///< Consecutive vertices closer than this are one
+inline constexpr double kMinRingAreaSquareMeters = 1;       ///< Rings with less area are degenerate unless they cross themselves
+inline constexpr double kMaxPolygonLatitude = 89.9;         ///< Polygons reaching closer to a pole are rejected, about 11 km
 
 /// Sets the preferred language of localized texts for the parse running on this thread
 /// @return Code of the preferred language of the parse running on this thread, like "de", empty for English
@@ -68,6 +72,8 @@ QStringList _authorities(const QJsonValue &value);
 
 bool _position(const QJsonValue &value, QGeoCoordinate &coordinate);
 
+/// Reads the positions of a ring, without the closing one. Their number is checked by _normalizeVolumes.
+/// @return false for invalid positions and rings over kMaxRingVertices
 bool _ring(const QJsonValue &value, GeoZone::Ring &ring);
 
 bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume);
@@ -75,6 +81,14 @@ bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume);
 void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volumes);
 
 bool _validRadius(double radius);
+
+/// Checks and normalizes the volumes of a parsed zone, adding the problems found to its issues. Consecutive duplicate
+/// vertices and the closing vertex are removed. Polygons with fewer than 3 distinct points, without area, or touching
+/// or enclosing a pole are dropped, as are circles without a valid radius; invalid holes are dropped, which enlarges
+/// the zone. Outer rings are made counterclockwise and holes clockwise. Rings crossing themselves are kept, with the
+/// even-odd rule of the containment tests, and reported.
+/// @return true if the zone has a volume left
+bool _normalizeVolumes(GeoZone::Data &zone);
 
 /// Adds the volumes described by a GeoJSON-like horizontal geometry. Vertical limits are copied from volumeTemplate.
 void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes);
