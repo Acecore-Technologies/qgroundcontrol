@@ -30,3 +30,17 @@ a GCC installation without its C++ library, pass `--gcc-install-dir=/usr/lib/gcc
 In the QGroundControl build, `-DGEOZONE_FUZZ=ON` adds the targets too. With compilers other than clang they are built
 with a driver which runs each file of a corpus once instead of fuzzing. `ctest -L fuzz` runs the seed corpora
 through the targets in both cases.
+
+## Benchmarks
+
+`GeoZoneBenchmark` measures the core with 10000 synthetic zones over central Europe, about the size of a large
+national dataset: parsing the 5 MB ED-269 file, loading it into a source, rebuilding the catalog with its index, 1000
+`zonesAt` and 1000 `zonesInArea` queries of 10 km areas, and evaluating a mission of 500 waypoints over 1000 km. It
+takes about two seconds and is a test of its own, labeled `benchmark`, which the sanitizer workflow doesn't run:
+
+```sh
+ctest -L benchmark -V          # or ./GeoZoneBenchmark, with QtTest options like -iterations 20
+ctest -LE "benchmark|fuzz"     # the other tests
+```
+
+Debug builds of the core are several times slower than release builds, compare measurements of the same build type.

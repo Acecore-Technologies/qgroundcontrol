@@ -68,6 +68,29 @@ qt_add_resources(GeoZoneCoreTest "geozone_core_test_resources"
 add_test(NAME GeoZoneCoreTest COMMAND GeoZoneCoreTest)
 add_dependencies(check GeoZoneCoreTest)
 
+# Benchmarks of the core with 10000 zones, a test of their own labeled benchmark which takes several seconds
+qt_add_executable(GeoZoneBenchmark
+    GeoZoneBenchmark.cc
+    GeoZoneBenchmark.h
+    GeoZoneTestHelpers.h
+)
+
+target_compile_definitions(GeoZoneBenchmark PRIVATE GEOZONE_CORE_TEST)
+target_link_libraries(GeoZoneBenchmark
+    PRIVATE
+        GeoZoneCore
+        Qt6::Concurrent
+        Qt6::Test
+)
+set_target_properties(GeoZoneBenchmark PROPERTIES
+    MACOSX_BUNDLE FALSE
+    WIN32_EXECUTABLE FALSE
+    QT_EXCLUDE_FROM_TRANSLATION ON
+)
+
+add_test(NAME GeoZoneBenchmark COMMAND GeoZoneBenchmark)
+set_tests_properties(GeoZoneBenchmark PROPERTIES LABELS benchmark)
+
 option(GEOZONE_FUZZ "Build the fuzz targets of the geozone parsers, libFuzzer targets with clang" OFF)
 if(GEOZONE_FUZZ)
     add_subdirectory(fuzz)
