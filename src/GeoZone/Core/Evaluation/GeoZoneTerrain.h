@@ -25,9 +25,9 @@ constexpr int maxPositions = 100;       ///< Positions of a path after adding th
 /// @return Ground elevation in meters AMSL at the coordinate, NaN when its terrain tile isn't loaded
 double elevationAt(const QGeoCoordinate &coordinate);
 
-/// @return The path with the terrain elevation at the positions without one, or the elevation of the previous position
-///         when its tile isn't loaded, and with positions added between them where the terrain is known, so that
-///         limits above ground follow the terrain. Altitudes of the added positions are interpolated.
+/// @return The path with the terrain elevation at the positions without one, and with positions added between them,
+///         so that limits above ground follow the terrain. Altitudes of the added positions are interpolated. Where the
+///         tile isn't loaded the terrain is NaN, so limits above ground don't bound the zones there.
 QList<GeoZone::Position> withTerrain(const QList<GeoZone::Position> &path, double spacing = defaultSpacing);
 
 } // namespace GeoZoneTerrain

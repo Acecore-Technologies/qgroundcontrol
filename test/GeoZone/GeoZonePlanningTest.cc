@@ -308,6 +308,48 @@ void GeoZonePlanningTest::_testEvaluatorAltitudes()
     QVERIFY(_near(crossing.entry.position.terrainAMSL, 400));
 }
 
+void GeoZonePlanningTest::_testEvaluatorUnknownTerrain()
+{
+    // From 50 to 150 m above the ground, which is at 400 m except in a gap without terrain data around the zone center
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("AGL"), QStringLiteral("PROHIBITED"), center, 300), 50, QStringLiteral("AGL"), 150, QStringLiteral("AGL")),
+    }), errorString), qPrintable(errorString));
+    GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }));
+    evaluator.setTerrainLookup([center](const QGeoCoordinate &coordinate) { return (center.distanceTo(coordinate) < 150) ? qQNaN() : 400.0; });
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(1000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(1000, 90);
+
+    // 200 m above the known ground, over the ceiling. The gap isn't bridged with the terrain on its sides, so the
+    // ceiling is unknown from the last position with terrain before it to the first after it, which enter the zone.
+    const GeoZonePathEvaluator::Result across = evaluator.evaluate({ _evaluatorPath({ west, east }, { 600, 600 }) });
+    QCOMPARE(across.activeEnteredZones().count(), 1);
+    const GeoZonePathEvaluator::ZoneResult &zone = across.zones[0];
+    QCOMPARE(zone.crossings.count(), 1);
+    QVERIFY(_near(zone.crossings[0].entry.distance, 800));
+    QVERIFY(_near(zone.crossings[0].exit.distance, 1200));
+    QVERIFY(zone.crossings[0].approximations.testFlag(GeoZonePathEvaluator::TerrainUnknown));
+    QCOMPARE(zone.stretches.count(), 1);
+    QCOMPARE(zone.stretches[0].parts.count(), 3);
+    QCOMPARE(zone.stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
+    QVERIFY(zone.stretches[0].approximations.testFlag(GeoZonePathEvaluator::TerrainUnknown));
+    QVERIFY(across.approximations().testFlag(GeoZonePathEvaluator::TerrainUnknown));
+
+    // A vertex in the gap doesn't take the terrain of the previous position
+    QCOMPARE(evaluator.evaluate({ _evaluatorPath({ west, center }, { 600, 600 }) }).activeEnteredZones().count(), 1);
+
+    // With the terrain known along the path the zone is below it, and the result is exact
+    evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; });
+    const GeoZonePathEvaluator::Result known = evaluator.evaluate({ _evaluatorPath({ west, east }, { 600, 600 }) });
+    QCOMPARE(known.zones.count(), 1);
+    QVERIFY(!known.zones[0].entered());
+    QCOMPARE(known.approximations(), GeoZonePathEvaluator::Approximations());
+}
+
 void GeoZonePlanningTest::_testEvaluatorSchedules()
 {
     // Active on 1 January 2027 from 10:00 to 12:00 UTC, 1900 to 2100 m along a path of 4000 m

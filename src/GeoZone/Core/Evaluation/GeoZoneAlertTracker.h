@@ -92,7 +92,7 @@ public:
     void forget(const QSet<QString> &zoneKeys);
 
     /// @return Straight path from the position at the velocity for the seconds, with the terrain along it from
-    ///         GeoZoneTerrain where it is loaded and the terrain below the vehicle elsewhere
+    ///         GeoZoneTerrain where it is loaded, unknown elsewhere
     static QList<GeoZone::Position> predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds);
     /// @return Seconds until the predicted path covering the horizon at a constant speed enters the zone, NaN if it doesn't
     static double timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon);

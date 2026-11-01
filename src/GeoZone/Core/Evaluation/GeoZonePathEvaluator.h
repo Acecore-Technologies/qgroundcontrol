@@ -43,6 +43,14 @@ public:
     /// be early or late and the vehicle may fly at another pace than estimated
     static constexpr int defaultScheduleToleranceSecs = 15 * 60;
 
+    /// Why the result of a part of the evaluation is approximate. Evaluations stay conservative: what isn't known
+    /// counts as inside the zone.
+    enum Approximation {
+        TerrainUnknown = 0x01,      ///< Limits above ground were compared where the terrain elevation is unknown, so they
+                                    ///< were taken as reached
+    };
+    Q_DECLARE_FLAGS(Approximations, Approximation)
+
     /// Datum of the altitudes of a path
     enum class AltitudeReference {
         MeanSeaLevel,
@@ -97,6 +105,7 @@ public:
         PathPoint exit;
         QList<VerticalPart> parts;      ///< From the entry to the exit
         bool active = true;             ///< See Crossing::active
+        Approximations approximations;  ///< Why the stretch or its vertical parts are approximate
     };
 
     /// Stretch of a path inside the zone, horizontally and between the vertical limits of any of its volumes
@@ -107,6 +116,7 @@ public:
         /// at some time from the estimated time of the entry to that of the exit, widened by the schedule tolerance, or,
         /// without times, as the policy's schedule accepts it at the evaluation time
         bool active = true;
+        Approximations approximations;  ///< Why the crossing, or whether there is one, is approximate
     };
 
     /// How the paths and areas interact with a zone
@@ -128,6 +138,8 @@ public:
         bool active() const;
         /// @return First crossing while the zone applies, or the first one, null without crossings
         const Crossing *firstCrossing() const;
+        /// @return Why the crossings or stretches are approximate
+        Approximations approximations() const;
     };
 
     struct Result {
@@ -139,6 +151,8 @@ public:
         const ZoneResult *find(const GeoZone *zone) const;
         /// @return The zones entered while they apply, in the order of zones
         QList<const GeoZone*> activeEnteredZones() const;
+        /// @return Why the results of the zones are approximate
+        Approximations approximations() const;
     };
 
     /// @param policy Restrictions, authorisations and schedule of the zones to evaluate. Authorisations are only
@@ -147,9 +161,10 @@ public:
     ///               those marked active, see GeoZone::active.
     GeoZonePathEvaluator(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const QDateTime &time = QDateTime());
 
-    /// Sets the ground elevations for vertices without terrain, which take the previous vertex's elevation where the
-    /// lookup has none, and positions added between the vertices every spacing meters where it has, so that limits
-    /// above ground follow the terrain. The lookup is called from the evaluating thread.
+    /// Sets the ground elevations for vertices without terrain, and positions added between the vertices every spacing
+    /// meters, so that limits above ground follow the terrain. Where the lookup has no elevation the terrain stays
+    /// unknown, and limits above ground don't bound the zones there, see TerrainUnknown. The lookup is called from the
+    /// evaluating thread.
     void setTerrainLookup(const TerrainLookup &lookup, double spacing = defaultTerrainSpacing, int maxPositions = defaultMaxTerrainPositions);
 
     /// Sets the seconds the estimated times of crossings are widened by on both sides, see defaultScheduleToleranceSecs
@@ -163,9 +178,9 @@ public:
     ///         is null when they don't.
     ZoneResult evaluateZone(const GeoZone *zone, const QList<Path> &paths) const;
 
-    /// @return The path with the terrain elevation at the positions without one, or the elevation of the previous
-    ///         position where the lookup has none, and with positions added every spacing meters between them where it
-    ///         has, with interpolated altitudes
+    /// @return The path with the terrain elevation at the positions without one, and with positions added every
+    ///         spacing meters between them, with interpolated altitudes. The terrain of positions where the lookup has
+    ///         none is NaN, it isn't interpolated across them.
     static QList<GeoZone::Position> withTerrain(const QList<GeoZone::Position> &path, const TerrainLookup &lookup, double spacing = defaultTerrainSpacing,
                                                 int maxPositions = defaultMaxTerrainPositions);
 
@@ -192,3 +207,5 @@ private:
     int _maxTerrainPositions = defaultMaxTerrainPositions;
     int _scheduleToleranceSecs = defaultScheduleToleranceSecs;
 };
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(GeoZonePathEvaluator::Approximations)

@@ -19,6 +19,7 @@ private slots:
     void _testPathHits();
     void _testEvaluatorCrossings();
     void _testEvaluatorAltitudes();
+    void _testEvaluatorUnknownTerrain();
     void _testEvaluatorSchedules();
     void _testFenceExcludes();
     void _testAntimeridianQueries();

@@ -142,6 +142,21 @@ GeoZone::VerticalPosition position(const GeoZone::Volume &volume, const GeoZone:
     return GeoZone::VerticalPosition::Inside;
 }
 
+Approximations approximations(const GeoZone::Volume &volume, const GeoZone::Position &from, const GeoZone::Position &to)
+{
+    Approximations result;
+    for (const bool upper : { false, true }) {
+        if (!(upper ? hasCeiling(volume) : hasFloor(volume))) {
+            continue;
+        }
+        if (((upper ? volume.upperReference : volume.lowerReference) == GeoZone::VerticalReference::Ground) &&
+            (qIsNaN(from.terrainAMSL) || qIsNaN(to.terrainAMSL))) {
+            result |= TerrainUnknown;
+        }
+    }
+    return result;
+}
+
 double limitAMSL(const GeoZone::Volume &volume, bool upper, const GeoZone::Position &position)
 {
     if (!(upper ? hasCeiling(volume) : hasFloor(volume))) {

@@ -319,7 +319,7 @@ void GeoZoneMonitorTest::_testTerrainAhead()
     QString errorString;
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zone }), errorString), qPrintable(errorString));
 
-    // Paths get the terrain where it is known, positions without terrain keep the previous one elsewhere
+    // Paths get the terrain where it is known
     const QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain({ { valley, 450, 100 }, { plateauZone, 450 } });
     QCOMPARE(path.count(), 23);
     QCOMPARE(path.constLast().terrainAMSL, 400.0);
@@ -334,12 +334,19 @@ void GeoZoneMonitorTest::_testTerrainAhead()
     QCOMPARE(alertSpy.count(), 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Approaching geozone PLATEAU (Prohibited), entry in about 43 s"));
 
-    // Without terrain tiles the ground below the vehicle is used, which puts the zone below the vehicle
+    // Without terrain tiles the ground ahead is unknown, rather than that below the vehicle, which would put the zone
+    // below it, so the zone counts as reaching the vehicle's altitude
     environment.setTerrain(qQNaN());
+    const QList<GeoZone::Position> unknownPath = GeoZoneTerrain::withTerrain({ { valley, 450, 100 }, { plateauZone, 450 } });
+    QCOMPARE(unknownPath.count(), 23);
+    QCOMPARE(unknownPath.constFirst().terrainAMSL, 100.0);
+    QVERIFY(qIsNaN(unknownPath[15].terrainAMSL));
+    QVERIFY(qIsNaN(unknownPath.constLast().terrainAMSL));
     GeoZoneMonitor noTerrain(&manager);
     QSignalSpy noTerrainSpy(&noTerrain, &GeoZoneMonitor::alert);
     noTerrain.evaluate({ valley, 450, 100 }, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ 40, 0, 0, true });
-    QCOMPARE(noTerrainSpy.count(), 0);
+    QCOMPARE(noTerrainSpy.count(), 1);
+    QVERIFY(noTerrainSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone PLATEAU (Prohibited)")));
 }
 
 void GeoZoneMonitorTest::_testVehicleTelemetry()

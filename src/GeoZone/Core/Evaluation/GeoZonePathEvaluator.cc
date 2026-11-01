@@ -9,6 +9,7 @@
 
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneBox.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QSet>
@@ -68,8 +69,8 @@ QDateTime fromMSecs(double msecs)
     return std::isnan(msecs) ? QDateTime() : QDateTime::fromMSecsSinceEpoch(std::llround(msecs), QTimeZone::UTC);
 }
 
-/// Fills the terrain of the vertices from the lookup, or from the previous vertex where it has none, and adds vertices
-/// every spacing meters between them where it has
+/// Fills the terrain of the vertices from the lookup and adds vertices every spacing meters between them. Where the
+/// lookup has no elevation the terrain stays NaN, so that unknown stretches aren't bridged by interpolation.
 QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathEvaluator::TerrainLookup &lookup, double spacing, int maxPositions)
 {
     if (!lookup) {
@@ -100,9 +101,6 @@ QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathE
                     RawVertex vertex;
                     vertex.coordinate = from.coordinate.atDistanceAndAzimuth(along, azimuth);
                     vertex.terrain = elevationAt(vertex.coordinate);
-                    if (std::isnan(vertex.terrain)) {
-                        continue;
-                    }
                     const double fraction = along / length;
                     vertex.altitude = interpolate(from.altitude, to.altitude, fraction);
                     vertex.msecs = interpolate(from.msecs, to.msecs, fraction);
@@ -114,9 +112,6 @@ QList<RawVertex> addTerrain(const QList<RawVertex> &vertices, const GeoZonePathE
         RawVertex vertex = vertices[i];
         if (std::isnan(vertex.terrain)) {
             vertex.terrain = elevationAt(vertex.coordinate);
-            if (std::isnan(vertex.terrain) && !result.isEmpty()) {
-                vertex.terrain = result.constLast().terrain;
-            }
         }
         result.append(vertex);
     }
@@ -130,11 +125,14 @@ const GeoZonePolicy &anyZonePolicy()
     return policy;
 }
 
+using Approximations = GeoZonePathEvaluator::Approximations;
+
 /// Span of the parameter along a prepared path, the segment index plus the fraction along it
 struct Span {
     int path = 0;
     double start = 0;
     double end = 0;
+    Approximations approximations;
 };
 
 struct PartSpan {
@@ -147,6 +145,17 @@ struct StretchSpan {
     Span span;
     QList<PartSpan> parts;
 };
+
+/// @return Why the comparison of the altitudes between the positions with the limits of the volume is approximate
+Approximations verticalApproximations(const GeoZone::Volume &volume, const GeoZone::Position &from, const GeoZone::Position &to)
+{
+    const GeoZoneVertical::Approximations vertical = GeoZoneVertical::approximations(volume, from, to);
+    Approximations result;
+    if (vertical.testFlag(GeoZoneVertical::TerrainUnknown)) {
+        result |= GeoZonePathEvaluator::TerrainUnknown;
+    }
+    return result;
+}
 
 void appendPart(QList<PartSpan> &parts, const PartSpan &part)
 {
@@ -244,6 +253,18 @@ const GeoZonePathEvaluator::Crossing *GeoZonePathEvaluator::ZoneResult::firstCro
     return crossings.isEmpty() ? nullptr : &crossings.constFirst();
 }
 
+GeoZonePathEvaluator::Approximations GeoZonePathEvaluator::ZoneResult::approximations() const
+{
+    Approximations result;
+    for (const Crossing &crossing : crossings) {
+        result |= crossing.approximations;
+    }
+    for (const Stretch &stretch : stretches) {
+        result |= stretch.approximations;
+    }
+    return result;
+}
+
 const GeoZonePathEvaluator::ZoneResult *GeoZonePathEvaluator::Result::find(const GeoZone *zone) const
 {
     for (const ZoneResult &result : zones) {
@@ -263,6 +284,15 @@ QList<const GeoZone*> GeoZonePathEvaluator::Result::activeEnteredZones() const
         }
     }
     return entered;
+}
+
+GeoZonePathEvaluator::Approximations GeoZonePathEvaluator::Result::approximations() const
+{
+    Approximations result;
+    for (const ZoneResult &zoneResult : zones) {
+        result |= zoneResult.approximations();
+    }
+    return result;
 }
 
 GeoZonePathEvaluator::GeoZonePathEvaluator(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const QDateTime &time)
@@ -388,9 +418,10 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
                 continue;
             }
             const GeoZone::Volume &volume = volumes[v];
-            const auto vertical = GeoZone::verticalInterval(volume, from, to);
+            const auto vertical = GeoZoneVertical::interval(volume, from, to);
+            const Approximations approximations = verticalApproximations(volume, from, to);
             const auto outsidePart = [&volume, &positionAt, segment](double first, double last) {
-                return PartSpan{ segment + first, segment + last, GeoZone::verticalPosition(volume, positionAt((first + last) / 2)) };
+                return PartSpan{ segment + first, segment + last, GeoZoneVertical::position(volume, positionAt((first + last) / 2)) };
             };
 
             for (const GeoZoneGeometry::Interval &interval : horizontal) {
@@ -405,17 +436,18 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
                     if (inLast < interval.second) {
                         parts.append(outsidePart(inLast, interval.second));
                     }
-                    crossingSpans.append(Span{ pathIndex, segment + inFirst, segment + inLast });
+                    crossingSpans.append(Span{ pathIndex, segment + inFirst, segment + inLast, approximations });
                 } else {
                     parts.append(outsidePart(interval.first, interval.second));
                 }
 
                 // Stretches continue across the vertices of the path
                 QList<StretchSpan> &stretches = volumeStretches[v];
-                const Span span{ pathIndex, segment + interval.first, segment + interval.second };
+                const Span span{ pathIndex, segment + interval.first, segment + interval.second, approximations };
                 if (!stretches.isEmpty() && (stretches.last().span.path == pathIndex) && (span.start <= (stretches.last().span.end + kContinuity))) {
                     StretchSpan &last = stretches.last();
                     last.span.end = (std::max)(last.span.end, span.end);
+                    last.span.approximations |= span.approximations;
                     for (const PartSpan &part : std::as_const(parts)) {
                         appendPart(last.parts, part);
                     }
@@ -438,6 +470,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
     for (const Span &span : std::as_const(crossingSpans)) {
         if (!merged.isEmpty() && (merged.last().path == span.path) && (span.start <= (merged.last().end + kContinuity))) {
             merged.last().end = (std::max)(merged.last().end, span.end);
+            merged.last().approximations |= span.approximations;
         } else {
             merged.append(span);
         }
@@ -446,6 +479,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
         const Prepared &path = paths[span.path];
         Crossing crossing{ path.pointAt(span.path, span.start), path.pointAt(span.path, span.end) };
         crossing.active = _activeDuring(zone, crossing.entry.time, crossing.exit.time);
+        crossing.approximations = span.approximations;
         result.crossings.append(crossing);
     }
 
@@ -460,6 +494,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
                 stretch.parts.append(VerticalPart{ path.pointAt(stretchSpan.span.path, part.start), path.pointAt(stretchSpan.span.path, part.end), part.position });
             }
             stretch.active = _activeDuring(zone, stretch.entry.time, stretch.exit.time);
+            stretch.approximations = stretchSpan.span.approximations;
             result.stretches.append(stretch);
         }
     }
