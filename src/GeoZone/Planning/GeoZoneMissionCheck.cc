@@ -300,6 +300,13 @@ QString GeoZoneMissionCheck::warningText() const
     for (const QString &label : std::as_const(labels)) {
         lines.append(tr("Only %1 enters %2.").arg(label, GeoZonePathEvaluator::zoneNames(labelZones.value(label), maxListedZones, false)));
     }
+    GeoZonePathEvaluator::Approximations approximations;
+    for (const GeoZone *zone : _crossedZones) {
+        approximations |= _approximations.value(zone);
+    }
+    if (approximations) {
+        lines.append(tr("Approximate: %1.").arg(GeoZonePathEvaluator::approximationTexts(approximations).join(QStringLiteral("; "))));
+    }
     return lines.join(QStringLiteral("\n"));
 }
 
@@ -377,6 +384,7 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
     (void) _pathLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
+    (void) _approximations.removeIf([&fromSource](const QHash<const GeoZone*, GeoZonePathEvaluator::Approximations>::iterator &it) { return fromSource(it.key()); });
     (void) _contingencyLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
     (void) _relevantZones.removeIf(fromSource);
     const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
@@ -479,6 +487,9 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
         }
         evaluation.zones.append(result.zone);
         evaluation.relevantZones.append(result.zone);
+        if (const GeoZonePathEvaluator::Approximations approximations = result.approximations()) {
+            evaluation.approximations.insert(result.zone, approximations);
+        }
         if (!result.active()) {
             evaluation.inactiveZones.append(result.zone);
         } else if (!result.labels.isEmpty()) {
@@ -587,8 +598,10 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
 
     if ((classification.crossedZones != _crossedZones) || (classification.uSpaceZones != _uSpaceZones) || (classification.permittedZones != _permittedZones) ||
         (classification.authorisedZones != _authorisedZones) || (classification.inactiveZoneCount != _inactiveZoneCount) || (unfenced != _unfencedZones) ||
-        (evaluation.pathLabels != _pathLabels) || (classification.contingencyZones != _contingencyZones) || (classification.contingencyLabels != _contingencyLabels)) {
+        (evaluation.pathLabels != _pathLabels) || (classification.contingencyZones != _contingencyZones) || (classification.contingencyLabels != _contingencyLabels) ||
+        (evaluation.approximations != _approximations)) {
         _pathLabels = evaluation.pathLabels;
+        _approximations = evaluation.approximations;
         _contingencyZones = classification.contingencyZones;
         _contingencyLabels = classification.contingencyLabels;
         _unfencedZones = unfenced;

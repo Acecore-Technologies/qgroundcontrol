@@ -180,6 +180,10 @@ public:
     /// @return true if the zone applies at any time between start and end inclusive
     bool isActiveDuring(const QDateTime &start, const QDateTime &end) const;
 
+    /// @return true if the schedule can't be fully evaluated, like daily periods from or to an unknown daylight event,
+    ///         which are then taken from the start or to the end of the day, so the zone is assumed active longer
+    bool scheduleAssumed() const { return _scheduleAssumed; }
+
     /// Outer boundaries of all polygon volumes, clockwise and without duplicates. Holes are dropped
     /// so that excluding these polygons is always conservative.
     /// @param simplifyTolerance Meters. When positive, polygons are reduced to fewer vertices which still enclose
@@ -272,6 +276,7 @@ private:
     QList<GeoZoneBox> _volumeBoxes; ///< Outer ring extents of the polygon volumes, invalid for circles
     GeoZoneBox _box;
     std::atomic<bool> _active = true;   ///< Updated on the GUI thread, read by checks on worker threads
+    bool _scheduleAssumed = false;
     QString _sourceKey;
     QString _sourceText;
     QString _key;

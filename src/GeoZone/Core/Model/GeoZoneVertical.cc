@@ -155,9 +155,24 @@ Approximations approximations(const GeoZone::Volume &volume, const GeoZone::Posi
         if (!(upper ? hasCeiling(volume) : hasFloor(volume))) {
             continue;
         }
-        if (((upper ? volume.upperReference : volume.lowerReference) == GeoZone::VerticalReference::Ground) &&
-            (qIsNaN(from.terrainAMSL) || qIsNaN(to.terrainAMSL))) {
-            result |= TerrainUnknown;
+        switch (upper ? volume.upperReference : volume.lowerReference) {
+        case GeoZone::VerticalReference::Unknown:
+            result |= ReferenceUnknown;
+            continue;
+        case GeoZone::VerticalReference::Ground:
+            if (qIsNaN(from.terrainAMSL) || qIsNaN(to.terrainAMSL)) {
+                result |= TerrainUnknown;
+            }
+            break;
+        case GeoZone::VerticalReference::FlightLevel:
+            result |= FlightLevel;
+            break;
+        case GeoZone::VerticalReference::MeanSeaLevel:
+        case GeoZone::VerticalReference::Ellipsoid:
+            break;
+        }
+        if (qIsNaN(from.altitudeAMSL) || qIsNaN(to.altitudeAMSL)) {
+            result |= AltitudeUnknown;
         }
     }
     return result;

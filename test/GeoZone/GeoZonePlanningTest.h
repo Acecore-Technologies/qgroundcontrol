@@ -21,6 +21,7 @@ private slots:
     void _testEvaluatorAltitudes();
     void _testEvaluatorUnknownTerrain();
     void _testEvaluatorGreatCircles();
+    void _testEvaluatorApproximations();
     void _testEvaluatorSchedules();
     void _testFenceExcludes();
     void _testAntimeridianQueries();

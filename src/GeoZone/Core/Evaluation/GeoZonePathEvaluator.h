@@ -54,6 +54,11 @@ public:
                                     ///< than the positions allowed, see setTerrainLookup
         GreatCircleDeviation = 0x04,///< A leg is longer than its great circle can be followed within
                                     ///< GeoZoneGeometry::kPathGreatCircleToleranceMeters, like across half the world
+        FlightLevel = 0x08,         ///< Flight level limits, converted with the QNH and widened, see GeoZoneVertical
+        ScheduleAssumed = 0x10,     ///< The zone applies by a schedule which can't be fully evaluated, see
+                                    ///< GeoZone::scheduleAssumed
+        AltitudeReferenceUnknown = 0x20,    ///< Limits in an unknown reference, or path altitudes which are unknown,
+                                            ///< like relative ones without the reference, so the limits were taken as reached
     };
     Q_DECLARE_FLAGS(Approximations, Approximation)
 
@@ -193,6 +198,11 @@ public:
     static QList<GeoZone::Position> withTerrain(const QList<GeoZone::Position> &path, const TerrainLookup &lookup, double spacing = defaultTerrainSpacing,
                                                 int maxPositions = defaultMaxTerrainPositions);
 
+    /// @return Short translated notes of the approximations, one per flag, like "Terrain unknown along part of the path"
+    static QStringList approximationTexts(Approximations approximations);
+    /// @return Stable codes of the approximations for exports, like "terrain_unknown"
+    static QStringList approximationCodes(Approximations approximations);
+
     /// Sorts zones from the most restrictive, keeping the order of equally restrictive ones
     static void sortBySeverity(QList<const GeoZone*> &zones);
 
@@ -205,6 +215,9 @@ private:
     QList<Prepared> _prepare(const QList<Path> &paths) const;
     ZoneResult _evaluateZone(const GeoZone *zone, const QList<Prepared> &paths, const QList<std::pair<int, qsizetype>> &segments) const;
     bool _activeDuring(const GeoZone *zone, const QDateTime &start, const QDateTime &end) const;
+    /// @return ScheduleAssumed when the zone is active by a schedule which the policy considers and which can't be
+    ///         fully evaluated
+    Approximations _scheduleApproximations(const GeoZone *zone, bool active) const;
     /// @return true if the policy accepts the restriction of the zone and doesn't exclude it as authorised
     bool _accepts(const GeoZone *zone) const;
 

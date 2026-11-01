@@ -93,6 +93,7 @@ public:
         double zoneFloor = qQNaN();         ///< Meters AMSL at the entry, NaN when the zone extends to the ground or the limit is unknown
         double zoneCeiling = qQNaN();       ///< NaN without ceiling or when unknown
         bool active = true;                 ///< See GeoZonePathEvaluator::Crossing::active
+        GeoZonePathEvaluator::Approximations approximations;    ///< Why the crossing is approximate
     };
 
     struct Authorisation {
@@ -130,6 +131,7 @@ public:
         std::optional<Authorisation> authorisation;
         QString sourceKey;
         QByteArray contentHash;
+        GeoZonePathEvaluator::Approximations approximations;    ///< Why how the paths meet the zone is approximate
 
         QString displayName() const { return name.isEmpty() ? identifier : name; }
     };
@@ -160,6 +162,8 @@ public:
     QDateTime generatedAt;  ///< UTC
     int scheduleTolerance = GeoZonePathEvaluator::defaultScheduleToleranceSecs;
     double nearbyDistance = defaultNearbyDistance;
+    /// Why the evaluation of the flight and contingency paths is approximate, see GeoZonePathEvaluator::Approximation
+    GeoZonePathEvaluator::Approximations approximations;
 
     /// @return The briefing of the paths through the zones of the catalog
     static GeoZoneBriefing build(const GeoZoneCatalog &catalog, const Input &input);

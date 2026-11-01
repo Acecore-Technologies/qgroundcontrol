@@ -406,6 +406,94 @@ void GeoZonePlanningTest::_testEvaluatorGreatCircles()
     QCOMPARE(coarse.find(result.zones[1].zone)->approximations(), GeoZonePathEvaluator::Approximations());
 }
 
+void GeoZonePlanningTest::_testEvaluatorApproximations()
+{
+    // East through a zone above a flight level, one with limits in an unknown reference, and one active from an unknown
+    // daylight event to sunset
+    const QGeoCoordinate start(47, 8);
+    QJsonObject scheduled = _circleFeature(QStringLiteral("SCHEDULED"), QStringLiteral("PROHIBITED"), start.atDistanceAndAzimuth(3000, 90), 200);
+    scheduled[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "schedule", QJsonArray{ QJsonObject{
+        { "day", QJsonArray{ "ANY" } }, { "startEvent", "MOONRISE" }, { "endEvent", "SS" } } } } } };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("LEVEL"), QStringLiteral("PROHIBITED"), start.atDistanceAndAzimuth(1000, 90), 200), 0, QStringLiteral("STD"), 3000, QStringLiteral("STD")),
+        _withLimits(_circleFeature(QStringLiteral("UNKNOWN"), QStringLiteral("PROHIBITED"), start.atDistanceAndAzimuth(2000, 90), 200), 100, QStringLiteral("XYZ"), 200, QStringLiteral("XYZ")),
+        scheduled,
+    }), errorString), qPrintable(errorString));
+    const auto zoneNamed = [&manager](const QString &identifier) {
+        const auto it = std::find_if(manager.zoneList().cbegin(), manager.zoneList().cend(), [&identifier](const GeoZone *zone) { return zone->identifier() == identifier; });
+        return (it == manager.zoneList().cend()) ? nullptr : *it;
+    };
+    QVERIFY(zoneNamed(QStringLiteral("SCHEDULED"))->scheduleAssumed());
+    QVERIFY(!zoneNamed(QStringLiteral("LEVEL"))->scheduleAssumed());
+
+    const QDateTime flightStart = _utc(QDate(2027, 6, 1), QTime(10, 0));
+    const QDateTime flightEnd = flightStart.addSecs(600);
+    const GeoZonePathEvaluator evaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited }).activeDuring(flightStart, flightEnd), flightStart);
+    GeoZonePathEvaluator::Path path = _evaluatorPath({ start, start.atDistanceAndAzimuth(4000, 90) }, { 500, 500 });
+    path.setTimes(flightStart, flightEnd);
+    const GeoZonePathEvaluator::Result result = evaluator.evaluate({ path });
+    QCOMPARE(result.activeEnteredZones().count(), 3);
+    QCOMPARE(result.find(zoneNamed(QStringLiteral("LEVEL")))->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
+    QCOMPARE(result.find(zoneNamed(QStringLiteral("UNKNOWN")))->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::AltitudeReferenceUnknown));
+    QCOMPARE(result.find(zoneNamed(QStringLiteral("SCHEDULED")))->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::ScheduleAssumed));
+    QCOMPARE(result.approximations(), GeoZonePathEvaluator::FlightLevel | GeoZonePathEvaluator::AltitudeReferenceUnknown | GeoZonePathEvaluator::ScheduleAssumed);
+    // Whatever the schedule, it isn't assumed
+    QCOMPARE(GeoZonePathEvaluator(manager.catalog(), GeoZonePolicy({ GeoZone::Prohibited })).evaluate({ path }).find(zoneNamed(QStringLiteral("SCHEDULED")))->approximations(),
+             GeoZonePathEvaluator::Approximations());
+
+    // Relative altitudes without their reference are unknown
+    GeoZonePathEvaluator::Path relative = _evaluatorPath({ start, start.atDistanceAndAzimuth(1500, 90) }, { 100, 100 });
+    relative.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Relative;
+    QVERIFY(evaluator.evaluate({ relative }).zones[0].crossings[0].approximations.testFlag(GeoZonePathEvaluator::AltitudeReferenceUnknown));
+
+    // Codes for exports and texts for the pilot
+    QCOMPARE(GeoZonePathEvaluator::approximationCodes(result.approximations()),
+             QStringList({ QStringLiteral("flight_level"), QStringLiteral("schedule_assumed"), QStringLiteral("altitude_reference_unknown") }));
+    QCOMPARE(GeoZonePathEvaluator::approximationTexts(GeoZonePathEvaluator::TerrainUnknown | GeoZonePathEvaluator::TerrainCoarse).count(), 2);
+    QVERIFY(GeoZonePathEvaluator::approximationCodes(GeoZonePathEvaluator::Approximations()).isEmpty());
+
+    // The briefing has them per crossing, per zone and overall, in the JSON and with a note in the web page
+    GeoZoneBriefing::Input input;
+    input.mission.name = QStringLiteral("Approximate");
+    input.paths = { path };
+    input.start = flightStart;
+    input.end = flightEnd;
+    const GeoZoneBriefing briefing = GeoZoneBriefing::build(manager.catalog(), input);
+    QCOMPARE(briefing.approximations, result.approximations());
+    const QList<const GeoZoneBriefing::Zone*> entered = briefing.zonesWith(GeoZoneBriefing::Involvement::Entered);
+    QCOMPARE(entered.count(), 3);
+    QCOMPARE(entered[0]->identifier, QStringLiteral("LEVEL"));
+    QCOMPARE(entered[0]->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
+    QCOMPARE(entered[0]->crossings[0].approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
+    const QJsonObject json = GeoZoneBriefingExport::toJson(briefing);
+    QCOMPARE(json[QStringLiteral("approximations")].toArray().count(), 3);
+    const QJsonObject levelJson = json[QStringLiteral("zones")].toArray()[0].toObject();
+    QCOMPARE(levelJson[QStringLiteral("approximations")].toArray(), QJsonArray({ QStringLiteral("flight_level") }));
+    QCOMPARE(levelJson[QStringLiteral("crossings")].toArray()[0].toObject()[QStringLiteral("approximations")].toArray(), QJsonArray({ QStringLiteral("flight_level") }));
+    const QString html = GeoZoneBriefingExport::toHtml(briefing);
+    QVERIFY(html.contains(QStringLiteral("Some results are approximate")));
+    QVERIFY(html.contains(QStringLiteral("Flight level limits converted with the QNH setting")));
+
+    // The mission check notes them in its warning
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    (void) missionController->insertSimpleMissionItem(start.atDistanceAndAzimuth(500, 270), 1);
+    (void) missionController->insertSimpleMissionItem(start.atDistanceAndAzimuth(1500, 90), 2);
+    QTRY_VERIFY(check.crossedZones().contains(zoneNamed(QStringLiteral("LEVEL"))));
+    QVERIFY(check.approximations(zoneNamed(QStringLiteral("LEVEL"))).testFlag(GeoZonePathEvaluator::FlightLevel));
+    QVERIFY2(check.warningText().contains(QStringLiteral("Approximate: ")), qPrintable(check.warningText()));
+    QVERIFY(check.warningText().contains(QStringLiteral("Flight level limits converted with the QNH setting")));
+}
+
 void GeoZonePlanningTest::_testEvaluatorSchedules()
 {
     // Active on 1 January 2027 from 10:00 to 12:00 UTC, 1900 to 2100 m along a path of 4000 m

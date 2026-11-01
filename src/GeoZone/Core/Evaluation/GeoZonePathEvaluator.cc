@@ -189,12 +189,23 @@ struct StretchSpan {
 };
 
 /// @return Why the comparison of the altitudes between the positions with the limits of the volume is approximate
-Approximations verticalApproximations(const GeoZone::Volume &volume, const GeoZone::Position &from, const GeoZone::Position &to)
+/// @param followsTerrain The altitudes are above the terrain, so they are unknown where it is
+Approximations verticalApproximations(const GeoZone::Volume &volume, const GeoZone::Position &from, const GeoZone::Position &to, bool followsTerrain)
 {
     const GeoZoneVertical::Approximations vertical = GeoZoneVertical::approximations(volume, from, to);
     Approximations result;
     if (vertical.testFlag(GeoZoneVertical::TerrainUnknown)) {
         result |= GeoZonePathEvaluator::TerrainUnknown;
+    }
+    if (vertical.testFlag(GeoZoneVertical::FlightLevel)) {
+        result |= GeoZonePathEvaluator::FlightLevel;
+    }
+    if (vertical.testFlag(GeoZoneVertical::ReferenceUnknown)) {
+        result |= GeoZonePathEvaluator::AltitudeReferenceUnknown;
+    }
+    if (vertical.testFlag(GeoZoneVertical::AltitudeUnknown)) {
+        const bool terrainUnknown = followsTerrain && (std::isnan(from.terrainAMSL) || std::isnan(to.terrainAMSL));
+        result |= terrainUnknown ? GeoZonePathEvaluator::TerrainUnknown : GeoZonePathEvaluator::AltitudeReferenceUnknown;
     }
     return result;
 }
@@ -423,6 +434,11 @@ bool GeoZonePathEvaluator::_accepts(const GeoZone *zone) const
     return _policy.acceptsRestriction(zone->restriction()) && !_policy.authorised(zone);
 }
 
+GeoZonePathEvaluator::Approximations GeoZonePathEvaluator::_scheduleApproximations(const GeoZone *zone, bool active) const
+{
+    return (active && (_policy.schedule() != GeoZonePolicy::Schedule::Any) && zone->scheduleAssumed()) ? Approximations(ScheduleAssumed) : Approximations();
+}
+
 bool GeoZonePathEvaluator::_activeDuring(const GeoZone *zone, const QDateTime &start, const QDateTime &end) const
 {
     if (_policy.schedule() == GeoZonePolicy::Schedule::Any) {
@@ -466,7 +482,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
             }
             const GeoZone::Volume &volume = volumes[v];
             const auto vertical = GeoZoneVertical::interval(volume, from, to);
-            Approximations approximations = verticalApproximations(volume, from, to) | path.approximations[segment + 1];
+            Approximations approximations = verticalApproximations(volume, from, to, path.followsTerrain) | path.approximations[segment + 1];
             if (path.coarseTerrain && (path.followsTerrain || GeoZoneVertical::aboveGround(volume))) {
                 approximations |= TerrainCoarse;
             }
@@ -529,7 +545,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
         const Prepared &path = paths[span.path];
         Crossing crossing{ path.pointAt(span.path, span.start), path.pointAt(span.path, span.end) };
         crossing.active = _activeDuring(zone, crossing.entry.time, crossing.exit.time);
-        crossing.approximations = span.approximations;
+        crossing.approximations = span.approximations | _scheduleApproximations(zone, crossing.active);
         result.crossings.append(crossing);
     }
 
@@ -544,7 +560,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
                 stretch.parts.append(VerticalPart{ path.pointAt(stretchSpan.span.path, part.start), path.pointAt(stretchSpan.span.path, part.end), part.position });
             }
             stretch.active = _activeDuring(zone, stretch.entry.time, stretch.exit.time);
-            stretch.approximations = stretchSpan.span.approximations;
+            stretch.approximations = stretchSpan.span.approximations | _scheduleApproximations(zone, stretch.active);
             result.stretches.append(stretch);
         }
     }
@@ -688,6 +704,49 @@ GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &p
         return std::make_tuple(2, entry.path, entry.distance);
     };
     std::stable_sort(result.zones.begin(), result.zones.end(), [&orderKey](const ZoneResult &a, const ZoneResult &b) { return orderKey(a) < orderKey(b); });
+    return result;
+}
+
+QStringList GeoZonePathEvaluator::approximationTexts(Approximations approximations)
+{
+    QStringList texts;
+    if (approximations.testFlag(TerrainUnknown)) {
+        texts.append(tr("Terrain unknown along part of the path, limits above ground taken as reached"));
+    }
+    if (approximations.testFlag(TerrainCoarse)) {
+        texts.append(tr("Terrain sampled coarsely along a long path"));
+    }
+    if (approximations.testFlag(GreatCircleDeviation)) {
+        texts.append(tr("Leg too long to follow its great circle closely"));
+    }
+    if (approximations.testFlag(FlightLevel)) {
+        texts.append(tr("Flight level limits converted with the QNH setting"));
+    }
+    if (approximations.testFlag(ScheduleAssumed)) {
+        texts.append(tr("Zone schedule not fully known, taken as active"));
+    }
+    if (approximations.testFlag(AltitudeReferenceUnknown)) {
+        texts.append(tr("Altitude or its reference unknown, limits taken as reached"));
+    }
+    return texts;
+}
+
+QStringList GeoZonePathEvaluator::approximationCodes(Approximations approximations)
+{
+    static const QList<std::pair<Approximation, QString>> codes = {
+        { TerrainUnknown, QStringLiteral("terrain_unknown") },
+        { TerrainCoarse, QStringLiteral("terrain_coarse") },
+        { GreatCircleDeviation, QStringLiteral("great_circle_deviation") },
+        { FlightLevel, QStringLiteral("flight_level") },
+        { ScheduleAssumed, QStringLiteral("schedule_assumed") },
+        { AltitudeReferenceUnknown, QStringLiteral("altitude_reference_unknown") },
+    };
+    QStringList result;
+    for (const auto &[approximation, code] : codes) {
+        if (approximations.testFlag(approximation)) {
+            result.append(code);
+        }
+    }
     return result;
 }
 

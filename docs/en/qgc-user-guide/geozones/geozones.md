@@ -110,7 +110,7 @@ How a zone boundary runs between two published points depends on the format. For
 
 Edges are checked as straight lines in latitude and longitude, so when zones are loaded, great circle edges get extra points on their great circle (up to 1023 per edge) and arcs a point every few degrees, keeping the boundary used by the checks, maps and fences within 1 m of the published one. On maps, long straight edges get extra points too, since the map projection would otherwise move them.
 
-Vehicles fly the legs of a path along great circles, so the checks follow them too: legs whose great circle is more than 1 m from the line straight in latitude and longitude, like a 56 km leg along the 60th parallel which passes about 105 m north of it halfway, are checked in pieces along the great circle. Along paths whose terrain the checks look up, like guided commands, returns and alerts, the terrain is taken every 100 m (250 m for returns), for up to 1000 positions per path; on longer paths the positions are spread farther apart, which is reported as approximate.
+Vehicles fly the legs of a path along great circles, so the checks follow them too: legs whose great circle is more than 1 m from the line straight in latitude and longitude, like a 56 km leg along the 60th parallel which passes about 105 m north of it halfway, are checked in pieces along the great circle. Along paths whose terrain the checks look up, like guided commands, returns and alerts, the terrain is taken every 100 m (250 m for returns), for up to 1000 positions per path; on longer paths the positions are spread farther apart, which is reported as approximate (see [Approximate Results](#approximate-results)).
 
 Altitude limits relative to the WGS84 ellipsoid are converted using the EGM96 geoid, within a few meters.
 
@@ -143,6 +143,19 @@ The check compares the planned altitudes with the zone altitude limits, using th
 The altitude profile below the Plan View map shades the restricted zones and U-space airspaces along the path between their floors and ceilings, so you can see where to climb or descend. Limits above ground follow the terrain, and limits that are unknown or beyond the chart extend to its edges.
 
 If the vehicle supports a GeoFence, the warning also names the prohibited zones on the path which no exclusion fence covers, and **Add Exclusion Fences** adds them to the GeoFence so the vehicle stops at them. Fences added from a zone cover it whatever their simplification, while a fence which leaves out part of a zone, or a zone without area, doesn't count.
+
+### Approximate Results {#approximate-results}
+
+Where data is missing or a limit can only be estimated, the checks stay conservative, so the zone counts as entered, and say so: the mission check adds a line like "Approximate: Terrain unknown along part of the path, limits above ground taken as reached." to its warning, and the briefing lists the notes per zone and for the whole mission. The notes are:
+
+| Note | JSON code | Meaning |
+| ---- | --------- | ------- |
+| Terrain unknown | `terrain_unknown` | Limits above ground were compared where the terrain elevation isn't known, so they were taken as reached. |
+| Terrain sampled coarsely | `terrain_coarse` | The path is too long for the terrain positions (1000), which were spread farther apart than every 100 m. |
+| Leg too long to follow its great circle | `great_circle_deviation` | A leg, like one across half the world, can't be checked within 1 m of its great circle. |
+| Flight level limits | `flight_level` | Flight levels were converted with the QNH setting and widened by 4 %. |
+| Zone schedule not fully known | `schedule_assumed` | The zone applies by a schedule which can't be fully evaluated, like one from an unknown daylight event, and was taken as active. |
+| Altitude or its reference unknown | `altitude_reference_unknown` | A limit is in an unknown reference, or the altitude flown is unknown (like altitudes above home without the home altitude), so the limit was taken as reached. |
 
 ### Flight Time and Schedule Tolerance {#flight-time}
 
@@ -189,16 +202,16 @@ The cost of a detour is the distance it adds; a climb or a descent counts 8 m of
 
 The briefing lists the mission (vehicle and firmware, planned start and estimated end, duration, distance, highest altitude, home and how the returns were modeled), then:
 
-- **Zones the flight path enters**, in the order the mission enters them: where (after which item, how far along the mission, the estimated times with a planned start), the altitudes flown inside against the zone floor and ceiling at the entry, when the zone is active during the flight (widened by 15 minutes like the mission check) and its published schedule, the vertical limits as published, the authority and its contacts, the message and conditions, U-space class, exemptions, your authorisation with whether it covers the flight, and the source and content hash of the zone.
+- **Zones the flight path enters**, in the order the mission enters them: where (after which item, how far along the mission, the estimated times with a planned start), the altitudes flown inside against the zone floor and ceiling at the entry, whether the result is approximate (see [Approximate Results](#approximate-results)), when the zone is active during the flight (widened by 15 minutes like the mission check) and its published schedule, the vertical limits as published, the authority and its contacts, the message and conditions, U-space class, exemptions, your authorisation with whether it covers the flight, and the source and content hash of the zone.
 - **Zones only returns would enter**, with the returns and the items they would be flown from.
 - **Restricted zones within 500 m** of the flight path, or passed above or below it, with their distance.
 - **Data versions**: each source covering the mission with its format, file or feed, data (issue) date, the AIRAC cycle in effect at that date (not for live restrictions), its published validity, when it was last checked, and the hash of its content.
 
 The JSON file has `"schema": "qgc-geozone-briefing"` and `"version": 1`. The version increases when fields are removed or change meaning, not when fields are added. Times are ISO 8601 UTC, distances and altitudes meters (altitudes above mean sea level), unknown values `null`. The fields are:
 
-- `generated`, `generator`, `scheduleToleranceSeconds`, `nearbyDistanceMeters`.
+- `generated`, `generator`, `scheduleToleranceSeconds`, `nearbyDistanceMeters`, `approximations` (codes of the [approximate results](#approximate-results) of the mission and its returns).
 - `mission`: `name`, `planFile`, `vehicle`, `firmware`, `plannedStart`, `plannedEnd`, `durationSeconds`, `distanceMeters`, `maxAltitudeAMSL`, `maxAltitudeAboveHome`, `home` (`lat`, `lon`, `altitudeAMSL`), `itemCount`, `returnAssumptions` (texts).
-- `zones`: `involvement` (`entered`, `contingency` or `nearby`), `key`, `identifier`, `country`, `name`, `restriction` (`prohibited`, `req_authorisation`, `conditional`, `no_restriction`, `u_space` or `unknown`), `restrictionCode` (as published), `restrictionText`, `reasons`, `verticalLimits`, `schedule`, `activeDuringFlight`, `activePeriods` (`start`, `end`), `crossings` (`path`: empty for the flight path or what the vehicle does, like "the loiter at item 3", `entryItem` and `exitItem`: sequence number of the last item reached before, `entryDistance`, `exitDistance`, `entry` and `exit` (`lat`, `lon`), `entryTime`, `exitTime`, `pathAltitudeMin`, `pathAltitudeMax`, `zoneFloor`, `zoneCeiling`, `active`), `inArea`, `contingencies` (texts), `distance`, `passed` (`above`, `below` or `null`), `authorities` (texts), `message`, `conditions`, `otherReasonInfo`, `uSpaceClass`, `regulationExemption`, `authorisation` (`permit`, `validFrom`, `validTo`, `status`, `coversFlight`, or `null`), `source` and `contentHash` (hexadecimal).
+- `zones`: `involvement` (`entered`, `contingency` or `nearby`), `key`, `identifier`, `country`, `name`, `restriction` (`prohibited`, `req_authorisation`, `conditional`, `no_restriction`, `u_space` or `unknown`), `restrictionCode` (as published), `restrictionText`, `reasons`, `verticalLimits`, `schedule`, `activeDuringFlight`, `activePeriods` (`start`, `end`), `crossings` (`path`: empty for the flight path or what the vehicle does, like "the loiter at item 3", `entryItem` and `exitItem`: sequence number of the last item reached before, `entryDistance`, `exitDistance`, `entry` and `exit` (`lat`, `lon`), `entryTime`, `exitTime`, `pathAltitudeMin`, `pathAltitudeMax`, `zoneFloor`, `zoneCeiling`, `active`, `approximations`), `inArea`, `contingencies` (texts), `distance`, `passed` (`above`, `below` or `null`), `authorities` (texts), `message`, `conditions`, `otherReasonInfo`, `uSpaceClass`, `regulationExemption`, `authorisation` (`permit`, `validFrom`, `validTo`, `status`, `coversFlight`, or `null`), `source`, `contentHash` (hexadecimal) and `approximations` (codes).
 - `sources`: `key`, `name`, `format`, `provider`, `dataDate`, `loaded`, `checked`, `validFrom`, `validTo`, `airacCycle`, `contentHash` (hexadecimal).
 
 ### Plan Data Audit {#plan-data-audit}
@@ -307,7 +320,8 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 - The checks and alerts are advisory and depend on the data loaded: always check the official sources and obtain any required authorisation before flying.
 - AIXM schedules are not read, so AIXM zones are always active, and holes of AIXM airspaces are not read.
 - European NOTAMs and FAA NOTAMs from the NOTAM Management Service are not read. A TFR whose NOTAM details can't be downloaded is treated as prohibited at all times and altitudes; check the NOTAM for exceptions.
-- Flight levels are converted with the QNH setting and a 4 % margin, and heights above the WGS84 ellipsoid with the EGM96 geoid, so these limits are approximate.
+- Flight levels are converted with the QNH setting and a 4 % margin, and heights above the WGS84 ellipsoid with the EGM96 geoid, so these limits are approximate. Results relying on such limits, unknown terrain or altitudes, coarse terrain or schedules which can't be fully read are marked as [approximate](#approximate-results).
+- Schedules with unknown days are taken as every day, which isn't marked as approximate; the zone details show the problem.
 - Return and contingency paths are estimates, see [Return and Contingency Paths](#return-and-contingency-paths).
 - GeoFences made from zones have no altitude limits and no holes, and the ArduPilot fence storage is estimated.
 - Secrets of services are stored unencrypted in the settings, and only SHA-256 hashes are checked, not signatures.

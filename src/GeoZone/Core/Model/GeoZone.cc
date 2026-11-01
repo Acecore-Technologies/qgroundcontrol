@@ -102,6 +102,16 @@ GeoZone::GeoZone(const Data &data)
 
     _active = isActiveAt(GeoZoneEnvironment::currentDateTimeUtc());
     setSourceKey(QString());
+
+    // All daylight events happen at the equator at an equinox, so those without a time there are unknown
+    const auto unknownEvent = [](const QString &event) {
+        return !event.isEmpty() && !GeoZoneSchedule::daylightEventTime(event, QDate(2000, 3, 20), QGeoCoordinate(0, 0)).isValid();
+    };
+    for (const TimePeriod &period : _data.applicability) {
+        for (const DailyPeriod &daily : period.schedule) {
+            _scheduleAssumed = _scheduleAssumed || unknownEvent(daily.startEvent) || unknownEvent(daily.endEvent);
+        }
+    }
 }
 
 void GeoZone::setSourceKey(const QString &sourceKey)

@@ -223,6 +223,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
     };
 
     const Evaluator::Result result = evaluator.evaluate(input.paths, input.areas);
+    briefing.approximations = result.approximations();
     QHash<const GeoZone*, qsizetype> indexes;
     for (const Evaluator::ZoneResult &zoneResult : result.zones) {
         if (!zoneResult.entered()) {
@@ -231,6 +232,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         Zone zone = makeZone(zoneResult.zone, Involvement::Entered);
         zone.activeDuringFlight = zoneResult.active();
         zone.inArea = !zoneResult.areas.isEmpty();
+        zone.approximations = zoneResult.approximations();
         for (const Evaluator::Crossing &crossing : zoneResult.crossings) {
             Crossing briefed;
             const Evaluator::Path &path = input.paths[crossing.entry.path];
@@ -244,6 +246,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
             briefed.entryTime = crossing.entry.time;
             briefed.exitTime = crossing.exit.time;
             briefed.active = crossing.active;
+            briefed.approximations = crossing.approximations;
             extend(briefed.pathAltitudeMin, briefed.pathAltitudeMax, crossing.entry.position.altitudeAMSL);
             extend(briefed.pathAltitudeMin, briefed.pathAltitudeMax, crossing.exit.position.altitudeAMSL);
             if (crossing.exit.path == crossing.entry.path) {
@@ -289,6 +292,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
     // Zones the returns from along the mission enter while they apply
     if (!input.contingencyPaths.isEmpty()) {
         const Evaluator::Result contingency = evaluator.evaluate(input.contingencyPaths);
+        briefing.approximations |= contingency.approximations();
         QHash<const GeoZone*, QStringList> labels;
         if (input.groupContingencies) {
             labels = input.groupContingencies(contingency);
@@ -309,7 +313,9 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
                 continue;
             }
             if (indexes.contains(zoneResult.zone)) {
-                briefing.zones[indexes.value(zoneResult.zone)].contingencies = zoneLabels;
+                Zone &zone = briefing.zones[indexes.value(zoneResult.zone)];
+                zone.contingencies = zoneLabels;
+                zone.approximations |= zoneResult.approximations();
             } else {
                 contingencyZones.append(zoneResult.zone);
             }
@@ -319,6 +325,9 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
             Zone zone = makeZone(contingencyZone, Involvement::Contingency);
             zone.contingencies = labels.value(contingencyZone);
             zone.activeDuringFlight = true;
+            if (const Evaluator::ZoneResult *const zoneResult = contingency.find(contingencyZone)) {
+                zone.approximations = zoneResult->approximations();
+            }
             indexes.insert(contingencyZone, briefing.zones.count());
             briefing.zones.append(zone);
         }
@@ -333,6 +342,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         }
         Zone zone = makeZone(zoneResult.zone, Involvement::Nearby);
         zone.distance = 0;
+        zone.approximations = zoneResult.approximations();
         for (const Evaluator::Stretch &stretch : zoneResult.stretches) {
             for (const Evaluator::VerticalPart &part : stretch.parts) {
                 if ((part.position != GeoZone::VerticalPosition::Inside) && (zone.passed == GeoZone::VerticalPosition::Inside)) {

@@ -160,6 +160,7 @@ public:
         QHash<const GeoZone*, QStringList> contingencyLabels;   ///< Of the contingency paths entering them with their items
         QList<const GeoZone*> relevantZones;            ///< Entered by any path whatever their schedule, see relevantZones()
         GeoZoneBox area;                                ///< Of the paths
+        QHash<const GeoZone*, GeoZonePathEvaluator::Approximations> approximations;    ///< Of the zones entered whose results are approximate
     };
 
     /// @return Zones the path or its areas enter whatever their authorisations, for a flight from start to end or at
@@ -190,6 +191,8 @@ public:
 
     /// @return Labels of the paths besides the drawn flight path entering the zone, when only those do
     QStringList pathLabels(const GeoZone *zone) const { return _pathLabels.value(zone); }
+    /// @return Why the check of the zone entered is approximate, see GeoZonePathEvaluator::Approximation
+    GeoZonePathEvaluator::Approximations approximations(const GeoZone *zone) const { return _approximations.value(zone); }
 
 signals:
     void missionControllerChanged();
@@ -228,6 +231,7 @@ private:
     QPointer<GeoFenceController> _geoFenceController;
     QList<const GeoZone*> _unfencedZones;
     QHash<const GeoZone*, QStringList> _pathLabels;
+    QHash<const GeoZone*, GeoZonePathEvaluator::Approximations> _approximations;
     QList<const GeoZone*> _contingencyZones;
     QHash<const GeoZone*, QStringList> _contingencyLabels;
     QList<const GeoZone*> _relevantZones;

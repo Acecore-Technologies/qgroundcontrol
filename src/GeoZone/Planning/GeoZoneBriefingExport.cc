@@ -150,6 +150,11 @@ QString restrictionColor(GeoZone::Restriction restriction)
     return QStringLiteral("#616161");
 }
 
+QJsonArray jsonApproximations(GeoZonePathEvaluator::Approximations approximations)
+{
+    return QJsonArray::fromStringList(GeoZonePathEvaluator::approximationCodes(approximations));
+}
+
 QString row(const QString &header, const QString &html)
 {
     return html.isEmpty() ? QString() : QStringLiteral("<tr><th>%1</th><td>%2</td></tr>\n").arg(header.toHtmlEscaped(), html);
@@ -262,6 +267,7 @@ QString zoneHtml(const Briefing::Zone &zone, const Briefing &briefing)
     }
     html += row(Text::tr("When"), whenHtml(zone, briefing));
     html += row(Text::tr("Vertical limits"), escaped(zone.verticalLimits));
+    html += row(Text::tr("Approximate"), escaped(GeoZonePathEvaluator::approximationTexts(zone.approximations).join(QChar(u'\n'))));
     html += row(Text::tr("Authority"), escaped(zone.authorities.join(QChar(u'\n'))));
     html += row(Text::tr("Message"), escaped(zone.message));
     html += row(Text::tr("Conditions"), escaped(zone.conditions));
@@ -582,6 +588,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
             crossingJson.insert(QStringLiteral("zoneFloor"), jsonNumber(crossing.zoneFloor));
             crossingJson.insert(QStringLiteral("zoneCeiling"), jsonNumber(crossing.zoneCeiling));
             crossingJson.insert(QStringLiteral("active"), crossing.active);
+            crossingJson.insert(QStringLiteral("approximations"), jsonApproximations(crossing.approximations));
             crossings.append(crossingJson);
         }
         json.insert(QStringLiteral("crossings"), crossings);
@@ -614,6 +621,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
         json.insert(QStringLiteral("authorisation"), authorisation);
         json.insert(QStringLiteral("source"), zone.sourceKey);
         json.insert(QStringLiteral("contentHash"), QString::fromLatin1(zone.contentHash.toHex()));
+        json.insert(QStringLiteral("approximations"), jsonApproximations(zone.approximations));
         zones.append(json);
     }
 
@@ -629,6 +637,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
     json.insert(QStringLiteral("generator"), QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion()).trimmed());
     json.insert(QStringLiteral("scheduleToleranceSeconds"), briefing.scheduleTolerance);
     json.insert(QStringLiteral("nearbyDistanceMeters"), briefing.nearbyDistance);
+    json.insert(QStringLiteral("approximations"), jsonApproximations(briefing.approximations));
     json.insert(QStringLiteral("mission"), missionJson);
     json.insert(QStringLiteral("zones"), zones);
     json.insert(QStringLiteral("sources"), sources);
@@ -686,6 +695,10 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
     summary.append(tr("returns would enter %n more", nullptr, static_cast<int>(contingency.count())));
     summary.append(tr("%n restricted zone(s) nearby", nullptr, static_cast<int>(nearby.count())));
     html += row(tr("Zones"), escaped(summary.join(QStringLiteral(", ")) + QChar(u'.')));
+    if (briefing.approximations) {
+        html += row(tr("Approximate"), escaped(tr("Some results are approximate, and conservative where data is missing: %1.")
+                                                   .arg(GeoZonePathEvaluator::approximationTexts(briefing.approximations).join(QStringLiteral("; ")))));
+    }
     html += QStringLiteral("</table>\n");
 
     const auto section = [&html, &briefing](const QString &heading, const QString &empty, const QList<const GeoZoneBriefing::Zone*> &zones) {
