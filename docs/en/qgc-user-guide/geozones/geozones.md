@@ -234,6 +234,8 @@ Zones the flight only passes above or below are left out unless you check them, 
 
 **Upload to Vehicle** adds the selected fences to the plan and uploads the plan's fence (not the mission) like a plan upload, then reads the fence back from the vehicle and compares it with the plan: the number of polygons and circles, each vertex and circle center within 0.5 m, the circle radii and the breach return point. The dialog shows whether the vehicle stores the fence as planned, the differences, or why the vehicle rejected it, for example when it has no room for it.
 
+The upload is aborted when the plan's fence is edited or another plan is opened (or the plan is saved under another name) before it is verified, since the vehicle wouldn't store the fence of the plan: the fence stays marked as changed, so upload it again. It fails when the vehicle disconnects meanwhile.
+
 Fences added from geozones are named after their zones and listed separately in the GeoFence panel, where **Delete Geozone Fences** deletes them (see [Edit/Delete a GeoFence](../plan_view/plan_geofence.md#edit-delete-a-geofence)).
 
 ::: warning
@@ -251,7 +253,11 @@ Every connected vehicle is monitored on its own, and alerts name the vehicle whe
 
 ### Guided Command Checks {#guided-command-checks}
 
-Guided commands of the Fly View are checked too: the confirmation of **Go To Location**, **Orbit**, **Change Altitude**, **Takeoff** and starting or continuing the mission names the active restricted zones and U-space airspaces the vehicle would enter, including zones it is in which it would leave and enter again, updated as the altitude slider moves, and a go to location which enters zones is always confirmed. Starting the mission also checks the mission on the vehicle for a flight starting now and whether the vehicle's GeoFence excludes its prohibited zones.
+Guided commands of the Fly View are checked too: the confirmation of **Go To Location**, **Orbit**, **Change Altitude**, **Takeoff**, **Return**, **Land**, setting the current mission item and starting, continuing or resuming the mission names the active restricted zones and U-space airspaces the vehicle would enter, including zones it is in which it would leave and enter again, updated as the altitude slider moves, and a go to location which enters zones is always confirmed. Starting the mission also checks the mission on the vehicle for a flight starting now and whether the vehicle's GeoFence excludes its prohibited zones.
+
+- **Return** follows the return the vehicle flies from where it is, with its return parameters, to home, its rally points or the landing of the mission on it, or along the mission, like the [return paths](#return-and-contingency-paths) of the mission check, for example "The return to rally point 2 would enter geozones: ...". With **Smart RTL** checked the vehicle retraces the path it flew, which isn't checked.
+- **Land** follows the descent to the ground below the vehicle (to the home altitude where the terrain isn't known), so zones from the ground up to a height below the vehicle count.
+- Setting the current mission item follows the flight from the vehicle to the item and on along the mission, and resuming the mission the flight from the vehicle climbing to the altitude of the item it resumes at. An item without a coordinate counts from the item with a coordinate before it.
 
 ### Spoken Alerts, Repeats and Muting {#spoken-alerts}
 

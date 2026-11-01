@@ -17,7 +17,7 @@ The module has two layers:
 | `src/GeoZone/Core/Geoid` | The EGM96 geoid grid converting heights above the WGS84 ellipsoid, see its `README.md`. |
 | `src/GeoZone` | The application layer: `GeoZoneModule` (the entry points), `GeoZoneManager` (the singleton publishing the zones and their queries to C++ and QML), `GeoZoneSettings` with `GeoZone.SettingsGroup.json`. |
 | `src/GeoZone/Map` | Map display: `GeoZoneMapModel`, `GeoZoneMapLayer` (scene graph rendering), `GeoZoneDisplay`, `GeoZoneNearbyModel`, the zone details, legend and search. |
-| `src/GeoZone/Planning` | Plan View: `GeoZoneMissionPath`, `GeoZoneMissionCheck`, `GeoZoneProfile`, `GeoZoneRoutePlanner`, `GeoZoneBriefingExport`, `GeoZoneFenceImporter`, `GeoZoneFenceTags`, `GeoZoneGuidedCheck`, `GeoZonePlanning` and `GeoZonePlanData` (the `geoZones` section of plan files). |
+| `src/GeoZone/Planning` | Plan View: `GeoZoneMissionPath`, `GeoZoneMissionCheck`, `GeoZoneProfile`, `GeoZoneRoutePlanner`, `GeoZoneBriefingExport`, `GeoZoneFenceImporter` with `GeoZoneFenceUpload` (the upload and read back of the fence, a state machine from `Idle` through `Sending` and `Verifying` to `Verified`, `Mismatch`, `Failed` or `Aborted`), `GeoZoneFenceTags`, `GeoZoneGuidedCheck` (the checks of the guided commands, with the returns from `GeoZoneReturnModel` and the mission from `GeoZoneMissionPath`), `GeoZonePlanning` and `GeoZonePlanData` (the `geoZones` section of plan files). |
 | `src/GeoZone/Flight` | Fly View: `GeoZoneMonitor`, `GeoZoneVehicleMonitor`, `GeoZoneAlertArbiter`, `GeoZoneAlertHistory`, `GeoZoneAlertLog`, the indicator, alert popup, altitude strip and map layer. |
 | `src/GeoZone/Settings` | The Geozones page of the Application Settings. |
 
