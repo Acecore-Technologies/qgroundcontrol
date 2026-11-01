@@ -14,6 +14,8 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneFeedFetch.h"
+#include "GeoZoneFormat.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneInfo.h"
@@ -24,6 +26,7 @@
 #include "GeoZoneProviders.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneStore.h"
 #include "GeoZoneTerrain.h"
 #ifndef GEOZONE_CORE_TEST
 #include "GeoFenceController.h"
@@ -74,6 +77,7 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QThreadPool>
 #include <QtCore/QTimeZone>
+#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -83,6 +87,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 
 /// Fixtures and helpers shared by the geozone tests
 namespace GeoZoneTestHelpers {
@@ -265,9 +270,16 @@ public:
                 (void) connect(socket, &QTcpSocket::readyRead, socket, [this, socket]() {
                     const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
                     socket->setProperty("request", request);
-                    if (request.contains("\r\n\r\n")) {
-                        requestCount++;
-                        _respond(socket, request.split(' ').value(1));
+                    if (!request.contains("\r\n\r\n")) {
+                        return;
+                    }
+                    requestCount++;
+                    const QByteArray path = request.split(' ').value(1);
+                    requestedPaths.append(path);
+                    if (delays.value(path) > 0) {
+                        QTimer::singleShot(delays.value(path), socket, [this, socket, path, request]() { _respond(socket, path, request); });
+                    } else {
+                        _respond(socket, path, request);
                     }
                 });
                 (void) connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
@@ -281,14 +293,26 @@ public:
     int requestCount = 0;
     QByteArray okPathStatus = "200 OK";     ///< Status of /ok, to make a feed fail later
     QHash<QByteArray, QByteArray> files;    ///< Content served by path
+    QHash<QByteArray, QByteArray> headers;  ///< Further response headers by path, each ending with CRLF
+    QHash<QByteArray, QByteArray> etags;    ///< ETag of the content by path, conditional requests matching it get 304
+    QHash<QByteArray, int> delays;          ///< Milliseconds before answering, by path
     QList<QByteArray> requestedPaths;
 
 private:
-    void _respond(QTcpSocket *socket, const QByteArray &path)
+    void _respond(QTcpSocket *socket, const QByteArray &path, const QByteArray &request)
     {
         QByteArray status = "200 OK";
         QByteArray content;
-        requestedPaths.append(path);
+        QByteArray extraHeaders = headers.value(path);
+        if (const QByteArray etag = etags.value(path); !etag.isEmpty()) {
+            extraHeaders += "ETag: " + etag + "\r\n";
+            // Header names are case insensitive, Qt sends them in lower case
+            if (request.toLower().contains("if-none-match: " + etag.toLower())) {
+                (void) socket->write("HTTP/1.1 304 Not Modified\r\n" + extraHeaders + "Content-Length: 0\r\nConnection: close\r\n\r\n");
+                socket->disconnectFromHost();
+                return;
+            }
+        }
         if (files.contains(path)) {
             content = files.value(path);
         } else if (path == "/ok") {
@@ -301,7 +325,7 @@ private:
         } else if (path == "/hang") {
             return;
         }
-        (void) socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " +
+        (void) socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\n" + extraHeaders + "Content-Length: " +
                              QByteArray::number(content.size()) + "\r\n\r\n" + content);
         socket->disconnectFromHost();
     }

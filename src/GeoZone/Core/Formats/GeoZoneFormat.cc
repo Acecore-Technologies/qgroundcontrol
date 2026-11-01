@@ -9,6 +9,8 @@
 
 #include "GeoZoneFormat.h"
 
+#include <QtCore/QJsonDocument>
+
 #include <algorithm>
 
 bool GeoZoneFormat::detectXml(QStringView, QStringView) const
@@ -78,6 +80,30 @@ const GeoZoneFormat *GeoZoneFormat::find(GeoZoneParser::Format format)
         }
     }
     return nullptr;
+}
+
+const GeoZoneFormat *GeoZoneFormat::detectJson(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint,
+                                               const QList<const GeoZoneFormat*> &candidates)
+{
+    for (const GeoZoneFormat *candidate : candidates) {
+        if (!candidate->isXml() && candidate->detect(root, features, formatHint)) {
+            return candidate;
+        }
+    }
+    return nullptr;
+}
+
+QList<GeoZoneFormat::CompanionRequest> GeoZoneFormat::companionRequestsOf(const QUrl &documentUrl, const QByteArray &document, GeoZoneParser::Format formatHint,
+                                                                         QJsonObject &root, const QList<const GeoZoneFormat*> &candidates)
+{
+    const QJsonDocument json = QJsonDocument::fromJson(document);
+    if (!json.isObject()) {
+        return {};
+    }
+    root = json.object();
+    const QJsonArray features = root.value(QStringLiteral("features")).toArray();
+    const GeoZoneFormat *const format = detectJson(root, features, formatHint, candidates);
+    return format ? format->companionRequests(documentUrl, root, features) : QList<CompanionRequest>();
 }
 
 bool GeoZoneFormat::isEmptyWfsResponse(const QJsonObject &root)

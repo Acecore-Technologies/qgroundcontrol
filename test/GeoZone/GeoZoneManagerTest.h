@@ -23,6 +23,8 @@ private slots:
     void _testFeedDatasetLink();
     void _testWfsPaging();
     void _testFeedCompanions();
+    void _testFeedFetchFormatCompanions();
+    void _testFeedCancellation();
     void _testReloadChanges();
     void _testSourceValidity();
     void _testDownloadSizeLimit();

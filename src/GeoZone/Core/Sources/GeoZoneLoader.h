@@ -14,6 +14,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QString>
 
+#include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneParser.h"
 
@@ -46,7 +47,7 @@ public:
         QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
         QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
         Request request = Request::Automatic;
-        int generation = 0;
+        GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops before parsing or storing
     };
 
     struct Result {
@@ -54,6 +55,7 @@ public:
         QString errorString;        ///< Why reading or parsing failed, empty on success
         bool stored = false;        ///< The copy was written
         QString storeError;
+        bool cancelled = false;     ///< The job was canceled, nothing was stored
     };
 
     /// @return Job loading a local file or file: URL, keyed by fileKey

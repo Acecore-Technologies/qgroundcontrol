@@ -9,7 +9,6 @@
 
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneEnvironment.h"
-#include "GeoZoneFormat.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneSource.h"
 
@@ -17,13 +16,10 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
-#include <QtCore/QJsonArray>
-#include <QtCore/QJsonDocument>
 #include <QtCore/QLocale>
+#include <QtCore/QScopeGuard>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
-
-#include <algorithm>
 
 GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObject *parent)
     : QObject(parent)
@@ -42,6 +38,13 @@ GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObj
 
 GeoZoneSourceRepository::~GeoZoneSourceRepository()
 {
+    // Downloads are aborted, loads still running stop before storing their copy and their results are dropped
+    for (const GeoZoneCancelToken &token : std::as_const(_operations)) {
+        token.cancel();
+    }
+    for (GeoZoneFeedFetch *const fetch : std::as_const(_fetches)) {
+        fetch->cancel();
+    }
 }
 
 void GeoZoneSourceRepository::init()
@@ -75,14 +78,14 @@ void GeoZoneSourceRepository::addFile(const QString &fileName)
 {
     GeoZoneLoader::Job job = GeoZoneLoader::fileJob(fileName);
     job.request = GeoZoneLoader::Request::Add;
-    job.generation = ++_generations[job.key];
+    job.cancelToken = _beginOperation(job.key);
     _startLoad(job, LoadMode::Background);
 }
 
 bool GeoZoneSourceRepository::loadFile(const QString &fileName, QString &errorString)
 {
     GeoZoneLoader::Job job = GeoZoneLoader::fileJob(fileName);
-    job.generation = ++_generations[job.key];
+    job.cancelToken = _beginOperation(job.key);
     _prepareJob(job);
 
     const GeoZoneLoader::Result loadResult = GeoZoneLoader::run(job, _store);
@@ -134,36 +137,39 @@ void GeoZoneSourceRepository::_refreshDueFeeds()
 
 void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Request request)
 {
-    const int generation = ++_generations[url];
     GeoZoneSource *const existing = source(url);
     if (existing) {
         existing->setBusy(true);
     }
 
-    qCDebug(GeoZoneSourceLog) << "Downloading" << url;
-
     if (QUrl(url).isLocalFile()) {
+        qCDebug(GeoZoneSourceLog) << "Reading" << url;
         GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
         job.request = request;
-        job.generation = generation;
+        job.cancelToken = _beginOperation(url);
         _startLoad(job, LoadMode::Background);
         return;
     }
 
-    // The validators of a feed linking to its dataset are the dataset's, its page is read every time since the
-    // link depends on the date, like the current AIRAC cycle
-    QString etag;
-    QString lastModified;
-    if (existing && existing->loaded() && existing->datasetUrl().isEmpty()) {
-        etag = existing->etag();
-        lastModified = existing->lastModified();
+    GeoZoneFeedFetch::Request fetchRequest;
+    fetchRequest.url = url;
+    fetchRequest.formatHint = GeoZoneProviders::formatHint(url);
+    fetchRequest.companions = _companions.value(url);
+    if (existing && existing->loaded()) {
+        fetchRequest.etag = existing->etag();
+        fetchRequest.lastModified = existing->lastModified();
+        fetchRequest.datasetUrl = existing->datasetUrl();
+        fetchRequest.formatHint = existing->format();
     }
 
+    // Counted first, so that replacing a fetch in progress doesn't make the repository idle
     _setPending(1);
-    _downloader->get(url, etag, lastModified, [this, url, generation, request](const GeoZoneDownloader::Result &download) {
-        _downloadComplete(download, url, generation, request);
-        _setPending(-1);
-    }, url);
+    GeoZoneFeedFetch *const fetch = new GeoZoneFeedFetch(_downloader, fetchRequest, _beginOperation(url), this);
+    _fetches.insert(url, fetch);
+    (void) connect(fetch, &GeoZoneFeedFetch::finished, this, [this, fetch, request](const GeoZoneFeedFetch::Result &result) {
+        _fetchFinished(fetch, result, request);
+    });
+    fetch->start();
 }
 
 double GeoZoneSourceRepository::progress() const
@@ -180,19 +186,31 @@ QString GeoZoneSourceRepository::progressText() const
     return _downloader->progressText();
 }
 
-void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
-                                                  const QString &datasetUrl)
+void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZoneFeedFetch::Result &result, GeoZoneLoader::Request request)
 {
-    if (_generations.value(url) != generation) {
-        // Removed or downloaded again in the meantime
-        if (!download.filePath.isEmpty()) {
-            (void) QFile::remove(download.filePath);
-        }
+    const QString url = fetch->request().url;
+    (void) _fetches.remove(url);
+    fetch->deleteLater();
+    const auto done = qScopeGuard([this]() { _setPending(-1); });
+
+    GeoZoneSource *const existing = source(url);
+    if (result.status == GeoZoneFeedFetch::Result::Status::Ready) {
+        GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
+        job.sourcePath = result.filePath;
+        job.pagePaths = result.pagePaths;
+        job.downloaded = true;
+        job.formatHint = fetch->request().formatHint;
+        job.etag = result.etag;
+        job.lastModified = result.lastModified;
+        job.datasetUrl = result.datasetUrl;
+        job.request = request;
+        job.cancelToken = fetch->cancelToken();
+        _startLoad(job, LoadMode::Background);
         return;
     }
 
-    GeoZoneSource *const existing = source(url);
-    if ((download.status == GeoZoneDownloader::Result::Status::NotModified) && existing) {
+    _endOperation(url, fetch->cancelToken());
+    if ((result.status == GeoZoneFeedFetch::Result::Status::NotModified) && existing) {
         qCDebug(GeoZoneSourceLog) << "Feed not modified" << url;
         const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
         existing->setStoredDates(now, now);
@@ -205,230 +223,43 @@ void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result 
         return;
     }
 
-    if (download.status != GeoZoneDownloader::Result::Status::Ok) {
-        const QString error = download.errorString.isEmpty() ? tr("The server responded with status %1.").arg(304) : download.errorString;
-        qCWarning(GeoZoneSourceLog) << "Download failed" << url << error;
-        if (existing) {
-            existing->setBusy(false);
-            existing->setErrorString(error);
-        }
-        if (request != GeoZoneLoader::Request::Automatic) {
-            emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
-        }
-        return;
+    const QString error = result.errorString.isEmpty() ? tr("The server responded with status %1.").arg(304) : result.errorString;
+    qCWarning(GeoZoneSourceLog) << "Download failed" << url << error;
+    if (existing) {
+        existing->setBusy(false);
+        existing->setErrorString(error);
     }
-
-    // Pages linking to the current dataset, like the AIRAC cycles of NATS, are followed. Pages are small, datasets aren't read here.
-    const QByteArray page = datasetUrl.isEmpty() ? GeoZoneDownloader::readFile(download.filePath, _maxPageBytes) : QByteArray();
-    if (const QString linkedUrl = GeoZoneProviders::datasetLink(url, page, GeoZoneEnvironment::currentDateTimeUtc().date()); !linkedUrl.isEmpty()) {
-        qCDebug(GeoZoneSourceLog) << "Downloading dataset" << linkedUrl << "linked from" << url;
-        (void) QFile::remove(download.filePath);
-        // The dataset already downloaded is confirmed by its validators
-        QString etag;
-        QString lastModified;
-        if (existing && existing->loaded() && (existing->datasetUrl() == linkedUrl)) {
-            etag = existing->etag();
-            lastModified = existing->lastModified();
-        }
-        _setPending(1);
-        _downloader->get(linkedUrl, etag, lastModified, [this, url, generation, request, linkedUrl](const GeoZoneDownloader::Result &dataset) {
-            _downloadComplete(dataset, url, generation, request, linkedUrl);
-            _setPending(-1);
-        }, url);
-        return;
+    if (request != GeoZoneLoader::Request::Automatic) {
+        emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
     }
-
-    if (_fetchPages(download, url, generation, request, datasetUrl) || _fetchCompanions(download, url, generation, request, datasetUrl)) {
-        return;
-    }
-    _loadDownload(download, url, generation, request, datasetUrl);
 }
 
-struct GeoZoneSourceRepository::PageFetch {
-    GeoZoneDownloader::Result download;
-    QString url;
-    int generation = 0;
-    GeoZoneLoader::Request request = GeoZoneLoader::Request::Automatic;
-    QString datasetUrl;
-    qint64 pageSize = 0;
-    int pageCount = 0;      ///< After the first
-    int nextPage = 1;
-    QStringList pagePaths;
-};
-
-bool GeoZoneSourceRepository::_fetchPages(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
-                                          const QString &datasetUrl)
+GeoZoneCancelToken GeoZoneSourceRepository::_beginOperation(const QString &key)
 {
-    // The counts are at the start or the end of the response, which isn't parsed here
-    constexpr qint64 countBytes = 4096;
-    QFile file(download.filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return false;
-    }
-    const QByteArray head = file.read(countBytes);
-    (void) file.seek((std::max)(qint64{ 0 }, file.size() - countBytes));
-    const QByteArray tail = file.read(countBytes);
-    file.close();
-    const GeoZoneProviders::WfsCounts counts = GeoZoneProviders::wfsCounts(head, tail);
-    if ((counts.returned <= 0) || (counts.matched <= counts.returned) || GeoZoneProviders::wfsPageUrl(url, counts.returned).isEmpty()) {
-        return false;
-    }
-
-    auto fetch = QSharedPointer<PageFetch>::create();
-    fetch->download = download;
-    fetch->url = url;
-    fetch->generation = generation;
-    fetch->request = request;
-    fetch->datasetUrl = datasetUrl;
-    fetch->pageSize = counts.returned;
-    fetch->pageCount = static_cast<int>((std::min)((counts.matched - 1) / counts.returned, qint64{ GeoZoneProviders::maxWfsPages }));
-    qCDebug(GeoZoneSourceLog) << "Downloading" << fetch->pageCount << "more pages of" << counts.matched << "features from" << url;
-    _fetchPage(fetch);
-    return true;
+    _cancelOperation(key);
+    const GeoZoneCancelToken token;
+    _operations.insert(key, token);
+    return token;
 }
 
-void GeoZoneSourceRepository::_fetchPage(const QSharedPointer<PageFetch> &fetch)
+void GeoZoneSourceRepository::_endOperation(const QString &key, const GeoZoneCancelToken &token)
 {
-    if (fetch->nextPage > fetch->pageCount) {
-        _pagePaths.insert(fetch->url, fetch->pagePaths);
-        if (!_fetchCompanions(fetch->download, fetch->url, fetch->generation, fetch->request, fetch->datasetUrl)) {
-            _loadDownload(fetch->download, fetch->url, fetch->generation, fetch->request, fetch->datasetUrl);
-        }
-        return;
+    if (const auto it = _operations.constFind(key); (it != _operations.cend()) && (it.value() == token)) {
+        (void) _operations.erase(it);
     }
+}
 
-    const QString pageUrl = GeoZoneProviders::wfsPageUrl(fetch->url, fetch->pageSize * fetch->nextPage);
-    _setPending(1);
-    _downloader->get(pageUrl, QString(), QString(), [this, fetch](const GeoZoneDownloader::Result &page) {
-        if (_generations.value(fetch->url) != fetch->generation) {
-            // Removed or downloaded again in the meantime
-            for (const QString &path : std::as_const(fetch->pagePaths) + QStringList{ page.filePath, fetch->download.filePath }) {
-                if (!path.isEmpty()) {
-                    (void) QFile::remove(path);
-                }
-            }
-            _setPending(-1);
-            return;
-        }
-        if (page.status == GeoZoneDownloader::Result::Status::Ok) {
-            fetch->pagePaths.append(page.filePath);
-            fetch->nextPage++;
-        } else {
-            // The pages received are kept, the source shows how many zones the response still misses
-            qCWarning(GeoZoneSourceLog) << "Page download failed" << fetch->url << page.errorString;
-            fetch->nextPage = fetch->pageCount + 1;
-        }
-        _fetchPage(fetch);
+void GeoZoneSourceRepository::_cancelOperation(const QString &key)
+{
+    if (const auto it = _operations.constFind(key); it != _operations.cend()) {
+        it->cancel();
+        (void) _operations.erase(it);
+    }
+    if (GeoZoneFeedFetch *const fetch = _fetches.take(key)) {
+        fetch->cancel();
+        fetch->deleteLater();
         _setPending(-1);
-    }, fetch->url);
-}
-
-void GeoZoneSourceRepository::_loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
-                                             const QString &datasetUrl)
-{
-    const GeoZoneSource *const existing = source(url);
-    GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
-    job.sourcePath = download.filePath;
-    job.downloaded = true;
-    if (existing && (existing->format() == GeoZoneParser::Format::FaaTfr)) {
-        job.formatHint = GeoZoneParser::Format::FaaTfr;
     }
-    job.etag = download.etag;
-    job.lastModified = download.lastModified;
-    job.datasetUrl = datasetUrl;
-    job.pagePaths = _pagePaths.take(url);
-    job.request = request;
-    job.generation = generation;
-    _startLoad(job, LoadMode::Background);
-}
-
-bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request,
-                                                const QString &datasetUrl)
-{
-    // Feeds with companions, like the FAA TFR list, are small enough to read here
-    const QJsonDocument document = QJsonDocument::fromJson(GeoZoneDownloader::readFile(download.filePath, _maxPageBytes));
-    if (!document.isObject()) {
-        return false;
-    }
-    const QJsonObject root = document.object();
-    const QJsonArray features = root.value(QStringLiteral("features")).toArray();
-    const GeoZoneSource *const existing = source(url);
-    const GeoZoneParser::Format hint = (existing && existing->loaded()) ? existing->format() : GeoZoneProviders::formatHint(url);
-    const GeoZoneFormat *format = nullptr;
-    for (const GeoZoneFormat *candidate : GeoZoneFormat::formats()) {
-        if (!candidate->isXml() && candidate->detect(root, features, hint)) {
-            format = candidate;
-            break;
-        }
-    }
-    if (!format) {
-        return false;
-    }
-    const QList<GeoZoneFormat::CompanionRequest> requests = format->companionRequests(QUrl(url), root, features);
-    if (requests.isEmpty()) {
-        return false;
-    }
-
-    struct Fetch {
-        QJsonObject root;
-        GeoZoneParser::Companions companions;
-        int remaining = 0;
-    };
-    const auto fetch = QSharedPointer<Fetch>::create();
-    fetch->root = root;
-    const GeoZoneParser::Companions known = _companions.value(url);
-    QList<GeoZoneFormat::CompanionRequest> missing;
-    for (const GeoZoneFormat::CompanionRequest &companion : requests) {
-        const auto it = known.constFind(companion.key);
-        if ((it != known.cend()) && (it->version == companion.version)) {
-            fetch->companions.insert(companion.key, it.value());
-        } else {
-            missing.append(companion);
-        }
-    }
-
-    // The document is stored with its companions, so they are available offline
-    const auto finish = [this, fetch, download, url, generation, request, datasetUrl]() {
-        if (_generations.value(url) != generation) {
-            (void) QFile::remove(download.filePath);
-            return;
-        }
-        QFile file(download.filePath);
-        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            (void) file.write(GeoZoneParser::composite(fetch->root, fetch->companions));
-            file.close();
-        }
-        _loadDownload(download, url, generation, request, datasetUrl);
-    };
-    if (missing.isEmpty()) {
-        finish();
-        return true;
-    }
-
-    qCDebug(GeoZoneSourceLog) << "Downloading" << missing.count() << "companion documents of" << url;
-    fetch->remaining = static_cast<int>(missing.count());
-    _setPending(1);
-    for (const GeoZoneFormat::CompanionRequest &companion : std::as_const(missing)) {
-        _downloader->get(companion.url, QString(), QString(), [this, fetch, companion, finish](const GeoZoneDownloader::Result &result) {
-            // A missing companion leaves its zones as conservative as without it
-            if (result.status == GeoZoneDownloader::Result::Status::Ok) {
-                const QByteArray data = GeoZoneDownloader::readFile(result.filePath, _maxCompanionBytes);
-                if (!data.isEmpty()) {
-                    fetch->companions.insert(companion.key, GeoZoneParser::Companion{ companion.version, data });
-                }
-            } else {
-                qCWarning(GeoZoneSourceLog) << "Companion download failed" << companion.url << result.errorString;
-            }
-            if (!result.filePath.isEmpty()) {
-                (void) QFile::remove(result.filePath);
-            }
-            if (--fetch->remaining == 0) {
-                finish();
-                _setPending(-1);
-            }
-        }, url);
-    }
-    return true;
 }
 
 void GeoZoneSourceRepository::_prepareJob(GeoZoneLoader::Job &job) const
@@ -465,13 +296,14 @@ void GeoZoneSourceRepository::_startLoad(GeoZoneLoader::Job job, LoadMode mode)
 
 void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult)
 {
-    if (_generations.value(job.key) != job.generation) {
+    if (job.cancelToken.isCancelled() || loadResult.cancelled) {
         // Removed or loaded again in the meantime
         if (loadResult.stored) {
             _store.removeFile(job.storedFileName);
         }
         return;
     }
+    _endOperation(job.key, job.cancelToken);
 
     GeoZoneSource *source = this->source(job.key);
     if (source) {
@@ -630,16 +462,11 @@ void GeoZoneSourceRepository::removeSource(int index)
 
     GeoZoneSource *const source = _sources[index];
     // Drops results of loads and downloads in progress
-    _generations[source->key()]++;
+    _cancelOperation(source->key());
     if (source->busy()) {
         source->setBusy(false);
     }
-
-    _downloader->abort(source->key());
     _companions.remove(source->key());
-    for (const QString &pagePath : _pagePaths.take(source->key())) {
-        (void) QFile::remove(pagePath);
-    }
     emit sourceAboutToChange(source);
     _sources.removeAt(index);
     emit sourceRemoved(index);
@@ -659,9 +486,8 @@ void GeoZoneSourceRepository::clear()
         removeSource(_sources.count() - 1);
     }
     // Drops results of new sources still loading
-    for (auto it = _generations.begin(); it != _generations.end(); ++it) {
-        it.value()++;
-        _downloader->abort(it.key());
+    for (const QString &key : _operations.keys() + _fetches.keys()) {
+        _cancelOperation(key);
     }
 }
 
@@ -702,7 +528,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
             qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source" << job.key << entry.fileName;
             continue;
         }
-        job.generation = ++_generations[job.key];
+        job.cancelToken = _beginOperation(job.key);
 
         // Keep the order of the sources while they load
         GeoZoneSource *const placeholder = _newSource(job.key, job.url, entry.enabled);

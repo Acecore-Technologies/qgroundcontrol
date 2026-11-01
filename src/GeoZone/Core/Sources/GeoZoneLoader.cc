@@ -204,15 +204,21 @@ bool GeoZoneLoader::parse(const QByteArray &content, GeoZoneParser::Result &resu
 GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &store)
 {
     Result loadResult;
-    if (!job.pagePaths.isEmpty()) {
-        mergePages(job.sourcePath, job.pagePaths);
-    }
     // Downloads which don't become the stored copy are removed
     const auto removeDownload = qScopeGuard([&job, &loadResult]() {
         if (job.downloaded && !loadResult.stored) {
-            (void) QFile::remove(job.sourcePath);
+            for (const QString &path : job.pagePaths + QStringList{ job.sourcePath }) {
+                (void) QFile::remove(path);
+            }
         }
     });
+    if (job.cancelToken.isCancelled()) {
+        loadResult.cancelled = true;
+        return loadResult;
+    }
+    if (!job.pagePaths.isEmpty()) {
+        mergePages(job.sourcePath, job.pagePaths);
+    }
 
     QFile file(job.sourcePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -246,6 +252,10 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
         return loadResult;
     }
 
+    if (job.cancelToken.isCancelled()) {
+        loadResult.cancelled = true;
+        return loadResult;
+    }
     if (!job.storedFileName.isEmpty()) {
         loadResult.stored = job.downloaded ? store.adoptFile(job.sourcePath, job.storedFileName, loadResult.storeError)
                                            : store.copyFile(job.sourcePath, job.storedFileName, loadResult.storeError);

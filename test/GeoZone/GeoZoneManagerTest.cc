@@ -12,6 +12,29 @@
 
 using namespace GeoZoneTestHelpers;
 
+namespace {
+
+/// A format whose documents name the companion document of each feature by its "detail" property
+class DetailFormat : public GeoZoneFormat
+{
+public:
+    GeoZoneParser::Format format() const final { return GeoZoneParser::Format::ED269; }
+    QString name() const final { return QStringLiteral("Detail"); }
+    int detectionOrder() const final { return 0; }
+    bool detect(const QJsonObject &root, const QJsonArray &, GeoZoneParser::Format) const final { return root.contains(QStringLiteral("details")); }
+    QList<CompanionRequest> companionRequests(const QUrl &documentUrl, const QJsonObject &, const QJsonArray &features) const final
+    {
+        QList<CompanionRequest> requests;
+        for (const QJsonValue &feature : features) {
+            const QString detail = feature.toObject().value(QStringLiteral("detail")).toString();
+            requests.append(CompanionRequest{ detail, QStringLiteral("v1"), documentUrl.resolved(QUrl(QStringLiteral("/details/%1").arg(detail))).toString() });
+        }
+        return requests;
+    }
+};
+
+} // namespace
+
 void GeoZoneManagerTest::_testManagerLoadPersistClear()
 {
     const QTemporaryDir storageDir;
@@ -379,6 +402,132 @@ void GeoZoneManagerTest::_testFeedCompanions()
     QTRY_VERIFY_WITH_TIMEOUT(!restarted.busy(), 10000);
     QCOMPARE(detailRequests(), 1);
     QCOMPARE(scheduled(restarted), 1);
+}
+
+void GeoZoneManagerTest::_testFeedFetchFormatCompanions()
+{
+    // The fetch asks the format recognizing the document which companions it needs
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/list", R"({ "details": true, "features": [ { "detail": "a" }, { "detail": "b" } ] })");
+    server.files.insert("/details/a", "detail of a");
+    server.files.insert("/details/b", "detail of b");
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneDownloader downloader;
+    downloader.setDirectory(dir.path());
+    const DetailFormat format;
+
+    GeoZoneFeedFetch::Request request;
+    request.url = server.url(QStringLiteral("/list"));
+    request.formats = { &format };
+    // A companion of the stored copy with the current version isn't downloaded again
+    request.companions.insert(QStringLiteral("b"), GeoZoneParser::Companion{ QStringLiteral("v1"), "stored detail of b" });
+    GeoZoneFeedFetch fetch(&downloader, request);
+    std::optional<GeoZoneFeedFetch::Result> result;
+    (void) connect(&fetch, &GeoZoneFeedFetch::finished, &fetch, [&result](const GeoZoneFeedFetch::Result &fetchResult) { result = fetchResult; });
+    fetch.start();
+    QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 10000);
+    QCOMPARE(result->status, GeoZoneFeedFetch::Result::Status::Ready);
+    QCOMPARE(fetch.stage(), GeoZoneFeedFetch::Stage::Finished);
+    QCOMPARE(server.requestedPaths, (QList<QByteArray>{ "/list", "/details/a" }));
+
+    // The document is kept with its companions
+    QFile file(result->filePath);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject companions = QJsonDocument::fromJson(file.readAll()).object().value(QStringLiteral("companions")).toObject();
+    QCOMPARE(companions.value(QStringLiteral("a")).toObject().value(QStringLiteral("data")).toString(), QStringLiteral("detail of a"));
+    QCOMPARE(companions.value(QStringLiteral("b")).toObject().value(QStringLiteral("data")).toString(), QStringLiteral("stored detail of b"));
+    file.close();
+
+    // Documents of formats without companions are loaded as downloaded
+    request.formats = GeoZoneFormat::formats();
+    GeoZoneFeedFetch plainFetch(&downloader, request);
+    result.reset();
+    (void) connect(&plainFetch, &GeoZoneFeedFetch::finished, &plainFetch, [&result](const GeoZoneFeedFetch::Result &fetchResult) { result = fetchResult; });
+    plainFetch.start();
+    QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), 10000);
+    QCOMPARE(result->status, GeoZoneFeedFetch::Result::Status::Ready);
+    QCOMPARE(server.requestedPaths.count(), 3);
+    QCOMPARE(GeoZoneDownloader::readFile(result->filePath, 1000), server.files.value("/list"));
+}
+
+void GeoZoneManagerTest::_testFeedCancellation()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/slow", server.body);
+    server.delays.insert("/slow", 300);
+    const QString url = server.url(QStringLiteral("/slow"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QDir storage(storageDir.path());
+    const QDir downloads(storage.filePath(QStringLiteral("downloads")));
+    const auto waitPastResponses = []() { QTest::qWait(500); };
+
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    manager.addUrl(url);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.zoneCount(), 3);
+
+    // Removing a source while it is refreshed aborts the download, the response arriving later is dropped
+    int requests = server.requestCount;
+    manager.refreshFeeds();
+    QTRY_COMPARE(server.requestCount, requests + 1);
+    QVERIFY(manager.busy());
+    manager.removeSource(0);
+    QVERIFY(!manager.busy());
+    waitPastResponses();
+    QCOMPARE(manager.sources()->count(), 0);
+    QCOMPARE(manager.zoneCount(), 0);
+    QCOMPARE(addedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+    QVERIFY(storage.entryList({ QStringLiteral("*.json") }, QDir::Files).isEmpty());
+    QVERIFY(downloads.entryList(QDir::Files).isEmpty());
+
+    // Adding the feed again while it downloads replaces the download, only the last one is loaded
+    requests = server.requestCount;
+    manager.addUrl(url);
+    QTRY_COMPARE(server.requestCount, requests + 1);
+    manager.addUrl(url);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    waitPastResponses();
+    QCOMPARE(addedSpy.count(), 2);
+    QCOMPARE(manager.sources()->count(), 1);
+    QCOMPARE(manager.zoneCount(), 3);
+    QCOMPARE(storage.entryList({ QStringLiteral("*.json") }, QDir::Files).count(), 2);
+    QVERIFY(downloads.entryList(QDir::Files).isEmpty());
+
+    // Closing while a feed downloads drops it
+    const QTemporaryDir closingDir;
+    QVERIFY(closingDir.isValid());
+    {
+        GeoZoneManager closing(closingDir.path());
+        requests = server.requestCount;
+        closing.addUrl(url);
+        QTRY_COMPARE(server.requestCount, requests + 1);
+    }
+    waitPastResponses();
+    QVERIFY(QDir(closingDir.path()).entryList({ QStringLiteral("*.json") }, QDir::Files).isEmpty());
+
+    // A load canceled before it runs neither parses nor stores the download
+    const QString downloadPath = storage.filePath(QStringLiteral("download.part"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), downloadPath));
+    GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
+    job.sourcePath = downloadPath;
+    job.downloaded = true;
+    job.cancelToken.cancel();
+    const GeoZoneLoader::Result loadResult = GeoZoneLoader::run(job, GeoZoneStore(storageDir.path()));
+    QVERIFY(loadResult.cancelled);
+    QVERIFY(!loadResult.stored);
+    QCOMPARE(loadResult.result.format, GeoZoneParser::Format::Unknown);
+    QVERIFY(!QFile::exists(downloadPath));
+    QVERIFY(!storage.exists(job.storedFileName));
 }
 
 void GeoZoneManagerTest::_testReloadChanges()

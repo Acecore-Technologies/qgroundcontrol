@@ -36,8 +36,11 @@ qt_add_library(GeoZoneCore STATIC
     Formats/GeoZoneParserUtils.h
     Formats/GeoZoneZip.cc
     Formats/GeoZoneZip.h
+    Sources/GeoZoneCancelToken.h
     Sources/GeoZoneDownloader.cc
     Sources/GeoZoneDownloader.h
+    Sources/GeoZoneFeedFetch.cc
+    Sources/GeoZoneFeedFetch.h
     Sources/GeoZoneLoader.cc
     Sources/GeoZoneLoader.h
     Sources/GeoZoneProviders.cc

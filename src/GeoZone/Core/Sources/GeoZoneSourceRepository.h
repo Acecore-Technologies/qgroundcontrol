@@ -11,10 +11,11 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QObject>
-#include <QtCore/QSharedPointer>
 #include <QtCore/QString>
 
+#include "GeoZoneCancelToken.h"
 #include "GeoZoneDownloader.h"
+#include "GeoZoneFeedFetch.h"
 #include "GeoZoneLoader.h"
 #include "GeoZoneSourceIndex.h"
 #include "GeoZoneStore.h"
@@ -96,18 +97,13 @@ private:
     void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _updateStoredEntry(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _download(const QString &url, GeoZoneLoader::Request request);
-    /// @param datasetUrl Dataset linked from the feed's page which was downloaded, empty for the feed URL itself
-    void _downloadComplete(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl = QString());
-    /// Starts loading a downloaded feed
-    void _loadDownload(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
-    /// Downloads the further pages of a WFS response the server limited, then continues with the companions
-    /// @return false when the response is complete
-    bool _fetchPages(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
-    struct PageFetch;
-    void _fetchPage(const QSharedPointer<PageFetch> &fetch);
-    /// Downloads the companion documents of a feed which has them, then loads it
-    /// @return false when the feed has no companions
-    bool _fetchCompanions(const GeoZoneDownloader::Result &download, const QString &url, int generation, GeoZoneLoader::Request request, const QString &datasetUrl);
+    void _fetchFinished(GeoZoneFeedFetch *fetch, const GeoZoneFeedFetch::Result &result, GeoZoneLoader::Request request);
+    /// Cancels the fetch or load of the source in progress
+    /// @return Token of the fetch or load replacing it
+    GeoZoneCancelToken _beginOperation(const QString &key);
+    /// Forgets the token of a fetch or load which finished, if it is the source's current one
+    void _endOperation(const QString &key, const GeoZoneCancelToken &token);
+    void _cancelOperation(const QString &key);
     void _idle();
     void _setPending(int delta);
     void _saveIndex();
@@ -123,15 +119,13 @@ private:
     QList<GeoZoneSource*> _sources;
     QTimer *_refreshTimer = nullptr;
     int _pendingCount = 0;
-    QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
+    QHash<QString, GeoZoneCancelToken> _operations; ///< Fetch or load in progress per source key, earlier ones were canceled
+    QHash<QString, GeoZoneFeedFetch*> _fetches;     ///< Feeds being downloaded, by URL
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
-    QHash<QString, QStringList> _pagePaths; ///< Further pages downloaded for the feed being loaded, by URL
     bool _storageErrorReported = false;
     QString _validityWarning;
     bool _startupRefreshPending = false;
     bool _startupCheckPending = false;
 
     static constexpr int _refreshCheckIntervalMSecs = 5 * 60 * 1000;
-    static constexpr qint64 _maxPageBytes = 4 * 1024 * 1024;   ///< Downloads read to look for links to datasets
-    static constexpr qint64 _maxCompanionBytes = 1024 * 1024;
 };

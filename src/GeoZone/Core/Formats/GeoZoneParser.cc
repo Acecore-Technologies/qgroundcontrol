@@ -151,13 +151,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         result.missingFeatures = static_cast<int>((std::min)(matched - returned, static_cast<double>(std::numeric_limits<int>::max())));
     }
 
-    const GeoZoneFormat *format = nullptr;
-    for (const GeoZoneFormat *candidate : GeoZoneFormat::formats()) {
-        if (!candidate->isXml() && candidate->detect(root, features, formatHint)) {
-            format = candidate;
-            break;
-        }
-    }
+    const GeoZoneFormat *const format = GeoZoneFormat::detectJson(root, features, formatHint);
     if (!format) {
         errorString = tr("The file is not in a supported geozone format. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces and the FAA, DiPUL and IGN GeoJSON are supported.");
         return false;

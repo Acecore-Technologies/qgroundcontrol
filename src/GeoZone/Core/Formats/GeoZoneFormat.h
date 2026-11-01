@@ -58,11 +58,20 @@ public:
     /// @return The companion documents the features refer to, none by default
     /// @param documentUrl Where the document was downloaded from
     virtual QList<CompanionRequest> companionRequests(const QUrl &documentUrl, const QJsonObject &root, const QJsonArray &features) const;
+    /// @return The companion documents of a downloaded JSON document, from the first of the formats recognizing it.
+    ///         None for documents of other formats, and documents which aren't JSON objects.
+    /// @param formatHint See detect()
+    /// @param root Set to the document, which GeoZoneParser::composite() stores with its companions
+    static QList<CompanionRequest> companionRequestsOf(const QUrl &documentUrl, const QByteArray &document, GeoZoneParser::Format formatHint,
+                                                       QJsonObject &root, const QList<const GeoZoneFormat*> &candidates = formats());
     /// Services answering with an empty list when no zones apply, unlike files which must have zones
     virtual bool acceptsEmpty() const { return false; }
 
     /// @return The registered formats, in the order in which they are detected
     static const QList<const GeoZoneFormat*> &formats();
+    /// @return The first of the JSON formats recognizing the document, null if none does
+    static const GeoZoneFormat *detectJson(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint,
+                                           const QList<const GeoZoneFormat*> &candidates = formats());
     /// @return The format, or null for Unknown
     static const GeoZoneFormat *find(GeoZoneParser::Format format);
 
