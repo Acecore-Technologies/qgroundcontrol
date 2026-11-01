@@ -17,8 +17,10 @@
 #include "GeoZoneMissionItem.h"
 
 /// The order a vehicle flies the items of a mission with DO_JUMP items: on to the next item along the drawn flight
-/// path, or straight back to the item a DO_JUMP jumps to as many times as its repeat count, a jump repeating without
-/// end being flown once more. A pure computation on the items and the drawn segments, see GeoZoneMissionReader.
+/// path, or straight to the item a DO_JUMP jumps to as many times as its repeat count, a jump repeating without end
+/// being flown once more, until the first return to launch reached. Like the mission controller, the drawn flight path
+/// ends at the first return to launch, so the legs between the items after it, which a jump can skip it to reach, are
+/// straight. A pure computation on the items and the drawn segments, see GeoZoneMissionReader.
 class GeoZoneMissionJumps
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionJumps)
@@ -45,13 +47,16 @@ public:
         QHash<int, double> itemDistances;   ///< Meters flown when the vehicle first reaches the items, by index
         double distance = 0;                ///< Meters flown
         bool repeatsIndefinitely = false;   ///< A DO_JUMP repeats without end, flown once more
+        int returnItem = -1;                ///< Return to launch the flight ends with, -1 when it reaches none
+        int lastCoordinateItem = -1;        ///< Last item with a coordinate flown, which the vehicle returns from
     };
 
     /// @return true if a DO_JUMP of the items jumps to an item of the mission
     static bool hasJumps(const QList<GeoZoneMissionItem> &items);
 
-    /// @return The flight along the items, until the end of the mission or a return to launch, then home along the
-    ///         drawn return segment. The repeats stop once maxSteps steps are flown.
+    /// @return The flight along the items, until the end of the mission or the first return to launch reached, then
+    ///         home along the drawn return segment when it is that of the return. The repeats stop once maxSteps steps
+    ///         are flown. Straight legs not drawn after a return to launch are labelled with the jump which skipped it.
     /// @param items The visual items of the mission, the planned home first
     /// @param itemSegments Drawn segments of the items, by item index
     /// @param segmentDistances Meters along the drawn segments

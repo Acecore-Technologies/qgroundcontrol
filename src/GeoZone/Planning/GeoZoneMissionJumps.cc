@@ -9,6 +9,9 @@
 
 #include "GeoZoneMissionJumps.h"
 
+#include <algorithm>
+#include <iterator>
+
 QHash<int, GeoZoneMissionJumps::Jump> GeoZoneMissionJumps::_jumps(const QList<GeoZoneMissionItem> &items)
 {
     QHash<int, Jump> jumps;
@@ -50,6 +53,17 @@ GeoZoneMissionJumps::Walk GeoZoneMissionJumps::walk(const QList<GeoZoneMissionIt
             previous = i;
         }
     }
+    // The mission controller draws no segments after its first return to launch, but a jump may skip it
+    const auto firstReturn = std::find_if(items.cbegin(), items.cend(), [](const GeoZoneMissionItem &item) {
+        return item.kind == GeoZoneMissionItem::Kind::ReturnToLaunch;
+    });
+    const int drawnEnd = (firstReturn != items.cend()) ? static_cast<int>(std::distance(items.cbegin(), firstReturn)) : count;
+    const auto jumpLabel = [&items, &jumps](int jumpItem) {
+        const int jumpSequence = items[jumpItem].sequenceNumber;
+        return (jumps.value(jumpItem).repeat < 0) ? tr("the jump at item %1, repeated without end").arg(jumpSequence) :
+                                                    tr("the jump at item %1").arg(jumpSequence);
+    };
+
     Walk walk;
     const auto flyDrawn = [&walk, &segmentDistances](int segment) {
         const double distance = segmentDistances.value(segment);
@@ -59,7 +73,8 @@ GeoZoneMissionJumps::Walk GeoZoneMissionJumps::walk(const QList<GeoZoneMissionIt
     QHash<int, int> jumpsLeft;
     qsizetype jumpCount = 0;
     int lastCoordinateItem = -1;
-    int jumpItem = -1;  ///< Jumped at, until the next item with a coordinate
+    int jumpItem = -1;      ///< Jumped at, until the next item with a coordinate
+    int skippingJump = -1;  ///< Jumped at past the first return to launch, the drawn flight path ends there
     for (int i = 0; i < count; i++) {
         const GeoZoneMissionItem &item = items[i];
         if (const auto jump = jumps.constFind(i); jump != jumps.cend()) {
@@ -73,15 +88,19 @@ GeoZoneMissionJumps::Walk GeoZoneMissionJumps::walk(const QList<GeoZoneMissionIt
                 jumpsLeft[i]--;
                 jumpCount++;
                 jumpItem = i;
+                if ((i < drawnEnd) && (jump->target > drawnEnd)) {
+                    skippingJump = i;
+                }
                 i = jump->target - 1;
             }
             continue;
         }
         if (item.kind == GeoZoneMissionItem::Kind::ReturnToLaunch) {
+            walk.returnItem = i;
             break;
         }
         if (item.flies && (lastCoordinateItem >= 0)) {
-            if ((jumpItem < 0) && (nextCoordinateItems.value(lastCoordinateItem, -1) == i)) {
+            if ((jumpItem < 0) && (i < drawnEnd) && (nextCoordinateItems.value(lastCoordinateItem, -1) == i)) {
                 if (itemSegments[lastCoordinateItem].outgoing >= 0) {
                     flyDrawn(itemSegments[lastCoordinateItem].outgoing);
                 }
@@ -90,9 +109,9 @@ GeoZoneMissionJumps::Walk GeoZoneMissionJumps::walk(const QList<GeoZoneMissionIt
                 const QGeoCoordinate to = item.entry.coordinate;
                 QString label;
                 if (jumpItem >= 0) {
-                    const int jumpSequence = items[jumpItem].sequenceNumber;
-                    label = (jumps.value(jumpItem).repeat < 0) ? tr("the jump at item %1, repeated without end").arg(jumpSequence) :
-                                                                 tr("the jump at item %1").arg(jumpSequence);
+                    label = jumpLabel(jumpItem);
+                } else if (skippingJump >= 0) {
+                    label = jumpLabel(skippingJump);
                 }
                 if (from.isValid() && to.isValid() && (from.distanceTo(to) > 0.01)) {
                     const double distance = from.distanceTo(to);
@@ -112,7 +131,9 @@ GeoZoneMissionJumps::Walk GeoZoneMissionJumps::walk(const QList<GeoZoneMissionIt
             lastCoordinateItem = i;
         }
     }
-    if ((returnSegment >= 0) && (lastCoordinateItem >= 0) && (itemSegments[lastCoordinateItem].outgoing == returnSegment)) {
+    walk.lastCoordinateItem = lastCoordinateItem;
+    // The drawn return segment leads home from the last item before the first return to launch
+    if ((walk.returnItem == drawnEnd) && (returnSegment >= 0) && (lastCoordinateItem >= 0) && (itemSegments[lastCoordinateItem].outgoing == returnSegment)) {
         flyDrawn(returnSegment);
     }
     return walk;

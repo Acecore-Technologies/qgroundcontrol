@@ -181,9 +181,9 @@ GeoZoneMissionPath GeoZoneMissionReader::read(MissionController *missionControll
     }
 
     const QList<GeoZoneMissionItem> missionItems = items(missionController);
-    _setFlightPaths(path, missionItems, itemSegments);
+    const auto [flownReturnItem, returnFromItem] = _setFlightPaths(path, missionItems, itemSegments);
     const GeoZoneReturnModel::Destinations returnDestinations = destinations(missionController, missionItems);
-    _appendCoverage(path, missionController, coordinateItems, returnParameters, returnDestinations);
+    _appendCoverage(path, missionController, coordinateItems, returnParameters, returnDestinations, flownReturnItem, returnFromItem);
     if (withContingencies) {
         // The sequence numbers the segments lead to
         QHash<int, int> outgoingSequenceNumbers;
@@ -289,14 +289,24 @@ GeoZoneReturnModel::Destinations GeoZoneMissionReader::destinations(MissionContr
     return destinations;
 }
 
-void GeoZoneMissionReader::_setFlightPaths(GeoZoneMissionPath &path, const QList<GeoZoneMissionItem> &items,
-                                           const QList<GeoZoneMissionJumps::ItemSegments> &itemSegments)
+std::pair<int, int> GeoZoneMissionReader::_setFlightPaths(GeoZoneMissionPath &path, const QList<GeoZoneMissionItem> &items,
+                                                          const QList<GeoZoneMissionJumps::ItemSegments> &itemSegments)
 {
     if (!GeoZoneMissionJumps::hasJumps(items)) {
         path._paths = GeoZoneMissionPath::pathsFromSegments(path._segments);
         path._itemFlightDistances = path._itemDistances;
         path._flightDistance = path.totalDistance();
-        return;
+        // The mission ends at the first return to launch
+        int returnFromItem = -1;
+        for (int i = 0; i < items.count(); i++) {
+            if (items[i].kind == GeoZoneMissionItem::Kind::ReturnToLaunch) {
+                return { i, returnFromItem };
+            }
+            if (items[i].flies) {
+                returnFromItem = i;
+            }
+        }
+        return { -1, -1 };
     }
 
     QList<double> segmentDistances;
@@ -333,10 +343,12 @@ void GeoZoneMissionReader::_setFlightPaths(GeoZoneMissionPath &path, const QList
     path._paths = GeoZoneMissionPath::pathsFromSegments(flown);
     path._flightDistance = walk.distance;
     path._repeatsIndefinitely = walk.repeatsIndefinitely;
+    return { walk.returnItem, (walk.returnItem >= 0) ? walk.lastCoordinateItem : -1 };
 }
 
 void GeoZoneMissionReader::_appendCoverage(GeoZoneMissionPath &path, MissionController *missionController, const QList<int> &coordinateItems,
-                                           const GeoZoneReturnModel::Parameters &returnParameters, const GeoZoneReturnModel::Destinations &destinations)
+                                           const GeoZoneReturnModel::Parameters &returnParameters, const GeoZoneReturnModel::Destinations &destinations,
+                                           int returnItem, int returnFromItem)
 {
     const QmlObjectListModel *const visualItems = missionController->visualItems();
 
@@ -377,7 +389,6 @@ void GeoZoneMissionReader::_appendCoverage(GeoZoneMissionPath &path, MissionCont
     };
 
     const double transitionDistance = SettingsManager::instance()->planViewSettings()->vtolTransitionDistance()->rawValue().toDouble();
-    int returnItem = -1;
     for (int i = 0; i < visualItems->count(); i++) {
         VisualMissionItem *const visualItem = visualItems->value<VisualMissionItem*>(i);
         if (SimpleMissionItem *const simpleItem = qobject_cast<SimpleMissionItem*>(visualItem)) {
@@ -424,8 +435,6 @@ void GeoZoneMissionReader::_appendCoverage(GeoZoneMissionPath &path, MissionCont
                     appendPath({ GeoZone::Position{ overshootFrom, altitude }, GeoZone::Position{ overshootFrom.atDistanceAndAzimuth(overshoot, azimuth), altitude } }, i,
                                tr("the VTOL transition at item %1").arg(simpleItem->sequenceNumber()), path.itemFlightDistance(i));
                 }
-            } else if ((command == MAV_CMD_NAV_RETURN_TO_LAUNCH) && (returnItem < 0)) {
-                returnItem = i;
             }
         } else if (LandingComplexItem *const landingItem = qobject_cast<LandingComplexItem*>(visualItem)) {
             const double radius = landingItem->loiterRadius()->rawValue().toDouble();
@@ -437,11 +446,10 @@ void GeoZoneMissionReader::_appendCoverage(GeoZoneMissionPath &path, MissionCont
     }
 
     // The return the vehicle flies after the return to launch item, from the last item before it
-    const QList<int> beforeReturn = previousCoordinateItems(returnItem);
-    if ((returnItem < 0) || beforeReturn.isEmpty()) {
+    if ((returnItem < 0) || (returnFromItem < 0)) {
         return;
     }
-    const VisualMissionItem *const lastItem = visualItems->value<const VisualMissionItem*>(beforeReturn.last());
+    const VisualMissionItem *const lastItem = visualItems->value<const VisualMissionItem*>(returnFromItem);
     GeoZoneReturnModel::Start start;
     start.position = GeoZone::Position{ lastItem->exitCoordinate(), lastItem->amslExitAlt() };
     start.sequenceNumber = path._sequenceNumbers.value(returnItem, -1);

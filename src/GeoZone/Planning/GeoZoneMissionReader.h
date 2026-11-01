@@ -12,6 +12,8 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QList>
 
+#include <utility>
+
 #include "GeoZoneMissionItem.h"
 #include "GeoZoneMissionJumps.h"
 #include "GeoZoneMissionPath.h"
@@ -50,9 +52,12 @@ public:
 
 private:
     /// Sets the paths flown, following the DO_JUMP items of the mission
-    static void _setFlightPaths(GeoZoneMissionPath &path, const QList<GeoZoneMissionItem> &items, const QList<GeoZoneMissionJumps::ItemSegments> &itemSegments);
+    /// @return The return to launch item the flight ends with and the item the vehicle returns from, -1 without
+    static std::pair<int, int> _setFlightPaths(GeoZoneMissionPath &path, const QList<GeoZoneMissionItem> &items,
+                                               const QList<GeoZoneMissionJumps::ItemSegments> &itemSegments);
     /// Adds the paths the drawn flight path leaves out: loiter circles, VTOL transitions, the loiters of landing patterns
-    /// and the return after a return to launch item
+    /// and the return after the return to launch item the flight ends with
     static void _appendCoverage(GeoZoneMissionPath &path, MissionController *missionController, const QList<int> &coordinateItems,
-                                const GeoZoneReturnModel::Parameters &returnParameters, const GeoZoneReturnModel::Destinations &destinations);
+                                const GeoZoneReturnModel::Parameters &returnParameters, const GeoZoneReturnModel::Destinations &destinations,
+                                int returnItem, int returnFromItem);
 };

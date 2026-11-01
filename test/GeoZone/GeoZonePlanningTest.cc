@@ -936,6 +936,47 @@ void GeoZonePlanningTest::_testMissionJumps()
     const GeoZoneMissionPath capped = GeoZoneMissionPath::fromMission(missionController);
     QVERIFY(capped.flightDistance() > (capped.totalDistance() + (100 * loop)));
     QVERIFY(capped.flightDistance() < (capped.totalDistance() + (((GeoZoneMissionPath::maxFlightSegments / 3) + 2) * loop)));
+
+    // A jump past a return to launch: the mission goes on to the items after it, whose legs the mission controller
+    // doesn't draw, and the vehicle doesn't return. S is on such a leg, R on the return the jump skips.
+    const QGeoCoordinate skippedFrom = offsetFrom(home, 1000, -3000);
+    const QGeoCoordinate afterReturn = offsetFrom(home, 1000, -1000);
+    const QGeoCoordinate missionEnd = offsetFrom(home, 0, -1000);
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("skipped.json"), QJsonArray{
+        _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), offsetFrom(home, 500, -1000), 50),
+        _circleFeature(QStringLiteral("R"), QStringLiteral("PROHIBITED"), offsetFrom(home, 500, -1500), 50),
+    }), errorString), qPrintable(errorString));
+    PlanMasterController skippingController;
+    skippingController.setFlyView(false);
+    skippingController.start();
+    MissionController *const skipping = skippingController.missionController();
+    skipping->visualItems()->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(home.latitude(), home.longitude(), 400));
+    (void) skipping->insertSimpleMissionItem(skippedFrom, 1);
+    SimpleMissionItem *const skippingJump = qobject_cast<SimpleMissionItem*>(skipping->insertSimpleMissionItem(skippedFrom, 2));
+    skippingJump->setCommand(MAV_CMD_DO_JUMP);
+    skippingJump->missionItem().setParam1(4);
+    skippingJump->missionItem().setParam2(1);
+    qobject_cast<SimpleMissionItem*>(skipping->insertSimpleMissionItem(skippedFrom, 3))->setCommand(MAV_CMD_NAV_RETURN_TO_LAUNCH);
+    (void) skipping->insertSimpleMissionItem(afterReturn, 4);
+    (void) skipping->insertSimpleMissionItem(missionEnd, 5);
+    QCOMPARE(skipping->visualItems()->value<VisualMissionItem*>(5)->sequenceNumber(), 5);
+    QTRY_VERIFY(!GeoZoneMissionPath::fromMission(skipping).segments().isEmpty());
+    const GeoZoneMissionPath skippedPath = GeoZoneMissionPath::fromMission(skipping);
+    const auto flownTo = [&skippedPath](const QGeoCoordinate &coordinate) {
+        return std::any_of(skippedPath.paths().cbegin(), skippedPath.paths().cend(), [&coordinate](const GeoZoneMissionPath::Path &flown) {
+            return std::any_of(flown.positions.cbegin(), flown.positions.cend(), [&coordinate](const GeoZone::Position &position) {
+                return position.coordinate.distanceTo(coordinate) < 1;
+            });
+        });
+    };
+    QVERIFY(flownTo(afterReturn));
+    QVERIFY(flownTo(missionEnd));
+    QVERIFY(std::abs(skippedPath.itemFlightDistance(5) - (skippedFrom.distanceTo(afterReturn) + afterReturn.distanceTo(missionEnd))) < 1);
+    GeoZoneMissionCheck skippingCheck(&manager);
+    skippingCheck.setUpdateDelay(0);
+    skippingCheck.setMissionController(skipping);
+    QTRY_COMPARE(zoneIdentifiers(skippingCheck.crossedZones()), QStringList{ QStringLiteral("S") });
+    QCOMPARE(skippingCheck.pathLabels(skippingCheck.crossedZones().first()), QStringList{ QStringLiteral("the jump at item 2") });
 }
 
 namespace {
@@ -1061,6 +1102,40 @@ void GeoZonePlanningTest::_testMissionJumpWalk()
     patterns.addCommand(Kind::Jump, 5, 1);
     patterns.items[3].sequenceNumber = patterns.items[3].lastSequenceNumber = 11;
     QCOMPARE(stepsText(patterns.walk()), QStringLiteral("0 1 2 2>1 1 2"));
+
+    // The drawn flight path ends with the segment home before the first return to launch, which a jump skips here
+    JumpMission skipped;
+    skipped.addWaypoint(home);
+    skipped.addWaypoint(offsetFrom(home, 1000, 0));
+    skipped.addCommand(Kind::Jump, 4, 1);
+    skipped.addCommand(Kind::ReturnToLaunch);
+    skipped.addWaypoint(offsetFrom(home, 1000, 2000), false);
+    skipped.addWaypoint(offsetFrom(home, 0, 2000), false);
+    skipped.addCommand(Kind::ReturnToLaunch);
+    skipped.itemSegments[1].outgoing = static_cast<int>(skipped.segmentDistances.count());
+    skipped.segmentDistances.append(1000);
+    walk = skipped.walk(1);
+    // On to the items after it, whose legs aren't drawn, until the second return to launch, without the segment home
+    QCOMPARE(stepsText(walk), QStringLiteral("0 1>4 4>5"));
+    QCOMPARE(walk.steps[1].label, QStringLiteral("the jump at item 2"));
+    QCOMPARE(walk.steps[2].label, QStringLiteral("the jump at item 2"));
+    QVERIFY(std::abs(walk.steps[2].distance - 1000) < 1);
+    QCOMPARE(walk.returnItem, 6);
+    QCOMPARE(walk.lastCoordinateItem, 5);
+    // Without the jump, the first return to launch ends the flight along the drawn segment home
+    skipped.items[2].jumpRepeat = 0;
+    walk = skipped.walk(1);
+    QCOMPARE(stepsText(walk), QStringLiteral("0 1"));
+    QCOMPARE(walk.returnItem, 3);
+    QCOMPARE(walk.lastCoordinateItem, 1);
+    // Nor is the segment home flown when a jump reaches the return from another item
+    skipped.items[2].jumpRepeat = 1;
+    skipped.items[6].kind = Kind::Other;
+    skipped.addCommand(Kind::Jump, 3, 1);
+    walk = skipped.walk(1);
+    QCOMPARE(stepsText(walk), QStringLiteral("0 1>4 4>5"));
+    QCOMPARE(walk.returnItem, 3);
+    QCOMPARE(walk.lastCoordinateItem, 5);
 }
 
 void GeoZonePlanningTest::_testMissionContingencies()
