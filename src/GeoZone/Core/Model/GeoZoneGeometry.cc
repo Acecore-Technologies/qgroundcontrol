@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneGeometry.h"
+#include "GeoZoneVector.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QRectF>
@@ -27,32 +28,6 @@ constexpr double kEarthRadiusMeters = 6371008.8;
 constexpr double kDegreesToRadians = M_PI / 180.0;
 constexpr double kMetersPerDegree = kEarthRadiusMeters * kDegreesToRadians;
 
-double _cross(const QPointF &a, const QPointF &b)
-{
-    return (a.x() * b.y()) - (a.y() * b.x());
-}
-
-double _length(const QPointF &vector)
-{
-    return std::hypot(vector.x(), vector.y());
-}
-
-QPointF _unit(const QPointF &vector)
-{
-    const double length = _length(vector);
-    return (length > 0) ? (vector / length) : QPointF();
-}
-
-/// @return Sign of the turn from a->b to a->c, 0 when collinear
-int _orientation(const QPointF &a, const QPointF &b, const QPointF &c)
-{
-    const double value = _cross(b - a, c - a);
-    if (std::abs(value) < 1e-12) {
-        return 0;
-    }
-    return (value > 0) ? 1 : -1;
-}
-
 bool _onSegment(const QPointF &a, const QPointF &b, const QPointF &point)
 {
     return (point.x() >= std::min(a.x(), b.x())) && (point.x() <= std::max(a.x(), b.x())) &&
@@ -62,11 +37,11 @@ bool _onSegment(const QPointF &a, const QPointF &b, const QPointF &point)
 /// Intersection of the lines through p with direction d and through q with direction e
 QPointF _lineIntersection(const QPointF &p, const QPointF &d, const QPointF &q, const QPointF &e)
 {
-    const double denominator = _cross(d, e);
+    const double denominator = GeoZoneVector::cross(d, e);
     if (std::abs(denominator) < 1e-12) {
         return p;
     }
-    return p + (d * (_cross(q - p, e) / denominator));
+    return p + (d * (GeoZoneVector::cross(q - p, e) / denominator));
 }
 
 /// Douglas-Peucker on the part of the closed ring from first to last, which may exceed the vertex count to wrap
@@ -125,12 +100,12 @@ Expansion _expansion(const QList<QPointF> &ring, const QList<qsizetype> &kept, b
     QList<QPointF> directions;
     QList<QPointF> normals;
     for (qsizetype i = 0; i < keptCount; i++) {
-        directions.append(_unit(ring[kept[wrap(i + 1)]] - ring[kept[i]]));
+        directions.append(GeoZoneVector::unit(ring[kept[wrap(i + 1)]] - ring[kept[i]]));
         normals.append(_outwardNormal(directions.last(), counterClockwise));
     }
     QList<bool> convex;
     for (qsizetype i = 0; i < keptCount; i++) {
-        const double turn = _cross(directions[wrap(i - 1)], directions[i]);
+        const double turn = GeoZoneVector::cross(directions[wrap(i - 1)], directions[i]);
         convex.append(counterClockwise ? (turn > 0) : (turn < 0));
     }
 
@@ -156,7 +131,7 @@ Expansion _expansion(const QList<QPointF> &ring, const QList<qsizetype> &kept, b
 
     for (qsizetype i = 0; i < keptCount; i++) {
         const QPointF &vertex = ring[kept[i]];
-        QPointF bisector = _unit(normals[wrap(i - 1)] + normals[i]);
+        QPointF bisector = GeoZoneVector::unit(normals[wrap(i - 1)] + normals[i]);
         if (bisector.isNull()) {
             bisector = directions[wrap(i - 1)];
         }
@@ -182,7 +157,7 @@ QList<QPointF> _offsetRing(const QList<QPointF> &ring, const Expansion &expansio
     // Points closer than this are merged since nearly zero length edges make intersection tests unreliable
     constexpr double minSpacing = 0.001;
     const auto append = [&result, &owners](const QPointF &point, qsizetype owner) {
-        if (result.isEmpty() || (_length(point - result.last()) > minSpacing)) {
+        if (result.isEmpty() || (GeoZoneVector::length(point - result.last()) > minSpacing)) {
             result.append(point);
             owners.append(owner);
         }
@@ -193,13 +168,13 @@ QList<QPointF> _offsetRing(const QList<QPointF> &ring, const Expansion &expansio
         const QPointF &previous = ring[(i + count - 1) % count];
         const QPointF &vertex = ring[i];
         const QPointF &next = ring[(i + 1) % count];
-        const QPointF d1 = _unit(vertex - previous);
-        const QPointF d2 = _unit(next - vertex);
+        const QPointF d1 = GeoZoneVector::unit(vertex - previous);
+        const QPointF d2 = GeoZoneVector::unit(next - vertex);
         const QPointF n1 = _outwardNormal(d1, counterClockwise);
         const QPointF n2 = _outwardNormal(d2, counterClockwise);
         const QPointF p1 = vertex + (n1 * expansion.offsets[(i + count - 1) % count]);
         const QPointF p2 = vertex + (n2 * expansion.offsets[i]);
-        const double turn = _cross(d1, d2);
+        const double turn = GeoZoneVector::cross(d1, d2);
 
         if (std::abs(turn) < 1e-9) {
             // Collinear or folding back, the offset lines don't meet
@@ -211,10 +186,10 @@ QList<QPointF> _offsetRing(const QList<QPointF> &ring, const Expansion &expansio
         const bool convex = counterClockwise ? (turn > 0) : (turn < 0);
         const QPointF mitre = _lineIntersection(p1, d1, p2, d2);
         // The mitre may use up to half of each edge, leaving the rest for the corner at its other end
-        const bool mitreFits = (QPointF::dotProduct(mitre - vertex, d1) >= -(_length(vertex - previous) / 2)) &&
-                               (QPointF::dotProduct(mitre - vertex, d2) <= (_length(next - vertex) / 2));
+        const bool mitreFits = (QPointF::dotProduct(mitre - vertex, d1) >= -(GeoZoneVector::length(vertex - previous) / 2)) &&
+                               (QPointF::dotProduct(mitre - vertex, d2) <= (GeoZoneVector::length(next - vertex) / 2));
         if (convex && (QPointF::dotProduct(n1, n2) < -0.5)) {
-            QPointF bisector = _unit(n1 + n2);
+            QPointF bisector = GeoZoneVector::unit(n1 + n2);
             if (bisector.isNull()) {
                 bisector = d1;
             }
@@ -230,7 +205,7 @@ QList<QPointF> _offsetRing(const QList<QPointF> &ring, const Expansion &expansio
             append(mitre, i);
         }
     }
-    if ((result.count() > 1) && (_length(result.first() - result.last()) <= minSpacing)) {
+    if ((result.count() > 1) && (GeoZoneVector::length(result.first() - result.last()) <= minSpacing)) {
         result.removeLast();
         owners.removeLast();
     }
@@ -340,7 +315,7 @@ void _findCrossings(const QList<QPointF> &expanded, const QList<QPointF> &origin
         const QPointF &a2 = expanded[(i + 1) % count];
         const QPointF &a3 = expanded[(i + 2) % count];
         // Adjacent edges may only share their vertex, not fold back over each other
-        if ((_orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
+        if ((GeoZoneVector::orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
             badExpandedEdges.append(i);
             badExpandedEdges.append((i + 1) % count);
         }
@@ -514,7 +489,7 @@ double signedArea(const QList<QPointF> &ring)
 {
     double area = 0;
     for (qsizetype i = 0; i < ring.count(); i++) {
-        area += _cross(ring[i], ring[(i + 1) % ring.count()]);
+        area += GeoZoneVector::cross(ring[i], ring[(i + 1) % ring.count()]);
     }
     return area / 2;
 }
@@ -532,10 +507,10 @@ double signedArea(const QList<QGeoCoordinate> &ring)
 
 bool segmentsIntersect(const QPointF &a1, const QPointF &a2, const QPointF &b1, const QPointF &b2)
 {
-    const int o1 = _orientation(a1, a2, b1);
-    const int o2 = _orientation(a1, a2, b2);
-    const int o3 = _orientation(b1, b2, a1);
-    const int o4 = _orientation(b1, b2, a2);
+    const int o1 = GeoZoneVector::orientation(a1, a2, b1);
+    const int o2 = GeoZoneVector::orientation(a1, a2, b2);
+    const int o3 = GeoZoneVector::orientation(b1, b2, a1);
+    const int o4 = GeoZoneVector::orientation(b1, b2, a2);
 
     if ((o1 != o2) && (o3 != o4)) {
         return true;
@@ -549,7 +524,7 @@ double distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &
     const QPointF ab = b - a;
     const double lengthSquared = QPointF::dotProduct(ab, ab);
     const double t = (lengthSquared > 0) ? std::clamp(QPointF::dotProduct(point - a, ab) / lengthSquared, 0.0, 1.0) : 0.0;
-    return _length(a + (ab * t) - point);
+    return GeoZoneVector::length(a + (ab * t) - point);
 }
 
 double distanceToRing(const QPointF &point, const QList<QPointF> &ring, double xScale)
@@ -594,10 +569,10 @@ QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, cons
             const QPointF &edgeStart = ring[i];
             const QPointF edge = ring[(i + 1) % ring.count()] - edgeStart;
             const QPointF offset = edgeStart - a;
-            const double denominator = _cross(direction, edge);
-            if (std::abs(denominator) <= (tolerance * length * _length(edge))) {
+            const double denominator = GeoZoneVector::cross(direction, edge);
+            if (std::abs(denominator) <= (tolerance * length * GeoZoneVector::length(edge))) {
                 // Parallel, a collinear edge overlaps the segment on the boundary
-                if (std::abs(_cross(offset, direction)) > (1e-6 * length)) {
+                if (std::abs(GeoZoneVector::cross(offset, direction)) > (1e-6 * length)) {
                     continue;
                 }
                 const double t1 = QPointF::dotProduct(offset, direction) / lengthSquared;
@@ -610,8 +585,8 @@ QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, cons
                 }
                 continue;
             }
-            const double t = _cross(offset, edge) / denominator;
-            const double s = _cross(offset, direction) / denominator;
+            const double t = GeoZoneVector::cross(offset, edge) / denominator;
+            const double s = GeoZoneVector::cross(offset, direction) / denominator;
             if ((t >= -tolerance) && (t <= (1 + tolerance)) && (s >= -tolerance) && (s <= (1 + tolerance))) {
                 cuts.append({ std::clamp(t, 0.0, 1.0), true });
             }
@@ -669,7 +644,7 @@ bool isSimple(const QList<QPointF> &ring)
         const QPointF &a2 = ring[(i + 1) % count];
         const QPointF &a3 = ring[(i + 2) % count];
         // Adjacent edges may only share their vertex, not fold back over each other
-        if ((_orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
+        if ((GeoZoneVector::orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
             return false;
         }
     }
@@ -743,7 +718,7 @@ QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double 
     // Douglas-Peucker from vertex 0 and the vertex farthest from it
     qsizetype farthest = 0;
     for (qsizetype i = 1; i < count; i++) {
-        if (_length(original[i] - original[0]) > _length(original[farthest] - original[0])) {
+        if (GeoZoneVector::length(original[i] - original[0]) > GeoZoneVector::length(original[farthest] - original[0])) {
             farthest = i;
         }
     }
