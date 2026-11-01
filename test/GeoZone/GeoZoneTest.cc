@@ -1898,6 +1898,78 @@ void GeoZoneTest::_testSettings()
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));
 }
 
+void GeoZoneTest::_testMonitorTimeToEntry()
+{
+    GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
+    settings->approachTime()->setRawValue(30);
+
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate above(47.1, 8);
+    QJsonObject overhead = _circleFeature(QStringLiteral("HIGH"), QStringLiteral("PROHIBITED"), above, 500);
+    QJsonArray geometry = overhead[QStringLiteral("geometry")].toArray();
+    QJsonObject layer = geometry[0].toObject();
+    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+    layer[QStringLiteral("lowerLimit")] = 500;
+    layer[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AMSL");
+    geometry[0] = layer;
+    overhead[QStringLiteral("geometry")] = geometry;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), overhead }), errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    const GeoZoneMonitor::Velocity north{ 25, 0, 0, true };
+
+    // Without a velocity only the distance counts
+    const GeoZone::Position start{ center.atDistanceAndAzimuth(1000, 180) };
+    monitor.evaluate(start);
+    QCOMPARE(alertSpy.count(), 0);
+
+    // Flying away the zone is never entered
+    monitor.evaluate(start, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ -25, 0, 0, true });
+    QCOMPARE(alertSpy.count(), 0);
+
+    // At 25 m/s the boundary 700 m ahead is reached in 28 s, within the approach time
+    monitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Approaching geozone P (Prohibited), entry in about 28 seconds"));
+    QCOMPARE(monitor.nearbyZones().count(), 1);
+    QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("timeToEntry")].toInt(), 28);
+    QCOMPARE(monitor.nearbyZones()[0].toMap()[QStringLiteral("distance")].toInt(), 700);
+
+    // Too slow to arrive within the approach time, and not repeated while it stays near
+    alertSpy.clear();
+    monitor.evaluate(start, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ 10, 0, 0, true });
+    QVERIFY(monitor.nearbyZones().isEmpty());
+    monitor.evaluate({ center.atDistanceAndAzimuth(900, 180) }, GeoZoneMonitor::noVehicle, north);
+    monitor.evaluate({ center.atDistanceAndAzimuth(800, 180) }, GeoZoneMonitor::noVehicle, north);
+    QCOMPARE(alertSpy.count(), 1);
+    alertSpy.clear();
+    monitor.evaluate({ center.atDistanceAndAzimuth(700, 180) }, GeoZoneMonitor::noVehicle, north);
+    QCOMPARE(alertSpy.count(), 0);
+
+    // Climbing into the floor of a zone overhead
+    GeoZoneMonitor climbMonitor(&manager);
+    QSignalSpy climbSpy(&climbMonitor, &GeoZoneMonitor::alert);
+    climbMonitor.evaluate({ above, 400, 300 }, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ 0, 0, 0, true });
+    QCOMPARE(climbSpy.count(), 0);
+    climbMonitor.evaluate({ above, 400, 300 }, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ 0, 0, 5, true });
+    QCOMPARE(climbSpy.count(), 1);
+    QVERIFY(climbSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone HIGH (Prohibited), entry in about 2")));
+
+    // Turned off
+    settings->approachTime()->setRawValue(0);
+    GeoZoneMonitor offMonitor(&manager);
+    QSignalSpy offSpy(&offMonitor, &GeoZoneMonitor::alert);
+    offMonitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
+    QCOMPARE(offSpy.count(), 0);
+}
+
 void GeoZoneTest::_testMonitorAlertOrder()
 {
     // Simultaneous alerts are emitted most severe first, entries before approaches

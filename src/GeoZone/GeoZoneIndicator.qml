@@ -72,7 +72,7 @@ Item {
 
                     SettingsGroupLayout {
                         heading:            qsTr("Nearby Geozones")
-                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1 of the active vehicle, considering altitude limits.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue))
+                        headingDescription: qsTr("Active prohibited, authorisation required, conditional and U-space zones within %1 of the active vehicle, or which it would enter within %2 s at its current velocity, considering altitude limits.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
 
                         QGCLabel {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
@@ -90,6 +90,7 @@ Item {
                                 required property var   zone
                                 required property bool  inside
                                 required property int   distance
+                                required property int   timeToEntry
 
                                 Rectangle {
                                     Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
@@ -105,7 +106,9 @@ Item {
                                 }
 
                                 QGCLabel {
-                                    text: nearbyRow.inside ? qsTr("Inside") : control._distanceText(nearbyRow.distance)
+                                    text: nearbyRow.inside ? qsTr("Inside") :
+                                              (nearbyRow.timeToEntry >= 0 ? qsTr("%1, entry in %2 s").arg(control._distanceText(nearbyRow.distance)).arg(nearbyRow.timeToEntry) :
+                                                                            control._distanceText(nearbyRow.distance))
                                 }
 
                                 QGCLabel {
@@ -188,6 +191,14 @@ Item {
                             Layout.fillWidth:   true
                             label:              fact.shortDescription
                             fact:               control._geoZoneSettings.approachVerticalDistance
+                            visible:            fact.visible
+                            enabled:            control._alertsEnabled
+                        }
+
+                        LabelledFactTextField {
+                            Layout.fillWidth:   true
+                            label:              fact.shortDescription
+                            fact:               control._geoZoneSettings.approachTime
                             visible:            fact.visible
                             enabled:            control._alertsEnabled
                         }

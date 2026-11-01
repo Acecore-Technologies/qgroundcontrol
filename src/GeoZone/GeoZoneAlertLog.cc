@@ -54,7 +54,7 @@ QString GeoZoneAlertLog::filePath(const QDate &date) const
 
 QString GeoZoneAlertLog::header()
 {
-    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source");
+    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s");
 }
 
 QString GeoZoneAlertLog::line(const GeoZoneMonitor::AlertEvent &event)
@@ -73,6 +73,7 @@ QString GeoZoneAlertLog::line(const GeoZoneMonitor::AlertEvent &event)
         csvField(event.zoneName),
         QString::fromLatin1(restrictions.valueToKey(event.restriction)),
         csvField(event.sourceText),
+        number(event.timeToEntry, 0),
     }.join(QLatin1Char(','));
 }
 

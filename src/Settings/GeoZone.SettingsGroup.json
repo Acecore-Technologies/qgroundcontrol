@@ -52,6 +52,16 @@
     "default":      30
 },
 {
+    "name":         "approachTime",
+    "shortDesc":    "Approach alert time",
+    "longDesc":     "Seconds before the vehicle would enter a geozone at its current speed, direction and climb rate at which it is alerted. 0 alerts by distance only.",
+    "type":         "uint32",
+    "units":        "s",
+    "min":          0,
+    "max":          600,
+    "default":      30
+},
+{
     "name":         "feedRefreshHours",
     "shortDesc":    "Feed refresh interval",
     "longDesc":     "Hours after which downloaded geozone feeds are downloaded again.",

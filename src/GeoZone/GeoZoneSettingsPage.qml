@@ -85,6 +85,14 @@ SettingsPage {
             visible:            fact.visible
             enabled:            _geoZoneSettings.alertsEnabled.rawValue
         }
+
+        LabelledFactTextField {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.approachTime
+            visible:            fact.visible
+            enabled:            _geoZoneSettings.alertsEnabled.rawValue
+        }
     }
 
     SettingsGroupLayout {

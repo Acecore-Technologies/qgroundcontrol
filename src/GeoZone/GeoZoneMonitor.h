@@ -11,6 +11,7 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QDateTime>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QHash>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QObject>
@@ -21,10 +22,13 @@
 
 #include "GeoZone.h"
 
+#include <cmath>
+
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneMonitorLog)
 
-/// Zones near the active vehicle with roles zone, inside and distance (meters). Rows are updated in place
-/// while only the distances change, so views keep their delegates.
+/// Zones near the active vehicle with roles zone, inside, distance (meters) and timeToEntry (seconds, -1 when
+/// the vehicle isn't heading into the zone). Rows are updated in place while only the distances change, so views
+/// keep their delegates.
 class GeoZoneNearbyModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -35,7 +39,8 @@ public:
     struct Item {
         GeoZone *zone = nullptr;
         bool inside = false;
-        int distance = 0;   ///< Rounded meters
+        int distance = 0;       ///< Rounded meters
+        int timeToEntry = -1;   ///< Rounded seconds until the vehicle enters at its current velocity, -1 when it doesn't
 
         friend bool operator==(const Item &, const Item &) = default;
     };
@@ -44,6 +49,7 @@ public:
         ZoneRole = Qt::UserRole + 1,
         InsideRole,
         DistanceRole,
+        TimeToEntryRole,
     };
 
     explicit GeoZoneNearbyModel(QObject *parent = nullptr);
@@ -91,6 +97,9 @@ public:
     static GeoZoneMonitor *instance();
 
     static constexpr double hysteresisDistance = 20;        ///< Meters to move away before an alert can repeat
+    static constexpr double hysteresisTime = 5;             ///< Seconds added to the approach time while a zone is near
+    static constexpr double minPredictionSpeed = 0.5;       ///< Meters per second below which entries aren't predicted
+    static constexpr int velocityWindowMSecs = 3000;        ///< Positions of a vehicle over which its velocity is estimated
     static constexpr int evaluateIntervalMSecs = 1000;
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
 
@@ -106,11 +115,24 @@ public:
         GeoZone::Restriction restriction = GeoZone::Unknown;
         QString sourceText;
         QString message;            ///< As shown to the user
+        double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
+    };
+
+    /// Velocity over ground and vertical speed
+    struct Velocity {
+        double north = 0;   ///< Meters per second
+        double east = 0;
+        double up = 0;      ///< Meters per second, 0 when unknown
+        bool valid = false;
+
+        double groundSpeed() const { return std::hypot(north, east); }
     };
 
     /// Updates the alert state of the zones for a position of the vehicle. Unknown altitudes are inside all
     /// vertical limits. The nearby zones follow the active vehicle, or positions without a vehicle.
-    void evaluate(const GeoZone::Position &position, int vehicleId = noVehicle);
+    /// With a valid velocity, the vehicle is also alerted when it would enter a zone within the approach time.
+    void evaluate(const GeoZone::Position &position, int vehicleId, const Velocity &velocity);
+    void evaluate(const GeoZone::Position &position, int vehicleId = noVehicle) { evaluate(position, vehicleId, Velocity()); }
 
     /// @return Position of the vehicle with its altitude above mean sea level and the terrain elevation from its
     ///         altitude above terrain, which is unknown without terrain data
@@ -160,10 +182,23 @@ private:
     using Nearby = GeoZoneNearbyModel::Item;
 
     /// Alert state of one vehicle
+    /// Position of a vehicle at an evaluation, for estimating its velocity
+    struct Sample {
+        qint64 msecs = 0;
+        GeoZone::Position position;
+    };
+
     struct Tracker {
         QHash<QString, State> states;   ///< Zones which are not Away by GeoZone::key, which stays the same when a source reloads
         QList<Nearby> nearby;
+        QList<Sample> samples;          ///< Recent positions of a vehicle, oldest first
     };
+
+    /// @return Velocity from the positions of the last velocityWindowMSecs, after adding the position
+    static Velocity _estimateVelocity(QList<Sample> &samples, qint64 msecs, const GeoZone::Position &position);
+    /// @return Seconds until the straight path from the position at the velocity enters the zone, NaN if it doesn't within the horizon
+    static double _timeToEntry(const GeoZone *zone, const GeoZone::Position &position, const Velocity &velocity, double horizon);
+    static GeoZone::Position _predictedPosition(const GeoZone::Position &position, const Velocity &velocity, double seconds);
 
     static void _speak(const QString &message);
     const QList<Nearby> &_activeNearby() const;
@@ -176,6 +211,7 @@ private:
     QList<QPointer<Vehicle>> _vehicles;         ///< Monitored vehicles of MultiVehicleManager
     int _activeVehicleId = noVehicle;
     QTimer _evaluateTimer;
+    QElapsedTimer _clock;
     GeoZoneAlertLog *_alertLog = nullptr;
     GeoZoneNearbyModel *_nearbyModel = nullptr;
 };
