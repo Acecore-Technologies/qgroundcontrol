@@ -44,6 +44,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneProviders.h
     Sources/GeoZoneSource.cc
     Sources/GeoZoneSource.h
+    Sources/GeoZoneSourceIndex.cc
+    Sources/GeoZoneSourceIndex.h
     Sources/GeoZoneSourceRepository.cc
     Sources/GeoZoneSourceRepository.h
     Sources/GeoZoneStore.cc

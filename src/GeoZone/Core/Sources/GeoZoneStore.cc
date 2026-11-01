@@ -15,27 +15,10 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
-#include <QtCore/QJsonArray>
-#include <QtCore/QJsonDocument>
-#include <QtCore/QJsonObject>
 #include <QtCore/QSaveFile>
-#include <QtCore/QSettings>
 #include <QtCore/QUuid>
 
 namespace {
-
-constexpr const char *keyKey = "key";
-constexpr const char *urlKey = "url";
-constexpr const char *fileKey = "file";
-constexpr const char *loadedAtKey = "loadedAt";
-constexpr const char *fileDateKey = "fileDate";
-constexpr const char *etagKey = "etag";
-constexpr const char *lastModifiedKey = "lastModified";
-constexpr const char *datasetUrlKey = "datasetUrl";
-constexpr const char *enabledKey = "enabled";
-constexpr const char *sourcesKey = "sources";
-constexpr const char *versionKey = "version";
-constexpr int indexVersion = 1;
 
 bool saveFile(const QString &path, const QByteArray &bytes, QString &errorString)
 {
@@ -63,115 +46,6 @@ QString GeoZoneStore::path(const QString &fileName) const
 QString GeoZoneStore::newFileName()
 {
     return QStringLiteral("%1.json").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-}
-
-GeoZoneStore::Index GeoZoneStore::readIndex() const
-{
-    Index index;
-
-    QFile indexFile(path(indexFileName));
-    if (indexFile.exists()) {
-        index.status = IndexStatus::Unreadable;
-        if (!indexFile.open(QIODevice::ReadOnly)) {
-            index.errorString = indexFile.errorString();
-            return index;
-        }
-
-        QJsonParseError parseError;
-        const QJsonDocument document = QJsonDocument::fromJson(indexFile.readAll(), &parseError);
-        const QJsonObject root = document.object();
-        if (parseError.error != QJsonParseError::NoError) {
-            index.errorString = parseError.errorString();
-            return index;
-        }
-        if (!document.isObject() || !root.value(sourcesKey).isArray() || !root.value(versionKey).isDouble()) {
-            index.errorString = QStringLiteral("Unexpected content");
-            return index;
-        }
-        if (root.value(versionKey).toInt() > indexVersion) {
-            index.status = IndexStatus::Newer;
-            return index;
-        }
-
-        for (const QJsonValue &value : root.value(sourcesKey).toArray()) {
-            const QJsonObject object = value.toObject();
-            index.entries.append(Entry{
-                object.value(keyKey).toString(),
-                object.value(urlKey).toString(),
-                object.value(fileKey).toString(),
-                QDateTime::fromString(object.value(loadedAtKey).toString(), Qt::ISODate),
-                QDateTime::fromString(object.value(fileDateKey).toString(), Qt::ISODate),
-                object.value(etagKey).toString(),
-                object.value(lastModifiedKey).toString(),
-                object.value(enabledKey).toBool(true),
-                object.value(datasetUrlKey).toString(),
-            });
-        }
-        index.status = IndexStatus::Ok;
-        return index;
-    }
-
-    if (QFile::exists(path(legacyFileName))) {
-        // Earlier versions kept a single file named in the settings
-        QSettings settings;
-        settings.beginGroup(legacySettingsGroup);
-        const QString sourceName = settings.value(legacySourceNameKey).toString();
-        settings.remove(legacySourceNameKey);
-        settings.endGroup();
-
-        const QDateTime fileDate = QFileInfo(path(legacyFileName)).lastModified().toUTC();
-        Entry entry;
-        entry.key = sourceName.isEmpty() ? QString(legacyFileName) : sourceName;
-        entry.fileName = legacyFileName;
-        entry.loadedAt = fileDate;
-        entry.fileDate = fileDate;
-        index.entries.append(entry);
-    }
-
-    return index;
-}
-
-bool GeoZoneStore::writeIndex(const QList<Entry> &entries, QString &errorString) const
-{
-    errorString.clear();
-
-    if (entries.isEmpty()) {
-        QFile indexFile(path(indexFileName));
-        if (indexFile.exists() && !indexFile.remove()) {
-            errorString = indexFile.errorString();
-            return false;
-        }
-        return true;
-    }
-
-    QJsonArray values;
-    for (const Entry &entry : entries) {
-        QJsonObject object{
-            { keyKey, entry.key },
-            { fileKey, entry.fileName },
-            { loadedAtKey, entry.loadedAt.toString(Qt::ISODate) },
-            { fileDateKey, entry.fileDate.toString(Qt::ISODate) },
-        };
-        if (!entry.url.isEmpty()) {
-            object.insert(urlKey, entry.url);
-        }
-        if (!entry.etag.isEmpty()) {
-            object.insert(etagKey, entry.etag);
-        }
-        if (!entry.lastModified.isEmpty()) {
-            object.insert(lastModifiedKey, entry.lastModified);
-        }
-        if (!entry.enabled) {
-            object.insert(enabledKey, false);
-        }
-        if (!entry.datasetUrl.isEmpty()) {
-            object.insert(datasetUrlKey, entry.datasetUrl);
-        }
-        values.append(object);
-    }
-
-    const QByteArray bytes = QJsonDocument(QJsonObject{ { versionKey, indexVersion }, { sourcesKey, values } }).toJson();
-    return saveFile(path(indexFileName), bytes, errorString);
 }
 
 QString GeoZoneStore::moveToBackup() const
@@ -261,7 +135,7 @@ void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) c
 {
     const QDir dir(_dir);
     for (const QString &fileName : dir.entryList({ QStringLiteral("*.json") }, QDir::Files)) {
-        if ((fileName != QLatin1String(indexFileName)) && (fileName != QLatin1String(GeoZoneAuthorisations::fileName)) && !referencedFileNames.contains(fileName)) {
+        if ((fileName != QLatin1String(GeoZoneAuthorisations::fileName)) && !referencedFileNames.contains(fileName)) {
             qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
             (void) QFile::remove(dir.filePath(fileName));
         }

@@ -16,6 +16,7 @@
 
 #include "GeoZoneDownloader.h"
 #include "GeoZoneLoader.h"
+#include "GeoZoneSourceIndex.h"
 #include "GeoZoneStore.h"
 
 class GeoZoneSource;
@@ -60,7 +61,7 @@ public:
     QList<const GeoZoneSource*> sourceList() const;
     GeoZoneSource *source(const QString &key) const;
     /// @return Name of the stored copy of a source in storageDir, empty when it has none
-    QString storedFileName(const QString &key) const { return _storedEntries.value(key).fileName; }
+    QString storedFileName(const QString &key) const { return _index.fileName(key); }
     QString storageDir() const { return _store.dir(); }
 
     bool busy() const { return _pendingCount > 0; }
@@ -117,15 +118,14 @@ private:
     void _reportStorageError(const QString &message);
 
     GeoZoneStore _store;
+    GeoZoneSourceIndex _index;
     GeoZoneDownloader *_downloader = nullptr;
     QList<GeoZoneSource*> _sources;
     QTimer *_refreshTimer = nullptr;
     int _pendingCount = 0;
     QHash<QString, int> _generations;   ///< Latest load per source key, older results are dropped
-    QHash<QString, GeoZoneStore::Entry> _storedEntries; ///< Stored copy of each source as written, by source key
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
     QHash<QString, QStringList> _pagePaths; ///< Further pages downloaded for the feed being loaded, by URL
-    bool _storeReadOnly = false;        ///< The index is from a newer version, keep it as is
     bool _storageErrorReported = false;
     QString _validityWarning;
     bool _startupRefreshPending = false;

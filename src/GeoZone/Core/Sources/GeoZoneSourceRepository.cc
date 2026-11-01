@@ -20,7 +20,6 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QLocale>
-#include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 
@@ -29,6 +28,7 @@
 GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObject *parent)
     : QObject(parent)
     , _store(storageDir)
+    , _index(_store)
     , _downloader(new GeoZoneDownloader(this))
     , _refreshTimer(new QTimer(this))
 {
@@ -198,10 +198,7 @@ void GeoZoneSourceRepository::_downloadComplete(const GeoZoneDownloader::Result 
         existing->setStoredDates(now, now);
         existing->setBusy(false);
         existing->setErrorString(QString());
-        // The stored copy is only confirmed current when it is the version the validators belong to
-        if (auto it = _storedEntries.find(url); (it != _storedEntries.end()) && (it->etag == existing->etag()) && (it->lastModified == existing->lastModified())) {
-            it->loadedAt = now;
-            it->fileDate = now;
+        if (_index.confirm(url, existing->etag(), existing->lastModified(), now)) {
             _saveIndex();
         }
         updateValidity();
@@ -436,7 +433,7 @@ bool GeoZoneSourceRepository::_fetchCompanions(const GeoZoneDownloader::Result &
 
 void GeoZoneSourceRepository::_prepareJob(GeoZoneLoader::Job &job) const
 {
-    if (_storeReadOnly) {
+    if (_index.readOnly()) {
         job.storedFileName.clear();
     }
     // Read here, the default locale changes on this thread with the language setting
@@ -550,8 +547,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
         return;
     }
 
-    GeoZoneStore::Entry &entry = _storedEntries[job.key];
-    const QString previousFileName = entry.fileName;
+    GeoZoneSourceIndex::Entry entry = _index.entry(job.key);
     entry.key = job.key;
     entry.url = job.url;
     entry.fileName = job.storedFileName;
@@ -565,9 +561,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
         entry.lastModified = job.lastModified;
         entry.datasetUrl = job.datasetUrl;
     }
-    if (previousFileName != entry.fileName) {
-        _store.removeFile(previousFileName);
-    }
+    _index.replace(entry);
     _saveIndex();
 }
 
@@ -652,8 +646,8 @@ void GeoZoneSourceRepository::removeSource(int index)
     emit sourceChanged(source);
     source->deleteLater();
 
-    if (!_storeReadOnly) {
-        _store.removeFile(_storedEntries.take(source->key()).fileName);
+    if (!_index.readOnly()) {
+        _index.remove(source->key());
         _saveIndex();
     }
     updateValidity();
@@ -673,12 +667,12 @@ void GeoZoneSourceRepository::clear()
 
 void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
 {
-    const GeoZoneStore::Index index = _store.readIndex();
+    const GeoZoneSourceIndex::Contents index = _index.read();
     switch (index.status) {
-    case GeoZoneStore::IndexStatus::Ok:
-    case GeoZoneStore::IndexStatus::Missing:
+    case GeoZoneSourceIndex::Status::Ok:
+    case GeoZoneSourceIndex::Status::Missing:
         break;
-    case GeoZoneStore::IndexStatus::Unreadable: {
+    case GeoZoneSourceIndex::Status::Unreadable: {
         qCWarning(GeoZoneSourceLog) << "Unreadable geozone source index" << index.errorString;
         const QString backupDir = _store.moveToBackup();
         _reportStorageError(backupDir.isEmpty() ?
@@ -686,14 +680,14 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
             tr("The list of stored geozone sources could not be read (%1). The stored files were moved to %2. Add the sources again in Application Settings > Geozones.").arg(index.errorString, backupDir));
         return;
     }
-    case GeoZoneStore::IndexStatus::Newer:
-        _storeReadOnly = true;
+    case GeoZoneSourceIndex::Status::Newer:
+        _index.setReadOnly(true);
         _reportStorageError(tr("The geozone sources were saved by a newer version of QGroundControl and are not loaded. Sources added now will not be kept."));
         return;
     }
 
     QList<GeoZoneLoader::Job> jobs;
-    for (const GeoZoneStore::Entry &entry : index.entries) {
+    for (const GeoZoneSourceIndex::Entry &entry : index.entries) {
         GeoZoneLoader::Job job;
         job.key = entry.key;
         job.url = entry.url;
@@ -715,15 +709,11 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         placeholder->setStoredDates(job.loadedAt, job.fileDate);
         placeholder->setValidators(job.etag, job.lastModified);
         placeholder->setDatasetUrl(job.datasetUrl);
-        _storedEntries.insert(job.key, entry);
+        _index.insert(entry);
         jobs.append(job);
     }
 
-    QSet<QString> referenced;
-    for (const GeoZoneStore::Entry &entry : std::as_const(_storedEntries)) {
-        referenced.insert(entry.fileName);
-    }
-    _store.removeOrphanFiles(referenced);
+    _index.removeUnreferencedFiles();
     _saveIndex();
 
     for (const GeoZoneLoader::Job &job : std::as_const(jobs)) {
@@ -746,8 +736,7 @@ void GeoZoneSourceRepository::_sourceEnabledChanged(GeoZoneSource *source)
     // The zones of the source join or leave the maps and checks
     emit sourceAboutToChange(source);
     emit sourceChanged(source);
-    if (const auto it = _storedEntries.find(source->key()); (it != _storedEntries.end()) && !_storeReadOnly) {
-        it->enabled = source->enabled();
+    if (_index.setEnabled(source->key(), source->enabled())) {
         _saveIndex();
     }
     updateValidity();
@@ -755,20 +744,12 @@ void GeoZoneSourceRepository::_sourceEnabledChanged(GeoZoneSource *source)
 
 void GeoZoneSourceRepository::_saveIndex()
 {
-    if (_storeReadOnly) {
-        return;
-    }
-
-    QList<GeoZoneStore::Entry> entries;
+    QStringList keys;
     for (const GeoZoneSource *const source : std::as_const(_sources)) {
-        const auto it = _storedEntries.constFind(source->key());
-        if (it != _storedEntries.cend()) {
-            entries.append(it.value());
-        }
+        keys.append(source->key());
     }
-
     QString errorString;
-    if (!_store.writeIndex(entries, errorString)) {
+    if (!_index.save(keys, errorString)) {
         _reportStorageError(tr("The list of geozone sources could not be saved, sources may be missing at the next start. %1").arg(errorString));
     }
 }
