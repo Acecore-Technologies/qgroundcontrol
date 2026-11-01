@@ -1689,6 +1689,146 @@ void GeoZoneManagerTest::_testIntegrity()
     QVERIFY(signedFeed->errorString().isEmpty());
 }
 
+void GeoZoneManagerTest::_testOfflinePack()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QFile ed269(QStringLiteral(":/unittest/ed269_test.json"));
+    QVERIFY(ed269.open(QIODevice::ReadOnly));
+    server.files.insert("/keyed", server.body);
+    server.files.insert("/plain", ed269.readAll());
+    server.etags.insert("/plain", "\"e1\"");
+    server.files.insert("/area", server.body);
+
+    const QTemporaryDir storageDir;
+    const QTemporaryDir importDir;
+    const QTemporaryDir packDir;
+    const QTemporaryDir sourceDir;
+    QVERIFY(storageDir.isValid() && importDir.isValid() && packDir.isValid() && sourceDir.isValid());
+    const QString packPath = packDir.filePath(QStringLiteral("field.zip"));
+    const QString keyedUrl = server.url(QStringLiteral("/keyed"));
+    const QString plainUrl = server.url(QStringLiteral("/plain"));
+    const QString areaUrl = server.url(QStringLiteral("/area?bbox={bbox}"));
+
+    GeoZoneManager manager(storageDir.path());
+    manager.repository()->setVehiclePosition(QGeoCoordinate(47.0, 8.0));
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    GeoZoneService keyed;
+    keyed.auth = GeoZoneService::Auth::ApiKeyHeader;
+    keyed.authParameter = QStringLiteral("X-Api-Key");
+    manager.addService(keyedUrl, keyed.toVariantMap(), QStringLiteral("pack-s3cret"));
+    QVERIFY(addedSpy.wait(10000));
+    manager.addUrl(plainUrl);
+    QVERIFY(addedSpy.wait(10000));
+    manager.addService(areaUrl, GeoZoneService().toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(10000));
+    QString errorString;
+    const QString fileName = _writeFeatures(sourceDir, QStringLiteral("local.json"), QJsonArray{
+        _circleFeature(QStringLiteral("L1"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 500) });
+    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.sources()->count(), 4);
+
+    // The sources turned on are exported
+    manager.source(GeoZoneLoader::fileKey(fileName))->setEnabled(false);
+    QSignalSpy fileSpy(&manager, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(manager.exportPack(packPath));
+    QVERIFY(fileSpy.last()[0].toBool());
+
+    // without secrets
+    QFile pack(packPath);
+    QVERIFY(pack.open(QIODevice::ReadOnly));
+    const QByteArray packBytes = pack.readAll();
+    QString zipError;
+    const QList<GeoZoneZip::File> files = GeoZoneZip::files(packBytes, { QStringLiteral(".json") }, GeoZonePack::maxBytes, zipError);
+    QVERIFY2(zipError.isEmpty(), qPrintable(zipError));
+    QCOMPARE(files.count(), 4);
+    QVERIFY(!packBytes.contains("pack-s3cret"));
+    QJsonObject manifest;
+    for (const GeoZoneZip::File &file : files) {
+        QVERIFY(!file.data.contains("pack-s3cret"));
+        if (file.name == QStringLiteral("manifest.json")) {
+            manifest = QJsonDocument::fromJson(file.data).object();
+        }
+    }
+    QCOMPARE(manifest.value("format").toString(), QStringLiteral("qgc-geozone-pack"));
+    const QJsonArray packSources = manifest.value("sources").toArray();
+    QCOMPARE(packSources.count(), 3);
+    QCOMPARE(packSources.first().toObject().value("service").toObject().value("authParameter").toString(), QStringLiteral("X-Api-Key"));
+
+    // Imported on another computer, which doesn't have the secret
+    GeoZoneCredentials().remove(keyedUrl);
+    GeoZoneManager imported(importDir.path());
+    QSignalSpy importSpy(&imported, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(imported.importPack(packPath));
+    QVERIFY(importSpy.last()[0].toBool());
+    QCOMPARE(importSpy.last()[1].toString(), QStringLiteral("3 geozone source(s) imported from field.zip."));
+    QTRY_VERIFY(!imported.busy());
+    QCOMPARE(imported.sources()->count(), 3);
+    QVERIFY(!imported.source(GeoZoneLoader::fileKey(fileName)));
+    const auto zoneHashes = [](const GeoZoneSource *source) {
+        QList<QByteArray> hashes;
+        for (const GeoZone *zone : source->zones()) {
+            hashes.append(zone->identifier().toUtf8() + zone->data().contentHash);
+        }
+        std::sort(hashes.begin(), hashes.end());
+        return hashes;
+    };
+    for (const QString &key : { keyedUrl, plainUrl, areaUrl }) {
+        const GeoZoneSource *const original = manager.source(key);
+        const GeoZoneSource *const copy = imported.source(key);
+        QVERIFY2(copy, qPrintable(key));
+        QCOMPARE(copy->zoneCount(), original->zoneCount());
+        QCOMPARE(zoneHashes(copy), zoneHashes(original));
+        QCOMPARE(copy->formatName(), original->formatName());
+        QCOMPARE(copy->loadedAt(), original->loadedAt());
+        QCOMPARE(copy->dataDate(), original->dataDate());
+        QCOMPARE(copy->provenance().finalUrl, original->provenance().finalUrl);
+        QCOMPARE(copy->provenance().sha256, original->provenance().sha256);
+        QCOMPARE(copy->provenance().contentHash, original->provenance().contentHash);
+        QCOMPARE(copy->provenance().fetchedAt, original->provenance().fetchedAt);
+        QVERIFY(copy->imported());
+        QCOMPARE(copy->provenance().packName, QStringLiteral("field.zip"));
+        QCOMPARE(copy->provenance().importedAt, environment.now());
+    }
+    QCOMPARE(imported.zoneCount(), manager.zoneCount());
+    QCOMPARE(imported.source(plainUrl)->etag(), QStringLiteral("\"e1\""));
+    QCOMPARE(imported.source(areaUrl)->area(), manager.source(areaUrl)->area());
+    QVERIFY(imported.source(areaUrl)->followsArea());
+    QVERIFY(imported.source(keyedUrl)->credentialsMissing());
+    QVERIFY(imported.source(keyedUrl)->provenanceText().startsWith(QStringLiteral("imported from field.zip")));
+
+    // and kept
+    GeoZoneManager restarted(importDir.path());
+    restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QCOMPARE(restarted.sources()->count(), 3);
+    QVERIFY(restarted.source(keyedUrl)->imported());
+    QCOMPARE(restarted.source(keyedUrl)->service().auth, GeoZoneService::Auth::ApiKeyHeader);
+
+    // Data which doesn't match the hash of its provenance is left out
+    const QString damagedPath = packDir.filePath(QStringLiteral("damaged.zip"));
+    {
+        QFile damaged(damagedPath);
+        QVERIFY(damaged.open(QIODevice::WriteOnly));
+        GeoZonePack::ZipWriter writer(&damaged);
+        QJsonObject source = packSources.first().toObject();
+        QVERIFY(writer.add(source.value("file").toString(), server.body + " "));
+        QVERIFY(writer.add(QStringLiteral("manifest.json"), QJsonDocument(QJsonObject{ { "format", "qgc-geozone-pack" }, { "version", 1 }, { "sources", QJsonArray{ source } } }).toJson()));
+        QVERIFY(writer.finish());
+    }
+    const QTemporaryDir otherDir;
+    GeoZoneManager other(otherDir.path());
+    QSignalSpy otherSpy(&other, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(other.importPack(damagedPath));
+    QVERIFY(!otherSpy.last()[0].toBool());
+    QVERIFY2(otherSpy.last()[1].toString().contains(QStringLiteral("the data in the pack is damaged")), qPrintable(otherSpy.last()[1].toString()));
+    QCOMPARE(other.sources()->count(), 0);
+    QVERIFY(!other.importPack(fileName));
+    QVERIFY(otherSpy.last()[1].toString().startsWith(QStringLiteral("The geozone pack could not be read.")));
+    QCOMPARE(QDir(QDir(otherDir.path()).filePath(QStringLiteral("downloads"))).entryList(QDir::Files).count(), 0);
+}
+
 void GeoZoneManagerTest::_testManagerStartup()
 {
     const ScopedEnvironment environment;

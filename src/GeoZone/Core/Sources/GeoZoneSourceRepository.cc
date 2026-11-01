@@ -9,13 +9,17 @@
 
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZonePack.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneSource.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFile>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QSaveFile>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QJsonArray>
 #include <QtCore/QLocale>
@@ -607,7 +611,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     entry.fileName = job.storedFileName;
     entry.loadedAt = job.loadedAt;
     entry.fileDate = job.fileDate;
-    entry.checkedAt = job.loadedAt;
+    entry.checkedAt = (job.checkedAt > job.loadedAt) ? job.checkedAt : job.loadedAt;
     if (const GeoZoneSource *const source = this->source(job.key)) {
         entry.enabled = source->enabled();
         entry.provenance = source->provenance().toJson();
@@ -870,6 +874,129 @@ QJsonObject GeoZoneSourceRepository::provenanceReport() const
         { QStringLiteral("generatedAt"), GeoZoneEnvironment::currentDateTimeUtc().toString(Qt::ISODate) },
         { QStringLiteral("sources"), sources },
     };
+}
+
+bool GeoZoneSourceRepository::exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const
+{
+    QSaveFile file(packPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        errorString = file.errorString();
+        return false;
+    }
+    GeoZonePack::ZipWriter writer(&file);
+    QJsonArray sources;
+    for (const QString &key : keys) {
+        const GeoZoneSource *const source = this->source(key);
+        const GeoZoneSourceIndex::Entry entry = _index.entry(key);
+        if (!source || !source->loaded() || entry.fileName.isEmpty()) {
+            continue;
+        }
+        QFile stored(_store.path(entry.fileName));
+        if (!stored.open(QIODevice::ReadOnly)) {
+            errorString = tr("The stored copy of %1 could not be read: %2").arg(source->name(), stored.errorString());
+            return false;
+        }
+        const QString name = QLatin1String(GeoZonePack::sourcesDir) + entry.fileName;
+        if (!writer.add(name, stored.readAll())) {
+            errorString = writer.errorString();
+            return false;
+        }
+
+        QJsonObject object = sourceReport(*source);
+        object.insert(QStringLiteral("file"), name);
+        if (!source->service().isEmpty()) {
+            // The service with its user, which identifies but doesn't authenticate
+            object.insert(QStringLiteral("service"), source->service().toJson());
+        }
+        if (entry.fileDate.isValid()) {
+            object.insert(QStringLiteral("fileDate"), entry.fileDate.toUTC().toString(Qt::ISODate));
+        }
+        const std::pair<const char*, QString> validators[] = { { "etag", source->etag() }, { "lastModified", source->lastModified() }, { "datasetUrl", source->datasetUrl() } };
+        for (const auto &[validatorName, value] : validators) {
+            if (!value.isEmpty()) {
+                object.insert(QLatin1String(validatorName), value);
+            }
+        }
+        if (entry.maxAgeSecs > 0) {
+            object.insert(QStringLiteral("maxAge"), entry.maxAgeSecs);
+        }
+        if (source->area().isValid()) {
+            const QGeoRectangle area = source->area();
+            object.insert(QStringLiteral("area"), QJsonArray{ area.topLeft().longitude(), area.bottomRight().latitude(), area.bottomRight().longitude(), area.topLeft().latitude() });
+        }
+        sources.append(object);
+    }
+    if (sources.isEmpty()) {
+        errorString = tr("None of the sources has stored data to export.");
+        return false;
+    }
+
+    const QJsonObject manifest{
+        { QStringLiteral("format"), QLatin1String(GeoZonePack::formatName) },
+        { QStringLiteral("version"), GeoZonePack::version },
+        { QStringLiteral("createdAt"), GeoZoneEnvironment::currentDateTimeUtc().toString(Qt::ISODate) },
+        { QStringLiteral("generator"), QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion()).trimmed() },
+        { QStringLiteral("sources"), sources },
+    };
+    if (!writer.add(QLatin1String(GeoZonePack::manifestName), QJsonDocument(manifest).toJson()) || !writer.finish()) {
+        errorString = writer.errorString();
+        return false;
+    }
+    if (!file.commit()) {
+        errorString = file.errorString();
+        return false;
+    }
+    qCDebug(GeoZoneSourceLog) << "Exported" << sources.count() << "sources to" << packPath;
+    return true;
+}
+
+int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorString)
+{
+    errorString.clear();
+    const GeoZonePack::Contents contents = GeoZonePack::read(packPath, _store.downloadDir());
+    if (!contents.errorString.isEmpty()) {
+        errorString = tr("The geozone pack could not be read. %1").arg(contents.errorString);
+        return -1;
+    }
+
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    const QString packName = QFileInfo(packPath).fileName();
+    for (const GeoZonePack::Source &packSource : contents.sources) {
+        const QJsonObject &manifest = packSource.manifest;
+        const auto date = [&manifest](const char *name) { return QDateTime::fromString(manifest.value(QLatin1String(name)).toString(), Qt::ISODate); };
+        GeoZoneLoader::Job job;
+        job.key = manifest.value(QStringLiteral("key")).toString();
+        job.url = manifest.value(QStringLiteral("url")).toString();
+        job.sourcePath = packSource.filePath;
+        // Adopted as the stored copy like a download
+        job.downloaded = true;
+        job.storedFileName = GeoZoneStore::newFileName();
+        job.loadedAt = date("loadedAt").isValid() ? date("loadedAt") : now;
+        job.fileDate = date("fileDate").isValid() ? date("fileDate") : job.loadedAt;
+        job.checkedAt = date("checkedAt");
+        job.formatHint = GeoZoneProviders::formatHint(job.url);
+        job.etag = manifest.value(QStringLiteral("etag")).toString();
+        job.lastModified = manifest.value(QStringLiteral("lastModified")).toString();
+        job.datasetUrl = manifest.value(QStringLiteral("datasetUrl")).toString();
+        job.maxAgeSecs = manifest.value(QStringLiteral("maxAge")).toInteger(-1);
+        const QJsonArray area = manifest.value(QStringLiteral("area")).toArray();
+        if (area.count() == 4) {
+            job.area = QGeoRectangle(QGeoCoordinate(area[3].toDouble(), area[0].toDouble()), QGeoCoordinate(area[1].toDouble(), area[2].toDouble()));
+        }
+        job.provenance = GeoZoneProvenance::fromJson(manifest.value(QStringLiteral("provenance")).toObject());
+        job.provenance.imported = true;
+        job.provenance.packName = packName;
+        job.provenance.importedAt = now;
+        job.request = GeoZoneLoader::Request::User;
+        // The secret of a service isn't in the pack, the source shows that it is missing
+        const QJsonValue service = manifest.value(QStringLiteral("service"));
+        _setService(job.key, (job.url.isEmpty() || !service.isObject()) ? GeoZoneService() : GeoZoneService::fromJson(service.toObject()));
+        job.cancelToken = _beginOperation(job.key);
+        _startLoad(job, LoadMode::Background);
+    }
+    qCDebug(GeoZoneSourceLog) << "Importing" << contents.sources.count() << "sources from" << packPath;
+    errorString = contents.errors.join(QLatin1Char('\n'));
+    return static_cast<int>(contents.sources.count());
 }
 
 void GeoZoneSourceRepository::updateValidity()

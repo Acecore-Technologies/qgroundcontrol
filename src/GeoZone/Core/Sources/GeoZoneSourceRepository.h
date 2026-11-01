@@ -88,6 +88,15 @@ public:
     static QJsonObject sourceReport(const GeoZoneSource &source);
     /// @return The reports of the sources, see sourceReport, and when it was made
     QJsonObject provenanceReport() const;
+
+    /// Writes an offline pack of the stored copies of the sources with the keys, see GeoZonePack. Secrets are left out.
+    /// @return false when it can't be written, errorString tells why
+    bool exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const;
+    /// Imports the sources of an offline pack, replacing those with the same keys. They are loaded in the background,
+    /// keep their dates, validators and provenance, marked as imported, and are refreshed like other sources.
+    /// @return Number of sources imported, negative when the pack can't be read. errorString tells why, or which
+    ///         sources were left out.
+    int importPack(const QString &packPath, QString &errorString);
     /// Downloads all feeds again. Failures keep the previous data.
     void refreshFeeds();
     /// Removes a source, its stored copy, and cancels its downloads

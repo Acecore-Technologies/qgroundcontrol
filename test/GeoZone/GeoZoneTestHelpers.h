@@ -20,6 +20,7 @@
 #include "GeoZoneIndex.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneLoader.h"
+#include "GeoZonePack.h"
 #include "GeoZoneParseCache.h"
 #include "GeoZoneParser.h"
 #include "GeoZonePathEvaluator.h"
@@ -30,6 +31,7 @@
 #include "GeoZoneSource.h"
 #include "GeoZoneStore.h"
 #include "GeoZoneTerrain.h"
+#include "GeoZoneZip.h"
 #ifndef GEOZONE_CORE_TEST
 #include "GeoFenceController.h"
 #include "GeoZoneAlertHistory.h"

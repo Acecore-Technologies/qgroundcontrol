@@ -24,6 +24,7 @@
 
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSaveFile>
 #include <QtCore/QLocale>
@@ -129,6 +130,43 @@ bool GeoZoneManager::exportProvenance(const QString &fileName)
         return false;
     }
     emit fileOperationFinished(true, tr("The geozone source provenance was saved to %1.").arg(localFileName));
+    return true;
+}
+
+bool GeoZoneManager::exportPack(const QString &fileName, const QStringList &keys)
+{
+    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+    QStringList sourceKeys = keys;
+    if (sourceKeys.isEmpty()) {
+        for (const GeoZoneSource *const source : _repository->sources()) {
+            if (source->enabled()) {
+                sourceKeys.append(source->key());
+            }
+        }
+    }
+    QString errorString;
+    if (!_repository->exportPack(sourceKeys, localFileName, errorString)) {
+        emit fileOperationFinished(false, tr("The geozone pack could not be saved to %1: %2").arg(localFileName, errorString));
+        return false;
+    }
+    emit fileOperationFinished(true, tr("The geozone pack was saved to %1.").arg(localFileName));
+    return true;
+}
+
+bool GeoZoneManager::importPack(const QString &fileName)
+{
+    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+    QString errorString;
+    const int count = _repository->importPack(localFileName, errorString);
+    if (count < 0) {
+        emit fileOperationFinished(false, errorString);
+        return false;
+    }
+    QString message = tr("%n geozone source(s) imported from %1.", nullptr, count).arg(QFileInfo(localFileName).fileName());
+    if (!errorString.isEmpty()) {
+        message += QStringLiteral("\n") + tr("Left out:") + QStringLiteral("\n") + errorString;
+    }
+    emit fileOperationFinished(errorString.isEmpty(), message);
     return true;
 }
 

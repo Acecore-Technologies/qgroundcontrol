@@ -37,6 +37,7 @@ private slots:
     void _testServiceAreaOfInterest();
     void _testProvenance();
     void _testIntegrity();
+    void _testOfflinePack();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();

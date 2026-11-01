@@ -103,6 +103,12 @@ public:
     /// Writes provenanceReport as a JSON file, for briefings. fileOperationFinished tells the outcome.
     Q_INVOKABLE bool exportProvenance(const QString &fileName);
 
+    /// Writes an offline pack of the sources, see GeoZonePack. fileOperationFinished tells the outcome.
+    /// @param keys Of the sources, those turned on when empty
+    Q_INVOKABLE bool exportPack(const QString &fileName, const QStringList &keys = QStringList());
+    /// Imports the sources of an offline pack, loaded in the background. fileOperationFinished tells the outcome.
+    Q_INVOKABLE bool importPack(const QString &fileName);
+
     /// Removes a source, its zones and its stored copy
     Q_INVOKABLE void removeSource(int index) { _repository->removeSource(index); }
 
