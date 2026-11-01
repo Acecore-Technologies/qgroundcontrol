@@ -25,4 +25,5 @@ private slots:
     void _testAlertLog();
     void _testAlertHistory();
     void _testFenceStatus();
+    void _testAlertArbiter();
 };

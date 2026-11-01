@@ -8,9 +8,39 @@
  ****************************************************************************/
 
 #include "GeoZoneMonitorTest.h"
+#include "GeoZoneAlertArbiter.h"
 #include "GeoZoneTestHelpers.h"
 
+#include <memory>
+
 using namespace GeoZoneTestHelpers;
+
+namespace {
+
+/// Keeps what would be spoken
+class RecordingAudioSink : public GeoZoneAlertArbiter::AudioSink
+{
+public:
+    void say(const QString &text) override { spoken.append(text); }
+
+    QStringList spoken;
+};
+
+GeoZoneAlertArbiter::Alert arbiterAlert(int id, int vehicleKey, const QString &zone, GeoZone::Restriction restriction, bool inside)
+{
+    GeoZoneAlertArbiter::Alert alert;
+    alert.id = id;
+    alert.vehicleKey = vehicleKey;
+    alert.zoneKey = zone;
+    alert.severity = GeoZone::restrictionSeverity(restriction);
+    alert.inside = inside;
+    alert.breach = inside && (restriction == GeoZone::Prohibited);
+    alert.message = QStringLiteral("%1 %2").arg(inside ? QStringLiteral("Entered") : QStringLiteral("Approaching"), zone);
+    alert.repeatMessage = QStringLiteral("Still inside %1").arg(zone);
+    return alert;
+}
+
+} // namespace
 
 void GeoZoneMonitorTest::_testMonitorAlerts()
 {
@@ -587,4 +617,117 @@ void GeoZoneMonitorTest::_testFenceStatus()
     QVERIFY(!monitor.fenceBreached());
     monitor.removeVehicle(vehicleId + 1);
     QVERIFY(!monitor.fenceStatusKnown());
+}
+
+void GeoZoneMonitorTest::_testAlertArbiter()
+{
+    qint64 now = 0;
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    GeoZoneAlertArbiter arbiter([&now]() { return now; }, sink);
+
+    // The alerts of a tick are one message, the most severe first, naming two and counting the others
+    arbiter.submit(arbiterAlert(1, 1, QStringLiteral("U"), GeoZone::USpace, true));
+    arbiter.submit(arbiterAlert(2, 1, QStringLiteral("A"), GeoZone::ReqAuthorisation, false));
+    arbiter.submit(arbiterAlert(3, 2, QStringLiteral("P"), GeoZone::Prohibited, false));
+    arbiter.submit(arbiterAlert(4, 1, QStringLiteral("C"), GeoZone::Conditional, true));
+    const GeoZoneAlertArbiter::Announcement announcement = arbiter.tick();
+    QCOMPARE(sink->spoken, QStringList{ QStringLiteral("Approaching P. Approaching A, and 2 more") });
+    QCOMPARE(announcement.text, sink->spoken.last());
+    QCOMPARE(announcement.alerts.count(), 4);
+    QCOMPARE(announcement.alerts[2].id, 4);
+    QCOMPARE(announcement.alerts[3].id, 1);
+    QVERIFY(arbiter.tick().text.isEmpty());
+
+    // Sooner than the minimum interval, alerts as urgent or less wait and are combined
+    now += 1000;
+    arbiter.submit(arbiterAlert(5, 1, QStringLiteral("C2"), GeoZone::Conditional, false));
+    QVERIFY(arbiter.tick().text.isEmpty());
+    now += 1000;
+    arbiter.submit(arbiterAlert(6, 2, QStringLiteral("U2"), GeoZone::USpace, false));
+    arbiter.submit(arbiterAlert(7, 2, QStringLiteral("P2"), GeoZone::Prohibited, false));
+    QVERIFY(arbiter.tick().text.isEmpty());
+    QCOMPARE(arbiter.pendingCount(), 3);
+    arbiter.acknowledge(7);
+    now = GeoZoneAlertArbiter::minIntervalMSecs;
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Approaching C2. Approaching U2"));
+
+    // A more urgent alert preempts the interval
+    now += 1000;
+    arbiter.submit(arbiterAlert(8, 1, QStringLiteral("A2"), GeoZone::ReqAuthorisation, true));
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Entered A2"));
+    now += 1000;
+    arbiter.submit(arbiterAlert(9, 1, QStringLiteral("A3"), GeoZone::ReqAuthorisation, true));
+    QVERIFY(arbiter.tick().text.isEmpty());
+    arbiter.acknowledge(9);
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
+    QVERIFY(arbiter.tick().text.isEmpty());
+
+    // Entering a prohibited zone is repeated until it is acknowledged
+    arbiter.submit(arbiterAlert(10, 1, QStringLiteral("P"), GeoZone::Prohibited, true));
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P"));
+    QCOMPARE(arbiter.breachCount(), 1);
+    arbiter.setInsideZones(1, { QStringLiteral("P") });
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs - 1;
+    QVERIFY(arbiter.tick().text.isEmpty());
+    now += 1;
+    const GeoZoneAlertArbiter::Announcement repeat = arbiter.tick();
+    QCOMPARE(repeat.text, QStringLiteral("Still inside P"));
+    QCOMPARE(repeat.repeated.count(), 1);
+    QCOMPARE(repeat.repeated.first().id, 10);
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P"));
+    arbiter.acknowledge(10);
+    QCOMPARE(arbiter.breachCount(), 0);
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    QVERIFY(arbiter.tick().text.isEmpty());
+
+    // ... or the vehicle leaves the zone
+    arbiter.submit(arbiterAlert(11, 2, QStringLiteral("P"), GeoZone::Prohibited, true));
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P"));
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    arbiter.setInsideZones(2, { QStringLiteral("P"), QStringLiteral("U") });
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P"));
+    arbiter.setInsideZones(2, { QStringLiteral("U") });
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    QVERIFY(arbiter.tick().text.isEmpty());
+    QCOMPARE(arbiter.breachCount(), 0);
+
+    // Muted, alerts are dropped, but the first announcement of a new breach is spoken
+    const qsizetype spokenCount = sink->spoken.count();
+    arbiter.mute();
+    QVERIFY(arbiter.muted());
+    QCOMPARE(arbiter.mutedUntil(), now + GeoZoneAlertArbiter::defaultMuteMSecs);
+    const qint64 mutedUntil = arbiter.mutedUntil();
+    arbiter.submit(arbiterAlert(12, 1, QStringLiteral("A4"), GeoZone::ReqAuthorisation, true));
+    QVERIFY(arbiter.tick().text.isEmpty());
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
+    arbiter.submit(arbiterAlert(13, 1, QStringLiteral("C3"), GeoZone::Conditional, true));
+    arbiter.submit(arbiterAlert(14, 1, QStringLiteral("P3"), GeoZone::Prohibited, true));
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P3"));
+    QCOMPARE(sink->spoken.count(), spokenCount + 1);
+    arbiter.setInsideZones(1, { QStringLiteral("P3") });
+
+    // Its repeats wait for the end of the mute, the alerts dropped meanwhile aren't spoken
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    QVERIFY(arbiter.tick().text.isEmpty());
+    now = mutedUntil;
+    QVERIFY(!arbiter.muted());
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P3"));
+
+    // A vehicle no longer monitored is forgotten, and nothing is spoken while turned off
+    arbiter.removeVehicle(1);
+    QCOMPARE(arbiter.breachCount(), 0);
+    arbiter.setEnabled(false);
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    arbiter.submit(arbiterAlert(15, 1, QStringLiteral("P4"), GeoZone::Prohibited, true));
+    QVERIFY(arbiter.tick().text.isEmpty());
+    QCOMPARE(arbiter.pendingCount(), 0);
+    QCOMPARE(arbiter.breachCount(), 0);
+
+    // Without a sink the announcements are still decided
+    arbiter.setEnabled(true);
+    arbiter.setAudioSink(nullptr);
+    arbiter.submit(arbiterAlert(16, 1, QStringLiteral("P4"), GeoZone::Prohibited, true));
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P4"));
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Still inside P3"));
 }
