@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QList>
+#include <QtCore/QMutex>
 #include <QtCore/QPointF>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -87,5 +88,6 @@ private:
     double _radius = 0;
     GeoZoneMercatorBounds _mercatorBounds;
     /// By simplified zoom level, a list since few levels are used and a hash allocates much more
-    mutable QList<std::pair<int, QList<QList<QPointF>>>> _mercatorCache;
+    mutable QList<std::pair<int, QList<QList<QPointF>>>> _mercatorCache;  ///< Guarded by _mercatorMutex
+    mutable QMutex _mercatorMutex;
 };

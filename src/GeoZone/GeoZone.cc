@@ -220,7 +220,7 @@ bool GeoZone::isActiveDuring(const QDateTime &start, const QDateTime &end) const
 bool GeoZone::updateActive(const QDateTime &now)
 {
     const bool active = isActiveAt(now);
-    if (active == _active) {
+    if (active == _active.load(std::memory_order_relaxed)) {
         return false;
     }
     _active = active;
@@ -230,9 +230,12 @@ bool GeoZone::updateActive(const QDateTime &now)
 QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance) const
 {
     if (simplifyTolerance > 0) {
-        const auto cached = _simplifiedPolygons.constFind(simplifyTolerance);
-        if (cached != _simplifiedPolygons.constEnd()) {
-            return cached.value();
+        {
+            const QMutexLocker locker(&_simplifiedMutex);
+            const auto cached = _simplifiedPolygons.constFind(simplifyTolerance);
+            if (cached != _simplifiedPolygons.constEnd()) {
+                return cached.value();
+            }
         }
 
         QList<QList<QGeoCoordinate>> simplified;
@@ -242,6 +245,7 @@ QList<QList<QGeoCoordinate>> GeoZone::exclusionPolygons(double simplifyTolerance
                 simplified.append(ring);
             }
         }
+        const QMutexLocker locker(&_simplifiedMutex);
         _simplifiedPolygons.insert(simplifyTolerance, simplified);
         return simplified;
     }

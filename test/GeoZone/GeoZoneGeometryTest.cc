@@ -760,3 +760,37 @@ void GeoZoneGeometryTest::_testAntimeridian()
     QVERIFY(shape.mercatorBounds().intersects({ 0.9995, y - 0.001, 1.0, y + 0.001 }));
     QVERIFY(!shape.mercatorBounds().intersects({ 0.5, y - 0.001, 0.6, y + 0.001 }));
 }
+
+void GeoZoneGeometryTest::_testConcurrentQueries()
+{
+    // Mission checks query zones on worker threads while the GUI thread uses the same zones and shapes
+    ZoneOwner owner;
+    GeoZone::Data data;
+    data.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8), 2000, 400)) } });
+    GeoZone *const zone = owner.add(data);
+    const GeoZoneShape shape(zone, zone->data().volumes[0].rings);
+    const QList<double> tolerances = { 5, 10, 20, 40, 80 };
+    const QList<int> zoomLevels = { 8, 10, 12, 14, 16 };
+
+    QList<QFuture<bool>> futures;
+    for (int thread = 0; thread < 8; thread++) {
+        futures.append(QtConcurrent::run([zone, &shape, &tolerances, &zoomLevels, thread]() {
+            bool ok = true;
+            for (int i = 0; i < 200; i++) {
+                const double tolerance = tolerances[(thread + i) % tolerances.count()];
+                ok = ok && !zone->exclusionPolygons(tolerance).isEmpty();
+                ok = ok && !shape.mercatorRings(zoomLevels[(thread + i) % zoomLevels.count()]).isEmpty();
+                ok = ok && zone->contains(QGeoCoordinate(47, 8)) && zone->active();
+            }
+            return ok;
+        }));
+    }
+    for (int i = 0; i < 200; i++) {
+        (void) zone->updateActive(QDateTime::currentDateTimeUtc());
+    }
+    for (QFuture<bool> &future : futures) {
+        QVERIFY(future.result());
+    }
+    // Each tolerance is simplified once and returned the same way afterwards
+    QCOMPARE(zone->exclusionPolygons(10), zone->exclusionPolygons(10));
+}

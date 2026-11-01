@@ -50,6 +50,7 @@
 #include "SurveyComplexItem.h"
 #include "UnitsSettings.h"
 #include "Vehicle.h"
+#include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>

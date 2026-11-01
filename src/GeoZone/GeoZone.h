@@ -13,6 +13,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QList>
+#include <QtCore/QMutex>
 #include <QtCore/QSharedPointer>
 #include <QtCore/QRectF>
 #include <QtCore/QStringList>
@@ -22,6 +23,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include <cmath>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -139,7 +141,7 @@ public:
     QString verticalLimitsText() const;
     QGeoCoordinate center() const { return _boundingBox.center(); }
     QGeoRectangle boundingBox() const { return _boundingBox; }
-    bool active() const { return _active; }
+    bool active() const { return _active.load(std::memory_order_relaxed); }
     QString sourceKey() const { return _sourceKey; }
     QString sourceText() const { return _sourceText; }
     /// Set by the source before the zone is published
@@ -245,11 +247,12 @@ private:
     const Data _data;
     QList<QRectF> _volumeBoxes;     ///< Outer ring extents of the polygon volumes, x is longitude and y latitude
     QGeoRectangle _boundingBox;
-    bool _active = true;
+    std::atomic<bool> _active = true;   ///< Updated on the GUI thread, read by checks on worker threads
     QString _sourceKey;
     QString _sourceText;
     QString _key;
-    mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance
+    mutable QMutex _simplifiedMutex;
+    mutable QHash<double, QList<QList<QGeoCoordinate>>> _simplifiedPolygons;    ///< Keyed by tolerance, guarded by _simplifiedMutex
     mutable std::once_flag _projectedOnce;
     mutable std::unique_ptr<const Projected> _projectedData;
 };

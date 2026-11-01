@@ -209,9 +209,12 @@ QList<QList<QPointF>> GeoZoneShape::mercatorRings(int zoomLevel) const
     }
 
     const int level = std::clamp(zoomLevel, 0, fullDetailZoomLevel);
-    for (const auto &[cachedLevel, cachedRings] : _mercatorCache) {
-        if (cachedLevel == level) {
-            return cachedRings;
+    {
+        const QMutexLocker locker(&_mercatorMutex);
+        for (const auto &[cachedLevel, cachedRings] : _mercatorCache) {
+            if (cachedLevel == level) {
+                return cachedRings;
+            }
         }
     }
 
@@ -240,6 +243,7 @@ QList<QList<QPointF>> GeoZoneShape::mercatorRings(int zoomLevel) const
         }
     }
 
+    const QMutexLocker locker(&_mercatorMutex);
     _mercatorCache.append({ level, rings });
     return rings;
 }
