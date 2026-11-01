@@ -824,6 +824,18 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     QCOMPARE(arbiter.breachCount(), 0);
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
     QVERIFY(arbiter.tick().text.isEmpty());
+
+    // The breaches of a vehicle whose position is lost are kept but not repeated until it is back
+    arbiter.submit(arbiterAlert(15, 3, QStringLiteral("P4"), GeoZone::Prohibited, true));
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P4"));
+    arbiter.setSuspended(3, true);
+    QVERIFY(arbiter.suspended(3));
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs * 2;
+    QVERIFY(arbiter.tick().text.isEmpty());
+    QCOMPARE(arbiter.breachCount(), 1);
+    arbiter.setSuspended(3, false);
+    QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P4"));
+    arbiter.removeVehicle(3);
 }
 
 void GeoZoneMonitorTest::_testSpokenAlerts()
@@ -943,4 +955,109 @@ void GeoZoneMonitorTest::_testSpokenAlerts()
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
     monitor.evaluate(inProhibited);
     QCOMPARE(repeatSpy.count(), repeatCount + 1);
+}
+
+void GeoZoneMonitorTest::_testPositionLoss()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(3000, 90), 300),
+    }), errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    QSignalSpy repeatSpy(&monitor, &GeoZoneMonitor::alertRepeated);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    GeoZoneActiveVehicleView *const view = monitor.activeView();
+
+    // An offline vehicle has no position of its own, like a vehicle whose position is lost
+    Vehicle vehicle(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(&vehicle);
+    monitor.setActiveVehicle(&vehicle);
+    QCOMPARE(view->vehicleId(), vehicle.id());
+    const GeoZone::Position inside{ center.atDistanceAndAzimuth(100, 0), 450, 400 };
+    monitor.evaluate(&vehicle, inside);
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone P (Prohibited)"));
+    now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+    monitor.evaluate(&vehicle, inside);
+    QCOMPARE(repeatSpy.count(), 1);
+
+    // Losing the position is alerted once with the zone the vehicle was in, and the breach isn't repeated while the
+    // vehicle may have left the zone. Its nearby zones and bands are kept as stale.
+    QSignalSpy unavailableSpy(view, &GeoZoneActiveVehicleView::positionUnavailableChanged);
+    now += 1000;
+    monitor.evaluateVehicles();
+    QVERIFY(vehicleMonitor->positionUnavailable());
+    QVERIFY(view->positionUnavailable());
+    QCOMPARE(unavailableSpy.count(), 1);
+    QVERIFY(monitor.arbiter().suspended(vehicleMonitor->key()));
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Position lost inside geozone P (Prohibited)"));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::Prohibited));
+    QCOMPARE(sink->spoken.last(), alertSpy.last()[0].toString());
+    const GeoZoneMonitor::AlertEvent lost = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(lost.kind == GeoZoneMonitor::AlertEvent::PositionLost);
+    QVERIFY(lost.inside);
+    QCOMPARE(lost.position.coordinate, inside.coordinate);
+    QVERIFY(view->inside());
+    QCOMPARE(view->verticalBands().count(), 1);
+    QCOMPARE(view->predictedEntryTime(), -1);
+    for (int i = 0; i < 3; i++) {
+        now += GeoZoneAlertArbiter::repeatIntervalMSecs;
+        monitor.evaluateVehicles();
+    }
+    QCOMPARE(repeatSpy.count(), 1);
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(monitor.arbiter().breachCount(), 1);
+
+    // When the position is back the breach resumes at once if the vehicle is still inside, and ends when it leaves
+    monitor.evaluate(&vehicle, inside);
+    QVERIFY(!view->positionUnavailable());
+    QVERIFY(!monitor.arbiter().suspended(vehicleMonitor->key()));
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(repeatSpy.count(), 2);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Still inside geozone P (Prohibited)"));
+    monitor.evaluate(&vehicle, { center.atDistanceAndAzimuth(1000, 0), 450, 400 });
+    QCOMPARE(monitor.arbiter().breachCount(), 0);
+
+    // Far from any zone, nothing is alerted
+    monitor.evaluate(&vehicle, { center.atDistanceAndAzimuth(10000, 0), 450, 400 });
+    QVERIFY(view->nearbyZones().isEmpty());
+    const qsizetype alertCount = alertSpy.count();
+    monitor.evaluateVehicles();
+    QVERIFY(view->positionUnavailable());
+    QCOMPARE(alertSpy.count(), alertCount);
+
+    // Positions passed to evaluate() are lost on request, near a zone
+    monitor.evaluate({ center.atDistanceAndAzimuth(3350, 90) }, 7);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 7: Approaching geozone C (Conditional)"));
+    monitor.positionLost(7);
+    monitor.positionLost(7);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 7: Position lost near geozone C (Conditional)"));
+    QCOMPARE(alertSpy.count(), alertCount + 2);
+    QVERIFY(monitor.positionMonitor(7)->positionUnavailable());
+    monitor.evaluate({ center.atDistanceAndAzimuth(3350, 90) }, 7);
+    QVERIFY(!monitor.positionMonitor(7)->positionUnavailable());
+    QCOMPARE(alertSpy.count(), alertCount + 2);
+
+    // The alert is logged and read back
+    const GeoZoneMonitor::AlertEvent nearLost = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    const QString line = GeoZoneAlertLog::line(nearLost);
+    QCOMPARE(line.section(QLatin1Char(','), 6, 6), QStringLiteral("position_lost"));
+    const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(line);
+    QVERIFY(read);
+    QVERIFY(read->kind == GeoZoneMonitor::AlertEvent::PositionLost);
+    QVERIFY(!read->inside);
+    QCOMPARE(read->message, QStringLiteral("Position lost near geozone C (Conditional)"));
+    QVERIFY(GeoZoneAlertHistory::parseLogLine(GeoZoneAlertLog::line(lost))->inside);
 }

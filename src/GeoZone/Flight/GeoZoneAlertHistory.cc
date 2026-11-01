@@ -183,7 +183,14 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     }
     GeoZoneMonitor::AlertEvent event;
     event.time = QDateTime::fromString(fields[0], Qt::ISODateWithMs);
-    if (!event.time.isValid() || ((fields[6] != QStringLiteral("entered")) && (fields[6] != QStringLiteral("approaching")))) {
+    if (fields[6] == QStringLiteral("entered")) {
+        event.kind = GeoZoneMonitor::AlertEvent::Entry;
+    } else if (fields[6] == QStringLiteral("position_lost")) {
+        event.kind = GeoZoneMonitor::AlertEvent::PositionLost;
+    } else if (fields[6] != QStringLiteral("approaching")) {
+        return std::nullopt;
+    }
+    if (!event.time.isValid()) {
         return std::nullopt;
     }
     bool vehicleOk = false;
@@ -192,8 +199,8 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.position.coordinate = QGeoCoordinate(number(fields[2]), number(fields[3]));
     event.position.altitudeAMSL = number(fields[4]);
     event.position.terrainAMSL = number(fields[5]);
-    event.inside = (fields[6] == QStringLiteral("entered"));
     event.distance = number(fields[7]);
+    event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
     event.zoneIdentifier = fields[8];
     event.zoneName = fields[9];
     bool restrictionOk = false;
@@ -204,14 +211,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
 
     // The messages of the monitor
     const QString name = event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName;
-    const QString restrictionText = GeoZone::restrictionToString(event.restriction);
-    if (event.inside) {
-        event.message = GeoZoneMonitor::tr("Entered geozone %1 (%2)").arg(name, restrictionText);
-    } else if (!std::isnan(event.timeToEntry)) {
-        event.message = GeoZoneMonitor::tr("Approaching geozone %1 (%2), entry in about %3 s").arg(name, restrictionText).arg(std::lround(event.timeToEntry));
-    } else {
-        event.message = GeoZoneMonitor::tr("Approaching geozone %1 (%2)").arg(name, restrictionText);
-    }
+    event.message = GeoZoneMonitor::alertMessage(event, name, GeoZone::restrictionToString(event.restriction));
     return event;
 }
 

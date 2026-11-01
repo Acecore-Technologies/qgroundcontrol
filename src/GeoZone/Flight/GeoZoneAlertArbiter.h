@@ -28,7 +28,8 @@
 /// - Messages are at least minIntervalMSecs apart. Alerts arriving sooner wait for a later tick, unless they are more
 ///   urgent than the last message, which they preempt.
 /// - Entering a prohibited zone (a breach) is repeated every repeatIntervalMSecs until its alert is acknowledged or
-///   the vehicle leaves the zone.
+///   the vehicle leaves the zone. While the position of the vehicle is lost, its breaches are suspended: kept, since
+///   it may still be inside, but not repeated.
 /// - Muting silences the alerts and repeats for a while, except the first announcement of a new breach. Alerts
 ///   raised while muted are dropped, not announced later.
 class GeoZoneAlertArbiter
@@ -72,7 +73,10 @@ public:
 
     /// Ends the breaches of the vehicle in zones other than those it is inside, by GeoZone::key
     void setInsideZones(int vehicleKey, const QSet<QString> &zoneKeys);
-    /// Forgets the alerts and breaches of a vehicle no longer monitored
+    /// Suspends the repeats of the breaches of a vehicle whose position is lost, or resumes them
+    void setSuspended(int vehicleKey, bool suspended);
+    bool suspended(int vehicleKey) const { return _suspended.contains(vehicleKey); }
+    /// Forgets the alerts, breaches and suspension of a vehicle no longer monitored
     void removeVehicle(int vehicleKey);
     /// Forgets all alerts and breaches, keeping the mute
     void clear();
@@ -113,6 +117,7 @@ private:
     Clock _clock;
     QList<Alert> _pending;          ///< Submitted, not spoken yet, in submission order
     QList<Breach> _breaches;
+    QSet<int> _suspended;           ///< Vehicle keys
     qint64 _lastSpokenMSecs = -1;   ///< -1 before the first message
     int _lastSpokenUrgency = std::numeric_limits<int>::max();
     qint64 _mutedUntilMSecs = -1;

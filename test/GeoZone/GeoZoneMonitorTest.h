@@ -28,4 +28,5 @@ private slots:
     void _testVehicleMonitors();
     void _testAlertArbiter();
     void _testSpokenAlerts();
+    void _testPositionLoss();
 };

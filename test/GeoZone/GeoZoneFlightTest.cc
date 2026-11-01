@@ -311,11 +311,17 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
     QVERIFY(logLines.last().section(QLatin1Char(','), 1, 1) == QString::number(vehicle->id()));
 
-    // Alerts pause while the link is lost, since the last position isn't where the vehicle is
+    // Alerts pause while the link is lost, since the last position isn't where the vehicle is, which is alerted once
+    // with the zone it was last seen in
     _mockLink->setCommLost(true);
     QTRY_VERIFY_WITH_TIMEOUT(monitor.activeView()->positionUnavailable(), 10000);
+    const QStringList lost = spiedAlerts(alertSpy).filter(QStringLiteral("Position lost inside geozone"));
+    QCOMPARE(lost.count(), 1);
+    QVERIFY2((lost.first() == alertText(*manager, QStringLiteral("Position lost inside"), ctrs[0])) ||
+             (lost.first() == alertText(*manager, QStringLiteral("Position lost inside"), ctrs[1])), qPrintable(lost.first()));
     _mockLink->setCommLost(false);
     QTRY_VERIFY_WITH_TIMEOUT(!monitor.activeView()->positionUnavailable(), 10000);
+    QCOMPARE(spiedAlerts(alertSpy).filter(QStringLiteral("Position lost")).count(), 1);
 
     // Alerts can be turned off in flight
     settings->alertsEnabled()->setRawValue(false);

@@ -35,7 +35,7 @@ public:
         MessageRole,
         ZoneNameRole,
         RestrictionRole,                ///< GeoZone::Restriction
-        InsideRole,                     ///< Entered, otherwise approached
+        InsideRole,                     ///< Inside the zone: entered it, or lost the position inside it
         CoordinateRole,                 ///< Of the vehicle
         AltitudeRole,                   ///< Of the vehicle in meters AMSL, NaN when unknown
         AcknowledgedRole,

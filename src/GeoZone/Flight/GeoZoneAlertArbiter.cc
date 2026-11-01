@@ -57,8 +57,18 @@ void GeoZoneAlertArbiter::setInsideZones(int vehicleKey, const QSet<QString> &zo
     });
 }
 
+void GeoZoneAlertArbiter::setSuspended(int vehicleKey, bool suspended)
+{
+    if (suspended) {
+        _suspended.insert(vehicleKey);
+    } else {
+        (void) _suspended.remove(vehicleKey);
+    }
+}
+
 void GeoZoneAlertArbiter::removeVehicle(int vehicleKey)
 {
+    (void) _suspended.remove(vehicleKey);
     (void) _pending.removeIf([vehicleKey](const Alert &alert) { return alert.vehicleKey == vehicleKey; });
     (void) _breaches.removeIf([vehicleKey](const Breach &breach) { return breach.alert.vehicleKey == vehicleKey; });
 }
@@ -106,7 +116,7 @@ GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
     }
     if (!silenced) {
         for (const Breach &breach : std::as_const(_breaches)) {
-            if ((breach.announcedMSecs >= 0) && ((now - breach.announcedMSecs) >= repeatIntervalMSecs)) {
+            if ((breach.announcedMSecs >= 0) && ((now - breach.announcedMSecs) >= repeatIntervalMSecs) && !_suspended.contains(breach.alert.vehicleKey)) {
                 candidates.append(Candidate{ breach.alert, true });
             }
         }

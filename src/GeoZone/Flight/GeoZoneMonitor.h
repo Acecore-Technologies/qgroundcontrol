@@ -74,13 +74,20 @@ public:
     static constexpr int evaluateIntervalMSecs = 1000;
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
 
-    /// An approach or entry alert
+    /// An alert of a vehicle about a zone
     struct AlertEvent {
+        enum Kind {
+            Approach,               ///< The vehicle came near the zone
+            Entry,                  ///< The vehicle entered the zone
+            PositionLost,           ///< The vehicle lost its position near or inside the zone
+        };
+
         int id = 0;                 ///< Unique for the session, 0 for alerts read from a log
         QDateTime time;             ///< UTC
         int vehicleId = noVehicle;
-        GeoZone::Position position;
-        bool inside = false;        ///< Entered, otherwise approached
+        GeoZone::Position position; ///< The last known position for PositionLost
+        Kind kind = Approach;
+        bool inside = false;        ///< The vehicle is inside the zone: entered it, or lost its position inside it
         double distance = 0;        ///< Meters to the zone, 0 inside
         QString zoneIdentifier;
         QString zoneName;
@@ -123,6 +130,12 @@ public:
     /// Vehicle whose nearby zones, bands, prediction and fence status are published by activeView()
     void setActiveVehicle(Vehicle *vehicle);
 
+    /// Evaluates the monitored vehicles at their current positions and announces the alerts and repeats due, which the
+    /// monitor does every evaluateIntervalMSecs. A vehicle without a current position (see
+    /// GeoZoneVehicleMonitor::update) is alerted once that its position is lost and its breaches aren't repeated
+    /// until the position is back.
+    void evaluateVehicles();
+
     /// Evaluates a position of a monitored vehicle, like the monitor does every evaluateIntervalMSecs with the
     /// position the vehicle reports, and announces its alerts
     void evaluate(Vehicle *vehicle, const GeoZone::Position &position, const Velocity &velocity = Velocity());
@@ -136,6 +149,10 @@ public:
     GeoZoneVehicleMonitor *positionMonitor(int vehicleId) const;
     /// Forgets the positions of the vehicle id, so that its alerts repeat
     void removePositionMonitor(int vehicleId);
+    /// The position of the vehicle id is lost until the next evaluate(), like that of a vehicle which stops sending it:
+    /// it is alerted once that its position is lost near or inside the most restrictive zone around its last position,
+    /// and its breaches aren't repeated meanwhile
+    void positionLost(int vehicleId);
     /// Publishes the positions passed to evaluate() for the vehicle id, noVehicle by default
     void setActiveVehicleId(int vehicleId);
     int activeVehicleId() const { return _activeVehicleId; }
@@ -144,6 +161,8 @@ public:
     static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate) { return GeoZoneVehicleMonitor::vehiclePosition(vehicle, coordinate); }
     /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
     static QString fenceBreachText(int breachType, int breachCount) { return GeoZoneVehicleMonitor::fenceBreachText(breachType, breachCount); }
+    /// @return Message of the alert about the zone, without the vehicle, like "Entered geozone P (Prohibited)"
+    static QString alertMessage(const AlertEvent &event, const QString &zoneName, const QString &restrictionText);
 
     /// Replaces the clock of the vehicles' messages and of the spoken alerts, like tests do
     void setClock(const Clock &clock) { _clock = clock; }
@@ -189,7 +208,6 @@ signals:
     void alertsMutedChanged();
 
 private slots:
-    void _evaluateVehicles();
     void _updateEvaluateTimer();
     void _forgetZones(GeoZoneSource *source);
     void _zonesChanged(GeoZoneSource *source);
@@ -207,12 +225,15 @@ private:
     void _evaluate(GeoZoneVehicleMonitor *monitor, const GeoZone::Position &position, const Velocity &velocity);
     /// Shows, logs and submits the alerts of a vehicle to the arbiter
     void _raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneAlertTracker::Alert> &alerts);
+    void _submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone);
+    /// Suspends the breaches of a vehicle whose position is lost and alerts it once, or resumes them
+    void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
     void _settingsChanged(const Settings &previous);
     void _resetMonitors();
 
-    AlertEvent _alertEvent(const GeoZoneAlertTracker::Alert &alert, const GeoZone::Position &position, int vehicleId);
+    AlertEvent _alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId);
     /// @return The message naming the vehicle while several are monitored
     QString _labelled(int vehicleId, const QString &message) const;
     qint64 _now() const { return _clock ? _clock() : _elapsed.elapsed(); }

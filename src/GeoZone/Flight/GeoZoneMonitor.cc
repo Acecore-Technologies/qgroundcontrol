@@ -55,7 +55,7 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
-    (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::_evaluateVehicles);
+    (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::evaluateVehicles);
     (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateEvaluateTimer);
 
     MultiVehicleManager *const multiVehicleManager = MultiVehicleManager::instance();
@@ -173,6 +173,9 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
     (void) connect(monitor, &GeoZoneVehicleMonitor::fenceBreachStarted, this, [this, monitor](const QString &text) {
         emit fenceBreach(_labelled(monitor->vehicleId(), text));
     });
+    (void) connect(monitor, &GeoZoneVehicleMonitor::positionUnavailableChanged, this, [this, monitor]() {
+        _positionAvailabilityChanged(monitor);
+    });
     _resolveActive();
     return monitor;
 }
@@ -267,14 +270,14 @@ void GeoZoneMonitor::_updateEvaluateTimer()
     if (monitoring()) {
         if (!_evaluateTimer.isActive()) {
             _evaluateTimer.start();
-            _evaluateVehicles();
+            evaluateVehicles();
         }
     } else {
         _evaluateTimer.stop();
     }
 }
 
-void GeoZoneMonitor::_evaluateVehicles()
+void GeoZoneMonitor::evaluateVehicles()
 {
     const GeoZoneVehicleMonitor::Context context = _context();
     const QList<QPointer<GeoZoneVehicleMonitor>> monitors(_monitors.cbegin(), _monitors.cend());
@@ -309,32 +312,67 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
     _announce();
 }
 
+void GeoZoneMonitor::positionLost(int vehicleId)
+{
+    GeoZoneVehicleMonitor *const monitor = positionMonitor(vehicleId);
+    if (!monitor) {
+        return;
+    }
+    monitor->setPositionUnavailable(true);
+    _announce();
+}
+
 void GeoZoneMonitor::_evaluate(GeoZoneVehicleMonitor *monitor, const GeoZone::Position &position, const Velocity &velocity)
 {
+    // A position is known again, resuming the breaches before the vehicle may leave their zones
+    monitor->setPositionUnavailable(false);
     _raise(monitor, monitor->evaluate(position, velocity, _context()));
 }
 
 void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneAlertTracker::Alert> &alerts)
 {
     for (const GeoZoneAlertTracker::Alert &zoneAlert : alerts) {
-        const AlertEvent event = _alertEvent(zoneAlert, monitor->position(), monitor->vehicleId());
-        const int severity = GeoZone::restrictionSeverity(event.restriction);
-        emit alertEvent(event);
-        emit alert(event.message, severity, event.id);
-
-        GeoZoneAlertArbiter::Alert spoken;
-        spoken.id = event.id;
-        spoken.vehicleKey = monitor->key();
-        spoken.zoneKey = event.zoneKey;
-        spoken.severity = severity;
-        spoken.inside = event.inside;
-        spoken.breach = event.inside && (event.restriction == GeoZone::Prohibited);
-        spoken.message = event.message;
-        spoken.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zoneAlert.zone->displayName(), zoneAlert.zone->restrictionText()));
-        _arbiter.submit(spoken);
+        const AlertEvent::Kind kind = zoneAlert.inside ? AlertEvent::Entry : AlertEvent::Approach;
+        _submit(monitor, _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId()), zoneAlert.zone);
     }
-    // Breaches end when the vehicle leaves the zone
-    _arbiter.setInsideZones(monitor->key(), monitor->insideZoneKeys());
+    // Breaches end when the vehicle leaves the zone. Without a current position the zones it is in aren't known, the
+    // nearby zones are those of its last position.
+    if (!monitor->positionUnavailable()) {
+        _arbiter.setInsideZones(monitor->key(), monitor->insideZoneKeys());
+    }
+}
+
+void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone)
+{
+    const int severity = GeoZone::restrictionSeverity(event.restriction);
+    emit alertEvent(event);
+    emit alert(event.message, severity, event.id);
+
+    GeoZoneAlertArbiter::Alert announced;
+    announced.id = event.id;
+    announced.vehicleKey = monitor->key();
+    announced.zoneKey = event.zoneKey;
+    announced.severity = severity;
+    // A lost position is as urgent as an entry
+    announced.inside = (event.kind != AlertEvent::Approach);
+    announced.breach = (event.kind == AlertEvent::Entry) && (event.restriction == GeoZone::Prohibited);
+    announced.message = event.message;
+    if (announced.breach) {
+        announced.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zone->displayName(), zone->restrictionText()));
+    }
+    _arbiter.submit(announced);
+}
+
+void GeoZoneMonitor::_positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor)
+{
+    const bool lost = monitor->positionUnavailable();
+    _arbiter.setSuspended(monitor->key(), lost);
+    if (!lost || monitor->nearby().isEmpty() || !settings().alertsEnabled) {
+        return;
+    }
+    // The vehicle may still be where it was last seen: in or near the most restrictive zone around it
+    const GeoZoneAlertTracker::Nearby &nearby = monitor->nearby().constFirst();
+    _submit(monitor, _alertEvent(nearby.zone, AlertEvent::PositionLost, nearby.inside, nearby.inside ? 0 : nearby.distance, qQNaN(), monitor->position(), monitor->vehicleId()), nearby.zone);
 }
 
 void GeoZoneMonitor::_announce()
@@ -422,34 +460,40 @@ QString GeoZoneMonitor::_labelled(int vehicleId, const QString &message) const
     return (vehicleCount > 1) ? QStringLiteral("%1: %2").arg(tr("Vehicle %1").arg(vehicleId), message) : message;
 }
 
-GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZoneAlertTracker::Alert &alert, const GeoZone::Position &position, int vehicleId)
+QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zoneName, const QString &restrictionText)
 {
-    const GeoZone *const zone = alert.zone;
-    const QString name = zone->displayName();
-    QString message;
-    if (alert.inside) {
-        message = tr("Entered geozone %1 (%2)").arg(name, zone->restrictionText());
-    } else if (!std::isnan(alert.timeToEntry)) {
-        message = tr("Approaching geozone %1 (%2), entry in about %3 s").arg(name, zone->restrictionText()).arg(std::lround(alert.timeToEntry));
-    } else {
-        message = tr("Approaching geozone %1 (%2)").arg(name, zone->restrictionText());
+    switch (event.kind) {
+    case AlertEvent::Entry:
+        return tr("Entered geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::PositionLost:
+        return event.inside ? tr("Position lost inside geozone %1 (%2)").arg(zoneName, restrictionText) :
+                              tr("Position lost near geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::Approach:
+        break;
     }
-    message = _labelled(vehicleId, message);
-    qCDebug(GeoZoneMonitorLog) << message << "distance" << alert.distance << "time to entry" << alert.timeToEntry;
+    if (!std::isnan(event.timeToEntry)) {
+        return tr("Approaching geozone %1 (%2), entry in about %3 s").arg(zoneName, restrictionText).arg(std::lround(event.timeToEntry));
+    }
+    return tr("Approaching geozone %1 (%2)").arg(zoneName, restrictionText);
+}
 
+GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId)
+{
     AlertEvent event;
     event.id = _nextAlertId++;
     event.time = GeoZoneEnvironment::currentDateTimeUtc();
     event.vehicleId = vehicleId;
     event.position = position;
-    event.inside = alert.inside;
-    event.distance = alert.distance;
+    event.kind = kind;
+    event.inside = inside;
+    event.distance = distance;
     event.zoneIdentifier = zone->identifier();
     event.zoneName = zone->name();
     event.restriction = zone->restriction();
     event.sourceText = zone->sourceText();
-    event.message = message;
     event.zoneKey = zone->key();
-    event.timeToEntry = alert.timeToEntry;
+    event.timeToEntry = timeToEntry;
+    event.message = _labelled(vehicleId, alertMessage(event, zone->displayName(), zone->restrictionText()));
+    qCDebug(GeoZoneMonitorLog) << event.message << "distance" << distance << "time to entry" << timeToEntry;
     return event;
 }

@@ -36,6 +36,19 @@ QString number(double value, int decimals)
     return qIsNaN(value) ? QString() : QString::number(value, 'f', decimals);
 }
 
+QString eventText(GeoZoneMonitor::AlertEvent::Kind kind)
+{
+    switch (kind) {
+    case GeoZoneMonitor::AlertEvent::Entry:
+        return QStringLiteral("entered");
+    case GeoZoneMonitor::AlertEvent::PositionLost:
+        return QStringLiteral("position_lost");
+    case GeoZoneMonitor::AlertEvent::Approach:
+        break;
+    }
+    return QStringLiteral("approaching");
+}
+
 } // namespace
 
 GeoZoneAlertLog::GeoZoneAlertLog(QObject *parent)
@@ -67,7 +80,7 @@ QString GeoZoneAlertLog::line(const GeoZoneMonitor::AlertEvent &event)
         number(event.position.coordinate.longitude(), 7),
         number(event.position.altitudeAMSL, 1),
         number(event.position.terrainAMSL, 1),
-        event.inside ? QStringLiteral("entered") : QStringLiteral("approaching"),
+        eventText(event.kind),
         number(event.distance, 0),
         csvField(event.zoneIdentifier),
         csvField(event.zoneName),
