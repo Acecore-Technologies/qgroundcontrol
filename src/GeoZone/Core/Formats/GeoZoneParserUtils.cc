@@ -365,8 +365,9 @@ QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, const QString
                     dailyPeriod.endTime = dailyPeriod.endTime.addSecs(dailyPeriod.utcOffsetSecs - *endOffsetSecs);
                 }
             } else if (dailyPeriod.startTime.isValid() || dailyPeriod.endTime.isValid()) {
-                // Local times, like ISO 8601 times without offset
+                // Local times like ISO 8601 times without offset, unless meant as UTC: the zone applies in both
                 dailyPeriod.timeZone = timeZone();
+                dailyPeriod.timeZoneAssumed = dailyPeriod.timeZone.isValid();
             }
             dailyPeriod.startEvent = dailyObject.value(QStringLiteral("startEvent")).toString();
             dailyPeriod.endEvent = dailyObject.value(QStringLiteral("endEvent")).toString();

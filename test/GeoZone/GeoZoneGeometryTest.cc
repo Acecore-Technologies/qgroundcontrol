@@ -192,7 +192,7 @@ void GeoZoneGeometryTest::_testScheduleTimeZones_data()
     QTest::addColumn<QString>("endTime");
     QTest::addColumn<QDateTime>("time");
     QTest::addColumn<QDateTime>("end");          ///< Of the interval from the time, invalid to check the time only
-    QTest::addColumn<bool>("active");
+    QTest::addColumn<bool>("active");           ///< In the time zone of the period, or in UTC as well when it was assumed
     QTest::addColumn<QByteArray>("timeZone");    ///< Of the daily period, empty without
     QTest::addColumn<bool>("issue");             ///< The times are taken as UTC since the time zone isn't known
 
@@ -202,27 +202,39 @@ void GeoZoneGeometryTest::_testScheduleTimeZones_data()
     const QDate summer(2026, 3, 30);
     const QDate autumn(2026, 10, 26);
     const QDateTime none;
-    // Daily 08:00-18:00 local time in Zurich, 07:00-17:00 UTC in winter and 06:00-16:00 UTC in summer
+    // Daily 08:00-18:00 local time in Zurich, 07:00-17:00 UTC in winter and 06:00-16:00 UTC in summer. Since the time
+    // zone is assumed for times without offset, the zone applies from 08:00 to 18:00 UTC too.
     QTest::newRow("local winter before") << "CHE" << zurich << "08:00" << "18:00" << _utc(winter, QTime(6, 30)) << none << false << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local winter start") << "CHE" << zurich << "08:00" << "18:00" << _utc(winter, QTime(7, 30)) << none << true << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local winter end") << "CHE" << zurich << "08:00" << "18:00" << _utc(winter, QTime(16, 30)) << none << true << QByteArray("Europe/Zurich") << false;
-    QTest::newRow("local winter after") << "CHE" << zurich << "08:00" << "18:00" << _utc(winter, QTime(17, 30)) << none << false << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local winter after, in utc") << "CHE" << zurich << "08:00" << "18:00" << _utc(winter, QTime(17, 30)) << none << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local winter after both") << "CHE" << zurich << "08:00" << "18:00" << _utc(winter, QTime(18, 30)) << none << false << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local switch day") << "CHE" << zurich << "08:00" << "18:00" << _utc(QDate(2026, 3, 29), QTime(6, 30)) << none << true << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local summer before") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(5, 30)) << none << false << QByteArray("Europe/Zurich") << false;
-    QTest::newRow("local summer start") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(6, 30)) << none << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local summer start, only local") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(6, 30)) << none << true << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local summer end") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(15, 30)) << none << true << QByteArray("Europe/Zurich") << false;
-    QTest::newRow("local summer after") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(16, 30)) << none << false << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local summer after, only utc") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(16, 30)) << none << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local summer utc end") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(17, 50)) << none << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local summer after both") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(18, 30)) << none << false << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local october summer") << "CHE" << zurich << "08:00" << "18:00" << _utc(QDate(2026, 10, 24), QTime(6, 30)) << none << true << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local october winter before") << "CHE" << zurich << "08:00" << "18:00" << _utc(autumn, QTime(6, 30)) << none << false << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local october winter start") << "CHE" << zurich << "08:00" << "18:00" << _utc(autumn, QTime(7, 30)) << none << true << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local october winter end") << "CHE" << zurich << "08:00" << "18:00" << _utc(autumn, QTime(16, 30)) << none << true << QByteArray("Europe/Zurich") << false;
-    QTest::newRow("local october winter after") << "CHE" << zurich << "08:00" << "18:00" << _utc(autumn, QTime(17, 30)) << none << false << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local october winter after, in utc") << "CHE" << zurich << "08:00" << "18:00" << _utc(autumn, QTime(17, 30)) << none << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local october winter after both") << "CHE" << zurich << "08:00" << "18:00" << _utc(autumn, QTime(18, 30)) << none << false << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local during summer") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(5, 0)) << _utc(summer, QTime(6, 10)) << true << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local not during summer") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(4, 0)) << _utc(summer, QTime(5, 50)) << false << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local during summer, only utc") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(16, 10)) << _utc(summer, QTime(16, 50)) << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local not during summer evening") << "CHE" << zurich << "08:00" << "18:00" << _utc(summer, QTime(18, 10)) << _utc(summer, QTime(18, 50)) << false << QByteArray("Europe/Zurich") << false;
     QTest::newRow("local alpha-2") << "ch" << zurich << "08:00" << "18:00" << _utc(summer, QTime(6, 30)) << none << true << QByteArray("Europe/Zurich") << false;
-    // Overnight 22:00-06:00 into the switch day, which ends at 04:00 UTC
+    // Overnight 22:00-06:00 into the switch day, which ends at 04:00 UTC in Zurich, and at 06:00 UTC in the Azores
+    // where it starts at 23:00 UTC
     QTest::newRow("local overnight") << "CHE" << zurich << "22:00" << "06:00" << _utc(QDate(2026, 3, 29), QTime(3, 30)) << none << true << QByteArray("Europe/Zurich") << false;
-    QTest::newRow("local overnight after") << "CHE" << zurich << "22:00" << "06:00" << _utc(QDate(2026, 3, 29), QTime(4, 30)) << none << false << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local overnight after, in utc") << "CHE" << zurich << "22:00" << "06:00" << _utc(QDate(2026, 3, 29), QTime(4, 30)) << none << true << QByteArray("Europe/Zurich") << false;
+    QTest::newRow("local overnight azores") << "PRT" << QPointF(-25.7, 37.7) << "22:00" << "06:00" << _utc(QDate(2026, 3, 29), QTime(5, 30)) << none << true
+                                            << QByteArray("Atlantic/Azores") << false;
+    QTest::newRow("local overnight azores after") << "PRT" << QPointF(-25.7, 37.7) << "22:00" << "06:00" << _utc(QDate(2026, 3, 29), QTime(6, 30)) << none
+                                                  << false << QByteArray("Atlantic/Azores") << false;
     // The Canary Islands are an hour behind the mainland of Spain
     QTest::newRow("local madrid") << "ESP" << QPointF(-3.7, 40.4) << "08:00" << "18:00" << _utc(summer, QTime(6, 30)) << none << true << QByteArray("Europe/Madrid") << false;
     QTest::newRow("local canary") << "ESP" << QPointF(-15.4, 28.1) << "08:00" << "18:00" << _utc(summer, QTime(6, 30)) << none << false << QByteArray("Atlantic/Canary") << false;
@@ -231,12 +243,15 @@ void GeoZoneGeometryTest::_testScheduleTimeZones_data()
     QTest::newRow("utc winter") << "CHE" << zurich << "08:00Z" << "18:00Z" << _utc(winter, QTime(7, 30)) << none << false << QByteArray() << false;
     QTest::newRow("utc summer") << "CHE" << zurich << "08:00Z" << "18:00Z" << _utc(summer, QTime(8, 30)) << none << true << QByteArray() << false;
     QTest::newRow("utc summer end") << "CHE" << zurich << "08:00Z" << "18:00Z" << _utc(summer, QTime(17, 30)) << none << true << QByteArray() << false;
+    QTest::newRow("utc summer local start") << "CHE" << zurich << "08:00Z" << "18:00Z" << _utc(summer, QTime(6, 30)) << none << false << QByteArray() << false;
     QTest::newRow("offset summer") << "CHE" << zurich << "08:00+01:00" << "18:00+01:00" << _utc(summer, QTime(6, 30)) << none << false << QByteArray() << false;
     QTest::newRow("offset summer start") << "CHE" << zurich << "08:00+01:00" << "18:00+01:00" << _utc(summer, QTime(7, 30)) << none << true << QByteArray() << false;
+    QTest::newRow("offset summer after") << "CHE" << zurich << "08:00+01:00" << "18:00+01:00" << _utc(summer, QTime(17, 30)) << none << false << QByteArray() << false;
     QTest::newRow("offset and local") << "CHE" << zurich << "08:00" << "18:00+01:00" << _utc(summer, QTime(6, 30)) << none << false << QByteArray() << false;
     // Without the time zone of the country, local times are taken as UTC
     QTest::newRow("unknown country") << "XXX" << zurich << "08:00" << "18:00" << _utc(summer, QTime(7, 30)) << none << false << QByteArray() << true;
     QTest::newRow("unknown country start") << "XXX" << zurich << "08:00" << "18:00" << _utc(summer, QTime(8, 30)) << none << true << QByteArray() << true;
+    QTest::newRow("unknown country local start") << "XXX" << zurich << "08:00" << "18:00" << _utc(summer, QTime(6, 30)) << none << false << QByteArray() << true;
     QTest::newRow("several time zones") << "USA" << QPointF(-77, 39) << "08:00" << "18:00" << _utc(summer, QTime(8, 30)) << none << true << QByteArray() << true;
     QTest::newRow("no country") << "" << zurich << "08:00" << "18:00" << _utc(summer, QTime(7, 30)) << none << false << QByteArray() << true;
 }
@@ -262,12 +277,13 @@ void GeoZoneGeometryTest::_testScheduleTimeZones()
     QVERIFY2(GeoZoneParser::parse(document.toUtf8(), result, errorString), qPrintable(errorString));
     const GeoZone::DailyPeriod &period = result.zones[0].applicability[0].schedule[0];
     QCOMPARE(period.timeZone.isValid() ? period.timeZone.id() : QByteArray(), timeZone);
+    QCOMPARE(period.timeZoneAssumed, !timeZone.isEmpty());
     QCOMPARE(result.zones[0].issues.count(), issue ? 1 : 0);
 
     const GeoZone zone(result.zones[0]);
     QCOMPARE(end.isValid() ? zone.isActiveDuring(time, end) : zone.isActiveAt(time), active);
     if (!timeZone.isEmpty()) {
-        QVERIFY(zone.applicabilityText().endsWith(QString::fromLatin1(timeZone)));
+        QVERIFY2(zone.applicabilityText().endsWith(QStringLiteral("%1 (time zone assumed)").arg(QString::fromLatin1(timeZone))), qPrintable(zone.applicabilityText()));
     }
 
     // Restored from the parse cache like when parsed
@@ -280,6 +296,7 @@ void GeoZoneGeometryTest::_testScheduleTimeZones()
     GeoZone::DailyPeriod restored;
     stream >> restored;
     QCOMPARE(restored.timeZone, period.timeZone);
+    QCOMPARE(restored.timeZoneAssumed, period.timeZoneAssumed);
     QCOMPARE(restored.startTime, period.startTime);
 }
 

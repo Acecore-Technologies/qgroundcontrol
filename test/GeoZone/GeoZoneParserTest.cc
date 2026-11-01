@@ -39,7 +39,7 @@ QString _resultDifference(const GeoZoneParser::Result &a, const GeoZoneParser::R
     };
     const auto sameDailyPeriod = [](const GeoZone::DailyPeriod &x, const GeoZone::DailyPeriod &y) {
         return (x.days == y.days) && (x.startTime == y.startTime) && (x.endTime == y.endTime) && (x.utcOffsetSecs == y.utcOffsetSecs) &&
-               (x.timeZone == y.timeZone) && (x.startEvent == y.startEvent) && (x.endEvent == y.endEvent);
+               (x.timeZone == y.timeZone) && (x.timeZoneAssumed == y.timeZoneAssumed) && (x.startEvent == y.startEvent) && (x.endEvent == y.endEvent);
     };
     const auto sameTimePeriod = [&](const GeoZone::TimePeriod &x, const GeoZone::TimePeriod &y) {
         return (x.permanent == y.permanent) && sameDateTime(x.start, y.start) && sameDateTime(x.end, y.end) &&
@@ -126,6 +126,7 @@ GeoZoneParser::Result _syntheticResult()
     local.startTime = QTime(8, 0);
     local.endTime = QTime(18, 0);
     local.timeZone = QTimeZone("Europe/Zurich");
+    local.timeZoneAssumed = true;
     zone.applicability = { GeoZone::TimePeriod{ false, _utc(QDate(2026, 9, 1), QTime(0, 0)), QDateTime(), { daily, events, local } },
                            GeoZone::TimePeriod{ true, QDateTime(), QDateTime(), {} } };
     GeoZone::Volume polygon;

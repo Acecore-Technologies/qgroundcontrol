@@ -33,6 +33,9 @@ public:
         /// Time zone of the days and times when published in local time, whose offset changes with daylight saving
         /// time. Invalid for UTC and fixed offsets.
         QTimeZone timeZone;
+        /// The time zone was assumed, for times published without offset which may be UTC as well: the period then
+        /// applies when it does in the time zone or in UTC
+        bool timeZoneAssumed = false;
         QString startEvent;     ///< Daylight event code (BMCT, SR, SS, EECT), used instead of the time when given
         QString endEvent;
     };
@@ -44,11 +47,11 @@ public:
         QList<DailyPeriod> schedule;
     };
 
-    /// @return true if a period applies at the time. Daylight events are computed at the location.
-    ///         An empty applicability always applies.
+    /// @return true if a period applies at the time. Daylight events are computed at the location. Daily periods
+    ///         whose time zone was assumed apply in it and in UTC. An empty applicability always applies.
     static bool isActiveAt(const QList<TimePeriod> &applicability, const QDateTime &dateTime, const QGeoCoordinate &location);
 
-    /// @return true if a period applies at any time between start and end inclusive
+    /// @return true if a period applies at any time between start and end inclusive, see isActiveAt
     static bool isActiveDuring(const QList<TimePeriod> &applicability, const QDateTime &start, const QDateTime &end, const QGeoCoordinate &location);
 
     /// @return Human readable periods, one per line

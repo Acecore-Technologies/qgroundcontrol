@@ -29,7 +29,7 @@ class GeoZoneParseCache
 public:
     /// Version of the cache file and the serialization of the parse result, see the QDataStream operators of
     /// GeoZoneParser::Result, GeoZone::Data and their parts. Bump it with any change to them.
-    static constexpr quint16 formatVersion = 2;
+    static constexpr quint16 formatVersion = 3;
     /// Of the parse result, caches written by another version of Qt are parsed again
     static constexpr QDataStream::Version streamVersion = QDataStream::Qt_DefaultCompiledVersion;
 

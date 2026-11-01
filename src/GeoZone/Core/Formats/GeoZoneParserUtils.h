@@ -63,9 +63,10 @@ QDateTime _dateTime(const QJsonValue &value);
 /// returned as published, utcOffsetSecs is set to its offset from UTC, or to nothing for a local time without offset.
 QTime _time(const QJsonValue &value, std::optional<int> &utcOffsetSecs);
 
-/// Reads the applicability of ED-269 and ED-318 zones. Daily times with an offset keep it, local times without offset
-/// follow the time zone of the zone's country (see GeoZoneSchedule::countryTimeZone), or are taken as UTC with an
-/// issue when it isn't known.
+/// Reads the applicability of ED-269 and ED-318 zones. Daily times with an offset keep it. Times without offset, local
+/// times or UTC since the formats don't tell, get the assumed time zone of the zone's country (see
+/// GeoZoneSchedule::countryTimeZone and DailyPeriod::timeZoneAssumed), or are taken as UTC with an issue when it isn't
+/// known.
 /// @param country ISO 3166-1 code of the zone
 /// @param volumes Of the zone, whose location tells the time zone of countries with several
 /// @param issues  Problems found, like unknown day codes, are added to it

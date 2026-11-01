@@ -71,12 +71,25 @@ QString _dailyPeriodToString(const GeoZoneSchedule::DailyPeriod &period)
     if (!timesUsed) {
         return text;
     }
-    return QStringLiteral("%1 %2").arg(text, period.timeZone.isValid() ? QString::fromLatin1(period.timeZone.id()) : _utcOffsetToString(period.utcOffsetSecs));
+    if (!period.timeZone.isValid()) {
+        return QStringLiteral("%1 %2").arg(text, _utcOffsetToString(period.utcOffsetSecs));
+    }
+    const QString timeZone = QString::fromLatin1(period.timeZone.id());
+    return period.timeZoneAssumed ? QStringLiteral("%1 %2 %3").arg(text, timeZone, GeoZoneSchedule::tr("(time zone assumed)")) : QStringLiteral("%1 %2").arg(text, timeZone);
 }
 
-/// @return UTC time of the date and time of day as published in the period, in its time zone or offset
-QDateTime _toUtc(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QTime &time)
+/// How the days and times of a period are read
+enum class Reading {
+    Published,  ///< In its time zone or offset
+    Utc,        ///< In UTC, which they may be in too when the time zone was assumed
+};
+
+/// @return UTC time of the date and time of day of the period
+QDateTime _toUtc(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QTime &time, Reading reading)
 {
+    if (reading == Reading::Utc) {
+        return QDateTime(date, time, QTimeZone::UTC);
+    }
     if (period.timeZone.isValid()) {
         // Times skipped when the clocks go forward are taken as after the change, those repeated when they go back
         // as before it
@@ -86,8 +99,11 @@ QDateTime _toUtc(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, 
 }
 
 /// @return Date of the UTC time in the time zone or offset of the period
-QDate _publishedDate(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc)
+QDate _publishedDate(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc, Reading reading)
 {
+    if (reading == Reading::Utc) {
+        return utc.date();
+    }
     return period.timeZone.isValid() ? utc.toTimeZone(period.timeZone).date() : utc.addSecs(period.utcOffsetSecs).date();
 }
 
@@ -149,15 +165,16 @@ SunEvent _sunEvent(const QString &event, const QDate &date, const QGeoCoordinate
 
 /// @return UTC start and end of a daily period on the date in the period's time zone or offset, nothing when it
 ///         doesn't apply that day. Ends before the start wrap past midnight.
-std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QGeoCoordinate &location)
+std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QGeoCoordinate &location,
+                                                            Reading reading)
 {
     if (!period.days.isEmpty() && !period.days.contains(date.dayOfWeek())) {
         return std::nullopt;
     }
 
     // Days with a daylight saving time change are an hour shorter or longer
-    const QDateTime dayStart = _toUtc(period, date, QTime(0, 0));
-    const QDateTime dayEnd = _toUtc(period, date.addDays(1), QTime(0, 0)).addMSecs(-1);
+    const QDateTime dayStart = _toUtc(period, date, QTime(0, 0), reading);
+    const QDateTime dayEnd = _toUtc(period, date.addDays(1), QTime(0, 0), reading).addMSecs(-1);
 
     // Time of an event. When the sun stays above or below the event altitude all day, rising events happen
     // at the start of the day and setting events at its end, or the other way around, so that daylight periods
@@ -179,14 +196,14 @@ std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedul
     if (!period.startEvent.isEmpty()) {
         start = eventTime(period.startEvent, true);
     } else if (period.startTime.isValid()) {
-        start = _toUtc(period, date, period.startTime);
+        start = _toUtc(period, date, period.startTime, reading);
     }
 
     QDateTime end = dayEnd;
     if (!period.endEvent.isEmpty()) {
         end = eventTime(period.endEvent, false);
     } else if (period.endTime.isValid()) {
-        end = _toUtc(period, date, period.endTime);
+        end = _toUtc(period, date, period.endTime, reading);
     }
 
     if ((start == dayEnd) && (end == dayStart)) {
@@ -194,18 +211,18 @@ std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedul
         return std::nullopt;
     }
     if (end < start) {
-        end = (!period.endEvent.isEmpty() || !period.endTime.isValid()) ? end.addDays(1) : _toUtc(period, date.addDays(1), period.endTime);
+        end = (!period.endEvent.isEmpty() || !period.endTime.isValid()) ? end.addDays(1) : _toUtc(period, date.addDays(1), period.endTime, reading);
     }
     return std::make_pair(start, end);
 }
 
-bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc, const QGeoCoordinate &location)
+bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc, const QGeoCoordinate &location, Reading reading)
 {
     // Days and times are published in the period's time zone or offset. A period wrapping past midnight started the
     // day before, and a sunrise east of the offset's meridian can be before midnight.
-    const QDate date = _publishedDate(period, utc);
+    const QDate date = _publishedDate(period, utc, reading);
     for (const QDate &day : { date.addDays(-1), date, date.addDays(1) }) {
-        const auto window = _dailyWindow(period, day, location);
+        const auto window = _dailyWindow(period, day, location, reading);
         if (window && (utc >= window->first) && (utc <= window->second)) {
             return true;
         }
@@ -213,19 +230,34 @@ bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDat
     return false;
 }
 
-bool _dailyPeriodOverlaps(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc, const QGeoCoordinate &location)
+bool _dailyPeriodOverlaps(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc, const QGeoCoordinate &location,
+                          Reading reading)
 {
-    const QDate firstDate = _publishedDate(period, startUtc).addDays(-1);
+    const QDate firstDate = _publishedDate(period, startUtc, reading).addDays(-1);
     // Windows can start before their date when a sunrise is before midnight. The schedule repeats weekly, so
     // a week past the first date covers every window of longer intervals.
-    const QDate lastDate = std::min(_publishedDate(period, endUtc).addDays(1), firstDate.addDays(9));
+    const QDate lastDate = std::min(_publishedDate(period, endUtc, reading).addDays(1), firstDate.addDays(9));
     for (QDate date = firstDate; date <= lastDate; date = date.addDays(1)) {
-        const auto window = _dailyWindow(period, date, location);
+        const auto window = _dailyWindow(period, date, location, reading);
         if (window && (window->first <= endUtc) && (window->second >= startUtc)) {
             return true;
         }
     }
     return false;
+}
+
+// Periods whose time zone was assumed apply both in it and in UTC, since their times may have been either
+
+bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc, const QGeoCoordinate &location)
+{
+    return _dailyPeriodContains(period, utc, location, Reading::Published) ||
+           (period.timeZoneAssumed && _dailyPeriodContains(period, utc, location, Reading::Utc));
+}
+
+bool _dailyPeriodOverlaps(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc, const QGeoCoordinate &location)
+{
+    return _dailyPeriodOverlaps(period, startUtc, endUtc, location, Reading::Published) ||
+           (period.timeZoneAssumed && _dailyPeriodOverlaps(period, startUtc, endUtc, location, Reading::Utc));
 }
 
 /// Local time of a country, see GeoZoneSchedule::countryTimeZone
@@ -415,7 +447,7 @@ QString GeoZoneSchedule::text(const QList<TimePeriod> &applicability)
 }
 
 // Fields added to the periods must be serialized here, see GeoZoneParseCache::formatVersion
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::DailyPeriod) == 96), "Serialize the new fields of DailyPeriod");
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::DailyPeriod) == 104), "Serialize the new fields of DailyPeriod");
 static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::TimePeriod) == 48), "Serialize the new fields of TimePeriod");
 
 QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod &period)
@@ -425,7 +457,7 @@ QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod 
         stream << static_cast<qint32>(day);
     }
     return stream << period.startTime << period.endTime << static_cast<qint32>(period.utcOffsetSecs) << period.startEvent << period.endEvent
-                  << (period.timeZone.isValid() ? period.timeZone.id() : QByteArray());
+                  << (period.timeZone.isValid() ? period.timeZone.id() : QByteArray()) << period.timeZoneAssumed;
 }
 
 QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &period)
@@ -442,7 +474,7 @@ QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &perio
     }
     qint32 utcOffsetSecs = 0;
     QByteArray timeZone;
-    stream >> period.startTime >> period.endTime >> utcOffsetSecs >> period.startEvent >> period.endEvent >> timeZone;
+    stream >> period.startTime >> period.endTime >> utcOffsetSecs >> period.startEvent >> period.endEvent >> timeZone >> period.timeZoneAssumed;
     period.utcOffsetSecs = utcOffsetSecs;
     if (!timeZone.isEmpty()) {
         period.timeZone = QTimeZone(timeZone);
@@ -461,7 +493,7 @@ QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::TimePeriod &period
 {
     period = GeoZoneSchedule::TimePeriod();
     stream >> period.permanent >> period.start >> period.end;
-    // Days, times, offset, events and time zone
-    (void) GeoZoneDataStream::readList(stream, period.schedule, 7 * sizeof(quint32));
+    // Days, times, offset, events, time zone and whether it was assumed
+    (void) GeoZoneDataStream::readList(stream, period.schedule, (7 * sizeof(quint32)) + 1);
     return stream;
 }
