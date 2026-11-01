@@ -40,8 +40,16 @@ public:
     ScopedLogCapture()
     {
         _instance = this;
-        QLoggingCategory::setFilterRules(QStringLiteral("qgc.geozone.*.debug=true"));
-        _previous = qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &message) {
+        // Called at once for the existing categories, which the previous filter configured already
+        _previousFilter = QLoggingCategory::installFilter([](QLoggingCategory *category) {
+            if (_instance->_previousFilter) {
+                _instance->_previousFilter(category);
+            }
+            if (QByteArray(category->categoryName()).startsWith("qgc.geozone")) {
+                category->setEnabled(QtDebugMsg, true);
+            }
+        });
+        _previousHandler = qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &message) {
             const QMutexLocker locker(&_instance->_mutex);
             _instance->_messages.append(message);
         });
@@ -49,8 +57,9 @@ public:
 
     ~ScopedLogCapture()
     {
-        (void) qInstallMessageHandler(_previous);
-        QLoggingCategory::setFilterRules(QString());
+        (void) qInstallMessageHandler(_previousHandler);
+        // Applies the previous filter to the categories again
+        (void) QLoggingCategory::installFilter(_previousFilter);
         _instance = nullptr;
     }
 
@@ -64,7 +73,8 @@ public:
 
 private:
     static inline ScopedLogCapture *_instance = nullptr;
-    QtMessageHandler _previous = nullptr;
+    QLoggingCategory::CategoryFilter _previousFilter = nullptr;
+    QtMessageHandler _previousHandler = nullptr;
     mutable QMutex _mutex;
     QStringList _messages;
 };
@@ -1330,6 +1340,7 @@ void GeoZoneManagerTest::_testServiceOAuth2()
     QVERIFY(!_directoryContent(storageDir.path()).contains("token-"));
     QVERIFY(!log.text().contains(QStringLiteral("client-s3cret")));
     QVERIFY(!log.text().contains(QStringLiteral("token-")));
+    manager.clear();
 }
 
 void GeoZoneManagerTest::_testEd318Service()
@@ -1413,6 +1424,7 @@ void GeoZoneManagerTest::_testEd318Service()
     QCOMPARE(nms->service.auth, GeoZoneService::Auth::OAuth2ClientCredentials);
     QVERIFY(GeoZoneService::hasAreaPlaceholders(nms->url));
     QCOMPARE(GeoZoneService::fromVariantMap(nms->service.toVariantMap()), nms->service);
+    manager.clear();
 }
 
 void GeoZoneManagerTest::_testServiceAreaOfInterest()
