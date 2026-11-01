@@ -112,6 +112,9 @@ QString GeoZoneSource::detailsText() const
     if (!_provider.isEmpty()) {
         parts.append(_provider);
     }
+    if (_isDownloaded() && _checkedAt.isValid()) {
+        parts.append(tr("checked %1").arg(QLocale().toString(_checkedAt.toLocalTime(), QLocale::ShortFormat)));
+    }
     if (_skippedCount > 0) {
         parts.append(tr("unsupported features skipped: %1").arg(_skippedCount));
     }
@@ -144,6 +147,11 @@ QString GeoZoneSource::_dateText() const
     return QString();
 }
 
+bool GeoZoneSource::_isDownloaded() const
+{
+    return isFeed() && !QUrl(_url).isLocalFile();
+}
+
 void GeoZoneSource::_clearZones()
 {
     qDeleteAll(_shapes);
@@ -172,6 +180,7 @@ void GeoZoneSource::_setMetadata(const GeoZoneParser::Result &result, const QDat
     _validTo = result.validTo;
     _loadedAt = loadedAt;
     _fileDate = fileDate;
+    _checkedAt = loadedAt;
     _contentHash = result.contentHash;
 }
 
@@ -186,10 +195,18 @@ void GeoZoneSource::markCurrent(const GeoZoneParser::Result &result, const QDate
     emit changed();
 }
 
-void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate)
+void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate, const QDateTime &checkedAt)
 {
     _loadedAt = loadedAt;
     _fileDate = fileDate;
+    _checkedAt = (checkedAt.isValid() && (checkedAt > loadedAt)) ? checkedAt : loadedAt;
+    updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
+    emit changed();
+}
+
+void GeoZoneSource::setCheckedAt(const QDateTime &checkedAt)
+{
+    _checkedAt = checkedAt;
     updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
     emit changed();
 }
@@ -338,7 +355,7 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
     const GeoZoneEnvironment::SourceSettings settings = GeoZoneEnvironment::sourceSettings();
     QString text;
     if (loaded()) {
-        const QDateTime date = dataDate();
+        const QDateTime date = (!_issued.isValid() && _isDownloaded() && _checkedAt.isValid()) ? _checkedAt : dataDate();
         if (_validTo.isValid() && (_validTo < now)) {
             text = tr("Expired on %1").arg(_formatDate(_validTo));
         } else if (_validFrom.isValid() && (_validFrom > now)) {

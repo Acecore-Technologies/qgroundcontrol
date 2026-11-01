@@ -40,6 +40,7 @@ public:
         QString storedFileName;     ///< Name of the copy to write in the storage directory, empty to not copy
         QDateTime loadedAt;
         QDateTime fileDate;
+        QDateTime checkedAt;        ///< When the server last confirmed a stored copy, loadedAt when invalid
         GeoZoneParser::Format formatHint = GeoZoneParser::Format::Unknown;
         QString language;           ///< Preferred language of localized texts
         QString etag;               ///< HTTP validators of a downloaded feed

@@ -69,7 +69,7 @@ QDateTime GeoZoneRefreshScheduler::nextRefresh(const GeoZoneSource &source) cons
     if (retryAt.isValid()) {
         return retryAt;
     }
-    const QDateTime last = source.loadedAt();
+    const QDateTime last = source.checkedAt();
     return last.isValid() ? last.addSecs(refreshIntervalSecs(source)) : QDateTime::fromSecsSinceEpoch(0, QTimeZone::UTC);
 }
 

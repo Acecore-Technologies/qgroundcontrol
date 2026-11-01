@@ -23,8 +23,9 @@
 class GeoZoneRefreshScheduler;
 class GeoZoneSource;
 
-/// The geozone sources: adds, downloads, loads and removes them, keeps a copy of each for the next start,
-/// refreshes the feeds and reports outdated data. GeoZoneManager publishes the zones of the loaded sources.
+/// The geozone sources: adds, loads and removes them and reports outdated data. Coordinates the downloads of the
+/// feeds (GeoZoneFeedFetch), their refreshes (GeoZoneRefreshScheduler) and the copies kept for the next start
+/// (GeoZoneStore, GeoZoneSourceIndex). GeoZoneManager publishes the zones of the loaded sources.
 class GeoZoneSourceRepository : public QObject
 {
     Q_OBJECT

@@ -43,8 +43,8 @@ public:
     ///         the server said its data stays current, but at least minRefreshSecs. 0 for files, which only the user
     ///         reloads.
     int refreshIntervalSecs(const GeoZoneSource &source) const;
-    /// @return When the source is due: after the refresh interval from its last download, or when its failed refresh
-    ///         is retried. Invalid for files.
+    /// @return When the source is due: after the refresh interval from when the server last confirmed its data, or
+    ///         when its failed refresh is retried. Invalid for files.
     QDateTime nextRefresh(const GeoZoneSource &source) const;
     bool isDue(const GeoZoneSource &source, const QDateTime &now) const;
 

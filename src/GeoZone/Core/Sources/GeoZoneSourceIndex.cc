@@ -29,6 +29,7 @@ constexpr const char *lastModifiedKey = "lastModified";
 constexpr const char *datasetUrlKey = "datasetUrl";
 constexpr const char *enabledKey = "enabled";
 constexpr const char *maxAgeKey = "maxAge";
+constexpr const char *checkedAtKey = "checkedAt";
 constexpr const char *sourcesKey = "sources";
 constexpr const char *versionKey = "version";
 
@@ -80,6 +81,11 @@ GeoZoneSourceIndex::Contents GeoZoneSourceIndex::read() const
             entry.enabled = object.value(enabledKey).toBool(true);
             entry.datasetUrl = object.value(datasetUrlKey).toString();
             entry.maxAgeSecs = object.value(maxAgeKey).toInteger(-1);
+            // Only written once the server confirmed the copy after downloading it
+            entry.checkedAt = QDateTime::fromString(object.value(checkedAtKey).toString(), Qt::ISODate);
+            if (!entry.checkedAt.isValid() || (entry.checkedAt < entry.loadedAt)) {
+                entry.checkedAt = entry.loadedAt;
+            }
             contents.entries.append(entry);
         }
         contents.status = Status::Ok;
@@ -100,6 +106,7 @@ GeoZoneSourceIndex::Contents GeoZoneSourceIndex::read() const
         entry.fileName = legacyFileName;
         entry.loadedAt = fileDate;
         entry.fileDate = fileDate;
+        entry.checkedAt = fileDate;
         contents.entries.append(entry);
     }
 
@@ -145,6 +152,9 @@ bool GeoZoneSourceIndex::write(const QList<Entry> &entries, QString &errorString
         if (entry.maxAgeSecs > 0) {
             object.insert(maxAgeKey, entry.maxAgeSecs);
         }
+        if (entry.checkedAt.isValid() && (entry.checkedAt > entry.loadedAt)) {
+            object.insert(checkedAtKey, entry.checkedAt.toString(Qt::ISODate));
+        }
         values.append(object);
     }
 
@@ -185,8 +195,7 @@ bool GeoZoneSourceIndex::confirm(const QString &key, const QString &etag, const 
     if ((it == _entries.end()) || (it->etag != etag) || (it->lastModified != lastModified)) {
         return false;
     }
-    it->loadedAt = checkedAt;
-    it->fileDate = checkedAt;
+    it->checkedAt = checkedAt;
     it->maxAgeSecs = maxAgeSecs;
     return true;
 }

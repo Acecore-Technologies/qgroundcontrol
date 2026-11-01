@@ -34,6 +34,7 @@ public:
         bool enabled = true;    ///< See GeoZoneSource::enabled
         QString datasetUrl;     ///< Dataset the feed's page linked to, whose download the validators belong to
         qint64 maxAgeSecs = -1; ///< How long the server said the data stays current, negative when it didn't
+        QDateTime checkedAt;    ///< When the server last confirmed the stored copy current, at least loadedAt
     };
 
     enum class Status : quint8 {

@@ -738,15 +738,20 @@ void GeoZoneManagerTest::_testFeedNotModified()
         QCOMPARE(feed->lastModified(), QStringLiteral("Sat, 31 Oct 2026 10:00:00 GMT"));
         QCOMPARE(requestCount, 1);
 
-        // An unchanged feed is not downloaded again but counts as current
+        // An unchanged feed is not downloaded again but counts as current, keeping the dates of its data
         QSignalSpy aboutToChangeSpy(&manager, &GeoZoneManager::zonesAboutToChange);
         const QDateTime loadedAt = feed->loadedAt();
+        const QDateTime dataDate = feed->dataDate();
+        QCOMPARE(feed->checkedAt(), loadedAt);
         environment.addSecs(60);
         manager.refreshFeeds();
         QTRY_VERIFY(!manager.busy());
         QCOMPARE(notModifiedCount, 1);
         QCOMPARE(manager.zoneCount(), 3);
-        QVERIFY(feed->loadedAt() > loadedAt);
+        QCOMPARE(feed->checkedAt(), environment.now());
+        QCOMPARE(feed->loadedAt(), loadedAt);
+        QCOMPARE(feed->fileDate(), loadedAt);
+        QCOMPARE(feed->dataDate(), dataDate);
         QVERIFY(feed->errorString().isEmpty());
 
         // A server without validators sends the same zones again, which are kept instead of reloaded
@@ -790,10 +795,21 @@ void GeoZoneManagerTest::_testFeedNotModified()
     restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
     QVERIFY(restarted.source(url));
     QCOMPARE(restarted.source(url)->etag(), QStringLiteral("\"v1\""));
+    const QDateTime downloadedAt = restarted.source(url)->loadedAt();
+    environment.addSecs(60);
     restarted.refreshFeeds();
     QTRY_VERIFY(!restarted.busy());
     QCOMPARE(notModifiedCount, 2);
     QCOMPARE(restarted.zoneCount(), 3);
+
+    // When the server confirmed the stored copy is kept apart from when it was downloaded
+    GeoZoneManager confirmed(storageDir.path());
+    confirmed.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QVERIFY(confirmed.source(url));
+    QCOMPARE(confirmed.source(url)->loadedAt(), downloadedAt);
+    QCOMPARE(confirmed.source(url)->checkedAt(), environment.now());
+    QVERIFY(confirmed.source(url)->detailsText().contains(QStringLiteral("checked")));
+    QCOMPARE(confirmed.repository()->scheduler()->nextRefresh(*confirmed.source(url)), environment.now().addSecs(24 * 3600));
 }
 
 void GeoZoneManagerTest::_testSourceValidity()
@@ -824,6 +840,16 @@ void GeoZoneManagerTest::_testSourceValidity()
     QVERIFY(source.validityText().startsWith(QStringLiteral("Not valid until")));
     source.updateValidity(now.addDays(3));
     QVERIFY(source.validityText().isEmpty());
+
+    // Without an issue date, downloaded data is as old as the server last confirmed it
+    GeoZoneSource download(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));
+    result = GeoZoneParser::Result();
+    result.format = GeoZoneParser::Format::ED269;
+    download.setResult(result, now.addDays(-30), now.addDays(-30));
+    QCOMPARE(download.validityText(), QStringLiteral("Data is 30 days old"));
+    download.setCheckedAt(now.addDays(-1));
+    QVERIFY(download.validityText().isEmpty());
+    QCOMPARE(download.dataDate(), now.addDays(-30));
 
     // The manager summarizes outdated sources
     const QTemporaryDir dir;

@@ -40,6 +40,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(int          skippedCount    READ skippedCount   NOTIFY changed FINAL)
     Q_PROPERTY(QDateTime    loadedAt        READ loadedAt       NOTIFY changed FINAL)             ///< When the file was loaded or the feed downloaded
     Q_PROPERTY(QDateTime    dataDate        READ dataDate       NOTIFY changed FINAL)             ///< When the data was issued, or the file date
+    Q_PROPERTY(QDateTime    checkedAt       READ checkedAt      NOTIFY changed FINAL)             ///< When the server last confirmed a feed's data current, or it was loaded
     Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed FINAL)
     Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged FINAL)
     Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete or partly unreadable, empty when it is complete
@@ -66,6 +67,9 @@ public:
     QDateTime loadedAt() const { return _loadedAt; }
     QDateTime fileDate() const { return _fileDate; }
     QDateTime dataDate() const { return _issued.isValid() ? _issued : _fileDate; }
+    /// @return When the data was last confirmed current: when the server answered a refresh with the same data or
+    ///         304 Not Modified, otherwise when it was loaded
+    QDateTime checkedAt() const { return _checkedAt; }
     QDateTime validFrom() const { return _validFrom; }
     QDateTime validTo() const { return _validTo; }
     QString detailsText() const;
@@ -88,8 +92,11 @@ public:
     const GeoZoneBox &box() const { return _box; }
     QGeoRectangle boundingBox() const { return _box.toRectangle(); }
 
-    /// Sets the dates of the stored copy before it is loaded, or when a feed is confirmed unchanged
-    void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate);
+    /// Sets the dates of the stored copy before it is loaded
+    /// @param checkedAt When the server last confirmed the copy current, loadedAt when invalid or earlier
+    void setStoredDates(const QDateTime &loadedAt, const QDateTime &fileDate, const QDateTime &checkedAt = QDateTime());
+    /// Records that the server confirmed the data current, keeping its dates
+    void setCheckedAt(const QDateTime &checkedAt);
 
     GeoZoneParser::Format format() const { return _format; }
     QByteArray contentHash() const { return _contentHash; }
@@ -113,7 +120,8 @@ public:
     void setErrorString(const QString &errorString);
 
     /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data ages of
-    /// GeoZoneEnvironment::sourceSettings
+    /// GeoZoneEnvironment::sourceSettings. Data without an issue date downloaded from a server is as old as the
+    /// server last confirmed it.
     void updateValidity(const QDateTime &now);
 
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
@@ -132,6 +140,8 @@ private:
     void _summarizeChanges(const QList<GeoZone::Data> &previous, const QList<GeoZone*> &zones);
     void _setMetadata(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate);
     QString _dateText() const;
+    /// @return true for feeds downloaded from a server, which confirms their data
+    bool _isDownloaded() const;
     QString _sourceText() const;
 
     const QString _key;
@@ -144,6 +154,7 @@ private:
     QMap<QString, int> _issues;     ///< See GeoZoneParser::Result::issues
     QDateTime _loadedAt;
     QDateTime _fileDate;
+    QDateTime _checkedAt;
     QDateTime _issued;
     QDateTime _validFrom;
     QDateTime _validTo;

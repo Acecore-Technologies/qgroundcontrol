@@ -204,7 +204,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     if ((result.status == GeoZoneFeedFetch::Result::Status::NotModified) && existing) {
         qCDebug(GeoZoneSourceLog) << "Feed not modified" << url;
         const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
-        existing->setStoredDates(now, now);
+        existing->setCheckedAt(now);
         existing->setBusy(false);
         existing->setErrorString(QString());
         _scheduler->refreshSucceeded(url, result.maxAgeSecs);
@@ -331,6 +331,9 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         emit sourceChanged(source);
         qCDebug(GeoZoneSourceLog) << "Loaded" << source->zoneCount() << source->formatName() << "zones from" << job.key;
     }
+    if (job.checkedAt > job.loadedAt) {
+        source->setCheckedAt(job.checkedAt);
+    }
     source->setErrorString(QString());
     _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
     // Companions of the stored copy are reused for the next download
@@ -380,6 +383,7 @@ void GeoZoneSourceRepository::_updateStoredEntry(const GeoZoneLoader::Job &job, 
     entry.fileName = job.storedFileName;
     entry.loadedAt = job.loadedAt;
     entry.fileDate = job.fileDate;
+    entry.checkedAt = job.loadedAt;
     if (const GeoZoneSource *const source = this->source(job.key)) {
         entry.enabled = source->enabled();
     }
@@ -517,6 +521,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         job.sourcePath = _store.path(entry.fileName);
         job.loadedAt = entry.loadedAt;
         job.fileDate = entry.fileDate;
+        job.checkedAt = entry.checkedAt;
         job.formatHint = GeoZoneProviders::formatHint(job.url);
         job.etag = entry.etag;
         job.lastModified = entry.lastModified;
@@ -530,7 +535,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
 
         // Keep the order of the sources while they load
         GeoZoneSource *const placeholder = _newSource(job.key, job.url, entry.enabled);
-        placeholder->setStoredDates(job.loadedAt, job.fileDate);
+        placeholder->setStoredDates(job.loadedAt, job.fileDate, job.checkedAt);
         placeholder->setValidators(job.etag, job.lastModified);
         placeholder->setDatasetUrl(job.datasetUrl);
         _index.insert(entry);
