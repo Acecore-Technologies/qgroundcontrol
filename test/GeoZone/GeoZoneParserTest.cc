@@ -39,7 +39,7 @@ QString _resultDifference(const GeoZoneParser::Result &a, const GeoZoneParser::R
     };
     const auto sameDailyPeriod = [](const GeoZone::DailyPeriod &x, const GeoZone::DailyPeriod &y) {
         return (x.days == y.days) && (x.startTime == y.startTime) && (x.endTime == y.endTime) && (x.utcOffsetSecs == y.utcOffsetSecs) &&
-               (x.startEvent == y.startEvent) && (x.endEvent == y.endEvent);
+               (x.timeZone == y.timeZone) && (x.startEvent == y.startEvent) && (x.endEvent == y.endEvent);
     };
     const auto sameTimePeriod = [&](const GeoZone::TimePeriod &x, const GeoZone::TimePeriod &y) {
         return (x.permanent == y.permanent) && sameDateTime(x.start, y.start) && sameDateTime(x.end, y.end) &&
@@ -122,7 +122,11 @@ GeoZoneParser::Result _syntheticResult()
     GeoZone::DailyPeriod events;
     events.startEvent = QStringLiteral("BMCT");
     events.endEvent = QStringLiteral("EECT");
-    zone.applicability = { GeoZone::TimePeriod{ false, _utc(QDate(2026, 9, 1), QTime(0, 0)), QDateTime(), { daily, events } },
+    GeoZone::DailyPeriod local;
+    local.startTime = QTime(8, 0);
+    local.endTime = QTime(18, 0);
+    local.timeZone = QTimeZone("Europe/Zurich");
+    zone.applicability = { GeoZone::TimePeriod{ false, _utc(QDate(2026, 9, 1), QTime(0, 0)), QDateTime(), { daily, events, local } },
                            GeoZone::TimePeriod{ true, QDateTime(), QDateTime(), {} } };
     GeoZone::Volume polygon;
     polygon.rings = { { QPointF(8.1, 47.1), QPointF(8.2, 47.1), QPointF(8.2, 47.2) }, { QPointF(8.15, 47.12), QPointF(8.16, 47.12), QPointF(8.16, 47.13) } };
@@ -421,10 +425,14 @@ void GeoZoneParserTest::_testParseED269()
     QCOMPARE(classified.extendedProperties, QStringList({ QStringLiteral("operator: Airport"), QStringLiteral("phone: 123") }));
     QVERIFY(std::isnan(classified.volumes[0].upperLimit));
     QVERIFY(classified.applicability[0].schedule[0].days.isEmpty());
-    QCOMPARE(classified.issues.count(), 2);
+    QCOMPARE(classified.issues.count(), 3);
     const QString unitIssue = QStringLiteral("Unknown unit NM, the altitude limits are ignored");
     QCOMPARE(result.issues.value(unitIssue), 2);
     QCOMPARE(result.issues.value(QStringLiteral("Unknown day HOLIDAY in the schedule, taken as every day")), 1);
+    // Local times are taken as UTC without the country
+    QCOMPARE(result.issues.value(QStringLiteral("Times of day without UTC offset are taken as UTC, the zone has no country")), 1);
+    QVERIFY(!classified.applicability[0].schedule[0].timeZone.isValid());
+    QCOMPARE(classified.applicability[0].schedule[0].utcOffsetSecs, 0);
     ZoneOwner owner;
     QCOMPARE(owner.add(classified)->regulationExemptionText(), QStringLiteral("Exemptions possible"));
     GeoZoneSource source(QStringLiteral("zones.json"), QString());

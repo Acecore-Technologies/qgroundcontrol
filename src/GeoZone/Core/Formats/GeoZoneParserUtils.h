@@ -15,6 +15,8 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonValue>
 
+#include <optional>
+
 /// Conversions shared by the geozone formats
 namespace GeoZoneParserUtils {
 
@@ -57,12 +59,17 @@ double _number(const QJsonValue &value);
 /// Parses ISO 8601 dates and times. Times without an offset are UTC in both standards, dates start at midnight UTC.
 QDateTime _dateTime(const QJsonValue &value);
 
-/// Parses ED-269/ED-318 times of day such as "06:00Z", "05:00:00.00Z" or "08:00+02:00". The time is returned
-/// as published, utcOffsetSecs is set to its offset from UTC.
-QTime _time(const QJsonValue &value, int &utcOffsetSecs);
+/// Parses ED-269/ED-318 times of day such as "06:00Z", "05:00:00.00Z", "08:00+02:00" or "08:00". The time is
+/// returned as published, utcOffsetSecs is set to its offset from UTC, or to nothing for a local time without offset.
+QTime _time(const QJsonValue &value, std::optional<int> &utcOffsetSecs);
 
-/// @param issues Problems found, like unknown day codes, are added to it
-QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, QStringList &issues);
+/// Reads the applicability of ED-269 and ED-318 zones. Daily times with an offset keep it, local times without offset
+/// follow the time zone of the zone's country (see GeoZoneSchedule::countryTimeZone), or are taken as UTC with an
+/// issue when it isn't known.
+/// @param country ISO 3166-1 code of the zone
+/// @param volumes Of the zone, whose location tells the time zone of countries with several
+/// @param issues  Problems found, like unknown day codes, are added to it
+QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, const QString &country, const QList<GeoZone::Volume> &volumes, QStringList &issues);
 
 /// Reads a unit of length
 /// @return false for an unknown unit, which is added to issues. An empty unit is meters.

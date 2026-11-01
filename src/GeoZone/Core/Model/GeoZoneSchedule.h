@@ -14,6 +14,7 @@
 #include <QtCore/QList>
 #include <QtCore/QString>
 #include <QtCore/QTime>
+#include <QtCore/QTimeZone>
 #include <QtPositioning/QGeoCoordinate>
 
 class QDataStream;
@@ -28,7 +29,10 @@ public:
         QList<int> days;        ///< Qt::DayOfWeek values, empty for any day
         QTime startTime;        ///< Invalid when not given or given as a daylight event. Ends before the start wrap past midnight.
         QTime endTime;
-        int utcOffsetSecs = 0;  ///< Offset from UTC of the days and times as published
+        int utcOffsetSecs = 0;  ///< Offset from UTC of the days and times as published, without time zone
+        /// Time zone of the days and times when published in local time, whose offset changes with daylight saving
+        /// time. Invalid for UTC and fixed offsets.
+        QTimeZone timeZone;
         QString startEvent;     ///< Daylight event code (BMCT, SR, SS, EECT), used instead of the time when given
         QString endEvent;
     };
@@ -55,6 +59,13 @@ public:
     /// @return UTC time of the event on the date at the location. Invalid for unknown events and when the
     ///         sun doesn't cross the event altitude that day.
     static QDateTime daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location);
+
+    /// Time zone of the local time in a country, for schedules published in local time without time zone: that of its
+    /// mainland, or of its islands at the location (the Canary Islands, Madeira and the Azores). Only European
+    /// countries, those of the ED-269 and ED-318 formats, with one local time on their mainland are known.
+    /// @param country ISO 3166-1 alpha-3 code, like ED-269 and ED-318 use, or alpha-2 code
+    /// @return Invalid for other countries, or when the system doesn't have the time zone
+    static QTimeZone countryTimeZone(const QString &country, const QGeoCoordinate &location = QGeoCoordinate());
 };
 
 /// Binary serialization, see GeoZoneDataStream

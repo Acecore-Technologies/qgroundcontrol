@@ -54,9 +54,8 @@ bool _ed318Feature(const QJsonObject &feature, GeoZone::Data &zone)
     if (zone.identifier.isEmpty()) {
         zone.identifier = _text(feature.value(QStringLiteral("id")));
     }
-    zone.applicability = _applicability(properties.value(QStringLiteral("limitedApplicability")), zone.issues);
-
     _ed318Geometry(feature.value(QStringLiteral("geometry")).toObject(), GeoZone::Volume(), zone.volumes, zone.issues);
+    zone.applicability = _applicability(properties.value(QStringLiteral("limitedApplicability")), zone.country, zone.volumes, zone.issues);
 
     return !zone.volumes.isEmpty();
 }

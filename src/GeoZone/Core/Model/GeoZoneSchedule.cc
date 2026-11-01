@@ -68,7 +68,27 @@ QString _dailyPeriodToString(const GeoZoneSchedule::DailyPeriod &period)
     }
     const bool timesUsed = (period.startEvent.isEmpty() && period.startTime.isValid()) || (period.endEvent.isEmpty() && period.endTime.isValid());
     const QString text = QStringLiteral("%1 %2-%3").arg(dayString, start.isEmpty() ? QStringLiteral("00:00") : start, end.isEmpty() ? QStringLiteral("24:00") : end);
-    return timesUsed ? QStringLiteral("%1 %2").arg(text, _utcOffsetToString(period.utcOffsetSecs)) : text;
+    if (!timesUsed) {
+        return text;
+    }
+    return QStringLiteral("%1 %2").arg(text, period.timeZone.isValid() ? QString::fromLatin1(period.timeZone.id()) : _utcOffsetToString(period.utcOffsetSecs));
+}
+
+/// @return UTC time of the date and time of day as published in the period, in its time zone or offset
+QDateTime _toUtc(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QTime &time)
+{
+    if (period.timeZone.isValid()) {
+        // Times skipped when the clocks go forward are taken as after the change, those repeated when they go back
+        // as before it
+        return QDateTime(date, time, period.timeZone).toUTC();
+    }
+    return QDateTime(date, time, QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
+}
+
+/// @return Date of the UTC time in the time zone or offset of the period
+QDate _publishedDate(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc)
+{
+    return period.timeZone.isValid() ? utc.toTimeZone(period.timeZone).date() : utc.addSecs(period.utcOffsetSecs).date();
 }
 
 struct SunEvent {
@@ -127,16 +147,17 @@ SunEvent _sunEvent(const QString &event, const QDate &date, const QGeoCoordinate
     return result;
 }
 
-/// @return UTC start and end of a daily period on the date in the period's offset, nothing when it doesn't
-///         apply that day. Ends before the start wrap past midnight.
+/// @return UTC start and end of a daily period on the date in the period's time zone or offset, nothing when it
+///         doesn't apply that day. Ends before the start wrap past midnight.
 std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QGeoCoordinate &location)
 {
     if (!period.days.isEmpty() && !period.days.contains(date.dayOfWeek())) {
         return std::nullopt;
     }
 
-    const QDateTime dayStart = QDateTime(date, QTime(0, 0), QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
-    const QDateTime dayEnd = dayStart.addDays(1).addMSecs(-1);
+    // Days with a daylight saving time change are an hour shorter or longer
+    const QDateTime dayStart = _toUtc(period, date, QTime(0, 0));
+    const QDateTime dayEnd = _toUtc(period, date.addDays(1), QTime(0, 0)).addMSecs(-1);
 
     // Time of an event. When the sun stays above or below the event altitude all day, rising events happen
     // at the start of the day and setting events at its end, or the other way around, so that daylight periods
@@ -158,14 +179,14 @@ std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedul
     if (!period.startEvent.isEmpty()) {
         start = eventTime(period.startEvent, true);
     } else if (period.startTime.isValid()) {
-        start = QDateTime(date, period.startTime, QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
+        start = _toUtc(period, date, period.startTime);
     }
 
     QDateTime end = dayEnd;
     if (!period.endEvent.isEmpty()) {
         end = eventTime(period.endEvent, false);
     } else if (period.endTime.isValid()) {
-        end = QDateTime(date, period.endTime, QTimeZone::UTC).addSecs(-period.utcOffsetSecs);
+        end = _toUtc(period, date, period.endTime);
     }
 
     if ((start == dayEnd) && (end == dayStart)) {
@@ -173,16 +194,16 @@ std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedul
         return std::nullopt;
     }
     if (end < start) {
-        end = end.addDays(1);
+        end = (!period.endEvent.isEmpty() || !period.endTime.isValid()) ? end.addDays(1) : _toUtc(period, date.addDays(1), period.endTime);
     }
     return std::make_pair(start, end);
 }
 
 bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc, const QGeoCoordinate &location)
 {
-    // Days and times are published in the period's offset. A period wrapping past midnight started the day before,
-    // and a sunrise east of the offset's meridian can be before midnight.
-    const QDate date = utc.addSecs(period.utcOffsetSecs).date();
+    // Days and times are published in the period's time zone or offset. A period wrapping past midnight started the
+    // day before, and a sunrise east of the offset's meridian can be before midnight.
+    const QDate date = _publishedDate(period, utc);
     for (const QDate &day : { date.addDays(-1), date, date.addDays(1) }) {
         const auto window = _dailyWindow(period, day, location);
         if (window && (utc >= window->first) && (utc <= window->second)) {
@@ -194,10 +215,10 @@ bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDat
 
 bool _dailyPeriodOverlaps(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc, const QGeoCoordinate &location)
 {
-    const QDate firstDate = startUtc.addSecs(period.utcOffsetSecs).date().addDays(-1);
+    const QDate firstDate = _publishedDate(period, startUtc).addDays(-1);
     // Windows can start before their date when a sunrise is before midnight. The schedule repeats weekly, so
     // a week past the first date covers every window of longer intervals.
-    const QDate lastDate = std::min(endUtc.addSecs(period.utcOffsetSecs).date().addDays(1), firstDate.addDays(9));
+    const QDate lastDate = std::min(_publishedDate(period, endUtc).addDays(1), firstDate.addDays(9));
     for (QDate date = firstDate; date <= lastDate; date = date.addDays(1)) {
         const auto window = _dailyWindow(period, date, location);
         if (window && (window->first <= endUtc) && (window->second >= startUtc)) {
@@ -207,7 +228,93 @@ bool _dailyPeriodOverlaps(const GeoZoneSchedule::DailyPeriod &period, const QDat
     return false;
 }
 
+/// Local time of a country, see GeoZoneSchedule::countryTimeZone
+struct CountryTimeZone {
+    const char *alpha3;
+    const char *alpha2;
+    const char *timeZone;
+    double westOf = 180;    ///< Longitude west of which the time zone applies, before those of the same country
+};
+
+const CountryTimeZone kCountryTimeZones[] = {
+    { "ALB", "AL", "Europe/Tirane" },
+    { "AND", "AD", "Europe/Andorra" },
+    { "ARM", "AM", "Asia/Yerevan" },
+    { "AUT", "AT", "Europe/Vienna" },
+    { "AZE", "AZ", "Asia/Baku" },
+    { "BEL", "BE", "Europe/Brussels" },
+    { "BGR", "BG", "Europe/Sofia" },
+    { "BIH", "BA", "Europe/Sarajevo" },
+    { "BLR", "BY", "Europe/Minsk" },
+    { "CHE", "CH", "Europe/Zurich" },
+    { "CYP", "CY", "Asia/Nicosia" },
+    { "CZE", "CZ", "Europe/Prague" },
+    { "DEU", "DE", "Europe/Berlin" },
+    { "DNK", "DK", "Europe/Copenhagen" },
+    { "ESP", "ES", "Atlantic/Canary", -12 },
+    { "ESP", "ES", "Europe/Madrid" },
+    { "EST", "EE", "Europe/Tallinn" },
+    { "FIN", "FI", "Europe/Helsinki" },
+    { "FRA", "FR", "Europe/Paris" },
+    { "FRO", "FO", "Atlantic/Faroe" },
+    { "GBR", "GB", "Europe/London" },
+    { "GEO", "GE", "Asia/Tbilisi" },
+    { "GGY", "GG", "Europe/Guernsey" },
+    { "GIB", "GI", "Europe/Gibraltar" },
+    { "GRC", "GR", "Europe/Athens" },
+    { "HRV", "HR", "Europe/Zagreb" },
+    { "HUN", "HU", "Europe/Budapest" },
+    { "IMN", "IM", "Europe/Isle_of_Man" },
+    { "IRL", "IE", "Europe/Dublin" },
+    { "ISL", "IS", "Atlantic/Reykjavik" },
+    { "ITA", "IT", "Europe/Rome" },
+    { "JEY", "JE", "Europe/Jersey" },
+    { "LIE", "LI", "Europe/Vaduz" },
+    { "LTU", "LT", "Europe/Vilnius" },
+    { "LUX", "LU", "Europe/Luxembourg" },
+    { "LVA", "LV", "Europe/Riga" },
+    { "MCO", "MC", "Europe/Monaco" },
+    { "MDA", "MD", "Europe/Chisinau" },
+    { "MKD", "MK", "Europe/Skopje" },
+    { "MLT", "MT", "Europe/Malta" },
+    { "MNE", "ME", "Europe/Podgorica" },
+    { "NLD", "NL", "Europe/Amsterdam" },
+    { "NOR", "NO", "Europe/Oslo" },
+    { "POL", "PL", "Europe/Warsaw" },
+    { "PRT", "PT", "Atlantic/Azores", -22 },
+    { "PRT", "PT", "Atlantic/Madeira", -12 },
+    { "PRT", "PT", "Europe/Lisbon" },
+    { "ROU", "RO", "Europe/Bucharest" },
+    { "SMR", "SM", "Europe/San_Marino" },
+    { "SRB", "RS", "Europe/Belgrade" },
+    { "SVK", "SK", "Europe/Bratislava" },
+    { "SVN", "SI", "Europe/Ljubljana" },
+    { "SWE", "SE", "Europe/Stockholm" },
+    { "TUR", "TR", "Europe/Istanbul" },
+    { "UKR", "UA", "Europe/Kyiv" },
+    { "VAT", "VA", "Europe/Vatican" },
+    { "XKX", "XK", "Europe/Belgrade" },
+};
+
 } // namespace
+
+QTimeZone GeoZoneSchedule::countryTimeZone(const QString &country, const QGeoCoordinate &location)
+{
+    const QByteArray code = country.trimmed().toUpper().toLatin1();
+    if ((code.size() != 2) && (code.size() != 3)) {
+        return QTimeZone();
+    }
+    for (const CountryTimeZone &entry : kCountryTimeZones) {
+        if ((code != entry.alpha3) && (code != entry.alpha2)) {
+            continue;
+        }
+        if ((entry.westOf < 180) && (!location.isValid() || (location.longitude() >= entry.westOf))) {
+            continue;
+        }
+        return QTimeZone(QByteArray(entry.timeZone));
+    }
+    return QTimeZone();
+}
 
 QDateTime GeoZoneSchedule::daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location)
 {
@@ -308,7 +415,7 @@ QString GeoZoneSchedule::text(const QList<TimePeriod> &applicability)
 }
 
 // Fields added to the periods must be serialized here, see GeoZoneParseCache::formatVersion
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::DailyPeriod) == 88), "Serialize the new fields of DailyPeriod");
+static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::DailyPeriod) == 96), "Serialize the new fields of DailyPeriod");
 static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::TimePeriod) == 48), "Serialize the new fields of TimePeriod");
 
 QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod &period)
@@ -317,7 +424,8 @@ QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod 
     for (const int day : period.days) {
         stream << static_cast<qint32>(day);
     }
-    return stream << period.startTime << period.endTime << static_cast<qint32>(period.utcOffsetSecs) << period.startEvent << period.endEvent;
+    return stream << period.startTime << period.endTime << static_cast<qint32>(period.utcOffsetSecs) << period.startEvent << period.endEvent
+                  << (period.timeZone.isValid() ? period.timeZone.id() : QByteArray());
 }
 
 QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &period)
@@ -333,8 +441,12 @@ QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &perio
         period.days.append(day);
     }
     qint32 utcOffsetSecs = 0;
-    stream >> period.startTime >> period.endTime >> utcOffsetSecs >> period.startEvent >> period.endEvent;
+    QByteArray timeZone;
+    stream >> period.startTime >> period.endTime >> utcOffsetSecs >> period.startEvent >> period.endEvent >> timeZone;
     period.utcOffsetSecs = utcOffsetSecs;
+    if (!timeZone.isEmpty()) {
+        period.timeZone = QTimeZone(timeZone);
+    }
     return stream;
 }
 
@@ -349,7 +461,7 @@ QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::TimePeriod &period
 {
     period = GeoZoneSchedule::TimePeriod();
     stream >> period.permanent >> period.start >> period.end;
-    // Days, times, offset and events
-    (void) GeoZoneDataStream::readList(stream, period.schedule, 6 * sizeof(quint32));
+    // Days, times, offset, events and time zone
+    (void) GeoZoneDataStream::readList(stream, period.schedule, 7 * sizeof(quint32));
     return stream;
 }

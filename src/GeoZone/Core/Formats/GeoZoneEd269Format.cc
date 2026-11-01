@@ -20,7 +20,6 @@ namespace {
 bool _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     _commonProperties(feature, QStringLiteral("restriction"), zone);
-    zone.applicability = _applicability(feature.value(QStringLiteral("applicability")), zone.issues);
 
     for (const QJsonValue &geometryValue : feature.value(QStringLiteral("geometry")).toArray()) {
         const QJsonObject geometry = geometryValue.toObject();
@@ -35,6 +34,7 @@ bool _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
         // ED-269 expresses all dimensions, including the circle radius, in uomDimensions
         _appendHorizontalGeometry(geometry.value(QStringLiteral("horizontalProjection")).toObject(), layer, layer.feet ? kMetersPerFoot : 1.0, zone.volumes);
     }
+    zone.applicability = _applicability(feature.value(QStringLiteral("applicability")), zone.country, zone.volumes, zone.issues);
 
     return !zone.volumes.isEmpty();
 }

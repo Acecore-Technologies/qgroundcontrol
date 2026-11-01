@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneParserUtils.h"
+#include "GeoZoneBox.h"
 #include "GeoZoneParser.h"
 
 #include <QtCore/QJsonDocument>
@@ -263,11 +264,9 @@ QDateTime _dateTime(const QJsonValue &value)
     return dateTime.isValid() ? dateTime.toUTC() : QDateTime();
 }
 
-/// Parses ED-269/ED-318 times of day such as "06:00Z", "05:00:00.00Z" or "08:00+02:00". The time is returned
-/// as published, utcOffsetSecs is set to its offset from UTC.
-QTime _time(const QJsonValue &value, int &utcOffsetSecs)
+QTime _time(const QJsonValue &value, std::optional<int> &utcOffsetSecs)
 {
-    utcOffsetSecs = 0;
+    utcOffsetSecs.reset();
 
     static const QRegularExpression timeRegExp(QStringLiteral("^(\\d{1,2}):(\\d{2})(?::(\\d{2})(?:\\.\\d+)?)?\\s*(Z|[+-]\\d{2}(?::?\\d{2})?)?$"),
                                                QRegularExpression::CaseInsensitiveOption);
@@ -287,7 +286,9 @@ QTime _time(const QJsonValue &value, int &utcOffsetSecs)
     }
 
     const QString offset = match.captured(4);
-    if (!offset.isEmpty() && (offset.toUpper() != QStringLiteral("Z"))) {
+    if (offset.toUpper() == QStringLiteral("Z")) {
+        utcOffsetSecs = 0;
+    } else if (!offset.isEmpty()) {
         const int sign = offset.startsWith(QLatin1Char('-')) ? -1 : 1;
         const QString digits = QString(offset.mid(1)).remove(QLatin1Char(':'));
         utcOffsetSecs = sign * ((digits.left(2).toInt() * 3600) + (digits.mid(2, 2).toInt() * 60));
@@ -295,7 +296,7 @@ QTime _time(const QJsonValue &value, int &utcOffsetSecs)
     return time;
 }
 
-QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, QStringList &issues)
+QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, const QString &country, const QList<GeoZone::Volume> &volumes, QStringList &issues)
 {
     static const QHash<QString, int> dayMap = {
         { QStringLiteral("MON"), Qt::Monday },
@@ -305,6 +306,23 @@ QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, QStringList &
         { QStringLiteral("FRI"), Qt::Friday },
         { QStringLiteral("SAT"), Qt::Saturday },
         { QStringLiteral("SUN"), Qt::Sunday },
+    };
+
+    // Time zone of the local times, looked up once
+    std::optional<QTimeZone> localTimeZone;
+    const auto timeZone = [&]() {
+        if (!localTimeZone) {
+            QGeoCoordinate location;
+            if (!volumes.isEmpty()) {
+                location = volumes.constFirst().isCircle ? volumes.constFirst().center : volumes.constFirst().boundingBox().center();
+            }
+            localTimeZone = GeoZoneSchedule::countryTimeZone(country, location);
+            if (!localTimeZone->isValid()) {
+                issues.append(country.isEmpty() ? GeoZoneParser::tr("Times of day without UTC offset are taken as UTC, the zone has no country")
+                                                : GeoZoneParser::tr("Times of day without UTC offset are taken as UTC, the time zone of country %1 isn't known").arg(country));
+            }
+        }
+        return *localTimeZone;
     };
 
     QList<GeoZone::TimePeriod> periods;
@@ -336,14 +354,19 @@ QList<GeoZone::TimePeriod> _applicability(const QJsonValue &value, QStringList &
             if (anyDay) {
                 dailyPeriod.days.clear();
             }
-            int startOffsetSecs = 0;
-            int endOffsetSecs = 0;
+            std::optional<int> startOffsetSecs;
+            std::optional<int> endOffsetSecs;
             dailyPeriod.startTime = _time(dailyObject.value(QStringLiteral("startTime")), startOffsetSecs);
             dailyPeriod.endTime = _time(dailyObject.value(QStringLiteral("endTime")), endOffsetSecs);
-            // Express both times in the offset of the start time
-            dailyPeriod.utcOffsetSecs = dailyPeriod.startTime.isValid() ? startOffsetSecs : endOffsetSecs;
-            if (dailyPeriod.endTime.isValid() && (endOffsetSecs != dailyPeriod.utcOffsetSecs)) {
-                dailyPeriod.endTime = dailyPeriod.endTime.addSecs(dailyPeriod.utcOffsetSecs - endOffsetSecs);
+            if (startOffsetSecs || endOffsetSecs) {
+                // Express both times in the offset of the start time, a time without offset in that of the other
+                dailyPeriod.utcOffsetSecs = startOffsetSecs ? *startOffsetSecs : *endOffsetSecs;
+                if (endOffsetSecs && (*endOffsetSecs != dailyPeriod.utcOffsetSecs)) {
+                    dailyPeriod.endTime = dailyPeriod.endTime.addSecs(dailyPeriod.utcOffsetSecs - *endOffsetSecs);
+                }
+            } else if (dailyPeriod.startTime.isValid() || dailyPeriod.endTime.isValid()) {
+                // Local times, like ISO 8601 times without offset
+                dailyPeriod.timeZone = timeZone();
             }
             dailyPeriod.startEvent = dailyObject.value(QStringLiteral("startEvent")).toString();
             dailyPeriod.endEvent = dailyObject.value(QStringLiteral("endEvent")).toString();
