@@ -89,7 +89,7 @@ public:
     void evaluate(const GeoZone::Position &position, int vehicleId = noVehicle) { evaluate(position, vehicleId, Velocity()); }
 
     /// @return Position of the vehicle with its altitude above mean sea level and the terrain elevation from its
-    ///         altitude above terrain, which is unknown without terrain data
+    ///         altitude above terrain or GeoZoneTerrain, which is unknown without terrain data
     static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate);
 
     GeoZoneManager *manager() const { return _manager; }

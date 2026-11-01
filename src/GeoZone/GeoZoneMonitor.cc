@@ -16,6 +16,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneTerrain.h"
 #include "MultiVehicleManager.h"
 #include "QmlObjectListModel.h"
 #include "QGCLoggingCategory.h"
@@ -206,12 +207,15 @@ GeoZone::Position GeoZoneMonitor::vehiclePosition(Vehicle *vehicle, const QGeoCo
     position.altitudeAMSL = altitudeAMSL;
 
     // Without terrain data limits above ground can't be excluded. The height above home is not used instead
-    // since it misses zones over rising ground. A disarmed vehicle is on the ground.
+    // since it misses zones over rising ground. A disarmed vehicle is on the ground. The vehicle doesn't query
+    // the terrain again while it hovers, so tiles loaded since its last query are looked up.
     const double heightAboveTerrain = vehicle->altitudeAboveTerr()->rawValue().toDouble();
     if (!qIsNaN(heightAboveTerrain)) {
         position.terrainAMSL = altitudeAMSL - heightAboveTerrain;
     } else if (!vehicle->armed()) {
         position.terrainAMSL = altitudeAMSL;
+    } else {
+        position.terrainAMSL = GeoZoneTerrain::elevationAt(coordinate);
     }
     return position;
 }

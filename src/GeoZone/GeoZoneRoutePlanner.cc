@@ -13,6 +13,7 @@
 #include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneTerrain.h"
 #include "MissionController.h"
 #include "QmlObjectListModel.h"
 #include "VisualMissionItem.h"
@@ -390,10 +391,13 @@ void GeoZoneRoutePlanner::update()
                 detourSegments.append(detourSegment);
             }
             QList<GeoZone*> entered;
-            for (QList<GeoZone::Position> path : GeoZoneMissionCheck::pathsFromSegments(detourSegments)) {
-                // The terrain along the detour is unknown, the leg's is close
+            for (const QList<GeoZone::Position> &detourPath : GeoZoneMissionCheck::pathsFromSegments(detourSegments)) {
+                // The terrain tiles give the terrain along the detour where they are loaded, the leg's is close elsewhere
+                QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain(detourPath);
                 for (GeoZone::Position &position : path) {
-                    position.terrainAMSL = legTerrain;
+                    if (std::isnan(position.terrainAMSL)) {
+                        position.terrainAMSL = legTerrain;
+                    }
                 }
                 for (GeoZone *zone : _zonesOnPath(path)) {
                     if (!avoided.contains(zone) && !entered.contains(zone)) {

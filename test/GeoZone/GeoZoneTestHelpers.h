@@ -30,6 +30,7 @@
 #include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneTerrain.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"

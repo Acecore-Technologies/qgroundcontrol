@@ -10,6 +10,7 @@
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZoneTerrain.h"
 #include "Vehicle.h"
 
 #include <algorithm>
@@ -56,12 +57,8 @@ QString GeoZoneGuidedCheck::gotoWarning(QObject *vehicle, const QGeoCoordinate &
         return QString();
     }
     const GeoZone::Position from = _monitor->vehiclePosition(guidedVehicle, guidedVehicle->coordinate());
-    GeoZone::Position to = from;
-    to.coordinate = coordinate;
-    if (!std::isnan(altitudeAMSL)) {
-        to.altitudeAMSL = altitudeAMSL;
-    }
-    return pathWarning({ from, to });
+    GeoZone::Position to{ coordinate, std::isnan(altitudeAMSL) ? from.altitudeAMSL : altitudeAMSL };
+    return pathWarning(GeoZoneTerrain::withTerrain({ from, to }));
 }
 
 QString GeoZoneGuidedCheck::orbitWarning(QObject *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const
@@ -75,14 +72,10 @@ QString GeoZoneGuidedCheck::orbitWarning(QObject *vehicle, const QGeoCoordinate 
     constexpr int circlePoints = 36;
     const double startAzimuth = center.azimuthTo(from.coordinate);
     for (int i = 0; i <= circlePoints; i++) {
-        GeoZone::Position position = from;
-        position.coordinate = center.atDistanceAndAzimuth(radius, startAzimuth + (360.0 * i / circlePoints));
-        if (!std::isnan(altitudeAMSL)) {
-            position.altitudeAMSL = altitudeAMSL;
-        }
-        path.append(position);
+        path.append(GeoZone::Position{ center.atDistanceAndAzimuth(radius, startAzimuth + (360.0 * i / circlePoints)),
+                                       std::isnan(altitudeAMSL) ? from.altitudeAMSL : altitudeAMSL });
     }
-    return pathWarning(path);
+    return pathWarning(GeoZoneTerrain::withTerrain(path));
 }
 
 QString GeoZoneGuidedCheck::altitudeWarning(QObject *vehicle, double relativeAltitude) const

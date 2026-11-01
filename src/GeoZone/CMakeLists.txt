@@ -56,6 +56,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneSourceRepository.h
         GeoZoneStore.cc
         GeoZoneStore.h
+        GeoZoneTerrain.cc
+        GeoZoneTerrain.h
         Formats/GeoZoneAixmFormat.cc
         Formats/GeoZoneDipulFormat.cc
         Formats/GeoZoneEd269Format.cc

@@ -77,10 +77,11 @@ public:
     /// Forgets the states, so that the alerts repeat
     void reset() { _states.clear(); }
 
-    /// @return Seconds until the straight path from the position at the velocity enters the zone, NaN if it doesn't within the horizon
-    static double timeToEntry(const GeoZone *zone, const GeoZone::Position &position, const Velocity &velocity, double horizon);
-    /// @return Position after the seconds at the velocity. The terrain ahead is unknown, so limits above ground use the terrain below the vehicle.
-    static GeoZone::Position predictedPosition(const GeoZone::Position &position, const Velocity &velocity, double seconds);
+    /// @return Straight path from the position at the velocity for the seconds, with the terrain along it from
+    ///         GeoZoneTerrain where it is loaded and the terrain below the vehicle elsewhere
+    static QList<GeoZone::Position> predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds);
+    /// @return Seconds until the predicted path covering the horizon at a constant speed enters the zone, NaN if it doesn't
+    static double timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon);
 
 private:
     enum class State {

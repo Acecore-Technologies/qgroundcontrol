@@ -10,6 +10,7 @@
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneTerrain.h"
 
 #include <QtCore/QSet>
 #include <QtCore/QtMath>
@@ -30,9 +31,10 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     const bool predict = velocity.valid && (limits.time > 0) &&
                          ((velocity.groundSpeed() >= minPredictionSpeed) || (std::abs(velocity.up) >= minPredictionSpeed));
     const double horizon = limits.time + hysteresisTime;
+    QList<GeoZone::Position> ahead;
     if (predict) {
-        const GeoZone::Position ahead = predictedPosition(position, velocity, horizon);
-        area = area.united(QGeoRectangle(QList<QGeoCoordinate>{ position.coordinate, ahead.coordinate }));
+        ahead = predictedPath(position, velocity, horizon);
+        area = area.united(QGeoRectangle(QList<QGeoCoordinate>{ position.coordinate, ahead.constLast().coordinate }));
     }
 
     QSet<QString> nearbyZones;
@@ -51,7 +53,7 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
 
         double entryTime = qQNaN();
         if (!inside && predict) {
-            entryTime = timeToEntry(zone, position, velocity, horizon);
+            entryTime = timeToEntry(zone, ahead, horizon);
         }
         const double timeLimit = limits.time + ((previous != State::Away) ? hysteresisTime : 0);
         const bool nearByTime = !std::isnan(entryTime) && (entryTime <= timeLimit);
@@ -98,22 +100,40 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     return update;
 }
 
-GeoZone::Position GeoZoneAlertTracker::predictedPosition(const GeoZone::Position &position, const Velocity &velocity, double seconds)
+QList<GeoZone::Position> GeoZoneAlertTracker::predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds)
 {
-    GeoZone::Position predicted = position;
+    GeoZone::Position predicted;
     const double course = qRadiansToDegrees(std::atan2(velocity.east, velocity.north));
     predicted.coordinate = position.coordinate.atDistanceAndAzimuth(velocity.groundSpeed() * seconds, course);
     if (!std::isnan(position.altitudeAMSL)) {
         predicted.altitudeAMSL = position.altitudeAMSL + (velocity.up * seconds);
     }
-    return predicted;
+    return GeoZoneTerrain::withTerrain({ position, predicted });
 }
 
-double GeoZoneAlertTracker::timeToEntry(const GeoZone *zone, const GeoZone::Position &position, const Velocity &velocity, double horizon)
+double GeoZoneAlertTracker::timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon)
 {
-    // The vehicle moves along the path at a constant velocity, so the time is proportional to the fraction
-    const auto entry = zone->pathEntry(QList<GeoZone::Position>{ position, predictedPosition(position, velocity, horizon) });
-    return entry ? (entry->fraction * horizon) : qQNaN();
+    const auto entry = zone->pathEntry(path);
+    if (!entry) {
+        return qQNaN();
+    }
+    // The vehicle moves along the path at a constant velocity, so the time is proportional to the distance
+    double total = 0;
+    double toEntry = 0;
+    for (qsizetype i = 1; i < path.count(); i++) {
+        const double length = path[i - 1].coordinate.distanceTo(path[i].coordinate);
+        if ((i - 1) < entry->segment) {
+            toEntry += length;
+        } else if ((i - 1) == entry->segment) {
+            toEntry += length * entry->fraction;
+        }
+        total += length;
+    }
+    // Climbing or descending in place
+    if (total < 0.01) {
+        return entry->fraction * horizon;
+    }
+    return (toEntry / total) * horizon;
 }
 
 GeoZoneAlertTracker::Velocity GeoZoneVelocityEstimator::add(qint64 msecs, const GeoZone::Position &position)
