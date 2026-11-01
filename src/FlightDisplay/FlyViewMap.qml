@@ -333,11 +333,9 @@ FlightMap {
         largeMapView:   !pipMode
     }
 
-    GeoZoneMapVisuals {
-        id:             geoZoneMapVisuals
-        map:            _root
-        showZones:      _root.pipState.state !== _root.pipState.pipState
-        showPrediction: showZones
+    GeoZoneFlyMapLayer {
+        id:     geoZoneMapLayer
+        map:    _root
     }
 
     GeoFenceMapVisuals {
@@ -693,9 +691,7 @@ FlightMap {
                             mapClickDropPanel.close()
                             gotoLocationItem.show(mapClickCoord)
 
-                            // Entering geozones is always confirmed
-                            if ((_activeVehicle.flightMode == _activeVehicle.gotoFlightMode) && !_flyViewSettings.goToLocationRequiresConfirmInGuided.value &&
-                                    !globals.guidedControllerFlyView.gotoEntersGeoZones(mapClickCoord)) {
+                            if ((_activeVehicle.flightMode == _activeVehicle.gotoFlightMode) && !_flyViewSettings.goToLocationRequiresConfirmInGuided.value && !geoZoneMapLayer.gotoEntersZones(mapClickCoord)) {
                                 globals.guidedControllerFlyView.executeAction(globals.guidedControllerFlyView.actionGoto, mapClickCoord, gotoLocationItem)
                                 gotoLocationItem.actionConfirmed() // Still need to call this to commit the new coordinate and radius
                             } else {
@@ -755,17 +751,10 @@ FlightMap {
                         }
                     }
 
-                    QGCButton {
-                        Layout.fillWidth:   true
-                        text:               qsTr("Geozones here (%1)").arg(_zoneCount)
-                        visible:            _zoneCount > 0
-                        onClicked: {
-                            mapClickDropPanel.close()
-                            geoZoneMapVisuals.showZonesAt(mapClickCoord)
-                        }
-
-                        readonly property int _zoneCount: geoZoneMapVisuals.showZones && GeoZoneManager.display.visible ?
-                                                              GeoZoneManager.zonesAt(mapClickCoord).length : 0
+                    GeoZoneMapClickButton {
+                        mapLayer:   geoZoneMapLayer
+                        coordinate: mapClickCoord
+                        dropPanel:  mapClickDropPanel
                     }
 
                     ColumnLayout {
@@ -790,8 +779,6 @@ FlightMap {
             position = _root.mapToItem(globals.parent, position)
             var dropPanel = mapClickDropPanelComponent.createObject(mainWindow, { mapClickCoord: clickCoord, clickRect: Qt.rect(position.x, position.y, 0, 0) })
             dropPanel.open()
-        } else if (!globals.guidedControllerFlyView.guidedUIVisible) {
-            geoZoneMapVisuals.showZonesAt(_root.toCoordinate(Qt.point(position.x, position.y), false /* clipToViewPort */))
         }
     }
 

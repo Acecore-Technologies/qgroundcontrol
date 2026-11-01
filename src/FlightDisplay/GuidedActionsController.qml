@@ -20,7 +20,6 @@ import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.Vehicle
 import QGroundControl.FlightMap
-import QGroundControl.GeoZone
 
 /// This provides the smarts behind the guided mode commands, minus the user interface. This way you can change UI
 /// without affecting the underlying functionality.
@@ -28,7 +27,6 @@ Item {
     id: _root
 
     property var missionController
-    property var geoFenceController: null   ///< Fence on the vehicle, checked for excluding prohibited zones of the mission
     property var confirmDialog
     property var guidedValueSlider
     property var fwdFlightGotoMapCircle
@@ -406,18 +404,6 @@ Item {
         guidedValueSlider.visible = false
     }
 
-    GeoZoneGuidedActionCheck {
-        id:                 _geoZoneCheck
-        guidedController:   _root
-        missionController:  _root.missionController
-        geoFenceController: _root.geoFenceController
-    }
-
-    /// @return true if a go to location would enter geozones, so it must be confirmed
-    function gotoEntersGeoZones(coordinate) {
-        return _geoZoneCheck.gotoEntersZones(coordinate)
-    }
-
     // Called when an action is about to be executed in order to confirm
     function confirmAction(actionCode, actionData, mapIndicator) {
         var showImmediate = true
@@ -430,7 +416,6 @@ Item {
         _actionData = actionData
 
         setupSlider(actionCode)
-        confirmDialog.geoZoneWarning = Qt.binding(function() { return _geoZoneCheck.warning(actionCode, actionData) })
 
         switch (actionCode) {
         case actionArm:

@@ -20,14 +20,15 @@
 ///   GeoZoneToolStripAction opening the panel, and calls to the overlay for map clicks and the upload confirmation
 /// - QGCFileDialog.qml: the fileName proposed when saving, for the briefing export
 /// - TerrainStatus.qml: GeoZoneProfileOverlay
-/// - FlyViewMap.qml: GeoZoneMapVisuals, map clicks showing zones and the go to confirmation
+/// - FlyViewMap.qml: GeoZoneFlyMapLayer with the zones and the zones at map clicks, the GeoZoneMapClickButton of the
+///   map click panel, and the layer's check making go to locations entering zones always confirmed
 /// - FlyViewWidgetLayer.qml: GeoZoneAltitudeStrip
-/// - GuidedActionsController.qml: GeoZoneGuidedActionCheck; GuidedActionConfirm.qml shows its warning
+/// - GuidedActionConfirm.qml: GeoZoneGuidedActionWarning
 /// - PlanMasterController: GeoZonePlanData in plan files, with the fence names of GeoZoneFenceTags
 /// - GeoFenceEditor.qml: GeoZoneFenceList in place of the lists of polygon and of circular fences
 ///
-/// Changes outside the module which don't depend on it and could go upstream on their own: GuidedValueSlider::value,
-/// and Vehicle clearing altitudeAboveTerr when the terrain query fails.
+/// Changes outside the module which don't depend on it and could go upstream on their own: the fileName of
+/// QGCFileDialog.qml, and Vehicle clearing altitudeAboveTerr when the terrain query fails.
 namespace GeoZoneModule {
 
 /// Connects the geozone core to the settings, units, terrain and downloads of QGroundControl, see GeoZoneEnvironment,

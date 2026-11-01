@@ -161,7 +161,6 @@ Item {
         GuidedActionsController {
             id:                 guidedActionsController
             missionController:  _missionController
-            geoFenceController: _geoFenceController
             guidedValueSlider:     _guidedValueSlider
         }
 

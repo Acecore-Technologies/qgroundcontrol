@@ -7,35 +7,49 @@
  *
  ****************************************************************************/
 import QtQuick
+import QtQuick.Layouts
 
 import QGroundControl
+import QGroundControl.Controls
 import QGroundControl.GeoZone
+import QGroundControl.Palette
 
-/// Geozone warnings for the confirmation of the guided actions of a GuidedActionsController: the zones a go to,
-/// orbit, altitude change or takeoff would enter, and the check of the mission on the vehicle when starting it
-QtObject {
-    id: root
+/// Geozone warning in the confirmation of a guided action, GuidedActionConfirm.qml: the zones a go to, orbit, altitude
+/// change or takeoff would enter, following the value slider, and the check of the mission on the vehicle when starting
+/// it. Empty and hidden for other actions or without zones.
+QGCLabel {
+    id:                     control
+    Layout.fillWidth:       true
+    horizontalAlignment:    Text.AlignHCenter
+    wrapMode:               Text.WordWrap
+    textFormat:             Text.PlainText
+    color:                  qgcPal.warningText
+    text:                   confirmDialog.visible ? warning(confirmDialog.action, confirmDialog.actionData) : ""
+    visible:                text !== ""
 
-    required property var guidedController  ///< GuidedActionsController, for its action codes, slider and orbit circle
-    property var missionController          ///< Mission on the vehicle
-    property var geoFenceController         ///< Fence on the vehicle, checked for excluding the prohibited zones of the mission
+    required property var confirmDialog     ///< GuidedActionConfirm, with the action, its data and the guided controller
 
-    readonly property var _vehicle: QGroundControl.multiVehicleManager.activeVehicle
+    readonly property var _guidedController:    confirmDialog.guidedController
+    readonly property var _missionController:   _guidedController.missionController
+    readonly property var _vehicle:             QGroundControl.multiVehicleManager.activeVehicle
 
     property GeoZoneMissionCheck _vehicleMissionCheck: GeoZoneMissionCheck {
-        missionController:  root.missionController
-        geoFenceController: root.geoFenceController
+        missionController:  control._missionController
+        // The fence on the vehicle is checked for excluding the prohibited zones of the mission
+        geoFenceController: control._missionController ? control._missionController.masterController.geoFenceController : null
         flightNow:          true
     }
 
+    QGCPalette { id: qgcPal }
+
     /// @return Warning about the geozones the action would enter, empty when there are none. Bound to the slider value.
     function warning(actionCode, actionData) {
-        const controller = guidedController
+        const controller = _guidedController
         const check = GeoZoneMonitor.guidedCheck
         if (!_vehicle || !GeoZoneManager.zoneCount) {
             return ""
         }
-        const sliderMeters = QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsToMeters(controller.guidedValueSlider.value)
+        const sliderMeters = QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsToMeters(confirmDialog.guidedValueSlider.getOutputValue())
         switch (actionCode) {
         case controller.actionGoto:
             return check.gotoWarning(_vehicle, actionData)
@@ -51,10 +65,5 @@ QtObject {
         default:
             return ""
         }
-    }
-
-    /// @return true if going to the coordinate would enter geozones, so it must be confirmed
-    function gotoEntersZones(coordinate) {
-        return warning(guidedController.actionGoto, coordinate) !== ""
     }
 }
