@@ -125,7 +125,7 @@ void GeoZoneAuthorisations::set(const GeoZoneAuthorisation &authorisation)
     }
 }
 
-void GeoZoneAuthorisations::merge(const QList<GeoZoneAuthorisation> &authorisations)
+QList<GeoZoneAuthorisation> GeoZoneAuthorisations::_merged(const QList<GeoZoneAuthorisation> &authorisations) const
 {
     QList<GeoZoneAuthorisation> merged = _authorisations;
     for (const GeoZoneAuthorisation &authorisation : authorisations) {
@@ -136,9 +136,59 @@ void GeoZoneAuthorisations::merge(const QList<GeoZoneAuthorisation> &authorisati
             *it = authorisation;
         }
     }
+    return merged;
+}
+
+void GeoZoneAuthorisations::merge(const QList<GeoZoneAuthorisation> &authorisations)
+{
+    const QList<GeoZoneAuthorisation> merged = _merged(authorisations);
     if (merged != _authorisations) {
         _reset(merged);
         _save();
+    }
+}
+
+void GeoZoneAuthorisations::offer(const QList<GeoZoneAuthorisation> &authorisations)
+{
+    // Only those which would add a zone or extend an authorisation are worth asking about
+    QList<GeoZoneAuthorisation> pending;
+    for (const GeoZoneAuthorisation &authorisation : authorisations) {
+        if (_merged({ authorisation }) != _authorisations) {
+            pending.append(authorisation);
+        }
+    }
+    if (pending != _pending) {
+        _pending = pending;
+        emit pendingChanged();
+    }
+}
+
+QVariantList GeoZoneAuthorisations::pendingAuthorisations() const
+{
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QVariantList list;
+    for (const GeoZoneAuthorisation &authorisation : _pending) {
+        list.append(QVariantMap{
+            { QStringLiteral("zoneName"), authorisation.zoneName.isEmpty() ? authorisation.zoneKey : authorisation.zoneName },
+            { QStringLiteral("permit"), authorisation.permit },
+            { QStringLiteral("statusText"), statusText(authorisation, now) },
+        });
+    }
+    return list;
+}
+
+void GeoZoneAuthorisations::acceptPending()
+{
+    const QList<GeoZoneAuthorisation> pending = _pending;
+    dismissPending();
+    merge(pending);
+}
+
+void GeoZoneAuthorisations::dismissPending()
+{
+    if (!_pending.isEmpty()) {
+        _pending.clear();
+        emit pendingChanged();
     }
 }
 

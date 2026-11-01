@@ -270,12 +270,25 @@ void GeoZonePlanningTest::_testAuthorisations()
     QCOMPARE(geoZones[QStringLiteral("authorisations")].toArray().count(), 1);
     QCOMPARE(geoZones[QStringLiteral("authorisations")].toArray()[0].toObject()[QStringLiteral("permit")].toString(), QStringLiteral("P-124"));
 
+    // Opening the plan offers its authorisations, which are only added when accepted
     authorisations->revoke(QStringLiteral("CHE/CTR"));
     manager.clearPlannedStart();
     QCOMPARE(authorisations->count(), 0);
     GeoZonePlanData::load(planJson, &manager);
-    QCOMPARE(authorisations->count(), 1);
     QCOMPARE(manager.plannedStart(), QDateTime(today.addDays(2), QTime(12, 0)).toUTC());
+    QCOMPARE(authorisations->count(), 0);
+    QCOMPARE(authorisations->pendingAuthorisations().count(), 1);
+    QCOMPARE(authorisations->pendingAuthorisations()[0].toMap()[QStringLiteral("permit")].toString(), QStringLiteral("P-124"));
+    authorisations->dismissPending();
+    QCOMPARE(authorisations->count(), 0);
+    QVERIFY(authorisations->pendingAuthorisations().isEmpty());
+    GeoZonePlanData::load(planJson, &manager);
+    authorisations->acceptPending();
+    QCOMPARE(authorisations->count(), 1);
+    QVERIFY(authorisations->pendingAuthorisations().isEmpty());
+    // Authorisations already known aren't offered again
+    GeoZonePlanData::load(planJson, &manager);
+    QVERIFY(authorisations->pendingAuthorisations().isEmpty());
 
     // Kept across restarts next to the stored sources
     GeoZoneManager restarted(storage);

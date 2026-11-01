@@ -44,7 +44,9 @@ class GeoZoneAuthorisations : public QAbstractListModel
 {
     Q_OBJECT
 
-    Q_PROPERTY(int count READ count NOTIFY changed FINAL)
+    Q_PROPERTY(int          count                   READ count                  NOTIFY changed FINAL)
+    /// Authorisations of a loaded plan waiting for the user to add them, as maps with zoneName, permit and statusText
+    Q_PROPERTY(QVariantList pendingAuthorisations   READ pendingAuthorisations  NOTIFY pendingChanged FINAL)
 
 public:
     enum Roles : int {
@@ -73,6 +75,15 @@ public:
     /// Adds authorisations, like those of a plan file. They replace those of the same zones which end sooner.
     void merge(const QList<GeoZoneAuthorisation> &authorisations);
 
+    /// Offers the authorisations of a loaded plan, those which would add to the known ones, for the user to accept.
+    /// They replace those offered before.
+    void offer(const QList<GeoZoneAuthorisation> &authorisations);
+    const QList<GeoZoneAuthorisation> &pending() const { return _pending; }
+    QVariantList pendingAuthorisations() const;
+    /// Adds the offered authorisations
+    Q_INVOKABLE void acceptPending();
+    Q_INVOKABLE void dismissPending();
+
     /// Authorises the zone from local dates, like 2026-12-31, both included
     /// @param validFrom First day, empty to start now
     /// @param validTo Last day, empty without end
@@ -92,6 +103,7 @@ public:
 
 signals:
     void changed();
+    void pendingChanged();
     /// The file couldn't be written, the authorisations are kept for the session
     void saveFailed(const QString &message);
 
@@ -99,7 +111,10 @@ private:
     void _load();
     void _save();
     void _reset(const QList<GeoZoneAuthorisation> &authorisations);
+    /// @return The known authorisations with those of the list added, keeping the longer of the same zone
+    QList<GeoZoneAuthorisation> _merged(const QList<GeoZoneAuthorisation> &authorisations) const;
 
     QString _filePath;
     QList<GeoZoneAuthorisation> _authorisations;
+    QList<GeoZoneAuthorisation> _pending;
 };

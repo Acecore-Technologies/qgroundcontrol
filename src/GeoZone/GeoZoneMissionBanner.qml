@@ -20,13 +20,13 @@ import QGroundControl.ScreenTools
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(warningLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
     border.color:   (missionCheck.warningText !== "" || _outdatedText !== "") ? qgcPal.warningText : qgcPal.text
     z:              QGroundControl.zOrderWidgets
-    visible:        missionCheck.warningText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== ""
+    visible:        missionCheck.warningText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== "" || _pendingAuthorisations.length > 0
 
     required property var   missionController
     required property var   map                 ///< Fitted to the crossed zones when the banner is clicked
@@ -41,6 +41,7 @@ Rectangle {
     readonly property string _outdatedText: GeoZoneManager.validityWarning !== "" ?
                                                 qsTr("Geozone data may be outdated: %1").arg(GeoZoneManager.validityWarning.replace(/\n/g, "; ")) : ""
 
+    readonly property var  _pendingAuthorisations: GeoZoneManager.authorisations.pendingAuthorisations
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth
     readonly property real _availableWidth: Math.max(rightLimit - leftLimit, ScreenTools.defaultFontPixelWidth * 20)
 
@@ -142,6 +143,36 @@ Rectangle {
             color:                  qgcPal.warningText
             text:                   check.fenceText
             visible:                text !== ""
+        }
+
+        // Authorisations of an opened plan are the operator's choice to add
+        QGCLabel {
+            id:                     pendingLabel
+            width:                  parent.width
+            wrapMode:               Text.WordWrap
+            horizontalAlignment:    Text.AlignHCenter
+            textFormat:             Text.PlainText
+            text:                   qsTr("The plan includes authorisations: %1. Add them to your authorisations?")
+                                        .arg(control._pendingAuthorisations.map(authorisation => authorisation.permit !== "" ?
+                                                qsTr("%1 (permit %2, %3)").arg(authorisation.zoneName).arg(authorisation.permit).arg(authorisation.statusText) :
+                                                qsTr("%1 (%2)").arg(authorisation.zoneName).arg(authorisation.statusText)).join(", "))
+            visible:                control._pendingAuthorisations.length > 0
+        }
+
+        Row {
+            anchors.horizontalCenter:   parent.horizontalCenter
+            spacing:                    control._margin
+            visible:                    pendingLabel.visible
+
+            QGCButton {
+                text:       qsTr("Add")
+                onClicked:  GeoZoneManager.authorisations.acceptPending()
+            }
+
+            QGCButton {
+                text:       qsTr("Ignore")
+                onClicked:  GeoZoneManager.authorisations.dismissPending()
+            }
         }
 
         QGCButton {

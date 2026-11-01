@@ -24,7 +24,7 @@ constexpr const char *jsonKey = "geoZones";
 /// @param manager GeoZoneManager::instance() when null
 void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneManager *manager = nullptr);
 
-/// Sets the planned start and adds the authorisations of a loaded plan, keeping longer ones already known
+/// Sets the planned start and offers the authorisations of a loaded plan, see GeoZoneAuthorisations::offer
 void load(const QJsonObject &planJson, GeoZoneManager *manager = nullptr);
 
 } // namespace GeoZonePlanData

@@ -67,7 +67,8 @@ void load(const QJsonObject &planJson, GeoZoneManager *manager)
             authorisations.append(*authorisation);
         }
     }
-    manager->authorisations()->merge(authorisations);
+    // Permits are the operator's, so those of a plan from elsewhere are only added when accepted
+    manager->authorisations()->offer(authorisations);
 }
 
 } // namespace GeoZonePlanData
