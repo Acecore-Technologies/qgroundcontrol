@@ -28,6 +28,7 @@
 #include "GeoZoneMapLayer.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZonePathEvaluator.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneParser.h"
 #include "GeoZonePlanData.h"

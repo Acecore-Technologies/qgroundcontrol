@@ -12,7 +12,6 @@
 #include "GeoZoneSource.h"
 
 #include <algorithm>
-#include <map>
 #include <numeric>
 
 void GeoZoneCatalog::rebuild(const QList<const GeoZoneSource*> &sources)
@@ -148,66 +147,6 @@ QList<const GeoZone*> GeoZoneCatalog::zonesInArea(const GeoZoneBox &area, const 
         }
     }
     return zones;
-}
-
-QList<GeoZoneCatalog::PathHit> GeoZoneCatalog::pathHits(const QList<QList<GeoZone::Position>> &paths, const GeoZonePolicy &policy) const
-{
-    // Candidates near any segment, checked once per path
-    std::map<int, QList<int>> candidatePaths;
-    for (int pathIndex = 0; pathIndex < paths.count(); pathIndex++) {
-        const QList<GeoZone::Position> &path = paths[pathIndex];
-        for (qsizetype i = 0; i < path.count(); i++) {
-            const QGeoCoordinate &from = path[(std::max)(i - 1, qsizetype{ 0 })].coordinate;
-            const QGeoCoordinate &to = path[i].coordinate;
-            if (!from.isValid() || !to.isValid()) {
-                continue;
-            }
-            for (const int index : _data->index.query(GeoZoneBox::fromPath({ from, to }))) {
-                QList<int> &candidatePathList = candidatePaths[index];
-                if (candidatePathList.isEmpty() || (candidatePathList.last() != pathIndex)) {
-                    candidatePathList.append(pathIndex);
-                }
-            }
-        }
-    }
-
-    // Meters from the start of each path to each of its positions
-    QList<QList<double>> pathDistances(paths.count());
-    const auto distanceAlong = [&paths, &pathDistances](int pathIndex, const GeoZone::PathEntry &entry) {
-        QList<double> &distances = pathDistances[pathIndex];
-        const QList<GeoZone::Position> &path = paths[pathIndex];
-        if (distances.isEmpty()) {
-            distances.reserve(path.count());
-            double distance = 0;
-            for (qsizetype i = 0; i < path.count(); i++) {
-                if ((i > 0) && path[i - 1].coordinate.isValid() && path[i].coordinate.isValid()) {
-                    distance += path[i - 1].coordinate.distanceTo(path[i].coordinate);
-                }
-                distances.append(distance);
-            }
-        }
-        const double start = distances[entry.segment];
-        const double end = distances[(std::min)(entry.segment + 1, path.count() - 1)];
-        return start + ((end - start) * entry.fraction);
-    };
-
-    QList<PathHit> hits;
-    for (auto it = candidatePaths.cbegin(); it != candidatePaths.cend(); ++it) {
-        const GeoZone *const zone = _data->zones[it->first];
-        if (!policy.accepts(zone)) {
-            continue;
-        }
-        for (const int pathIndex : it->second) {
-            if (const auto entry = zone->pathEntry(paths[pathIndex])) {
-                hits.append(PathHit{ zone, pathIndex, *entry, distanceAlong(pathIndex, *entry) });
-                break;
-            }
-        }
-    }
-    std::stable_sort(hits.begin(), hits.end(), [](const PathHit &a, const PathHit &b) {
-        return (a.path != b.path) ? (a.path < b.path) : (a.distance < b.distance);
-    });
-    return hits;
 }
 
 QList<const GeoZone*> GeoZoneCatalog::zonesIntersectingAreas(const QList<GeoZone::Area> &areas, const GeoZonePolicy &policy) const

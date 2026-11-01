@@ -11,6 +11,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZonePathEvaluator.h"
 #include "GeoZoneTerrain.h"
 #include "Vehicle.h"
 
@@ -25,31 +26,30 @@ GeoZoneGuidedCheck::GeoZoneGuidedCheck(GeoZoneMonitor *monitor)
 
 QString GeoZoneGuidedCheck::pathWarning(const QList<GeoZone::Position> &path) const
 {
-    QList<const GeoZone*> zones;
+    return pathWarning(GeoZonePathEvaluator::Path::fromPositions(path));
+}
+
+QString GeoZoneGuidedCheck::pathWarning(const GeoZonePathEvaluator::Path &path) const
+{
     GeoZoneManager *const manager = _monitor->manager();
-    for (const GeoZoneCatalog::PathHit &hit : manager->catalog().pathHits(path, GeoZonePolicy::alerts().excludingAuthorised(manager->planning()->authorisations()))) {
-        // Zones the vehicle is already in were alerted when it entered them
-        if ((hit.entry.segment > 0) || (hit.entry.fraction > 0)) {
-            zones.append(hit.zone);
+    GeoZonePathEvaluator evaluator(manager->catalog(), GeoZonePolicy::alerts().excludingAuthorised(manager->planning()->authorisations()),
+                                   QDateTime::currentDateTimeUtc());
+    evaluator.setTerrainLookup(GeoZoneTerrain::elevationAt);
+    QList<const GeoZone*> zones;
+    for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate({ path }).zones) {
+        // Zones the vehicle is already in were alerted when it entered them, it may enter them again after leaving them
+        const bool enters = std::any_of(result.crossings.cbegin(), result.crossings.cend(), [](const GeoZonePathEvaluator::Crossing &crossing) {
+            return crossing.active && ((crossing.entry.segment > 0) || (crossing.entry.fraction > 0));
+        });
+        if (enters) {
+            zones.append(result.zone);
         }
     }
     if (zones.isEmpty()) {
         return QString();
     }
-    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
-        return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
-    });
-
-    constexpr qsizetype maxListed = 4;
-    QStringList names;
-    for (qsizetype i = 0; i < (std::min)(zones.count(), maxListed); i++) {
-        names.append(QStringLiteral("%1 (%2)").arg(zones[i]->displayName(), zones[i]->restrictionText()));
-    }
-    QString text = names.join(QStringLiteral(", "));
-    if (zones.count() > maxListed) {
-        text += tr(" and %1 more").arg(zones.count() - maxListed);
-    }
-    return tr("The vehicle would enter geozones: %1").arg(text);
+    GeoZonePathEvaluator::sortBySeverity(zones);
+    return tr("The vehicle would enter geozones: %1").arg(GeoZonePathEvaluator::zoneNames(zones, maxListedZones, true));
 }
 
 QString GeoZoneGuidedCheck::gotoWarning(QObject *vehicle, const QGeoCoordinate &coordinate, double altitudeAMSL) const
@@ -59,8 +59,8 @@ QString GeoZoneGuidedCheck::gotoWarning(QObject *vehicle, const QGeoCoordinate &
         return QString();
     }
     const GeoZone::Position from = _monitor->vehiclePosition(guidedVehicle, guidedVehicle->coordinate());
-    GeoZone::Position to{ coordinate, std::isnan(altitudeAMSL) ? from.altitudeAMSL : altitudeAMSL };
-    return pathWarning(GeoZoneTerrain::withTerrain({ from, to }));
+    const GeoZone::Position to{ coordinate, std::isnan(altitudeAMSL) ? from.altitudeAMSL : altitudeAMSL };
+    return pathWarning({ from, to });
 }
 
 QString GeoZoneGuidedCheck::orbitWarning(QObject *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const
@@ -77,7 +77,7 @@ QString GeoZoneGuidedCheck::orbitWarning(QObject *vehicle, const QGeoCoordinate 
         path.append(GeoZone::Position{ center.atDistanceAndAzimuth(radius, startAzimuth + (360.0 * i / circlePoints)),
                                        std::isnan(altitudeAMSL) ? from.altitudeAMSL : altitudeAMSL });
     }
-    return pathWarning(GeoZoneTerrain::withTerrain(path));
+    return pathWarning(path);
 }
 
 QString GeoZoneGuidedCheck::altitudeWarning(QObject *vehicle, double relativeAltitude) const
@@ -92,7 +92,11 @@ QString GeoZoneGuidedCheck::altitudeWarning(QObject *vehicle, double relativeAlt
         // Unknown altitudes are inside all limits, so only zones applying at any altitude would be named
         return pathWarning({ from, from });
     }
-    GeoZone::Position to = from;
-    to.altitudeAMSL = from.altitudeAMSL + (relativeAltitude - currentRelative);
-    return pathWarning({ from, to });
+    // Climbing or descending in place relative to the home altitude
+    GeoZonePathEvaluator::Path path;
+    path.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Relative;
+    path.referenceAltitudeAMSL = from.altitudeAMSL - currentRelative;
+    path.vertices = { GeoZonePathEvaluator::Vertex{ from.coordinate, currentRelative, from.terrainAMSL, QDateTime() },
+                      GeoZonePathEvaluator::Vertex{ from.coordinate, relativeAltitude, from.terrainAMSL, QDateTime() } };
+    return pathWarning(path);
 }

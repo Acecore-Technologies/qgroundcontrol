@@ -32,9 +32,10 @@ class GeoZoneProfile : public QObject
     Q_MOC_INCLUDE("MissionController.h")
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
-    /// One map per zone volume and stretch of the path inside its horizontal projection: restriction (GeoZone::Restriction),
-    /// name, and points, a list of maps with distance (meters from the start), floor and ceiling (meters AMSL, NaN when
-    /// the zone extends to the ground or has no ceiling, or the limit is unknown)
+    /// One map per zone volume and stretch of the path inside its horizontal projection while the zone is active, see
+    /// GeoZonePathEvaluator::Stretch: restriction (GeoZone::Restriction), name, and points from the entry to the exit,
+    /// a list of maps with distance (meters from the start), floor and ceiling (meters AMSL, NaN when the zone extends to
+    /// the ground or has no ceiling, or the limit is unknown)
     Q_PROPERTY(QVariantList         bands               READ bands                                          NOTIFY bandsChanged FINAL)
     /// The bands are only computed while active, like while the profile is shown
     Q_PROPERTY(bool                 active              READ active             WRITE setActive             NOTIFY activeChanged FINAL)
@@ -44,8 +45,8 @@ public:
     /// @param manager Zones to show, GeoZoneManager::instance() when null
     explicit GeoZoneProfile(GeoZoneManager *manager, QObject *parent = nullptr);
 
-    static constexpr double minSampleSpacing = 5;   ///< Meters between samples along short paths
-    static constexpr int maxSamples = 20000;        ///< About the samples along the whole path, which sets the spacing of long paths
+    static constexpr double minSampleSpacing = 5;   ///< Meters at least between the points of a band inside it
+    static constexpr int maxSamples = 20000;        ///< About the points along the whole path, which sets the spacing of long paths
 
     MissionController *missionController() const;
     void setMissionController(MissionController *missionController);
@@ -75,9 +76,9 @@ public:
         friend bool operator==(const Band &, const Band &) = default;
     };
 
-    /// @return Bands of the zones along consecutive segments, see the bands property. Segments with a zero distance
-    ///         and invalid coordinates only advance the distance. Can run on any thread with a copy of the catalog.
-    /// @param activeFrom, activeTo When valid, only zones active at some time between them
+    /// @return Bands of the zones along consecutive segments, see the bands property. Segments with invalid coordinates
+    ///         only advance the distance. Can run on any thread with a copy of the catalog.
+    /// @param activeFrom, activeTo When valid, the times of a flight along the segments, for the zone schedules
     static QList<Band> computeBands(const QList<GeoZoneMissionPath::Segment> &segments, const GeoZoneCatalog &catalog,
                                     const QDateTime &activeFrom = QDateTime(), const QDateTime &activeTo = QDateTime());
     /// @return The bands in the form of the bands property

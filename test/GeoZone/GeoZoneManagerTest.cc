@@ -1144,11 +1144,10 @@ void GeoZoneManagerTest::_testCatalogSnapshot()
         QCOMPARE(oldZones.count(), 1);
         QCOMPARE(oldZones[0]->identifier(), QStringLiteral("OLD"));
         QCOMPARE(snapshot.zonesInArea(QGeoRectangle(), GeoZonePolicy({ GeoZone::Prohibited })).count(), 1);
-        const QList<GeoZoneCatalog::PathHit> hits = snapshot.pathHits({ GeoZone::Position{ center.atDistanceAndAzimuth(1000, 270) },
-                                                                        GeoZone::Position{ center.atDistanceAndAzimuth(1000, 90) } },
-                                                                      GeoZonePolicy({ GeoZone::Prohibited }));
+        const QList<GeoZonePathEvaluator::ZoneResult> hits = GeoZonePathEvaluator(snapshot, GeoZonePolicy({ GeoZone::Prohibited })).evaluate({
+            GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center.atDistanceAndAzimuth(1000, 270) }, GeoZone::Position{ center.atDistanceAndAzimuth(1000, 90) } }) }).zones;
         QCOMPARE(hits.count(), 1);
-        QVERIFY(qAbs(hits[0].distance - 500) < 1);
+        QVERIFY(qAbs(hits[0].crossings.constFirst().entry.distance - 500) < 1);
 
         const QList<const GeoZone*> newZones = manager.catalog().zonesAt(center);
         QCOMPARE(newZones.count(), 1);

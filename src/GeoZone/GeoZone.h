@@ -61,6 +61,13 @@ public:
         FlightLevel,    ///< STD, pressure altitude which depends on the weather
     };
 
+    /// Altitude of a position relative to the vertical limits of a volume
+    enum class VerticalPosition {
+        Below,          ///< Under the floor
+        Inside,         ///< Between the limits, or not comparable with them
+        Above,          ///< Over the ceiling
+    };
+
     /// Unclosed polygon boundary, x is longitude and y latitude in degrees. Much smaller than QGeoCoordinate vertices.
     /// The rings of a zone are continuous across the antimeridian, so their longitudes can exceed 180 degrees.
     using Ring = QList<QPointF>;
@@ -220,8 +227,18 @@ public:
     ///         Unknown altitudes, limits and references don't limit it.
     static std::optional<std::pair<double, double>> verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin = 0);
 
+    /// @return Where the altitude of the position is relative to the vertical limits of the volume. Unknown altitudes,
+    ///         limits and references are inside, like for verticalInterval.
+    static VerticalPosition verticalPosition(const Volume &volume, const Position &position);
+
     /// @return true if the coordinate is inside the horizontal projection of the volume at the index
     bool volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordinate) const;
+
+    /// @return Fractions of the straight segment between the coordinates, in latitude and longitude, which are inside
+    ///         the horizontal projection of the volume at the index, ordered and with touching intervals merged. The
+    ///         boundary is inside, so a segment touching it has an empty interval there. The segment takes the shorter
+    ///         way, which may cross the antimeridian.
+    QList<GeoZoneGeometry::Interval> horizontalIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const;
 
     /// @return Lower or upper limit of the volume in meters above mean sea level at the position, using its terrain
     ///         elevation for limits above ground. NaN when the zone extends to the ground or has no ceiling, or the

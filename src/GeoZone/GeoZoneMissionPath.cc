@@ -126,28 +126,34 @@ GeoZoneMissionPath GeoZoneMissionPath::fromMission(MissionController *missionCon
 
     // Same order and distances as TerrainProfile: the segments of a pattern, then the segment to the next item
     QList<int> coordinateItems;
+    double distance = 0;
+    const auto appendSegment = [&path, &distance](const Segment &segment) {
+        path._segments.append(segment);
+        distance += segment.distance;
+    };
     for (int i = 0; i < visualItems->count(); i++) {
         VisualMissionItem *const visualItem = visualItems->value<VisualMissionItem*>(i);
         if (!visualItem) {
             continue;
         }
+        path._itemDistances.insert(i, distance);
         if (ComplexMissionItem *const complexItem = qobject_cast<ComplexMissionItem*>(visualItem)) {
             const QmlObjectListModel *const complexSegments = complexItem->flightPathSegments();
             if (complexSegments->count() == 0) {
                 Segment gap;
                 gap.distance = complexItem->complexDistance();
                 gap.itemIndex = i;
-                path._segments.append(gap);
+                appendSegment(gap);
             }
             for (int j = 0; j < complexSegments->count(); j++) {
-                path._segments.append(segmentFrom(complexSegments->value<const FlightPathSegment*>(j), i));
+                appendSegment(segmentFrom(complexSegments->value<const FlightPathSegment*>(j), i));
             }
             if (const std::optional<GeoZone::Area> area = areaOf(complexItem)) {
                 path._areas.append(*area);
             }
         }
         if (visualItem->simpleFlightPathSegment()) {
-            path._segments.append(segmentFrom(visualItem->simpleFlightPathSegment(), i));
+            appendSegment(segmentFrom(visualItem->simpleFlightPathSegment(), i));
         }
         if (visualItem->specifiesCoordinate() && !visualItem->isStandaloneCoordinate()) {
             coordinateItems.append(i);
@@ -202,14 +208,15 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
         return qQNaN();
     };
     // The terrain tiles give the terrain along the path where they are loaded, the nearest flight path position's elsewhere
-    const auto appendPath = [this, &terrainAtPathPosition](QList<GeoZone::Position> positions, int itemIndex, const QString &label) {
+    const auto appendPath = [this, &terrainAtPathPosition](QList<GeoZone::Position> positions, int itemIndex, const QString &label, double distance) {
         if (positions.count() < 2) {
             return;
         }
         if (qIsNaN(positions.first().terrainAMSL)) {
             positions.first().terrainAMSL = terrainAtPathPosition(positions.first().coordinate);
         }
-        _paths.append(Path{ GeoZoneTerrain::withTerrain(positions), itemIndex, label });
+        const QList<GeoZone::Position> withTerrain = GeoZoneTerrain::withTerrain(positions);
+        _paths.append(Path{ withTerrain, itemIndex, label, QList<double>(withTerrain.count(), distance) });
     };
     const auto previousCoordinateItems = [&coordinateItems](int index) {
         QList<int> previous;
@@ -232,7 +239,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
                 const double radius = std::abs(simpleItem->loiterRadius());
                 if (radius > 0) {
                     appendPath(circle(simpleItem->coordinate(), radius, simpleItem->amslEntryAlt(), qQNaN()), i,
-                               tr("the loiter at item %1").arg(simpleItem->sequenceNumber()));
+                               tr("the loiter at item %1").arg(simpleItem->sequenceNumber()), itemDistance(i));
                 }
             } else if (command == MAV_CMD_DO_VTOL_TRANSITION) {
                 // Transitions take about the transition distance, flying on past the waypoints they follow or lead to
@@ -267,7 +274,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
                 if (overshootFrom.isValid() && (overshoot > 0)) {
                     const double altitude = startItem->amslExitAlt();
                     appendPath({ GeoZone::Position{ overshootFrom, altitude }, GeoZone::Position{ overshootFrom.atDistanceAndAzimuth(overshoot, azimuth), altitude } }, i,
-                               tr("the VTOL transition at item %1").arg(simpleItem->sequenceNumber()));
+                               tr("the VTOL transition at item %1").arg(simpleItem->sequenceNumber()), itemDistance(i));
                 }
             } else if (command == MAV_CMD_NAV_RETURN_TO_LAUNCH) {
                 returnItem = i;
@@ -276,7 +283,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
             const double radius = landingItem->loiterRadius()->rawValue().toDouble();
             if (landingItem->useLoiterToAlt()->rawValue().toBool() && landingItem->finalApproachCoordinate().isValid() && (radius > 0)) {
                 appendPath(circle(landingItem->finalApproachCoordinate(), radius, landingItem->amslEntryAlt(), qQNaN()), i,
-                           tr("the landing pattern loiter at item %1").arg(landingItem->sequenceNumber()));
+                           tr("the landing pattern loiter at item %1").arg(landingItem->sequenceNumber()), itemDistance(i));
             }
         }
     }
@@ -300,7 +307,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
         if (from.isValid() && (from.distanceTo(homePosition) > 1)) {
             for (const Path &returnPath : pathsFromSegments({ Segment{ from, from, fromAltitude, cruise }, Segment{ from, homePosition, cruise, cruise },
                                                               Segment{ homePosition, homePosition, cruise, homeAltitude } })) {
-                appendPath(returnPath.positions, returnItem, label);
+                appendPath(returnPath.positions, returnItem, label, totalDistance());
             }
         }
     }
@@ -357,11 +364,50 @@ QList<QList<GeoZone::Position>> GeoZoneMissionPath::positionLists() const
     return lists;
 }
 
+double GeoZoneMissionPath::totalDistance() const
+{
+    double distance = 0;
+    for (const Segment &segment : _segments) {
+        distance += segment.distance;
+    }
+    return distance;
+}
+
+QDateTime GeoZoneMissionPath::timeAt(double distance, double totalDistance, const QDateTime &start, const QDateTime &end)
+{
+    if (!start.isValid() || !end.isValid() || !(totalDistance > 0) || qIsNaN(distance)) {
+        return start;
+    }
+    const double fraction = std::clamp(distance / totalDistance, 0.0, 1.0);
+    return start.addMSecs(std::llround(static_cast<double>((std::max)(start.msecsTo(end), qint64{ 0 })) * fraction));
+}
+
+QList<GeoZonePathEvaluator::Path> GeoZoneMissionPath::evaluatorPaths(const QDateTime &start, const QDateTime &end) const
+{
+    const double total = totalDistance();
+    QList<GeoZonePathEvaluator::Path> paths;
+    paths.reserve(_paths.count());
+    for (const Path &path : _paths) {
+        GeoZonePathEvaluator::Path evaluatorPath = GeoZonePathEvaluator::Path::fromPositions(path.positions, path.label);
+        for (qsizetype i = 0; i < evaluatorPath.vertices.count(); i++) {
+            evaluatorPath.vertices[i].time = timeAt(path.distances.value(i, qQNaN()), total, start, end);
+        }
+        paths.append(evaluatorPath);
+    }
+    return paths;
+}
+
 QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QList<Segment> &segments)
 {
     QList<Path> paths;
+    double offset = 0;
+    bool connected = false;
     for (const Segment &segment : segments) {
+        const double segmentOffset = offset;
+        offset += segment.distance;
+        // The vehicle flies an unknown path where the segment has no coordinates
         if (!segment.isValid()) {
+            connected = false;
             continue;
         }
 
@@ -392,8 +438,11 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
         }
 
         QList<GeoZone::Position> positions;
+        QList<double> distances;
         positions.reserve(samples.count());
+        distances.reserve(samples.count());
         for (const auto &[along, fraction, terrain] : std::as_const(samples)) {
+            distances.append(segmentOffset + (segment.distance * fraction));
             GeoZone::Position position;
             if (fraction <= 0) {
                 position.coordinate = segment.from;
@@ -408,7 +457,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
         }
 
         // Continue the previous path, keeping both ends when the altitude changes at the shared waypoint
-        if (!paths.isEmpty() && (paths.last().positions.last().coordinate == segment.from)) {
+        if (connected && (paths.last().positions.last().coordinate == segment.from)) {
             GeoZone::Position &last = paths.last().positions.last();
             const bool sameAltitude = (last.altitudeAMSL == positions.first().altitudeAMSL) ||
                                       (qIsNaN(last.altitudeAMSL) && qIsNaN(positions.first().altitudeAMSL));
@@ -417,11 +466,14 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
                     last.terrainAMSL = positions.first().terrainAMSL;
                 }
                 positions.removeFirst();
+                distances.removeFirst();
             }
             paths.last().positions.append(positions);
+            paths.last().distances.append(distances);
         } else {
-            paths.append(Path{ positions, segment.itemIndex });
+            paths.append(Path{ positions, segment.itemIndex, QString(), distances });
         }
+        connected = true;
     }
 
     // Positions without terrain samples, such as a takeoff climb before its terrain is received, take the terrain known at the same place

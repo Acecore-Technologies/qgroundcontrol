@@ -11,12 +11,15 @@
 #include "GeoZoneInfo.h"
 #include "GeoFenceController.h"
 #include "GeoZone.h"
+#include "GeoZoneGeometry.h"
 #include "GeoZoneManager.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
+
+#include <algorithm>
 
 GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
     : QObject(parent)
@@ -185,13 +188,14 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<const 
     Fences fences;
     for (const GeoZone *zone : zones) {
         const QString name = zone->displayName();
-        for (const QList<QGeoCoordinate> &vertices : zone->exclusionPolygons(simplifyTolerance)) {
+        const ZoneFences zoneShapes = zoneFences(zone, simplifyTolerance);
+        for (const QList<QGeoCoordinate> &vertices : zoneShapes.polygons) {
             if (polygonSet.insert(vertices)) {
                 fences.polygons.append(vertices);
                 fences.polygonNames.append(name);
             }
         }
-        for (const QGeoCircle &geoCircle : zone->exclusionCircles()) {
+        for (const QGeoCircle &geoCircle : zoneShapes.circles) {
             if (circleSet.insert(geoCircle)) {
                 fences.circles.append(geoCircle);
                 fences.circleNames.append(name);
@@ -199,6 +203,112 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<const 
         }
     }
     return fences;
+}
+
+GeoZoneFenceImporter::ZoneFences GeoZoneFenceImporter::zoneFences(const GeoZone *zone, double simplifyTolerance)
+{
+    return ZoneFences{ zone->exclusionPolygons(simplifyTolerance), zone->exclusionCircles() };
+}
+
+GeoZoneFenceImporter::ZoneFences GeoZoneFenceImporter::exclusionFences(GeoFenceController *geoFenceController)
+{
+    ZoneFences fences;
+    QmlObjectListModel *const polygons = geoFenceController->polygons();
+    for (int i = 0; i < polygons->count(); i++) {
+        const QGCFencePolygon *const polygon = polygons->value<QGCFencePolygon*>(i);
+        if (!polygon->inclusion() && (polygon->count() >= 3)) {
+            fences.polygons.append(polygon->coordinateList());
+        }
+    }
+    QmlObjectListModel *const circles = geoFenceController->circles();
+    for (int i = 0; i < circles->count(); i++) {
+        QGCFenceCircle *const circle = circles->value<QGCFenceCircle*>(i);
+        if (!circle->inclusion()) {
+            fences.circles.append(QGeoCircle(circle->center(), circle->radius()->rawValue().toDouble()));
+        }
+    }
+    return fences;
+}
+
+namespace {
+
+/// @return true if the polygon lies within the fence polygon up to the tolerance, edges included
+bool _polygonWithin(const QList<QGeoCoordinate> &polygon, const QList<QGeoCoordinate> &fence)
+{
+    if (polygon == fence) {
+        return true;
+    }
+    const GeoZoneGeometry::LocalProjection projection(fence.first());
+    const QList<QList<QPointF>> fenceRings = { projection.toLocal(fence) };
+    const QList<QPointF> &ring = fenceRings.first();
+    const auto near = [&ring](const QPointF &point) {
+        return GeoZoneGeometry::ringContains(ring, point) || (GeoZoneGeometry::distanceToRing(point, ring) <= GeoZoneFenceImporter::fenceBoundaryTolerance);
+    };
+    for (qsizetype i = 0; i < polygon.count(); i++) {
+        // Vertices inside, and edges not leaving the fence between them, like around a notch of the fence
+        const QPointF a = projection.toLocal(polygon[i]);
+        const QPointF b = projection.toLocal(polygon[(i + 1) % polygon.count()], a);
+        if (!near(a)) {
+            return false;
+        }
+        double covered = 0;
+        QList<GeoZoneGeometry::Interval> inside = GeoZoneGeometry::segmentPolygonIntervals(a, b, fenceRings);
+        inside.append({ 1, 1 });
+        for (const GeoZoneGeometry::Interval &interval : std::as_const(inside)) {
+            if (interval.first > covered) {
+                for (const double fraction : { 0.25, 0.5, 0.75 }) {
+                    if (!near(a + ((b - a) * (covered + ((interval.first - covered) * fraction))))) {
+                        return false;
+                    }
+                }
+            }
+            covered = (std::max)(covered, interval.second);
+        }
+    }
+    return true;
+}
+
+bool _polygonWithinCircle(const QList<QGeoCoordinate> &polygon, const QGeoCircle &fence)
+{
+    return std::all_of(polygon.cbegin(), polygon.cend(), [&fence](const QGeoCoordinate &point) {
+        return fence.center().distanceTo(point) <= (fence.radius() + GeoZoneFenceImporter::fenceBoundaryTolerance);
+    });
+}
+
+bool _circleWithin(const QGeoCircle &circle, const QList<QGeoCoordinate> &fence)
+{
+    const GeoZoneGeometry::LocalProjection projection(circle.center());
+    const QList<QPointF> ring = projection.toLocal(fence);
+    return GeoZoneGeometry::ringContains(ring, QPointF(0, 0)) &&
+           (GeoZoneGeometry::distanceToRing(QPointF(0, 0), ring) >= (circle.radius() - GeoZoneFenceImporter::fenceBoundaryTolerance));
+}
+
+} // namespace
+
+bool GeoZoneFenceImporter::fencesCover(const ZoneFences &fences, const GeoZone *zone)
+{
+    const ZoneFences zoneShapes = zoneFences(zone);
+    if (zoneShapes.isEmpty()) {
+        return false;
+    }
+    for (const QList<QGeoCoordinate> &polygon : zoneShapes.polygons) {
+        const bool covered = std::any_of(fences.polygons.cbegin(), fences.polygons.cend(), [&polygon](const QList<QGeoCoordinate> &fence) { return _polygonWithin(polygon, fence); }) ||
+                             std::any_of(fences.circles.cbegin(), fences.circles.cend(), [&polygon](const QGeoCircle &fence) { return _polygonWithinCircle(polygon, fence); });
+        if (!covered) {
+            return false;
+        }
+    }
+    for (const QGeoCircle &circle : zoneShapes.circles) {
+        const bool covered =
+            std::any_of(fences.circles.cbegin(), fences.circles.cend(), [&circle](const QGeoCircle &fence) {
+                return (fence.center().distanceTo(circle.center()) + circle.radius()) <= (fence.radius() + fenceBoundaryTolerance);
+            }) ||
+            std::any_of(fences.polygons.cbegin(), fences.polygons.cend(), [&circle](const QList<QGeoCoordinate> &fence) { return _circleWithin(circle, fence); });
+        if (!covered) {
+            return false;
+        }
+    }
+    return true;
 }
 
 int GeoZoneFenceImporter::addZones(const QVariantList &zones, double simplifyTolerance)

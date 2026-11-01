@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
@@ -29,9 +30,10 @@ class MissionController;
 
 /// Checks whether the planned mission's flight path enters restricted geozones, considering the planned
 /// altitudes. U-space airspaces and no restriction zones are reported separately, they never hide
-/// restricted zones. With a planned start in GeoZoneManager, only zones active at some time during the mission
-/// are reported, otherwise zone schedules are not considered since the mission may be flown at any time. Zones
-/// authorised for the whole flight, or from now on without a planned start, are listed as information.
+/// restricted zones. With a planned start in GeoZoneManager, only zones active while the mission flies through them
+/// are reported, estimating the times from the mission duration, otherwise zone schedules are not considered since
+/// the mission may be flown at any time. Zones authorised for the whole flight, or from now on without a planned
+/// start, are listed as information. See GeoZonePathEvaluator.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -84,7 +86,8 @@ public:
     QVariantList unfencedZonesInfo() const { return GeoZoneInfo::toVariantList(_unfencedZones); }
     QString fenceText() const;
 
-    /// @return true if exclusion fences of the controller cover the whole zone, using the outer boundaries of its polygons
+    /// @return true if exclusion fences of the controller cover the whole zone, like the fences GeoZoneFenceImporter
+    ///         adds for it with any simplification, see GeoZoneFenceImporter::fencesCover
     static bool fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone);
 
     /// @return Start and end of the planned flight from the planned start of the manager and the mission duration,
@@ -98,11 +101,15 @@ public:
     struct Evaluation {
         QList<const GeoZone*> zones;                    ///< Most restrictive first
         QHash<const GeoZone*, QStringList> pathLabels;  ///< Labels of the paths entering zones the drawn flight path doesn't
+        QList<const GeoZone*> inactiveZones;            ///< Zones of zones which aren't active while the mission flies through them
+        QDateTime start;                                ///< Of the flight evaluated
+        QDateTime end;
     };
 
-    /// @return Zones the path or its areas enter whatever their schedule and authorisations. Can run on any thread with
-    ///         a copy of the catalog.
-    static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path);
+    /// @return Zones the path or its areas enter whatever their authorisations, for a flight from start to end or at
+    ///         any time without start. Can run on any thread with a copy of the catalog.
+    static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start = QDateTime(),
+                               const QDateTime &end = QDateTime());
 
     /// @return Labels of the paths besides the drawn flight path entering the zone, when only those do
     QStringList pathLabels(const GeoZone *zone) const { return _pathLabels.value(zone); }
@@ -119,6 +126,8 @@ private:
     void _connectMissionItems();
     /// Evaluates the mission path on another thread, the result is dropped when the mission or zones change meanwhile
     void _updateConcurrently();
+    /// @return Start and end of the flight checked, now with flightNow, invalid to check it at any time
+    std::pair<QDateTime, QDateTime> _flightTimes() const;
     /// Sorts the zones on the path by the policies of the planned flight
     void _apply(const Evaluation &evaluation);
 

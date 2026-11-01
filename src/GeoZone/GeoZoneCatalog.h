@@ -58,19 +58,6 @@ public:
     QList<const GeoZone*> zonesInArea(const GeoZoneBox &area, const GeoZonePolicy &policy) const;
     QList<const GeoZone*> zonesInArea(const QGeoRectangle &area, const GeoZonePolicy &policy) const { return zonesInArea(GeoZoneBox(area), policy); }
 
-    /// First entry of a path into a zone
-    struct PathHit {
-        const GeoZone *zone = nullptr;
-        int path = 0;               ///< Index of the path entering the zone
-        GeoZone::PathEntry entry;
-        double distance = 0;        ///< Meters along the path to the entry
-    };
-
-    /// @return First entry into each zone accepted by the policy which one of the paths enters, see
-    ///         GeoZone::pathEntry, ordered by path and distance along it
-    QList<PathHit> pathHits(const QList<QList<GeoZone::Position>> &paths, const GeoZonePolicy &policy) const;
-    QList<PathHit> pathHits(const QList<GeoZone::Position> &path, const GeoZonePolicy &policy) const { return pathHits(QList<QList<GeoZone::Position>>{ path }, policy); }
-
     /// @return Zones accepted by the policy which overlap one of the areas, see GeoZone::intersectsArea
     QList<const GeoZone*> zonesIntersectingAreas(const QList<GeoZone::Area> &areas, const GeoZonePolicy &policy) const;
 

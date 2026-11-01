@@ -14,6 +14,7 @@
 #include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
+#include "GeoZonePathEvaluator.h"
 #include "GeoZoneTerrain.h"
 #include "MissionController.h"
 #include "QGroundControlQmlGlobal.h"
@@ -330,26 +331,34 @@ QList<std::pair<int, double>> GeoZoneRoutePlanner::_altitudesBelowFloor(const Ge
         return {};
     }
 
-    // Lowest floor where the leg is inside the zone, and the terrain along the leg
+    // The terrain along the leg, from its terrain samples or the terrain tiles
     const double length = segment.from.distanceTo(segment.to);
     const int sampleCount = std::clamp(static_cast<int>(std::ceil(length / floorSampleSpacing)), 1, maxFloorSamples);
-    const QList<GeoZone::Volume> &volumes = zone->data().volumes;
-    QList<double> terrain;
-    double floor = std::numeric_limits<double>::infinity();
+    QList<GeoZone::Position> samples;
+    samples.reserve(sampleCount + 1);
     for (int i = 0; i <= sampleCount; i++) {
         GeoZone::Position position = segment.positionAt((length * i) / sampleCount);
         if (qIsNaN(position.terrainAMSL)) {
             position.terrainAMSL = GeoZoneTerrain::elevationAt(position.coordinate);
         }
-        terrain.append(position.terrainAMSL);
-        for (qsizetype v = 0; v < volumes.count(); v++) {
-            if (zone->volumeContains(v, position.coordinate)) {
-                const double volumeFloor = GeoZone::limitAMSL(volumes[v], false, position);
-                if (qIsNaN(volumeFloor)) {
-                    return {};
-                }
-                floor = (std::min)(floor, volumeFloor);
+        samples.append(position);
+    }
+
+    // Lowest floor where the leg is inside the zone. Floors above ground follow the terrain, which is linear between
+    // the samples.
+    const GeoZonePathEvaluator evaluator(_manager->catalog(), GeoZonePolicy());
+    double floor = std::numeric_limits<double>::infinity();
+    for (const GeoZonePathEvaluator::Stretch &stretch : evaluator.evaluateZone(zone, { GeoZonePathEvaluator::Path::fromPositions(samples) }).stretches) {
+        QList<GeoZone::Position> positions = { stretch.entry.position, stretch.exit.position };
+        for (qsizetype i = stretch.entry.segment + 1; i <= stretch.exit.segment; i++) {
+            positions.append(samples[i]);
+        }
+        for (const GeoZone::Position &position : std::as_const(positions)) {
+            const double volumeFloor = GeoZone::limitAMSL(zone->data().volumes[stretch.volume], false, position);
+            if (qIsNaN(volumeFloor)) {
+                return {};
             }
+            floor = (std::min)(floor, volumeFloor);
         }
     }
     if (std::isinf(floor)) {
@@ -389,21 +398,20 @@ QList<std::pair<int, double>> GeoZoneRoutePlanner::_altitudesBelowFloor(const Ge
     // The lowered leg must stay clear of the terrain
     for (int i = 0; i <= sampleCount; i++) {
         const double altitude = fromAltitude + (((toAltitude - fromAltitude) * i) / sampleCount);
-        if (qIsNaN(terrain[i]) || ((altitude - terrain[i]) < minGroundClearance)) {
+        if (qIsNaN(samples[i].terrainAMSL) || ((altitude - samples[i].terrainAMSL) < minGroundClearance)) {
             return {};
         }
     }
     return altitudes;
 }
 
-QList<const GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path) const
+QList<const GeoZone*> GeoZoneRoutePlanner::_zonesOnPath(const QList<GeoZone::Position> &path, const QDateTime &pathStart, const QDateTime &pathEnd) const
 {
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
-    QList<const GeoZone*> zones;
-    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->planning()->authorisations()))) {
-        zones.append(hit.zone);
-    }
-    return zones;
+    const GeoZonePathEvaluator evaluator(_manager->catalog(), GeoZonePolicy::routing(start, end).excludingAuthorised(_manager->planning()->authorisations()), start);
+    GeoZonePathEvaluator::Path evaluatorPath = GeoZonePathEvaluator::Path::fromPositions(path);
+    evaluatorPath.setTimes(pathStart, pathEnd);
+    return evaluator.evaluate({ evaluatorPath }).activeEnteredZones();
 }
 
 void GeoZoneRoutePlanner::update()
@@ -411,6 +419,7 @@ void GeoZoneRoutePlanner::update()
     _updateTimer.stop();
     QList<Suggestion> suggestions;
     const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(_missionController);
+    const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _missionController);
     for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
         const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
         const QGeoCoordinate &from = segment.from;
@@ -418,6 +427,12 @@ void GeoZoneRoutePlanner::update()
         if (!segment.isValid() || (from.distanceTo(to) < 1)) {
             continue;
         }
+
+        // When the vehicle flies the leg, like for the mission check, which detours take too
+        const double legEndDistance = missionPath.itemDistance(missionLeg.toItemIndex);
+        const double legStartDistance = legEndDistance - ((segment.distance > 0) ? segment.distance : from.distanceTo(to));
+        const QDateTime legStart = GeoZoneMissionPath::timeAt(legStartDistance, missionPath.totalDistance(), plannedStart, plannedEnd);
+        const QDateTime legEnd = GeoZoneMissionPath::timeAt(legEndDistance, missionPath.totalDistance(), plannedStart, plannedEnd);
 
         // The leg's average terrain stands in for the terrain along detours where it isn't loaded
         double legTerrain = qQNaN();
@@ -427,7 +442,7 @@ void GeoZoneRoutePlanner::update()
         QList<const GeoZone*> crossed;
         for (const GeoZoneMissionPath::Path &path : GeoZoneMissionPath::pathsFromSegments({ segment })) {
             // Like detours, with the terrain of the loaded tiles where the leg has no terrain samples
-            for (const GeoZone *zone : _zonesOnPath(GeoZoneTerrain::withTerrain(path.positions))) {
+            for (const GeoZone *zone : _zonesOnPath(GeoZoneTerrain::withTerrain(path.positions), legStart, legEnd)) {
                 if (!crossed.contains(zone)) {
                     crossed.append(zone);
                 }
@@ -497,7 +512,7 @@ void GeoZoneRoutePlanner::update()
                         position.terrainAMSL = legTerrain;
                     }
                 }
-                for (const GeoZone *zone : _zonesOnPath(path)) {
+                for (const GeoZone *zone : _zonesOnPath(path, legStart, legEnd)) {
                     if (!avoided.contains(zone) && !entered.contains(zone)) {
                         entered.append(zone);
                     }

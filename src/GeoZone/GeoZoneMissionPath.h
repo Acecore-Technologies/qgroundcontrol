@@ -10,10 +10,13 @@
 #pragma once
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
+#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
+#include "GeoZonePathEvaluator.h"
 
 class MissionController;
 class Vehicle;
@@ -55,6 +58,8 @@ public:
         QList<GeoZone::Position> positions;
         int itemIndex = -1;         ///< Item of the first segment
         QString label;              ///< What the vehicle does on paths besides the drawn flight path, like "the loiter at item 3"
+        QList<double> distances;    ///< Meters along the mission at each position, like Segment::distance. Paths besides the
+                                    ///< drawn flight path are at the distance where the vehicle flies them.
     };
 
     /// Straight leg between two mission items with a coordinate, which a route can go around
@@ -78,8 +83,18 @@ public:
     const QList<Leg> &legs() const { return _legs; }
     /// The segments as connected paths, see pathsFromSegments
     const QList<Path> &paths() const { return _paths; }
-    /// The positions of paths, as GeoZoneCatalog::pathHits takes them
+    /// The positions of paths
     QList<QList<GeoZone::Position>> positionLists() const;
+    /// @return Meters along the whole mission, the sum of the segment distances
+    double totalDistance() const;
+    /// @return Meters along the mission where the vehicle reaches the item, NaN for unknown items
+    double itemDistance(int itemIndex) const { return _itemDistances.value(itemIndex, qQNaN()); }
+
+    /// @return The paths for GeoZonePathEvaluator, with times estimated from start to end in proportion to the distance
+    ///         along the mission, all at start without end and unknown without start
+    QList<GeoZonePathEvaluator::Path> evaluatorPaths(const QDateTime &start = QDateTime(), const QDateTime &end = QDateTime()) const;
+    /// @return Estimated time at the distance along a mission flown from start to end, see evaluatorPaths
+    static QDateTime timeAt(double distance, double totalDistance, const QDateTime &start, const QDateTime &end);
 
     static constexpr double maxStepDistance = 1000;     ///< Meters between positions along long legs without terrain
     static constexpr int maxStepsPerSegment = 10000;
@@ -93,7 +108,7 @@ public:
     static QList<GeoZone::Position> circle(const QGeoCoordinate &center, double radius, double altitudeAMSL, double terrainAMSL);
 
     /// Splits segments into connected paths with a position at each terrain sample, or along the great circle every
-    /// maxStepDistance without terrain samples. Altitudes are interpolated.
+    /// maxStepDistance without terrain samples. Altitudes are interpolated. Segments without coordinates end a path.
     static QList<Path> pathsFromSegments(const QList<Segment> &segments);
 
 private:
@@ -104,4 +119,5 @@ private:
     QList<GeoZone::Area> _areas;
     QList<Leg> _legs;
     QList<Path> _paths;
+    QHash<int, double> _itemDistances;  ///< Of the visual items, by index
 };

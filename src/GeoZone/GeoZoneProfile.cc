@@ -9,21 +9,16 @@
 
 #include "GeoZoneProfile.h"
 #include "GeoZoneCatalog.h"
-#include "GeoZoneBox.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZonePathEvaluator.h"
 #include "MissionController.h"
-
-#include <QtCore/QHash>
-#include <QtCore/QSet>
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFutureWatcher>
 
 #include <algorithm>
-#include <cmath>
-#include <optional>
 
 GeoZoneProfile::GeoZoneProfile(QObject *parent)
     : GeoZoneProfile(GeoZoneManager::instance(), parent)
@@ -160,97 +155,45 @@ QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
 QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<GeoZoneMissionPath::Segment> &segments, const GeoZoneCatalog &catalog,
                                                          const QDateTime &activeFrom, const QDateTime &activeTo)
 {
-    const GeoZonePolicy policy = GeoZonePolicy::profile(activeFrom, activeTo);
+    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromSegments(segments);
+    const QList<GeoZoneMissionPath::Path> &paths = missionPath.paths();
+    const GeoZonePathEvaluator evaluator(catalog, GeoZonePolicy::profile(activeFrom, activeTo), activeFrom);
+    const GeoZonePathEvaluator::Result result = evaluator.evaluate(missionPath.evaluatorPaths(activeFrom, activeTo));
 
-    struct Run {
-        const GeoZone *zone = nullptr;
-        QList<BandPoint> points;
-    };
-    QHash<std::pair<const GeoZone*, int>, Run> runs;   ///< Stretches being followed by zone volume
+    // One spacing for the whole path, so that long missions have a bounded number of points up to their end
+    const double spacing = (std::max)(minSampleSpacing, missionPath.totalDistance() / maxSamples);
+
     QList<Band> bands;
-    const auto closeRun = [&bands](const Run &run) {
-        bands.append(Band{ run.zone->restriction(), run.zone->displayName(), run.points });
-    };
-    const auto closeAll = [&runs, &closeRun]() {
-        for (const Run &run : std::as_const(runs)) {
-            closeRun(run);
-        }
-        runs.clear();
-    };
-    const auto validSegment = [](const GeoZoneMissionPath::Segment &segment) {
-        return segment.isValid() && (segment.distance > 0);
-    };
+    for (const GeoZonePathEvaluator::ZoneResult &zoneResult : result.zones) {
+        for (const GeoZonePathEvaluator::Stretch &stretch : zoneResult.stretches) {
+            const QList<double> &distances = paths[stretch.entry.path].distances;
+            const QList<GeoZone::Position> &positions = paths[stretch.entry.path].positions;
+            const auto missionDistance = [&distances](const GeoZonePathEvaluator::PathPoint &point) {
+                const double from = distances[point.segment];
+                const double to = distances[(std::min)(point.segment + 1, distances.count() - 1)];
+                return (point.fraction <= 0) ? from : ((point.fraction >= 1) ? to : (from + ((to - from) * point.fraction)));
+            };
+            const double entryDistance = missionDistance(stretch.entry);
+            const double exitDistance = missionDistance(stretch.exit);
+            if (!stretch.active || !(exitDistance > entryDistance)) {
+                continue;
+            }
 
-    // One spacing for the whole path, so that long missions are sampled up to their end
-    double totalLength = 0;
-    for (const GeoZoneMissionPath::Segment &segment : segments) {
-        if (validSegment(segment)) {
-            totalLength += segment.from.distanceTo(segment.to);
+            const GeoZone::Volume &volume = zoneResult.zone->data().volumes[stretch.volume];
+            const auto bandPoint = [&volume](double distance, const GeoZone::Position &position) {
+                return BandPoint{ distance, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) };
+            };
+            Band band{ zoneResult.zone->restriction(), zoneResult.zone->displayName(), { bandPoint(entryDistance, stretch.entry.position) } };
+            // Limits above ground follow the terrain, which is linear between the positions
+            for (qsizetype i = stretch.entry.segment + 1; i <= stretch.exit.segment; i++) {
+                if (((distances[i] - band.points.constLast().distance) >= spacing) && (distances[i] < exitDistance)) {
+                    band.points.append(bandPoint(distances[i], positions[i]));
+                }
+            }
+            band.points.append(bandPoint(exitDistance, stretch.exit.position));
+            bands.append(band);
         }
     }
-    const double spacing = (std::max)(minSampleSpacing, totalLength / maxSamples);
-
-    // Zone volume near a segment
-    struct Candidate {
-        const GeoZone *zone = nullptr;
-        int volumeIndex = 0;
-    };
-
-    double offset = 0;
-    for (const GeoZoneMissionPath::Segment &segment : segments) {
-        if (!validSegment(segment)) {
-            closeAll();
-            offset += segment.distance;
-            continue;
-        }
-
-        const double length = segment.from.distanceTo(segment.to);
-        // The segment takes the shorter way, which may cross the antimeridian
-        const GeoZoneBox segmentBox = GeoZoneBox::fromPath({ segment.from, segment.to });
-
-        QList<Candidate> candidates;
-        for (const GeoZone *zone : catalog.zonesInArea(segmentBox, policy)) {
-            const QList<GeoZone::Volume> &volumes = zone->data().volumes;
-            for (int v = 0; v < volumes.count(); v++) {
-                if (volumes[v].boundingBox().intersects(segmentBox)) {
-                    candidates.append(Candidate{ zone, v });
-                }
-            }
-        }
-
-        const int sampleCount = (std::max)(1, static_cast<int>(std::ceil(length / spacing)));
-        for (int i = 0; i <= sampleCount; i++) {
-            const double fraction = static_cast<double>(i) / sampleCount;
-            const double along = length * fraction;
-            const GeoZone::Position position = segment.positionAt(along);
-            const double distance = offset + (segment.distance * fraction);
-
-            QSet<std::pair<const GeoZone*, int>> inside;
-            for (const Candidate &candidate : std::as_const(candidates)) {
-                if (!candidate.zone->volumeContains(candidate.volumeIndex, position.coordinate)) {
-                    continue;
-                }
-                const GeoZone::Volume &volume = candidate.zone->data().volumes[candidate.volumeIndex];
-
-                const std::pair<const GeoZone*, int> key(candidate.zone, candidate.volumeIndex);
-                inside.insert(key);
-                Run &run = runs[key];
-                run.zone = candidate.zone;
-                run.points.append(BandPoint{ distance, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) });
-            }
-
-            for (auto it = runs.begin(); it != runs.end();) {
-                if (inside.contains(it.key())) {
-                    ++it;
-                } else {
-                    closeRun(it.value());
-                    it = runs.erase(it);
-                }
-            }
-        }
-        offset += segment.distance;
-    }
-    closeAll();
 
     // Along the path, the most restrictive drawn last, on top
     std::stable_sort(bands.begin(), bands.end(), [](const Band &a, const Band &b) {

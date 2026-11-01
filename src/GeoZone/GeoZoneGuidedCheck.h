@@ -13,12 +13,13 @@
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
+#include "GeoZonePathEvaluator.h"
 
 class GeoZoneMonitor;
 
 /// Checks of the guided commands of the Fly View, each returning a warning naming the zones accepted by
-/// GeoZonePolicy::alerts which the vehicle would enter, or an empty string. Zones the vehicle is in and zones
-/// authorised now are left out.
+/// GeoZonePolicy::alerts and active now which the vehicle would enter, or an empty string. Zones authorised now and
+/// zones the vehicle is in are left out, unless it would leave and enter them again. See GeoZonePathEvaluator.
 /// Limits above ground use the terrain along the path from GeoZoneTerrain where it is loaded, and the terrain below
 /// the vehicle elsewhere, see GeoZoneMonitor::vehiclePosition.
 class GeoZoneGuidedCheck : public QObject
@@ -37,8 +38,11 @@ public:
     /// @param relativeAltitude Target altitude in meters above the vehicle's home
     Q_INVOKABLE QString altitudeWarning(QObject *vehicle, double relativeAltitude) const;
 
+    static constexpr int maxListedZones = 4;
+
     /// @return Warning naming the zones the path enters after its start, empty without
     QString pathWarning(const QList<GeoZone::Position> &path) const;
+    QString pathWarning(const GeoZonePathEvaluator::Path &path) const;
 
 private:
     GeoZoneMonitor *_monitor = nullptr;

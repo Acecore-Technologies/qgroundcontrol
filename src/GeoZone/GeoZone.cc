@@ -271,6 +271,45 @@ bool GeoZone::volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordi
     return GeoZoneGeometry::polygonContains(projected.volumeRings[volumeIndex], projected.projection.toLocal(coordinate));
 }
 
+QList<GeoZoneGeometry::Interval> GeoZone::horizontalIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const
+{
+    const Volume &volume = _data.volumes[volumeIndex];
+    if (!from.isValid() || !to.isValid()) {
+        return {};
+    }
+
+    QList<GeoZoneGeometry::Interval> intervals;
+    if (volume.isCircle) {
+        if (!volume.center.isValid()) {
+            return {};
+        }
+        const GeoZoneGeometry::LocalProjection centerProjection(volume.center);
+        const QPointF a = centerProjection.toLocal(from);
+        if (const auto interval = GeoZoneGeometry::segmentCircleInterval(a, centerProjection.toLocal(to, a), volume.radius)) {
+            intervals.append(*interval);
+        }
+        return intervals;
+    }
+    if (volume.rings.isEmpty() || !_volumeBoxes[volumeIndex].intersects(GeoZoneBox::fromPath({ from, to }))) {
+        return {};
+    }
+
+    // The projection is affine in latitude and longitude, so containment and crossing tests are exact. The end
+    // continues from the start, so that segments far from the projection origin don't wrap around the world.
+    const Projected &projected = _projected();
+    const QPointF a = projected.projection.toLocal(from);
+    QList<GeoZoneGeometry::Interval> raw = GeoZoneGeometry::segmentPolygonIntervals(a, projected.projection.toLocal(to, a), projected.volumeRings[volumeIndex]);
+    std::sort(raw.begin(), raw.end());
+    for (const GeoZoneGeometry::Interval &interval : std::as_const(raw)) {
+        if (!intervals.isEmpty() && (interval.first <= intervals.last().second)) {
+            intervals.last().second = (std::max)(intervals.last().second, interval.second);
+        } else {
+            intervals.append(interval);
+        }
+    }
+    return intervals;
+}
+
 bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin)
 {
     const double scale = volume.feet ? kMetersPerFoot : 1.0;
@@ -325,6 +364,24 @@ std::optional<std::pair<double, double>> GeoZone::verticalInterval(const Volume 
         return std::nullopt;
     }
     return std::make_pair(first, last);
+}
+
+GeoZone::VerticalPosition GeoZone::verticalPosition(const Volume &volume, const Position &position)
+{
+    const double scale = volume.feet ? kMetersPerFoot : 1.0;
+    if (hasFloor(volume)) {
+        const auto heights = referenceHeights(volume.lowerReference, position, position);
+        if (heights && (heights->first < (volume.lowerLimit * scale))) {
+            return VerticalPosition::Below;
+        }
+    }
+    if (hasCeiling(volume)) {
+        const auto heights = referenceHeights(volume.upperReference, position, position);
+        if (heights && (heights->first > (volume.upperLimit * scale))) {
+            return VerticalPosition::Above;
+        }
+    }
+    return VerticalPosition::Inside;
 }
 
 double GeoZone::limitAMSL(const Volume &volume, bool upper, const Position &position)
@@ -467,9 +524,6 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
         return contains(path.first()) ? std::make_optional(PathEntry{ 0, 0, path.first() }) : std::nullopt;
     }
 
-    // Only projected when a segment comes near, since most paths are far from the zone. The projection is affine in
-    // latitude and longitude, so containment and crossing tests are exact.
-    const Projected *projected = nullptr;
     for (qsizetype i = 1; i < path.count(); i++) {
         const Position &from = path[i - 1];
         const Position &to = path[i];
@@ -478,37 +532,14 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
             continue;
         }
 
-        if (!projected) {
-            projected = &_projected();
-        }
-        const GeoZoneGeometry::LocalProjection *const projection = &projected->projection;
-
-        // The earliest fraction of the segment inside a volume horizontally and vertically. The end continues from the
-        // start, so that segments far from the projection origin don't wrap around the world.
-        const QPointF a = projection->toLocal(from.coordinate);
-        const QPointF b = projection->toLocal(to.coordinate, a);
+        // The earliest fraction of the segment inside a volume horizontally and vertically
         double entry = qInf();
         for (qsizetype v = 0; v < _data.volumes.count(); v++) {
-            const Volume &volume = _data.volumes[v];
-            const auto vertical = verticalInterval(volume, from, to);
+            const auto vertical = verticalInterval(_data.volumes[v], from, to);
             if (!vertical || (vertical->first >= entry)) {
                 continue;
             }
-
-            QList<GeoZoneGeometry::Interval> horizontal;
-            if (volume.isCircle) {
-                if (!volume.center.isValid()) {
-                    continue;
-                }
-                const GeoZoneGeometry::LocalProjection centerProjection(volume.center);
-                const QPointF centerFrom = centerProjection.toLocal(from.coordinate);
-                if (const auto interval = GeoZoneGeometry::segmentCircleInterval(centerFrom, centerProjection.toLocal(to.coordinate, centerFrom), volume.radius)) {
-                    horizontal.append(*interval);
-                }
-            } else {
-                horizontal = GeoZoneGeometry::segmentPolygonIntervals(a, b, projected->volumeRings[v]);
-            }
-            for (const GeoZoneGeometry::Interval &interval : std::as_const(horizontal)) {
+            for (const GeoZoneGeometry::Interval &interval : horizontalIntervals(v, from.coordinate, to.coordinate)) {
                 if ((interval.second >= vertical->first) && (interval.first <= vertical->second)) {
                     entry = (std::min)(entry, (std::max)(interval.first, vertical->first));
                     break;
@@ -519,13 +550,17 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
             continue;
         }
 
+        // The projection is affine in latitude and longitude, so the entry is on the segment the containment tests use
+        const GeoZoneGeometry::LocalProjection &projection = _projected().projection;
+        const QPointF a = projection.toLocal(from.coordinate);
+        const QPointF b = projection.toLocal(to.coordinate, a);
         const auto interpolate = [entry](double value1, double value2) {
             return (entry <= 0) ? value1 : ((entry >= 1) ? value2 : (value1 + ((value2 - value1) * entry)));
         };
         PathEntry result;
         result.segment = i - 1;
         result.fraction = entry;
-        result.position.coordinate = (entry <= 0) ? from.coordinate : ((entry >= 1) ? to.coordinate : projection->toGeo(a + ((b - a) * entry)));
+        result.position.coordinate = (entry <= 0) ? from.coordinate : ((entry >= 1) ? to.coordinate : projection.toGeo(a + ((b - a) * entry)));
         result.position.altitudeAMSL = interpolate(from.altitudeAMSL, to.altitudeAMSL);
         result.position.terrainAMSL = interpolate(from.terrainAMSL, to.terrainAMSL);
         return result;

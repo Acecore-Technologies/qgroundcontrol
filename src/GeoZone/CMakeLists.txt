@@ -52,6 +52,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneParser.h
         GeoZoneParserUtils.cc
         GeoZoneParserUtils.h
+        GeoZonePathEvaluator.cc
+        GeoZonePathEvaluator.h
         GeoZonePlanData.cc
         GeoZonePlanning.cc
         GeoZonePlanning.h
