@@ -33,7 +33,7 @@ When zones are loaded, the **Geozones** button in the Plan View tool strip and t
 To add geozones:
 
 1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the Plan View **Geozones** panel or the Fly View geozone indicator.
-1. Press **Add File...** and select a `.json` or `.geojson` file, or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**, or press **Add Service...** for a service needing credentials or an area (see [Geozone Services](#geozone-services)).
+1. Press **Add File...** and select a geozone file (`.json`, `.geojson`, AIXM `.xml` or a `.zip` package), or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**, or press **Add Service...** for a service needing credentials or an area (see [Geozone Services](#geozone-services)).
 
 The national feeds offered by **Add Feed...** are **Finland (Traficom)**, **Latvia (LGS)**, **Luxembourg (Geoportail)**, **Sweden (LFV)**, **United States TFRs (FAA)**, **Switzerland (FOCA)**, **Germany aviation zones (DiPUL)** and **United Kingdom FRZ (NATS)**.
 **Germany aviation zones (DiPUL)** holds the control zones, airports, aerodromes and flight restriction areas of the German DiPUL service (licensed CC BY-ND 4.0), and **United Kingdom FRZ (NATS)** the flight restriction and runway protection zones of protected aerodromes and the danger areas from the AIXM dataset NATS publishes every AIRAC cycle.
@@ -296,7 +296,6 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 ## Limitations {#limitations}
 
 - The checks and alerts are advisory and depend on the data loaded: always check the official sources and obtain any required authorisation before flying.
-- The **Add File...** dialog lists `.json` and `.geojson` files. AIXM airspaces are loaded from feeds, also zipped.
 - AIXM schedules are not read, so AIXM zones are always active, and holes of AIXM airspaces are not read.
 - European NOTAMs and FAA NOTAMs from the NOTAM Management Service are not read. A TFR whose NOTAM details can't be downloaded is treated as prohibited at all times and altitudes; check the NOTAM for exceptions.
 - Flight levels are converted with the QNH setting and a 4 % margin, and heights above the WGS84 ellipsoid with the EGM96 geoid, so these limits are approximate.

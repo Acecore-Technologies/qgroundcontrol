@@ -117,7 +117,8 @@ void GeoZoneManager::_activeVehicleChanged(Vehicle *vehicle)
 
 QStringList GeoZoneManager::fileDialogFilters() const
 {
-    return QStringList(tr("ED-269/ED-318 Geozone Files (*.json *.geojson)"));
+    // The format is recognized by the content, zip packages are unpacked
+    return { tr("Geozone Files (*.json *.geojson *.xml *.zip)"), tr("All Files (*)") };
 }
 
 bool GeoZoneManager::exportProvenance(const QString &fileName)

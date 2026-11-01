@@ -24,7 +24,7 @@ class MissionController;
 /// Exports the pre-flight geozone briefing of the planned mission, see GeoZoneBriefing, as JSON for other tools, as a
 /// self-contained web page readable on phones, or as an A4 PDF document.
 ///
-/// The JSON has a stable schema, see docs/en/qgc-user-guide/plan_view/plan_geofence.md: "schema" is
+/// The JSON has a stable schema, see docs/en/qgc-user-guide/geozones/geozones.md: "schema" is
 /// "qgc-geozone-briefing" and "version" jsonVersion, which increases when fields change meaning or are removed, not
 /// when fields are added. Times are ISO 8601 UTC, distances and altitudes meters, unknown values null.
 class GeoZoneBriefingExport : public QObject

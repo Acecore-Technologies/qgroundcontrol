@@ -382,6 +382,17 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     QCOMPARE(manager.sources()->count(), 2);
     QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->formatName(), QStringLiteral("ED-269"));
 
+    // XML files are recognized by their content, like the files the dialog offers
+    const QString aixmFile = sourceDir.filePath(QStringLiteral("zones.xml"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/uk_aixm_test.xml"), aixmFile));
+    addedSpy.clear();
+    manager.addFile(aixmFile);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(manager.sources()->count(), 3);
+    QCOMPARE(manager.sources()->value<GeoZoneSource*>(2)->formatName(), QStringLiteral("AIXM 5.1"));
+    QCOMPARE(manager.sources()->value<GeoZoneSource*>(2)->zoneCount(), 3);
+
     // Removing all sources drops loads in progress
     manager.addFile(ed318File);
     manager.clear();
