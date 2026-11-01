@@ -85,6 +85,8 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
         (void) disconnect(_masterController, nullptr, _worker, nullptr);
     }
     (void) _worker->setMissionController(missionController);
+    // The zones of the previous mission don't apply to this one
+    _clearResults();
     _masterController = missionController ? missionController->masterController() : nullptr;
     if (missionController) {
         (void) connect(missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionCheck::_connectMissionItems);
@@ -356,6 +358,32 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
                               _unfencedZones.removeIf(fromSource) + _contingencyZones.removeIf(fromSource);
     if (removed > 0) {
         emit crossedZonesChanged();
+    }
+}
+
+void GeoZoneMissionCheck::_clearResults()
+{
+    _relevantZones.clear();
+    _area = GeoZoneBox();
+    const bool listed = !_crossedZones.isEmpty() || !_uSpaceZones.isEmpty() || !_permittedZones.isEmpty() || !_authorisedZones.isEmpty() ||
+                        !_unfencedZones.isEmpty() || !_contingencyZones.isEmpty() || !_pathLabels.isEmpty() || !_contingencyLabels.isEmpty() ||
+                        (_inactiveZoneCount != 0);
+    _crossedZones.clear();
+    _uSpaceZones.clear();
+    _permittedZones.clear();
+    _authorisedZones.clear();
+    _unfencedZones.clear();
+    _contingencyZones.clear();
+    _pathLabels.clear();
+    _contingencyLabels.clear();
+    _inactiveZoneCount = 0;
+    if (listed) {
+        emit crossedZonesChanged();
+    }
+    if (!_auditText.isEmpty() || !_auditDetails.isEmpty()) {
+        _auditText.clear();
+        _auditDetails.clear();
+        emit auditChanged();
     }
 }
 

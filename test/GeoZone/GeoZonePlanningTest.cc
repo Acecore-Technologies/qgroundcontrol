@@ -11,6 +11,7 @@
 #include "GeoZoneBriefing.h"
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneFenceTags.h"
+#include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneRouteSearch.h"
 #include "GeoZoneSourceRepository.h"
@@ -674,6 +675,74 @@ void GeoZonePlanningTest::_testMissionCheck()
     // Zones are released before the manager deletes them
     manager.clear();
     QVERIFY(check.crossedZones().isEmpty());
+}
+
+void GeoZonePlanningTest::_testMissionControllerSwitch()
+{
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+    }), errorString), qPrintable(errorString));
+
+    // A mission through the zone, and an empty one
+    PlanMasterController crossing;
+    crossing.setFlyView(false);
+    crossing.start();
+    (void) crossing.missionController()->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
+    (void) crossing.missionController()->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
+    QTRY_VERIFY(!GeoZoneMissionPath::fromMission(crossing.missionController()).paths().isEmpty());
+    PlanMasterController empty;
+    empty.setFlyView(false);
+    empty.start();
+
+    GeoZoneMissionCheck check(&manager);
+    GeoZoneProfile profile(&manager);
+    GeoZoneMissionWorker *const checkWorker = check.findChild<GeoZoneMissionWorker*>();
+    GeoZoneMissionWorker *const profileWorker = profile.findChild<GeoZoneMissionWorker*>();
+    QVERIFY(checkWorker && profileWorker);
+    // Evaluations only start when triggered here
+    checkWorker->setDelay(600000);
+    profileWorker->setDelay(600000);
+    check.setMissionController(crossing.missionController());
+    profile.setMissionController(crossing.missionController());
+    checkWorker->trigger();
+    profileWorker->trigger();
+    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QTRY_COMPARE(profile.bands().count(), 1);
+
+    // The results of the previous mission are cleared, and those of its evaluations in flight never applied
+    checkWorker->trigger();
+    profileWorker->trigger();
+    QVERIFY(checkWorker->busy());
+    QSignalSpy crossedSpy(&check, &GeoZoneMissionCheck::crossedZonesChanged);
+    QSignalSpy bandsSpy(&profile, &GeoZoneProfile::bandsChanged);
+    check.setMissionController(empty.missionController());
+    profile.setMissionController(empty.missionController());
+    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.relevantZones().isEmpty());
+    QVERIFY(profile.bands().isEmpty());
+    QCOMPARE(crossedSpy.count(), 1);
+    QCOMPARE(bandsSpy.count(), 1);
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(10000));
+    QTest::qWait(100);
+    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(profile.bands().isEmpty());
+    QCOMPARE(crossedSpy.count(), 1);
+    QCOMPARE(bandsSpy.count(), 1);
+
+    // Then the new mission is checked
+    checkWorker->trigger();
+    QVERIFY(checkWorker->busy());
+    QTRY_VERIFY(!checkWorker->busy());
+    QVERIFY(check.crossedZones().isEmpty());
+    check.setMissionController(crossing.missionController());
+    checkWorker->trigger();
+    QTRY_COMPARE(check.crossedZones().count(), 1);
 }
 
 void GeoZonePlanningTest::_testMissionCoverage()

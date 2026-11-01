@@ -23,6 +23,7 @@ private slots:
     void _testFenceExcludes();
     void _testAntimeridianQueries();
     void _testMissionCheck();
+    void _testMissionControllerSwitch();
     void _testMissionCoverage();
     void _testMissionJumps();
     void _testMissionContingencies();

@@ -166,6 +166,8 @@ signals:
 
 private:
     void _clearZones(GeoZoneSource *source);
+    /// Clears the zones of the mission checked, like when the mission controller changes
+    void _clearResults();
     void _connectMissionItems();
     /// Connects the plan's rally points and breach return point, which the returns go to
     void _connectPlan();

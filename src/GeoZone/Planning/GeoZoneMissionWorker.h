@@ -40,7 +40,7 @@ public:
 
     MissionController *missionController() const;
     /// Follows the changes of the controller's mission, which schedule an evaluation, and outdates the evaluations of
-    /// the previous one
+    /// the previous one, whose results the owner should clear
     /// @return false if the controller didn't change
     bool setMissionController(MissionController *missionController);
 

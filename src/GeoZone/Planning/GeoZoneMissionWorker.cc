@@ -38,6 +38,8 @@ bool GeoZoneMissionWorker::setMissionController(MissionController *missionContro
         (void) disconnect(_missionController, nullptr, this, nullptr);
     }
     _missionController = missionController;
+    // Results of the previous mission must not be applied to this one
+    invalidate();
     if (_missionController) {
         // Emitted after the flight path or any item coordinate changes, or the mission is replaced
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionWorker::schedule);

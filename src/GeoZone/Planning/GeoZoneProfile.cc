@@ -46,6 +46,8 @@ void GeoZoneProfile::setMissionController(MissionController *missionController)
     if (!_worker->setMissionController(missionController)) {
         return;
     }
+    // The bands of the previous mission don't apply to this one
+    _apply({});
     emit missionControllerChanged();
     _worker->schedule();
 }
