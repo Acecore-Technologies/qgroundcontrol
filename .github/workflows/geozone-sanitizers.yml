@@ -107,6 +107,8 @@ jobs:
           if grep -h "src/GeoZone/.*runtime error" GeoZoneCoreTest.log; then
             status=1
           fi
+          # The Qt Quick tests of the components which don't need the application
+          ./Debug/tst_geozone_qml -platform offscreen || status=1
           exit $status
 
   # Fuzzes the parsers with libFuzzer for a minute each, building only the GeoZoneCore library and the fuzz targets

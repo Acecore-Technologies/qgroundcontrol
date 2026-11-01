@@ -91,6 +91,32 @@ set_target_properties(GeoZoneBenchmark PROPERTIES
 add_test(NAME GeoZoneBenchmark COMMAND GeoZoneBenchmark)
 set_tests_properties(GeoZoneBenchmark PROPERTIES LABELS benchmark)
 
+# Qt Quick tests of the components which don't need the application, run with the offscreen platform
+find_package(Qt6 QUIET COMPONENTS QuickTest)
+if(TARGET Qt6::QuickTest)
+    qt_add_executable(tst_geozone_qml GeoZoneQmlTestMain.cc)
+    target_compile_definitions(tst_geozone_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
+    target_link_libraries(tst_geozone_qml
+        PRIVATE
+            GeoZoneCore
+            Qt6::Qml
+            Qt6::Quick
+            Qt6::QuickTest
+    )
+    set_target_properties(tst_geozone_qml PROPERTIES
+        MACOSX_BUNDLE FALSE
+        WIN32_EXECUTABLE FALSE
+        QT_EXCLUDE_FROM_TRANSLATION ON
+    )
+    qt_add_resources(tst_geozone_qml "geozone_qml_test_components"
+        PREFIX "/geozone"
+        BASE ${CMAKE_SOURCE_DIR}/src/GeoZone/Map
+        FILES ${CMAKE_SOURCE_DIR}/src/GeoZone/Map/GeoZoneStyle.qml
+    )
+    add_test(NAME tst_geozone_qml COMMAND tst_geozone_qml -platform offscreen)
+    add_dependencies(check tst_geozone_qml)
+endif()
+
 option(GEOZONE_FUZZ "Build the fuzz targets of the geozone parsers, libFuzzer targets with clang" OFF)
 if(GEOZONE_FUZZ)
     add_subdirectory(fuzz)

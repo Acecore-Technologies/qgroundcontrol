@@ -4,6 +4,14 @@ The application tests run with `QGroundControl --unittest:<Class>` (GeoZoneParse
 GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest). The parser and geometry tests also
 run headless in `GeoZoneCoreTest`, which only links the GeoZoneCore library (`ctest -R GeoZoneCore`).
 
+Tests which depend on the time or the terrain set them with `GeoZoneTestHelpers::ScopedEnvironment`, whose clock
+stands still until the test advances it and whose terrain is unknown until set.
+
+`tst_geozone_qml` runs the Qt Quick tests of `qml/` with the offscreen platform (`ctest -R tst_geozone_qml`). It
+registers the GeoZone enums and loads the components from their sources, without QGroundControl. Only GeoZoneStyle is
+tested: the other components use the singletons of the application, like ScreenTools, QGCPalette, the controls of
+QGroundControl.Controls and GeoZoneManager or GeoZoneMonitor, which need the application or a large set of mocks.
+
 ## Fuzzing
 
 The parsers read untrusted files and feeds, so `fuzz/` has libFuzzer targets for them:
