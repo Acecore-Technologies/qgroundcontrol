@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include <QtCore/QElapsedTimer>
+#include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QStringList>
@@ -21,43 +21,57 @@
 
 #include "GeoFenceController.h"
 #include "GeoZoneFences.h"
-
-#include <optional>
+#include "QGCFenceCircle.h"
+#include "QGCFencePolygon.h"
 
 class GeoZone;
+class Vehicle;
 
 /// Adds loaded geozones to a GeoFence as exclusion fences. Polygon holes are dropped, so the whole outer
 /// boundary is excluded, and fences identical to existing ones are not added again.
+/// Selections fit zones into the fence storage of the plan's vehicle, the zones most relevant for the planned flight
+/// first, see GeoZoneFences::select, and replace the fences from geozones. The fence can then be uploaded and read
+/// back from the vehicle to verify it.
 class GeoZoneFenceImporter : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(GeoFenceController* geoFenceController READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)
+    Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)
+    Q_PROPERTY(QVariantMap          capacity            READ capacityInfo       NOTIFY selectionChanged FINAL)      ///< See capacityInfo
+    Q_PROPERTY(QVariantList         choices             READ choicesInfo        NOTIFY selectionChanged FINAL)      ///< See choicesInfo
+    Q_PROPERTY(int                  selectedCount       READ selectedCount      NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(UploadState          uploadState         READ uploadState        NOTIFY uploadStateChanged FINAL)
+    Q_PROPERTY(QString              uploadMessage       READ uploadMessage      NOTIFY uploadStateChanged FINAL)
+    Q_PROPERTY(bool                 canUpload           READ canUpload          NOTIFY canUploadChanged FINAL)      ///< A vehicle supporting fences is connected
 
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);
 
-    static constexpr int px4MaxFencePoints = 64;                ///< PX4 dataman fence storage (DM_KEY_FENCE_POINTS_MAX)
-    static constexpr int arduPilotMaxPolygonVertices = 255;     ///< ArduPilot stores the polygon vertex count in 8 bits
+    enum UploadState {
+        UploadIdle,
+        Uploading,
+        Verifying,      ///< Reading the fence back
+        UploadVerified,
+        UploadMismatch, ///< The fence read back differs from the one sent
+        UploadFailed,
+    };
+    Q_ENUM(UploadState)
+
+    static constexpr double verifyTolerance = 0.5;  ///< Meters vertices, circle centers and radii read back may differ by
+    static constexpr int maxListedChoices = 500;    ///< Zones left out listed by choicesInfo
 
     /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
     static GeoZoneFences::ZoneFences exclusionFences(GeoFenceController *geoFenceController);
 
+    /// @return What the fence of the vehicle can store: PX4's dataman, ArduPilot's fence storage for the vehicle type or
+    ///         on the SD card, a conservative estimate without a vehicle, nothing without fence support
+    static GeoZoneFences::Capacity vehicleCapacity(Vehicle *vehicle);
+
+    /// @return Storage of the plan fences selections keep: those not from geozones and the breach return point
+    static GeoZoneFences::Usage keptUsage(GeoFenceController *geoFenceController);
+
     GeoFenceController *geoFenceController() const { return _geoFenceController; }
     void setGeoFenceController(GeoFenceController *geoFenceController);
-
-    /// Adds exclusion fences for the zones of GeoZoneManager
-    ///     @param restrictions: GeoZone::Restriction values of the zones to import
-    ///     @param area: Only zones intersecting this area are imported. Invalid to import zones anywhere.
-    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours. Negative to ignore zone schedules.
-    ///     @param simplifyTolerance: Meters. When positive, polygons are reduced to fewer vertices which still enclose the zone.
-    /// @return Number of fence polygons and circles added
-    Q_INVOKABLE int importZones(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = -1, double simplifyTolerance = 0);
-
-    /// Summarizes the fences importZones would add with the same arguments
-    /// @return Map with fenceCount, pointCount (polygon vertices plus one per circle), totalPointCount (including the
-    ///         existing fence) and limitWarning (empty unless the vehicle likely can't store the resulting fence)
-    Q_INVOKABLE QVariantMap preview(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = -1, double simplifyTolerance = 0) const;
 
     /// Adds exclusion fences for the zones
     /// @return Number of fence polygons and circles added
@@ -65,11 +79,68 @@ public:
     /// Same as addExclusions, for GeoZoneInfo values from QML
     Q_INVOKABLE int addZones(const QVariantList &zones, double simplifyTolerance = 0);
 
-    /// Summarizes the fences addExclusions would add, see preview
-    QVariantMap exclusionsPreview(const QList<const GeoZone*> &zones, double simplifyTolerance = 0) const;
+    /// Selects zones of GeoZoneManager, see select
+    ///     @param restrictions: GeoZone::Restriction values of the zones
+    ///     @param area: Only zones intersecting this area. Invalid for zones anywhere.
+    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours. Negative to ignore zone schedules.
+    ///     @param maxSimplifyTolerance: Meters fences may be simplified by to fit, see GeoZoneFences::zoneFences
+    Q_INVOKABLE void updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = -1, double maxSimplifyTolerance = 0);
+
+    /// Selects which of the zones fit into the fence of the plan's vehicle besides the fences kept, the zones entered by or
+    /// near the planned flight first, see GeoZoneFences::select. Simplification steps up to the tolerance when needed.
+    void select(const QList<const GeoZone*> &zones, double maxSimplifyTolerance = 0);
+    const GeoZoneFences::Selection &selection() const { return _selection; }
+    const GeoZoneFences::Capacity &capacity() const { return _capacity; }
+    int selectedCount() const;
+
+    /// Includes or leaves out the zone with the key, see GeoZone::key, and selects again
+    Q_INVOKABLE void setZoneIncluded(const QString &key, bool included);
+
+    /// Replaces the fences from geozones in the plan with those of the selected zones
+    /// @return Number of fence polygons and circles added
+    Q_INVOKABLE int applySelection();
+
+    /// Applies the selection, sends the plan's fence to the vehicle like a plan upload does, then reads it back and
+    /// compares it with the plan's, see uploadState
+    Q_INVOKABLE void uploadToVehicle();
+
+    /// @return Map with text ("Vehicle fence: 40 of 64 points"), note (where the limits come from), warning (fence
+    ///         parameters which keep the vehicle from enforcing exclusion fences), usedItems, maxItems, usedBytes,
+    ///         storageBytes, keptItems, circles, supported and estimated
+    QVariantMap capacityInfo() const;
+    /// @return One map per zone, selected ones first: key, name, restriction, restrictionText, proximityText, points,
+    ///         simplifyTolerance, selected, included and reason
+    QVariantList choicesInfo() const;
+
+    UploadState uploadState() const { return _uploadState; }
+    QString uploadMessage() const { return _uploadMessage; }
+    bool canUpload() const;
+
+    /// Fence sent to or read back from a vehicle
+    struct FenceSnapshot {
+        struct Polygon {
+            bool inclusion = false;
+            QList<QGeoCoordinate> vertices;
+        };
+        struct Circle {
+            bool inclusion = false;
+            QGeoCircle circle;
+        };
+        QList<Polygon> polygons;
+        QList<Circle> circles;
+        QGeoCoordinate returnPoint;
+    };
+    static FenceSnapshot snapshot(GeoFenceController *geoFenceController);
+    static FenceSnapshot snapshot(const QList<QGCFencePolygon> &polygons, const QList<QGCFenceCircle> &circles, const QGeoCoordinate &returnPoint);
+
+    /// @return What differs between the fences beyond verifyTolerance, empty when they match. Fences may be in any order.
+    static QString compareFences(const FenceSnapshot &sent, const FenceSnapshot &received);
 
 signals:
     void geoFenceControllerChanged();
+    void selectionChanged();
+    void uploadStateChanged();
+    void canUploadChanged();
 
 private:
     /// Fences for the zones which don't already exist in the fence, with the names of their zones
@@ -80,27 +151,31 @@ private:
         QStringList circleNames;
     };
 
-    /// Arguments of a preview, whose fences an import with the same arguments reuses
-    struct PreviewKey {
-        QVariantList restrictions;
-        QGeoRectangle area;
-        int activeWithinHours = 0;
-        double simplifyTolerance = 0;
-        qsizetype polygonCount = 0;     ///< Existing fences, which new ones are compared with
-        qsizetype circleCount = 0;
-
-        friend bool operator==(const PreviewKey &, const PreviewKey &) = default;
-    };
-
     Fences _newFences(const QList<const GeoZone*> &zones, double simplifyTolerance) const;
-    Fences _fencesFor(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double simplifyTolerance) const;
-    QVariantMap _preview(const Fences &fences) const;
     int _addFences(const Fences &fences);
-    static QList<const GeoZone*> _zonesToImport(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours);
+    void _select();
+    QString _capacityNote() const;
+    QString _parameterWarning() const;
+    Vehicle *_vehicle() const;
+    void _connectVehicle();
+    void _setUploadState(UploadState state, const QString &message);
+    void _uploadSent(bool error);
+    void _uploadReadBack();
+    QString _rejectionText(const QString &errorMessage) const;
 
     QPointer<GeoFenceController> _geoFenceController;
-    mutable std::optional<std::pair<PreviewKey, Fences>> _previewFences;
-    mutable QElapsedTimer _previewAge;
+    QList<const GeoZone*> _zones;                       ///< Of the last selection
+    QList<double> _simplifyTolerances = { 0 };
+    QHash<QString, bool> _included;                     ///< Zones included or left out by the user, by key
+    GeoZoneFences::Capacity _capacity;
+    GeoZoneFences::Selection _selection;
+    UploadState _uploadState = UploadIdle;
+    QString _uploadMessage;
+    QObject *_uploadConnections = nullptr;              ///< Receiver of the signals of an upload, deleted to disconnect them
+    QObject *_vehicleConnections = nullptr;
+    FenceSnapshot _sentFence;
+    QString _uploadError;                               ///< Reported by the fence manager during the upload
+    int _uploadAckResult = 0;                           ///< MAV_MISSION_RESULT of the last fence MISSION_ACK, 0 when accepted
 
-    static constexpr qint64 _previewReuseMSecs = 60 * 1000;    ///< Zone schedules make older previews inexact
+    static constexpr double _simplifySteps[] = { 0, 10, 25, 50, 100, 250, 500 };   ///< Meters, tried up to the maximum tolerance
 };

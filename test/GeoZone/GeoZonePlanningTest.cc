@@ -14,8 +14,13 @@
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoFenceManager.h"
+#include "MockLink.h"
+#include "MultiVehicleManager.h"
+#include "ParameterManager.h"
 #include "RallyPoint.h"
 #include "RallyPointController.h"
+#include "Vehicle.h"
 
 using namespace GeoZoneTestHelpers;
 
@@ -1793,9 +1798,9 @@ void GeoZonePlanningTest::_testGeoFenceImport()
     QCOMPARE(geoFenceController->circles()->count(), 0);
 }
 
-void GeoZonePlanningTest::_testGeoFenceImportPreview()
+void GeoZonePlanningTest::_testGeoFenceSelection()
 {
-    // Two circular zones published as 40 vertex polygons
+    // Two circular zones published as 40 vertex polygons, and a circle
     ZoneOwner zoneParent;
     QList<const GeoZone*> zones;
     for (int i = 0; i < 2; i++) {
@@ -1807,38 +1812,180 @@ void GeoZonePlanningTest::_testGeoFenceImportPreview()
         data.volumes.append(volume);
         zones.append(zoneParent.add(data));
     }
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = QGeoCoordinate(47, 8.2);
+    circleVolume.radius = 300;
+    GeoZone::Data circleData;
+    circleData.identifier = QStringLiteral("C");
+    circleData.restriction = GeoZone::Prohibited;
+    circleData.volumes.append(circleVolume);
+    zones.append(zoneParent.add(circleData));
 
     PlanMasterController masterController;
     masterController.setFlyView(false);
     masterController.start();
-    QVERIFY(masterController.managerVehicle()->px4Firmware());
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
     GeoZoneFenceImporter importer;
     importer.setGeoFenceController(geoFenceController);
+    QVERIFY(!importer.canUpload());
 
-    // Exceeds the PX4 fence storage
-    QVariantMap preview = importer.exclusionsPreview(zones);
-    QCOMPARE(preview[QStringLiteral("fenceCount")].toInt(), 2);
-    QCOMPARE(preview[QStringLiteral("pointCount")].toInt(), 80);
-    QCOMPARE(preview[QStringLiteral("totalPointCount")].toInt(), 80);
-    QVERIFY(!preview[QStringLiteral("limitWarning")].toString().isEmpty());
+    // Without a vehicle the fence fits PX4 and ArduPilot copters, with the circle as a polygon. 80 polygon points don't.
+    QSignalSpy selectionSpy(&importer, &GeoZoneFenceImporter::selectionChanged);
+    importer.select(zones);
+    QCOMPARE(selectionSpy.count(), 1);
+    QCOMPARE(importer.capacity().maxItems, GeoZoneFences::Capacity::px4MaxItems);
+    QVERIFY(!importer.capacity().circles);
+    QCOMPARE(importer.selectedCount(), 2);
+    QVariantMap capacity = importer.capacityInfo();
+    QVERIFY(capacity[QStringLiteral("estimated")].toBool());
+    QVERIFY(capacity[QStringLiteral("text")].toString().startsWith(QStringLiteral("Vehicle fence: %1 of 64 points").arg(capacity[QStringLiteral("usedItems")].toInt())));
+    QVERIFY(capacity[QStringLiteral("note")].toString().contains(QStringLiteral("No vehicle")));
+    QVariantList choices = importer.choicesInfo();
+    QCOMPARE(choices.count(), 3);
+    QVERIFY(choices[0].toMap()[QStringLiteral("selected")].toBool());
+    QVERIFY(!choices[2].toMap()[QStringLiteral("selected")].toBool());
+    QCOMPARE(choices[2].toMap()[QStringLiteral("reason")].toString(), QStringLiteral("No room left in the vehicle fence"));
 
-    // Simplified polygons fit
-    preview = importer.exclusionsPreview(zones, 25);
-    const int simplifiedPointCount = preview[QStringLiteral("pointCount")].toInt();
-    QCOMPARE(preview[QStringLiteral("fenceCount")].toInt(), 2);
-    QVERIFY(simplifiedPointCount < GeoZoneFenceImporter::px4MaxFencePoints);
-    QVERIFY(preview[QStringLiteral("limitWarning")].toString().isEmpty());
+    // Simplified, all of them fit
+    importer.select(zones, 25);
+    QCOMPARE(importer.selectedCount(), 3);
+    QVERIFY(importer.capacity().fits(importer.selection().usage));
 
-    QCOMPARE(importer.addExclusions(zones, 25), 2);
-    QCOMPARE(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->count() + geoFenceController->polygons()->value<QGCFencePolygon*>(1)->count(), simplifiedPointCount);
+    // Drawn fences and the breach return point are kept and take room, fences added from geozones before are replaced
+    geoFenceController->addInclusionCircle(QGeoCoordinate(47.1, 7.9), QGeoCoordinate(46.9, 8.3));
+    geoFenceController->setBreachReturnPoint(QGeoCoordinate(47, 7.95));
+    QCOMPARE(importer.addExclusions({ zones[0] }), 1);
+    QCOMPARE(GeoZoneFenceImporter::keptUsage(geoFenceController).items, 2);
+    importer.select(zones, 25);
+    QCOMPARE(importer.capacityInfo()[QStringLiteral("keptItems")].toInt(), 2);
+    QCOMPARE(importer.applySelection(), 3);
+    QCOMPARE(geoFenceController->polygons()->count(), 3);
+    QCOMPARE(geoFenceController->circles()->count(), 1);
+    QCOMPARE(importer.applySelection(), 3);
+    QCOMPARE(geoFenceController->polygons()->count(), 3);
+    int points = 2;
+    for (int i = 0; i < geoFenceController->polygons()->count(); i++) {
+        QVERIFY(geoFenceController->polygons()->value<QGCFencePolygon*>(i)->geoZone());
+        points += geoFenceController->polygons()->value<QGCFencePolygon*>(i)->count();
+    }
+    QCOMPARE(points, importer.selection().usage.items);
+    // The mission check finds the zones excluded by the fences of the selection
+    for (const GeoZone *zone : std::as_const(zones)) {
+        QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, zone));
+    }
 
-    // Existing fences count towards the total but are not added again
-    preview = importer.exclusionsPreview(zones, 25);
-    QCOMPARE(preview[QStringLiteral("fenceCount")].toInt(), 0);
-    QCOMPARE(preview[QStringLiteral("totalPointCount")].toInt(), simplifiedPointCount);
-    preview = importer.exclusionsPreview(zones);
-    QCOMPARE(preview[QStringLiteral("totalPointCount")].toInt(), simplifiedPointCount + 80);
+    // Zones left out by the user
+    importer.setZoneIncluded(zones[0]->key(), false);
+    QCOMPARE(importer.selectedCount(), 2);
+    choices = importer.choicesInfo();
+    const QVariantMap leftOut = choices.last().toMap();
+    QCOMPARE(leftOut[QStringLiteral("key")].toString(), zones[0]->key());
+    QVERIFY(!leftOut[QStringLiteral("included")].toBool());
+    QCOMPARE(leftOut[QStringLiteral("reason")].toString(), QStringLiteral("Left out"));
+    importer.setZoneIncluded(zones[0]->key(), true);
+    QCOMPARE(importer.selectedCount(), 3);
+}
+
+void GeoZonePlanningTest::_testGeoFenceUpload()
+{
+    ZoneOwner zoneParent;
+    GeoZone::Volume polygonVolume;
+    polygonVolume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8), 500, 40)));
+    GeoZone::Data polygonData;
+    polygonData.identifier = QStringLiteral("P");
+    polygonData.restriction = GeoZone::Prohibited;
+    polygonData.volumes.append(polygonVolume);
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = QGeoCoordinate(47, 8.05);
+    circleVolume.radius = 300;
+    GeoZone::Data circleData;
+    circleData.identifier = QStringLiteral("C");
+    circleData.restriction = GeoZone::ReqAuthorisation;
+    circleData.volumes.append(circleVolume);
+    const QList<const GeoZone*> zones = { zoneParent.add(polygonData), zoneParent.add(circleData) };
+
+    for (const MAV_AUTOPILOT autopilot : { MAV_AUTOPILOT_PX4, MAV_AUTOPILOT_ARDUPILOTMEGA }) {
+        _connectMockLink(autopilot);
+        Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+        QVERIFY(vehicle);
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+
+        PlanMasterController masterController;
+        masterController.setFlyView(false);
+        masterController.start();
+        QCOMPARE(masterController.managerVehicle(), vehicle);
+        GeoFenceController *const geoFenceController = masterController.geoFenceController();
+        GeoZoneFenceImporter importer;
+        importer.setGeoFenceController(geoFenceController);
+        QVERIFY(importer.canUpload());
+
+        // PX4 stores 64 points, the MockLink ArduCopter is estimated with 16 KB storage. Both store circles.
+        importer.select(zones, 25);
+        const GeoZoneFences::Capacity capacity = importer.capacity();
+        QVERIFY(capacity.circles);
+        if (autopilot == MAV_AUTOPILOT_PX4) {
+            QCOMPARE(capacity.maxItems, GeoZoneFences::Capacity::px4MaxItems);
+            QVERIFY(!capacity.estimated);
+            QVERIFY(importer.capacityInfo()[QStringLiteral("warning")].toString().isEmpty());
+        } else {
+            QCOMPARE(capacity.storageBytes, GeoZoneFences::Capacity::arduPilotCopterBytes);
+            QVERIFY(capacity.estimated);
+            QVERIFY(importer.capacityInfo()[QStringLiteral("text")].toString().contains(QStringLiteral("of 560 bytes")));
+            // The MockLink ArduCopter has its fence disabled
+            QVERIFY(importer.capacityInfo()[QStringLiteral("warning")].toString().contains(QStringLiteral("FENCE_ENABLE")));
+        }
+        QCOMPARE(importer.selectedCount(), 2);
+        geoFenceController->setBreachReturnPoint(QGeoCoordinate(47, 7.95, 50));
+
+        // The fence is sent and read back
+        importer.uploadToVehicle();
+        QCOMPARE(importer.uploadState(), GeoZoneFenceImporter::Uploading);
+        QTRY_COMPARE_WITH_TIMEOUT(importer.uploadState(), GeoZoneFenceImporter::UploadVerified, 15000);
+        QVERIFY2(importer.uploadMessage().startsWith(QStringLiteral("Verified")), qPrintable(importer.uploadMessage()));
+        GeoFenceManager *const manager = vehicle->geoFenceManager();
+        QCOMPARE(manager->polygons().count(), 1);
+        QCOMPARE(manager->circles().count(), 1);
+        QVERIFY(!manager->polygons().first().inclusion());
+        QCOMPARE(manager->polygons().first().count(), importer.selection().choices.first().fences.polygons.first().count());
+        // The plan keeps its fences from geozones
+        QCOMPARE(geoFenceController->polygons()->count(), 1);
+        QVERIFY(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->geoZone());
+        QVERIFY(!geoFenceController->dirty());
+
+        // A vehicle without room for the fence rejects it
+        _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailWriteRequest0ErrorAck, MAV_MISSION_NO_SPACE);
+        importer.uploadToVehicle();
+        QTRY_COMPARE_WITH_TIMEOUT(importer.uploadState(), GeoZoneFenceImporter::UploadFailed, 15000);
+        QVERIFY2(importer.uploadMessage().contains(QStringLiteral("no room")), qPrintable(importer.uploadMessage()));
+        _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailNone, MAV_MISSION_ACCEPTED);
+
+        _disconnectMockLink();
+        QTRY_VERIFY(!importer.canUpload());
+        importer.uploadToVehicle();
+        QCOMPARE(importer.uploadState(), GeoZoneFenceImporter::UploadFailed);
+    }
+
+    // Fences read back are compared within the tolerance, in any order
+    GeoZoneFenceImporter::FenceSnapshot sent;
+    sent.polygons.append({ false, _circleRing(QGeoCoordinate(47, 8), 500, 8) });
+    sent.polygons.append({ true, _circleRing(QGeoCoordinate(47, 8), 5000, 4) });
+    sent.circles.append({ false, QGeoCircle(QGeoCoordinate(47, 8.05), 300) });
+    sent.returnPoint = QGeoCoordinate(47, 7.95, 50);
+    GeoZoneFenceImporter::FenceSnapshot received = sent;
+    std::swap(received.polygons[0], received.polygons[1]);
+    received.circles[0].circle.setRadius(300.1);
+    received.returnPoint.setAltitude(0);
+    QVERIFY(GeoZoneFenceImporter::compareFences(sent, received).isEmpty());
+    received.circles[0].circle.setRadius(302);
+    QVERIFY(GeoZoneFenceImporter::compareFences(sent, received).contains(QStringLiteral("Fences differing from the plan: 1.")));
+    received.circles.clear();
+    QVERIFY(GeoZoneFenceImporter::compareFences(sent, received).contains(QStringLiteral("0 circles")));
+    received = sent;
+    received.returnPoint = QGeoCoordinate();
+    QVERIFY(!GeoZoneFenceImporter::compareFences(sent, received).isEmpty());
 }
 
 void GeoZonePlanningTest::_testMapModel()

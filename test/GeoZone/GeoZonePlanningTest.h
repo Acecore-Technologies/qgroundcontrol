@@ -34,7 +34,8 @@ private slots:
     void _testRoutePlanner();
     void _testProfileBands();
     void _testGeoFenceImport();
-    void _testGeoFenceImportPreview();
+    void _testGeoFenceSelection();
+    void _testGeoFenceUpload();
     void _testMapModel();
     void _testMapModelShapeLimit();
 };

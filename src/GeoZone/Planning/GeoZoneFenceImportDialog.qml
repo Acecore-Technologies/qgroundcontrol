@@ -19,43 +19,34 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Adds loaded geozones to the plan as exclusion fences
+/// Fits loaded geozones into the vehicle's fence as exclusion fences, the zones of the planned flight first, and
+/// uploads the fence to the vehicle and verifies it
 QGCPopupDialog {
     id:                     control
-    title:                  qsTr("Add Fences from Geozones")
-    buttons:                Dialog.Ok | Dialog.Cancel
-    acceptButtonEnabled:    _restrictions().length > 0 && _preview.fenceCount > 0
+    title:                  qsTr("Fences from Geozones")
+    buttons:                Dialog.Apply | Dialog.Cancel
+    acceptButtonEnabled:    !_uploading
 
     required property var geoFenceController
     required property var flightMap
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _margin:            ScreenTools.defaultFontPixelHeight / 2
-    readonly property real  _contentWidth:      ScreenTools.defaultFontPixelWidth * 50
+    readonly property real  _contentWidth:      ScreenTools.defaultFontPixelWidth * 56
+    readonly property var   _capacity:          importer.capacity
+    readonly property var   _selected:          importer.choices.filter(choice => choice.selected)
+    readonly property var   _leftOut:           importer.choices.filter(choice => !choice.selected)
+    readonly property bool  _uploading:         importer.uploadState === GeoZoneFenceImporter.Uploading || importer.uploadState === GeoZoneFenceImporter.Verifying
 
-    property var _preview: ({ fenceCount: 0, pointCount: 0, totalPointCount: 0, limitWarning: "" })
-
-    // The dialog shows before the first preview is computed
-    Component.onCompleted: previewTimer.start()
+    // The dialog shows before the first selection is computed
+    Component.onCompleted: selectionTimer.start()
 
     onAccepted: {
-        // The importer reuses the fences of a preview with the same choices
-        if (previewTimer.running) {
-            previewTimer.stop()
-            _updatePreview()
+        if (selectionTimer.running) {
+            selectionTimer.stop()
+            _updateSelection()
         }
-        const preview = _preview
-        if (preview.limitWarning === "") {
-            _import()
-            return
-        }
-        preventClose = true
-        mainWindow.showMessageDialog(title, preview.limitWarning + "\n\n" + qsTr("Add the fences anyway?"),
-                                     Dialog.Ok | Dialog.Cancel,
-                                     function() {
-                                         control._import()
-                                         control.close()
-                                     })
+        importer.applySelection()
     }
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
@@ -65,16 +56,16 @@ QGCPopupDialog {
         geoFenceController: control.geoFenceController
     }
 
-    // Previews are computed after changes settle since simplifying many zones takes a moment
+    // Selections are computed after changes settle since simplifying many zones takes a moment
     Timer {
-        id:             previewTimer
+        id:             selectionTimer
         interval:       300
-        onTriggered:    control._updatePreview()
+        onTriggered:    control._updateSelection()
     }
 
     Connections {
         target:                     _geoZoneManager
-        function onZonesChanged()   { previewTimer.restart() }
+        function onZonesChanged()   { selectionTimer.restart() }
     }
 
     function _horizontalDistanceText(meters) {
@@ -96,26 +87,70 @@ QGCPopupDialog {
         return restrictions
     }
 
-    function _area() {
-        return mapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
+    function _updateSelection() {
+        const area = mapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
+        importer.updateSelection(_restrictions(), area, activeCombo.hours[activeCombo.currentIndex], simplifyCombo.tolerances[simplifyCombo.currentIndex])
     }
 
-    function _activeWithinHours() {
-        return activeCombo.hours[activeCombo.currentIndex]
+    function _choiceDetail(choice) {
+        const parts = [ choice.restrictionText ]
+        if (choice.proximityText !== "") {
+            parts.push(choice.proximityText)
+        }
+        if (choice.selected) {
+            parts.push(qsTr("%1 points").arg(choice.points))
+            if (choice.simplifyTolerance > 0) {
+                parts.push(qsTr("simplified %1").arg(_horizontalDistanceText(choice.simplifyTolerance)))
+            }
+        } else {
+            parts.push(choice.reason)
+        }
+        return parts.join(" · ")
     }
 
-    function _tolerance() {
-        return simplifyCombo.tolerances[simplifyCombo.currentIndex]
-    }
+    Component {
+        id: choiceDelegate
 
-    function _updatePreview() {
-        _preview = importer.preview(_restrictions(), _area(), _activeWithinHours(), _tolerance())
-    }
+        RowLayout {
+            id:         choiceRow
+            width:      ListView.view ? ListView.view.width : implicitWidth
+            spacing:    ScreenTools.defaultFontPixelWidth
 
-    function _import() {
-        const fenceCount = importer.importZones(_restrictions(), _area(), _activeWithinHours(), _tolerance())
-        if (fenceCount === 0) {
-            mainWindow.showMessageDialog(title, qsTr("No new matching zones found."))
+            required property var modelData
+
+            QGCCheckBox {
+                checked:    choiceRow.modelData.included
+                enabled:    !control._uploading
+                onClicked:  importer.setZoneIncluded(choiceRow.modelData.key, checked)
+            }
+
+            Rectangle {
+                Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
+                Layout.preferredHeight: Layout.preferredWidth
+                radius:                 width / 2
+                color:                  GeoZoneStyle.restrictionColor(choiceRow.modelData.restriction)
+            }
+
+            ColumnLayout {
+                Layout.fillWidth:   true
+                spacing:            0
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    text:               choiceRow.modelData.name
+                    textFormat:         Text.PlainText
+                    elide:              Text.ElideRight
+                }
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    text:               control._choiceDetail(choiceRow.modelData)
+                    textFormat:         Text.PlainText
+                    elide:              Text.ElideRight
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    color:              choiceRow.modelData.selected ? qgcPal.text : qgcPal.warningText
+                }
+            }
         }
     }
 
@@ -125,37 +160,39 @@ QGCPopupDialog {
         QGCLabel {
             Layout.preferredWidth:  _contentWidth
             wrapMode:               Text.WordWrap
-            text:                   qsTr("Adds the selected zone types as exclusion fences. Altitude limits and polygon holes are not transferred to the fence, and vehicles can only store a limited number of fence points.")
-        }
-
-        QGCLabel { text: qsTr("Zone types") }
-
-        QGCCheckBox {
-            id:                 prohibitedCheck
-            text:               qsTr("Prohibited")
-            checked:            true
-            onCheckedChanged:   previewTimer.restart()
-        }
-
-        QGCCheckBox {
-            id:                 reqAuthorisationCheck
-            text:               qsTr("Authorisation required")
-            checked:            true
-            onCheckedChanged:   previewTimer.restart()
-        }
-
-        QGCCheckBox {
-            id:                 conditionalCheck
-            text:               qsTr("Conditional")
-            checked:            false
-            onCheckedChanged:   previewTimer.restart()
+            text:                   qsTr("Replaces the fences added from geozones with exclusion fences for the zones which fit into the vehicle's fence, those the flight enters or passes near first. Altitude limits and polygon holes are not transferred to the fence.")
         }
 
         GridLayout {
             Layout.preferredWidth:  _contentWidth
             columns:                2
             columnSpacing:          _margin
-            rowSpacing:             _margin
+            rowSpacing:             _margin / 2
+
+            QGCLabel { text: qsTr("Zone types") }
+            RowLayout {
+                Layout.fillWidth:   true
+                spacing:            _margin
+
+                QGCCheckBox {
+                    id:                 prohibitedCheck
+                    text:               qsTr("Prohibited")
+                    checked:            true
+                    onClicked:          selectionTimer.restart()
+                }
+                QGCCheckBox {
+                    id:                 reqAuthorisationCheck
+                    text:               qsTr("Authorisation")
+                    checked:            true
+                    onClicked:          selectionTimer.restart()
+                }
+                QGCCheckBox {
+                    id:                 conditionalCheck
+                    text:               qsTr("Conditional")
+                    checked:            false
+                    onClicked:          selectionTimer.restart()
+                }
+            }
 
             QGCLabel { text: qsTr("Area") }
             QGCCheckBox {
@@ -163,7 +200,7 @@ QGCPopupDialog {
                 Layout.fillWidth:   true
                 text:               qsTr("Only zones in current map view")
                 checked:            true
-                onCheckedChanged:   previewTimer.restart()
+                onClicked:          selectionTimer.restart()
             }
 
             QGCLabel { text: qsTr("Active") }
@@ -171,20 +208,20 @@ QGCPopupDialog {
                 id:                 activeCombo
                 Layout.fillWidth:   true
                 model:              [ qsTr("Any time"), qsTr("Now"), qsTr("Next 3 hours"), qsTr("Next 24 hours") ]
-                onActivated:        previewTimer.restart()
+                onActivated:        selectionTimer.restart()
 
                 readonly property var hours: [ -1, 0, 3, 24 ]
             }
 
-            QGCLabel { text: qsTr("Simplify") }
+            QGCLabel { text: qsTr("Simplify up to") }
             QGCComboBox {
                 id:                 simplifyCombo
                 Layout.fillWidth:   true
-                currentIndex:       2
+                currentIndex:       3
                 model:              tolerances.map(meters => meters === 0 ? qsTr("Off") : control._horizontalDistanceText(meters))
-                onActivated:        previewTimer.restart()
+                onActivated:        selectionTimer.restart()
 
-                readonly property var tolerances: [ 0, 10, 25, 50, 100 ]
+                readonly property var tolerances: [ 0, 10, 25, 50, 100, 250 ]
             }
         }
 
@@ -192,24 +229,108 @@ QGCPopupDialog {
             Layout.preferredWidth:  _contentWidth
             wrapMode:               Text.WordWrap
             font.pointSize:         ScreenTools.smallFontPointSize
-            text:                   qsTr("Simplified fences have fewer points and enclose the zone, extending up to twice the tolerance beyond it.")
+            text:                   qsTr("Fences are simplified only as far as needed to fit. Simplified fences enclose the zone, extending up to twice the tolerance beyond it.")
             visible:                simplifyCombo.currentIndex > 0
         }
 
-        QGCLabel {
+        // Capacity of the vehicle's fence
+        ColumnLayout {
             Layout.preferredWidth:  _contentWidth
-            wrapMode:               Text.WordWrap
-            text:                   _preview.fenceCount > 0 ?
-                                        qsTr("Adds %1 fences with %2 points (%3 fence points in total).").arg(_preview.fenceCount).arg(_preview.pointCount).arg(_preview.totalPointCount) :
-                                        qsTr("No new matching zones.")
+            spacing:                0
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                text:               _capacity.text ?? ""
+                font.bold:          true
+            }
+
+            ProgressBar {
+                Layout.fillWidth:   true
+                from:               0
+                to:                 Math.max(_capacity.maxItems ?? 0, 1)
+                value:              _capacity.usedItems ?? 0
+                visible:            (_capacity.maxItems ?? 0) > 0
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                text:               (_capacity.note ?? "") + ((_capacity.keptItems ?? 0) > 0 ? " " + qsTr("Drawn fences and the breach return point take %1 points.").arg(_capacity.keptItems) : "")
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                color:              qgcPal.warningText
+                text:               _capacity.warning ?? ""
+                visible:            text !== ""
+            }
         }
 
         QGCLabel {
+            text:       _selected.length > 0 ? qsTr("Selected zones (%1)").arg(_selected.length) : qsTr("No zones selected")
+            font.bold:  true
+        }
+
+        QGCListView {
             Layout.preferredWidth:  _contentWidth
-            wrapMode:               Text.WordWrap
-            color:                  qgcPal.warningText
-            text:                   _preview.limitWarning
-            visible:                text !== ""
+            Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 12)
+            clip:                   true
+            spacing:                ScreenTools.defaultFontPixelHeight / 4
+            model:                  _selected
+            visible:                _selected.length > 0
+            delegate:               choiceDelegate
+        }
+
+        QGCLabel {
+            text:       qsTr("Left out (%1)").arg(_leftOut.length)
+            font.bold:  true
+            visible:    _leftOut.length > 0
+        }
+
+        QGCListView {
+            Layout.preferredWidth:  _contentWidth
+            Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 8)
+            clip:                   true
+            spacing:                ScreenTools.defaultFontPixelHeight / 4
+            model:                  _leftOut
+            visible:                _leftOut.length > 0
+            delegate:               choiceDelegate
+        }
+
+        RowLayout {
+            Layout.preferredWidth:  _contentWidth
+            spacing:                _margin
+
+            QGCButton {
+                text:       qsTr("Upload to Vehicle")
+                enabled:    importer.canUpload && !control._uploading && _selected.length > 0
+                onClicked: {
+                    if (selectionTimer.running) {
+                        selectionTimer.stop()
+                        control._updateSelection()
+                    }
+                    importer.uploadToVehicle()
+                }
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                text:               importer.canUpload ? qsTr("Adds the fences to the plan and uploads the plan's fence, then reads it back to verify it.") : qsTr("Connect a vehicle supporting fences to upload.")
+                font.pointSize:     ScreenTools.smallFontPointSize
+                visible:            importer.uploadState === GeoZoneFenceImporter.UploadIdle
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                text:               importer.uploadMessage
+                textFormat:         Text.PlainText
+                visible:            importer.uploadState !== GeoZoneFenceImporter.UploadIdle
+                color:              (importer.uploadState === GeoZoneFenceImporter.UploadFailed || importer.uploadState === GeoZoneFenceImporter.UploadMismatch) ? qgcPal.warningText : qgcPal.text
+            }
         }
     }
 }
