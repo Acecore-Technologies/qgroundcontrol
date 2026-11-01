@@ -12,6 +12,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneParserTest.h
         GeoZonePlanningTest.cc
         GeoZonePlanningTest.h
+        GeoZoneReturnTest.cc
+        GeoZoneReturnTest.h
         GeoZoneTestBase.h
         GeoZoneTestHelpers.h
 )
@@ -34,13 +36,15 @@ qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_test_resources"
     FILES ${GEOZONE_TEST_DATA}
 )
 
-# The tests of the parsers and the geometry also run headless, linked with the GeoZoneCore library only
+# The tests of the parsers, the geometry and the return model also run headless, linked with the GeoZoneCore library only
 qt_add_executable(GeoZoneCoreTest
     GeoZoneCoreTestMain.cc
     GeoZoneGeometryTest.cc
     GeoZoneGeometryTest.h
     GeoZoneParserTest.cc
     GeoZoneParserTest.h
+    GeoZoneReturnTest.cc
+    GeoZoneReturnTest.h
     GeoZoneTestBase.h
     GeoZoneTestHelpers.h
 )

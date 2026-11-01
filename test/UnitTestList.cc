@@ -48,6 +48,7 @@
 #include "GeoZoneMonitorTest.h"
 #include "GeoZoneParserTest.h"
 #include "GeoZonePlanningTest.h"
+#include "GeoZoneReturnTest.h"
 
 // GPS
 #include "GpsTest.h"
@@ -161,6 +162,7 @@ int runTests(bool stress, QStringView unitTestOptions)
     UT_REGISTER_TEST(GeoZoneMonitorTest)
     UT_REGISTER_TEST(GeoZoneParserTest)
     UT_REGISTER_TEST(GeoZonePlanningTest)
+    UT_REGISTER_TEST(GeoZoneReturnTest)
 
     // GPS
     // UT_REGISTER_TEST(GpsTest)

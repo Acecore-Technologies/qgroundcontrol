@@ -71,6 +71,7 @@ add_qgc_test(GeoZoneManagerTest)
 add_qgc_test(GeoZoneMonitorTest)
 add_qgc_test(GeoZoneParserTest)
 add_qgc_test(GeoZonePlanningTest)
+add_qgc_test(GeoZoneReturnTest)
 
 add_subdirectory(GPS)
 add_qgc_test(GpsTest)
