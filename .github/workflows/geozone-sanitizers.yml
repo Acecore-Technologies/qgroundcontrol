@@ -88,9 +88,18 @@ jobs:
         run: |
           set -o pipefail
           # GeoZoneFlightTest is not run: MockLink copies short strings into fixed size MAVLink fields, which
-          # AddressSanitizer reports as overflows
-          ./Debug/QGroundControl --unittest:GeoZoneTest 2>&1 | tee GeoZoneTest.log
-          # Undefined behavior elsewhere in QGroundControl is reported but only fails the job in geozone code
-          if grep -h "src/GeoZone/.*runtime error" GeoZoneTest.log; then
-            exit 1
-          fi
+          # AddressSanitizer reports as overflows. The test runner only runs a test whose name matches exactly.
+          status=0
+          for test in GeoZoneParserTest GeoZoneGeometryTest GeoZoneManagerTest GeoZonePlanningTest GeoZoneMonitorTest; do
+            ./Debug/QGroundControl --unittest:$test 2>&1 | tee $test.log || status=1
+            # A test which didn't run, like after a rename, reports no totals
+            if ! grep -q "^Totals: .*[1-9][0-9]* passed, 0 failed" $test.log; then
+              echo "::error::$test did not pass"
+              status=1
+            fi
+            # Undefined behavior elsewhere in QGroundControl is reported but only fails the job in geozone code
+            if grep -h "src/GeoZone/.*runtime error" $test.log; then
+              status=1
+            fi
+          done
+          exit $status
