@@ -625,7 +625,8 @@ void GeoZoneManagerTest::_testFeedCancellation()
     QVERIFY(storageDir.isValid());
     const QDir storage(storageDir.path());
     const QDir downloads(storage.filePath(QStringLiteral("downloads")));
-    const auto waitPastResponses = []() { QTest::qWait(500); };
+    // Until each request was answered or abandoned, so that no delayed response is still to come
+    const auto waitPastResponses = [&server]() { return QTest::qWaitFor([&server]() { return server.settled(); }, 10000); };
 
     GeoZoneManager manager(storageDir.path());
     QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
@@ -642,7 +643,8 @@ void GeoZoneManagerTest::_testFeedCancellation()
     QVERIFY(manager.busy());
     manager.removeSource(0);
     QVERIFY(!manager.busy());
-    waitPastResponses();
+    QVERIFY(waitPastResponses());
+    QCOMPARE(server.abandonedCount, 1);
     QCOMPARE(manager.sources()->count(), 0);
     QCOMPARE(manager.zoneCount(), 0);
     QCOMPARE(addedSpy.count(), 1);
@@ -657,7 +659,8 @@ void GeoZoneManagerTest::_testFeedCancellation()
     manager.addUrl(url);
     QVERIFY(addedSpy.wait(10000));
     QTRY_VERIFY(!manager.busy());
-    waitPastResponses();
+    QVERIFY(waitPastResponses());
+    QCOMPARE(server.abandonedCount, 2);
     QCOMPARE(addedSpy.count(), 2);
     QCOMPARE(manager.sources()->count(), 1);
     QCOMPARE(manager.zoneCount(), 3);
@@ -673,7 +676,8 @@ void GeoZoneManagerTest::_testFeedCancellation()
         closing.addUrl(url);
         QTRY_COMPARE(server.requestCount, requests + 1);
     }
-    waitPastResponses();
+    QVERIFY(waitPastResponses());
+    QCOMPARE(server.abandonedCount, 3);
     QVERIFY(QDir(closingDir.path()).entryList({ QStringLiteral("*.json") }, QDir::Files).isEmpty());
 
     // A load canceled before it runs neither parses nor stores the download

@@ -66,6 +66,7 @@
 #include <QtNetwork/QTcpSocket>
 #endif
 #include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -165,6 +166,19 @@ private:
     const GeoZoneEnvironment::Hooks _saved;
     const std::shared_ptr<State> _state = std::make_shared<State>();
 };
+
+/// Waits for the evaluations running on the global thread pool, then delivers the results they posted, so that a test
+/// can check that outdated results are dropped without waiting for a fixed time
+/// @return false when they didn't finish within the timeout
+inline bool _settleWorkers(int timeoutMSecs = 10000)
+{
+    if (!QThreadPool::globalInstance()->waitForDone(timeoutMSecs)) {
+        return false;
+    }
+    QCoreApplication::sendPostedEvents();
+    QCoreApplication::processEvents();
+    return true;
+}
 
 inline GeoZoneParser::Result _parseResource(const QString &name)
 {
@@ -292,7 +306,8 @@ inline QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
 
 #ifndef GEOZONE_CORE_TEST
 /// Answers requests by path: /ok with the ED-318 test file, /missing 404, /broken 500, /empty an empty 200 and
-/// /hang never. Counts the requests and keeps them with their headers and bodies.
+/// /hang never. Counts the requests and keeps them with their headers and bodies, and counts those answered and those
+/// the client abandoned by closing the connection first, like aborted downloads.
 class TestFeedServer : public QTcpServer
 {
 public:
@@ -315,6 +330,7 @@ public:
                         return;
                     }
                     requestCount++;
+                    socket->setProperty("counted", true);
                     requests.append(request);
                     const QByteArray path = request.split(' ').value(1);
                     requestedPaths.append(path);
@@ -324,7 +340,12 @@ public:
                         _respond(socket, path, request);
                     }
                 });
-                (void) connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+                (void) connect(socket, &QTcpSocket::disconnected, socket, [this, socket]() {
+                    if (socket->property("counted").toBool() && !socket->property("answered").toBool()) {
+                        abandonedCount++;
+                    }
+                    socket->deleteLater();
+                });
             }
         });
     }
@@ -344,8 +365,14 @@ public:
     }
     static QByteArray requestBody(const QByteArray &request) { return request.mid(request.indexOf("\r\n\r\n") + 4); }
 
+    /// @return true when each request was answered or abandoned, so that no response is still to come, like those
+    ///         delayed for aborted downloads
+    bool settled() const { return (answeredCount + abandonedCount) >= requestCount; }
+
     QByteArray body;
     int requestCount = 0;
+    int answeredCount = 0;
+    int abandonedCount = 0;                 ///< Requests whose connection the client closed before the answer
     QByteArray okPathStatus = "200 OK";     ///< Status of /ok, to make a feed fail later
     QHash<QByteArray, QByteArray> files;    ///< Content served by path, with or without the query
     QHash<QByteArray, QByteArray> headers;  ///< Further response headers by path, each ending with CRLF
@@ -375,8 +402,7 @@ private:
             extraHeaders += "ETag: " + etag + "\r\n";
             // Header names are case insensitive, Qt sends them in lower case
             if (request.toLower().contains("if-none-match: " + etag.toLower())) {
-                (void) socket->write("HTTP/1.1 304 Not Modified\r\n" + extraHeaders + "Content-Length: 0\r\nConnection: close\r\n\r\n");
-                socket->disconnectFromHost();
+                _answer(socket, "HTTP/1.1 304 Not Modified\r\n" + extraHeaders + "Content-Length: 0\r\nConnection: close\r\n\r\n");
                 return;
             }
         }
@@ -395,10 +421,17 @@ private:
         _write(socket, status, content, extraHeaders);
     }
 
-    static void _write(QTcpSocket *socket, const QByteArray &status, const QByteArray &content, const QByteArray &extraHeaders)
+    void _write(QTcpSocket *socket, const QByteArray &status, const QByteArray &content, const QByteArray &extraHeaders)
     {
-        (void) socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\n" + extraHeaders + "Content-Length: " +
-                             QByteArray::number(content.size()) + "\r\n\r\n" + content);
+        _answer(socket, "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\n" + extraHeaders + "Content-Length: " +
+                            QByteArray::number(content.size()) + "\r\n\r\n" + content);
+    }
+
+    void _answer(QTcpSocket *socket, const QByteArray &response)
+    {
+        answeredCount++;
+        socket->setProperty("answered", true);
+        (void) socket->write(response);
         socket->disconnectFromHost();
     }
 };

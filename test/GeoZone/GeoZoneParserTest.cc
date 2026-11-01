@@ -440,8 +440,10 @@ void GeoZoneParserTest::_testParseED269()
     QCOMPARE(classified.applicability[0].schedule[0].utcOffsetSecs, 0);
     ZoneOwner owner;
     QCOMPARE(owner.add(classified)->regulationExemptionText(), QStringLiteral("Exemptions possible"));
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 11, 1), QTime(12, 0)));
     GeoZoneSource source(QStringLiteral("zones.json"), QString());
-    source.setResult(result, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    source.setResult(result, environment.now(), environment.now());
     QVERIFY(source.warningText().contains(QStringLiteral("%1 (2 zone").arg(unitIssue)));
 }
 
@@ -540,7 +542,9 @@ void GeoZoneParserTest::_testParseFaaTfr()
     // Live restrictions are refreshed more often than other feeds
     GeoZoneSource source(QStringLiteral("https://tfr.faa.gov/x"), QStringLiteral("https://tfr.faa.gov/x"));
     QVERIFY2(GeoZoneParser::parseFile(QStringLiteral(":/unittest/faa_tfr_test.json"), result, errorString), qPrintable(errorString));
-    const QDateTime now = QDateTime::currentDateTimeUtc();
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 11, 1), QTime(12, 0)));
+    const QDateTime now = environment.now();
     source.setResult(result, now, now);
     const GeoZoneRefreshScheduler scheduler;
     QCOMPARE(scheduler.refreshIntervalSecs(source), 15 * 60);
@@ -629,11 +633,13 @@ void GeoZoneParserTest::_testParseNationalFormats()
     const QGeoCoordinate inside(48.81, 2.41);
     QVERIFY(!limited.contains(GeoZone::Position{ inside, 340, 300 }));
     QVERIFY(limited.contains(GeoZone::Position{ inside, 360, 300 }));
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 11, 1), QTime(12, 0)));
     GeoZoneSource source(QStringLiteral("france"), QStringLiteral("https://data.geopf.fr/wfs"));
-    source.setResult(france, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    source.setResult(france, environment.now(), environment.now());
     QVERIFY(source.warningText().contains(QStringLiteral("8")));
     GeoZoneSource areaSource(QStringLiteral("area"), QStringLiteral("https://data.geopf.fr/wfs/ows?SERVICE=WFS&BBOX=2.25,48.8,2.45,48.9,EPSG:4326"));
-    areaSource.setResult(france, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    areaSource.setResult(france, environment.now(), environment.now());
     QCOMPARE(areaSource.name(), QStringLiteral("UAS restrictions (France), area around 48.85, 2.35"));
 
     // UK flight restriction zones in AIXM 5.1: arcs and geodesic strings, a circle and a danger area

@@ -919,8 +919,7 @@ void GeoZonePlanningTest::_testMissionControllerSwitch()
     QVERIFY(profile.bands().isEmpty());
     QCOMPARE(crossedSpy.count(), 1);
     QCOMPARE(bandsSpy.count(), 1);
-    QVERIFY(QThreadPool::globalInstance()->waitForDone(10000));
-    QTest::qWait(100);
+    QVERIFY(_settleWorkers());
     QVERIFY(check.crossedZones().isEmpty());
     QVERIFY(profile.bands().isEmpty());
     QCOMPARE(crossedSpy.count(), 1);
@@ -2713,7 +2712,7 @@ void GeoZonePlanningTest::_testRoutePlannerWorker()
     planner.startUpdate();
     QTRY_VERIFY(!planner.busy());
     QCOMPARE(planner.suggestions(), synchronous);
-    QTest::qWait(200);
+    QVERIFY(_settleWorkers());
     QCOMPARE(suggestionsSpy.count(), 2);
 
     // Cancelled, nothing comes later
@@ -2722,7 +2721,7 @@ void GeoZonePlanningTest::_testRoutePlannerWorker()
     QVERIFY(!planner.busy());
     QVERIFY(planner.suggestions().isEmpty());
     QVERIFY(planner.statusText().contains(QStringLiteral("cancelled")));
-    QTest::qWait(300);
+    QVERIFY(_settleWorkers());
     QVERIFY(planner.suggestions().isEmpty());
 
     // While active, the suggestions follow the settings

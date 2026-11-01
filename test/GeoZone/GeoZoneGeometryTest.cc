@@ -175,8 +175,10 @@ void GeoZoneGeometryTest::_testIsActiveDuring()
     QVERIFY(!night.isActiveDuring(_utc(friday.addDays(3), QTime(1, 1)), _utc(friday.addDays(6), QTime(21, 0))));
 
     // The catalog filters zones by the activity window
+    ScopedEnvironment environment;
+    environment.setNow(_utc(monday, QTime(12, 0)));
     GeoZoneSource source(QStringLiteral("ed269_test.json"), QString());
-    source.setResult(ed269, QDateTime::currentDateTimeUtc(), QDateTime::currentDateTimeUtc());
+    source.setResult(ed269, environment.now(), environment.now());
     GeoZoneCatalog catalog;
     catalog.rebuild({ &source });
     const GeoZonePolicy all({ GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown });
@@ -1632,8 +1634,9 @@ void GeoZoneGeometryTest::_testConcurrentQueries()
             return ok;
         }));
     }
+    const QDateTime now = _utc(QDate(2027, 1, 1), QTime(12, 0));
     for (int i = 0; i < 200; i++) {
-        (void) zone->updateActive(QDateTime::currentDateTimeUtc());
+        (void) zone->updateActive(now.addSecs(i));
     }
     for (QFuture<bool> &future : futures) {
         QVERIFY(future.result());
