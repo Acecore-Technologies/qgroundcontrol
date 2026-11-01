@@ -310,6 +310,8 @@ ColumnLayout {
         readonly property var   _template:  serviceTemplateCombo.currentIndex < _templates.length ? _templates[serviceTemplateCombo.currentIndex] : null
         readonly property var   _authTypes: [ "none", "apiKeyHeader", "apiKeyQuery", "bearer", "basic", "oauth2ClientCredentials" ]
         readonly property int   _auth:      authCombo.currentIndex
+        // Bindings follow the fields serviceMap reads
+        readonly property var   _otherOrigins: visible ? _geoZoneManager.serviceOtherOrigins(serviceUrlField.text, serviceMap()) : []
 
         function applyTemplate() {
             var service = _template ? _template.service : {}
@@ -451,13 +453,33 @@ ColumnLayout {
             text:   qsTr("Download the zones around the mission and the vehicle")
         }
 
+        // The client secret or the area of interest would go to another server than the feed's
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            color:              qgcPal.warningText
+            text:               qsTr("The token or SHA-256 address is on another server than the feed: %1. It receives the client secret or the area of interest.")
+                                    .arg(serviceEntry._otherOrigins.join(", "))
+            textFormat:         Text.PlainText
+            visible:            serviceEntry._otherOrigins.length > 0
+        }
+
+        QGCCheckBox {
+            id:         trustOtherOriginsCheckBox
+            text:       qsTr("I trust these servers")
+            visible:    serviceEntry._otherOrigins.length > 0
+        }
+
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Download")
-            enabled:            serviceUrlField.text.trim() !== "" && (!serviceEntry._template || serviceEntry._template.supported)
+            enabled:            serviceUrlField.text.trim() !== "" && (!serviceEntry._template || serviceEntry._template.supported) &&
+                                (serviceEntry._otherOrigins.length === 0 || trustOtherOriginsCheckBox.checked)
             onClicked: {
-                _geoZoneManager.addService(serviceUrlField.text, serviceEntry.serviceMap(), serviceSecretField.text)
+                _geoZoneManager.addService(serviceUrlField.text, serviceEntry.serviceMap(), serviceSecretField.text, trustOtherOriginsCheckBox.checked)
                 serviceSecretField.text = ""
+                trustOtherOriginsCheckBox.checked = false
                 serviceEntry.visible = false
             }
         }

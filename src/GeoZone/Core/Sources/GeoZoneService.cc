@@ -8,9 +8,11 @@
  ****************************************************************************/
 
 #include "GeoZoneService.h"
+#include "GeoZoneOrigin.h"
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QTimeZone>
 #include <QtCore/QUrl>
 #include <QtCore/QtMath>
 
@@ -54,6 +56,36 @@ QString degrees(double value)
 bool GeoZoneService::isEmpty() const
 {
     return *this == GeoZoneService();
+}
+
+bool GeoZoneService::sameAuthTarget(const GeoZoneService &other) const
+{
+    return (auth == other.auth) && ((auth != Auth::OAuth2ClientCredentials) || (tokenUrl == other.tokenUrl));
+}
+
+QStringList GeoZoneService::otherOrigins(const QString &urlTemplate) const
+{
+    // The templates are filled with any area and time, only the origins are compared
+    const QGeoRectangle area(QGeoCoordinate(1, 0), QGeoCoordinate(0, 1));
+    const QDateTime time = QDateTime::fromSecsSinceEpoch(0, QTimeZone::UTC);
+    const QUrl feedUrl(resolve(urlTemplate, area, time, time));
+    QStringList targets;
+    if ((auth == Auth::OAuth2ClientCredentials) && !tokenUrl.isEmpty()) {
+        targets.append(tokenUrl);
+    }
+    if (!sha256Url.isEmpty()) {
+        targets.append(QString(sha256Url).replace(QStringLiteral("{url}"), urlTemplate));
+    }
+    QStringList origins;
+    for (const QString &target : std::as_const(targets)) {
+        const QUrl url(resolve(target, area, time, time));
+        if (!GeoZoneOrigin::same(url, feedUrl)) {
+            const QString origin = GeoZoneOrigin::name(url);
+            origins.append(origin.isEmpty() ? target : origin);
+        }
+    }
+    origins.removeDuplicates();
+    return origins;
 }
 
 QString GeoZoneService::effectiveResponseMember() const

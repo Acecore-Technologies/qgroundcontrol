@@ -64,6 +64,12 @@ public:
 
     bool isEmpty() const;
     bool needsSecret() const { return auth != Auth::None; }
+    /// @return true when the secret of this service goes where the secret of the other one goes: the same
+    ///         authentication and, for OAuth2, the same token URL. A secret is forgotten when this changes.
+    bool sameAuthTarget(const GeoZoneService &other) const;
+    /// @return Origins, see GeoZoneOrigin, of the token URL and the SHA-256 URL which aren't the origin of the feed's
+    ///         URL template: other servers which would get the client secret or the area of interest
+    QStringList otherOrigins(const QString &urlTemplate) const;
     /// @return responseMember, or the member of the zones in ED-318 replies when the request is an ED-318 POST
     QString effectiveResponseMember() const;
     bool operator==(const GeoZoneService &other) const = default;

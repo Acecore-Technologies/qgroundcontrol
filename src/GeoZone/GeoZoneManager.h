@@ -87,9 +87,17 @@ public:
     /// GeoZoneSourceRepository::addService
     /// @param service Fields of GeoZoneService::toVariantMap
     /// @param secret API key, token, password or client secret, kept in the settings, the one kept when empty
-    Q_INVOKABLE void addService(const QString &url, const QVariantMap &service, const QString &secret)
+    /// @param allowOtherOrigins The user confirmed the other servers of serviceOtherOrigins
+    Q_INVOKABLE void addService(const QString &url, const QVariantMap &service, const QString &secret, bool allowOtherOrigins = false)
     {
-        _repository->addService(url, GeoZoneService::fromVariantMap(service), secret);
+        _repository->addService(url, GeoZoneService::fromVariantMap(service), secret, allowOtherOrigins);
+    }
+
+    /// @return Origins of the token and SHA-256 URLs of the service which aren't the feed's, which the user confirms
+    ///         before addService, see GeoZoneService::otherOrigins
+    Q_INVOKABLE QStringList serviceOtherOrigins(const QString &url, const QVariantMap &service) const
+    {
+        return GeoZoneService::fromVariantMap(service).otherOrigins(url.trimmed());
     }
 
     /// Replaces the secret of the service of a source and downloads it again

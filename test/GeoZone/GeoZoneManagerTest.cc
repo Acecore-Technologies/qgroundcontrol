@@ -92,6 +92,49 @@ QByteArray _directoryContent(const QString &path)
     return content;
 }
 
+/// @return The files of a pack by name
+QHash<QString, QByteArray> _packFiles(const QString &packPath)
+{
+    QHash<QString, QByteArray> files;
+    QFile pack(packPath);
+    if (pack.open(QIODevice::ReadOnly)) {
+        QString zipError;
+        for (const GeoZoneZip::File &file : GeoZoneZip::files(pack.readAll(), { QStringLiteral(".json"), QStringLiteral(".xml"), QStringLiteral(".zip") }, GeoZonePack::maxBytes, zipError)) {
+            files.insert(file.name, file.data);
+        }
+    }
+    return files;
+}
+
+/// Writes a pack with the files of another whose sources in the manifest are edited, like a pack made elsewhere
+bool _rewritePack(const QString &packPath, const QString &copyPath, const std::function<void(QJsonObject &source)> &edit)
+{
+    const QHash<QString, QByteArray> files = _packFiles(packPath);
+    QFile copy(copyPath);
+    if (files.isEmpty() || !copy.open(QIODevice::WriteOnly)) {
+        return false;
+    }
+    GeoZonePack::ZipWriter writer(&copy);
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        QByteArray data = it.value();
+        if (it.key() == QStringLiteral("manifest.json")) {
+            QJsonObject manifest = QJsonDocument::fromJson(data).object();
+            QJsonArray sources;
+            for (const QJsonValue &value : manifest.value(QStringLiteral("sources")).toArray()) {
+                QJsonObject source = value.toObject();
+                edit(source);
+                sources.append(source);
+            }
+            manifest.insert(QStringLiteral("sources"), sources);
+            data = QJsonDocument(manifest).toJson();
+        }
+        if (!writer.add(it.key(), data)) {
+            return false;
+        }
+    }
+    return writer.finish();
+}
+
 } // namespace
 
 void GeoZoneManagerTest::_testManagerLoadPersistClear()
@@ -1888,6 +1931,139 @@ void GeoZoneManagerTest::_testOfflinePack()
     QVERIFY(!other.importPack(fileName));
     QVERIFY(otherSpy.last()[1].toString().startsWith(QStringLiteral("The geozone pack could not be read.")));
     QCOMPARE(QDir(QDir(otherDir.path()).filePath(QStringLiteral("downloads"))).entryList(QDir::Files).count(), 0);
+}
+
+void GeoZoneManagerTest::_testPackServiceTrust()
+{
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    TestFeedServer hostile;
+    QVERIFY(server.listen(QHostAddress::LocalHost) && hostile.listen(QHostAddress::LocalHost));
+    const QByteArray clientCredentials = "Basic " + QByteArray("client:client-s3cret").toBase64();
+    int tokenRequests = 0;
+    server.handler = [&](const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &) {
+        const QByteArray path = request.split(' ').value(1);
+        if (path == "/token") {
+            tokenRequests++;
+            if (TestFeedServer::header(request, "Authorization") != clientCredentials) {
+                status = "401 Unauthorized";
+            } else {
+                content = R"({ "access_token": "token-1", "token_type": "Bearer", "expires_in": 3600 })";
+            }
+            return true;
+        }
+        if (path == "/zones") {
+            if (TestFeedServer::header(request, "Authorization") != "Bearer token-1") {
+                status = "401 Unauthorized";
+            } else {
+                content = server.body;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    const QTemporaryDir storageDir;
+    const QTemporaryDir otherDir;
+    const QTemporaryDir packDir;
+    QVERIFY(storageDir.isValid() && otherDir.isValid() && packDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    service.tokenUrl = server.url(QStringLiteral("/token"));
+    service.user = QStringLiteral("client");
+    const QString url = server.url(QStringLiteral("/zones"));
+
+    // A token URL on another server is only used once the user confirmed it
+    GeoZoneService elsewhere = service;
+    elsewhere.tokenUrl = hostile.url(QStringLiteral("/token"));
+    QVERIFY(manager.serviceOtherOrigins(url, service.toVariantMap()).isEmpty());
+    QCOMPARE(manager.serviceOtherOrigins(url, elsewhere.toVariantMap()), QStringList{ hostile.url(QString()) });
+    manager.addService(url, elsewhere.toVariantMap(), QStringLiteral("client-s3cret"));
+    QCOMPARE(failedSpy.count(), 1);
+    QVERIFY2(failedSpy.last()[1].toString().contains(hostile.url(QString())), qPrintable(failedSpy.last()[1].toString()));
+    QVERIFY(manager.repository()->credentials().secret(url).isEmpty());
+
+    manager.addService(url, service.toVariantMap(), QStringLiteral("client-s3cret"));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    GeoZoneSource *const feed = manager.source(url);
+    QVERIFY(feed);
+    QCOMPARE(tokenRequests, 1);
+    const QString packPath = packDir.filePath(QStringLiteral("feed.zip"));
+    QVERIFY(manager.exportPack(packPath));
+
+    // A pack redirecting the secret of a source and the area of interest to another server, with headers of its own
+    const QString hostilePackPath = packDir.filePath(QStringLiteral("hostile.zip"));
+    QVERIFY(_rewritePack(packPath, hostilePackPath, [&hostile](QJsonObject &source) {
+        QJsonObject packService = source.value(QStringLiteral("service")).toObject();
+        packService.insert(QStringLiteral("tokenUrl"), hostile.url(QStringLiteral("/token")));
+        packService.insert(QStringLiteral("sha256Url"), hostile.url(QStringLiteral("/hash?of={url}")));
+        packService.insert(QStringLiteral("headers"), QJsonObject{ { QStringLiteral("X-Pack"), QStringLiteral("injected") } });
+        source.insert(QStringLiteral("service"), packService);
+    }));
+
+    // updates the zones of the source, which keeps its service and secret
+    QVERIFY(manager.importPack(hostilePackPath));
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY(feed->imported());
+    QCOMPARE(feed->service(), service);
+    QCOMPARE(manager.repository()->credentials().secret(url), QStringLiteral("client-s3cret"));
+    environment.addSecs(2 * 3600);
+    manager.refreshFeeds();
+    QTRY_VERIFY(!manager.busy());
+    QVERIFY2(feed->errorString().isEmpty(), qPrintable(feed->errorString()));
+    QCOMPARE(tokenRequests, 2);
+    for (const QByteArray &request : std::as_const(server.requests)) {
+        QVERIFY(TestFeedServer::header(request, "X-Pack").isEmpty());
+    }
+
+    // The secret entered for a token URL is forgotten when the user changes it
+    GeoZoneService moved = service;
+    moved.tokenUrl = server.url(QStringLiteral("/token2"));
+    const qsizetype failures = failedSpy.count();
+    manager.addService(url, moved.toVariantMap(), QString());
+    QTRY_COMPARE(failedSpy.count(), failures + 1);
+    QVERIFY(feed->credentialsMissing());
+    QVERIFY(manager.repository()->credentials().secret(url).isEmpty());
+    QCOMPARE(tokenRequests, 2);
+
+    // A new source of a pack doesn't take a service sending requests to another server
+    GeoZoneCredentials().setSecret(url, QStringLiteral("client-s3cret"));
+    GeoZoneManager other(otherDir.path());
+    QSignalSpy otherSpy(&other, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(other.importPack(hostilePackPath));
+    QVERIFY(!otherSpy.last()[0].toBool());
+    QVERIFY2(otherSpy.last()[1].toString().contains(hostile.url(QString())), qPrintable(otherSpy.last()[1].toString()));
+    QCOMPARE(other.sources()->count(), 0);
+    QCOMPARE(QDir(QDir(otherDir.path()).filePath(QStringLiteral("downloads"))).entryList(QDir::Files).count(), 0);
+
+    // nor the headers of the pack, nor the secret kept for its URL, which the user enters again
+    const QString headersPackPath = packDir.filePath(QStringLiteral("headers.zip"));
+    QVERIFY(_rewritePack(packPath, headersPackPath, [](QJsonObject &source) {
+        QJsonObject packService = source.value(QStringLiteral("service")).toObject();
+        packService.insert(QStringLiteral("headers"), QJsonObject{ { QStringLiteral("X-Pack"), QStringLiteral("injected") } });
+        source.insert(QStringLiteral("service"), packService);
+    }));
+    QVERIFY(other.importPack(headersPackPath));
+    QVERIFY(otherSpy.last()[0].toBool());
+    QTRY_VERIFY(!other.busy());
+    GeoZoneSource *const copy = other.source(url);
+    QVERIFY(copy);
+    QVERIFY(copy->service().headers.isEmpty());
+    QCOMPARE(copy->service().tokenUrl, service.tokenUrl);
+    QVERIFY(copy->credentialsMissing());
+    QVERIFY(GeoZoneCredentials().secret(url).isEmpty());
+    other.setCredentials(url, QStringLiteral("client-s3cret"));
+    QTRY_VERIFY(!other.busy());
+    QVERIFY2(copy->errorString().isEmpty(), qPrintable(copy->errorString()));
+    QCOMPARE(tokenRequests, 3);
+
+    QVERIFY(hostile.requests.isEmpty());
+    other.clear();
+    manager.clear();
 }
 
 void GeoZoneManagerTest::_testManagerStartup()

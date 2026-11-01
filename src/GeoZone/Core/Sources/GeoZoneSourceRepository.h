@@ -54,9 +54,12 @@ public:
     /// See GeoZoneManager::addUrl
     void addUrl(const QString &url);
     /// Adds a feed requested from a service taking credentials, a POST query or the area of interest, replacing the
-    /// source with the same URL. The URL may be a template, see GeoZoneService.
+    /// source with the same URL. The URL may be a template, see GeoZoneService. The secret kept for the source is
+    /// forgotten when the service sends it elsewhere than before, see GeoZoneService::sameAuthTarget.
     /// @param secret Kept by credentials(), the one kept is used when empty
-    void addService(const QString &url, const GeoZoneService &service, const QString &secret);
+    /// @param allowOtherOrigins The user confirmed that the token or SHA-256 URLs may be on another server than the
+    ///                          feed, see GeoZoneService::otherOrigins. The service is refused otherwise.
+    void addService(const QString &url, const GeoZoneService &service, const QString &secret, bool allowOtherOrigins = false);
     /// Replaces the secret of the service of a source and downloads it again
     void setSecret(const QString &key, const QString &secret);
     /// Keeps the secrets of the services, in the application settings by default
@@ -93,7 +96,10 @@ public:
     /// @return false when it can't be written, errorString tells why
     bool exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const;
     /// Imports the sources of an offline pack, replacing those with the same keys. They are loaded in the background,
-    /// keep their dates, validators and provenance, marked as imported, and are refreshed like other sources.
+    /// keep their dates, validators and provenance, marked as imported, and are refreshed like other sources. Sources
+    /// already here keep their service and secret. New sources take the service of the pack without its custom
+    /// headers and without a secret; those whose service sends requests to another server than their feed are left
+    /// out.
     /// @return Number of sources imported, negative when the pack can't be read. errorString tells why, or which
     ///         sources were left out.
     int importPack(const QString &packPath, QString &errorString);
@@ -165,7 +171,9 @@ private:
     void _reportStorageError(const QString &message);
     /// Forgets the service of a source with its secret and token
     void _forgetService(const QString &key);
+    /// Sets the service of a source, forgetting its secret and token when the service sends them elsewhere
     void _setService(const QString &key, const GeoZoneService &service);
+    void _updateCredentialsMissing(const QString &key);
     /// @return Area to download a feed taking the area of interest for: the area it was downloaded for while it
     ///         covers the area of interest, otherwise the area of interest with the margin
     QGeoRectangle _requestArea(const QString &key) const;

@@ -124,7 +124,7 @@ void GeoZoneSourceRepository::addUrl(const QString &url)
     _download(trimmedUrl, GeoZoneLoader::Request::Add);
 }
 
-void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneService &service, const QString &secret)
+void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneService &service, const QString &secret, bool allowOtherOrigins)
 {
     const QString trimmedUrl = url.trimmed();
     const QUrl parsedUrl(trimmedUrl);
@@ -136,11 +136,18 @@ void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneServic
     if (GeoZoneService::hasAreaPlaceholders(trimmedUrl)) {
         feedService.areaOfInterest = true;
     }
+    // The client secret and the area of interest only go to another server the user trusts
+    if (const QStringList otherOrigins = feedService.otherOrigins(trimmedUrl); !otherOrigins.isEmpty() && !allowOtherOrigins) {
+        emit loadFailed(trimmedUrl, tr("Geozone download from %1 failed. The service sends requests to %2, another server than the feed's, which was not confirmed.")
+                                        .arg(trimmedUrl, otherOrigins.join(QStringLiteral(", "))));
+        return;
+    }
+    _setService(trimmedUrl, feedService);
     if (!secret.isEmpty()) {
         _credentials.setSecret(trimmedUrl, secret);
+        _updateCredentialsMissing(trimmedUrl);
     }
     _tokens.remove(trimmedUrl);
-    _setService(trimmedUrl, feedService);
     _download(trimmedUrl, GeoZoneLoader::Request::Add);
 }
 
@@ -158,6 +165,11 @@ void GeoZoneSourceRepository::setSecret(const QString &key, const QString &secre
 
 void GeoZoneSourceRepository::_setService(const QString &key, const GeoZoneService &service)
 {
+    // A secret only goes where it was entered for
+    if (const auto previous = _services.constFind(key); (previous == _services.cend()) || !previous->sameAuthTarget(service)) {
+        _credentials.remove(key);
+        (void) _tokens.remove(key);
+    }
     if (service.isEmpty()) {
         (void) _services.remove(key);
     } else {
@@ -165,10 +177,17 @@ void GeoZoneSourceRepository::_setService(const QString &key, const GeoZoneServi
     }
     if (GeoZoneSource *const existing = source(key)) {
         existing->setService(service);
-        existing->setCredentialsMissing(service.needsSecret() && _credentials.secret(key).isEmpty());
     }
+    _updateCredentialsMissing(key);
     if (_index.setService(key, service.isEmpty() ? QJsonObject() : service.toJson())) {
         _saveIndex();
+    }
+}
+
+void GeoZoneSourceRepository::_updateCredentialsMissing(const QString &key)
+{
+    if (GeoZoneSource *const existing = source(key)) {
+        existing->setCredentialsMissing(existing->service().needsSecret() && _credentials.secret(key).isEmpty());
     }
 }
 
@@ -977,12 +996,30 @@ int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorS
 
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     const QString packName = QFileInfo(packPath).fileName();
+    QStringList errors = contents.errors;
+    int count = 0;
     for (const GeoZonePack::Source &packSource : contents.sources) {
         const QJsonObject &manifest = packSource.manifest;
         const auto date = [&manifest](const char *name) { return QDateTime::fromString(manifest.value(QLatin1String(name)).toString(), Qt::ISODate); };
         GeoZoneLoader::Job job;
         job.key = manifest.value(QStringLiteral("key")).toString();
         job.url = manifest.value(QStringLiteral("url")).toString();
+
+        // Sources already here keep their service, so that a pack can't send their secret elsewhere. The service of
+        // a new source is the pack's without its custom headers, its secret is entered again.
+        if (!source(job.key) && !_services.contains(job.key)) {
+            const QJsonValue serviceValue = manifest.value(QStringLiteral("service"));
+            GeoZoneService service = (job.url.isEmpty() || !serviceValue.isObject()) ? GeoZoneService() : GeoZoneService::fromJson(serviceValue.toObject());
+            service.headers.clear();
+            if (const QStringList otherOrigins = service.otherOrigins(job.url); !otherOrigins.isEmpty()) {
+                (void) QFile::remove(packSource.filePath);
+                errors.append(tr("%1: its service sends requests to %2, another server than the feed's. Add the service again to trust it.")
+                                  .arg(manifest.value(QStringLiteral("name")).toString(), otherOrigins.join(QStringLiteral(", "))));
+                continue;
+            }
+            _setService(job.key, service);
+        }
+
         job.sourcePath = packSource.filePath;
         // Adopted as the stored copy like a download
         job.downloaded = true;
@@ -1004,15 +1041,13 @@ int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorS
         job.provenance.packName = packName;
         job.provenance.importedAt = now;
         job.request = GeoZoneLoader::Request::User;
-        // The secret of a service isn't in the pack, the source shows that it is missing
-        const QJsonValue service = manifest.value(QStringLiteral("service"));
-        _setService(job.key, (job.url.isEmpty() || !service.isObject()) ? GeoZoneService() : GeoZoneService::fromJson(service.toObject()));
         job.cancelToken = _beginOperation(job.key);
         _startLoad(job, LoadMode::Background);
+        count++;
     }
-    qCDebug(GeoZoneSourceLog) << "Importing" << contents.sources.count() << "sources from" << packPath;
-    errorString = contents.errors.join(QLatin1Char('\n'));
-    return static_cast<int>(contents.sources.count());
+    qCDebug(GeoZoneSourceLog) << "Importing" << count << "sources from" << packPath;
+    errorString = errors.join(QLatin1Char('\n'));
+    return count;
 }
 
 void GeoZoneSourceRepository::updateValidity()
