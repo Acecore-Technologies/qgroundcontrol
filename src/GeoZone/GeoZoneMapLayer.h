@@ -17,6 +17,8 @@
 #include <QtPositioning/QGeoShape>
 #include <QtQuick/QQuickItem>
 
+#include <functional>
+
 class GeoZoneMapItem;
 class GeoZoneMapModel;
 class QDeclarativeGeoMap;
@@ -67,6 +69,11 @@ public:
     static Triangulation triangulatePolygon(const QList<QList<QPointF>> &rings);
     /// @return Triangulated circle of the radius in meters, as a polygon following the geodesic circle
     static Triangulation triangulateCircle(const QGeoCoordinate &center, double radius);
+
+    /// Finds the affine transform from Web Mercator to item coordinates of a flat map
+    /// @param toItem Item position of a coordinate on the map, not finite for coordinates it can't project
+    /// @return false when the map can't be projected
+    static bool mercatorTransform(const QGeoCoordinate &center, double zoomLevel, const std::function<QPointF(const QGeoCoordinate&)> &toItem, QTransform &transform);
 
 signals:
     void mapChanged();

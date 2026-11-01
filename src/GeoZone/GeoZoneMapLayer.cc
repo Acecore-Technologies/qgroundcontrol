@@ -187,27 +187,34 @@ bool GeoZoneMapLayer::_mercatorTransform(QTransform &transform) const
     if (!_mapView || (width() <= 0) || (height() <= 0)) {
         return false;
     }
+    const auto toItem = [this](const QGeoCoordinate &coordinate) { return mapFromItem(_mapView, _mapView->fromCoordinate(coordinate, false)); };
+    return mercatorTransform(_mapView->center(), _mapView->zoomLevel(), toItem, transform);
+}
 
+bool GeoZoneMapLayer::mercatorTransform(const QGeoCoordinate &center, double zoomLevel, const std::function<QPointF(const QGeoCoordinate&)> &toItem, QTransform &transform)
+{
     // The map is flat, so mercator coordinates map to the item by an affine transform found from three points
-    const QGeoCoordinate center = _mapView->center();
     if (!center.isValid()) {
         return false;
     }
     const QPointF mercatorCenter = GeoZoneShape::toMercator(center);
-    const double step = 100.0 / GeoZoneShape::mercatorPixels(_mapView->zoomLevel());
-    const QPointF centerPoint = mapFromItem(_mapView, _mapView->fromCoordinate(center, false));
-    const QPointF eastPoint = mapFromItem(_mapView, _mapView->fromCoordinate(GeoZoneShape::fromMercator(mercatorCenter + QPointF(step, 0)), false));
-    const QPointF southPoint = mapFromItem(_mapView, _mapView->fromCoordinate(GeoZoneShape::fromMercator(mercatorCenter + QPointF(0, step)), false));
+    const double step = 100.0 / GeoZoneShape::mercatorPixels(zoomLevel);
+    // The probes stay within the projection, westwards near the antimeridian and northwards near its southern edge
+    const double stepX = ((mercatorCenter.x() + step) < 1.0) ? step : -step;
+    const double stepY = ((mercatorCenter.y() + step) < 1.0) ? step : -step;
+    const QPointF centerPoint = toItem(center);
+    const QPointF eastPoint = toItem(GeoZoneShape::fromMercator(mercatorCenter + QPointF(stepX, 0)));
+    const QPointF southPoint = toItem(GeoZoneShape::fromMercator(mercatorCenter + QPointF(0, stepY)));
     for (const QPointF &point : { centerPoint, eastPoint, southPoint }) {
         if (!std::isfinite(point.x()) || !std::isfinite(point.y())) {
             return false;
         }
     }
 
-    const double m11 = (eastPoint.x() - centerPoint.x()) / step;
-    const double m12 = (eastPoint.y() - centerPoint.y()) / step;
-    const double m21 = (southPoint.x() - centerPoint.x()) / step;
-    const double m22 = (southPoint.y() - centerPoint.y()) / step;
+    const double m11 = (eastPoint.x() - centerPoint.x()) / stepX;
+    const double m12 = (eastPoint.y() - centerPoint.y()) / stepX;
+    const double m21 = (southPoint.x() - centerPoint.x()) / stepY;
+    const double m22 = (southPoint.y() - centerPoint.y()) / stepY;
     transform = QTransform(m11, m12, m21, m22,
                            centerPoint.x() - ((m11 * mercatorCenter.x()) + (m21 * mercatorCenter.y())),
                            centerPoint.y() - ((m12 * mercatorCenter.x()) + (m22 * mercatorCenter.y())));
@@ -218,6 +225,8 @@ void GeoZoneMapLayer::_updateCamera()
 {
     QTransform transform;
     if (!_mercatorTransform(transform)) {
+        // Built again once the map can be projected
+        _rebuildNeeded = true;
         if (!_fillVertices.isEmpty() || !_strokeVertices.isEmpty()) {
             _fillVertices.clear();
             _strokeVertices.clear();
@@ -387,8 +396,9 @@ GeoZoneMapLayer::Triangulation GeoZoneMapLayer::triangulatePolygon(const QList<Q
         return result;
     }
 
-    // The triangulator rounds to 1/32 of a unit, so the shape is scaled to about a million units
-    const double scale = (1 << 20) / extent;
+    // The triangulator rounds to 1/32 of a unit and supports coordinates up to 2^21 / 32, within a few centimeters
+    // for a zone 100 km across
+    const double scale = 65000.0 / extent;
     QPainterPath path;
     path.setFillRule(Qt::OddEvenFill);
     for (const QList<QPointF> &ring : std::as_const(result.rings)) {

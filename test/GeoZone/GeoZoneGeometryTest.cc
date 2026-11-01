@@ -642,4 +642,33 @@ void GeoZoneGeometryTest::_testMapLayerTriangulation()
     QVERIFY(qAbs((area(circle.triangles) / (M_PI * mercatorRadius * mercatorRadius)) - 1) < 0.01);
     QVERIFY(GeoZoneMapLayer::triangulateCircle(center, 0).triangles.isEmpty());
     QVERIFY(GeoZoneMapLayer::triangulatePolygon({ { { 0.5, 0.5 }, { 0.6, 0.6 } } }).triangles.isEmpty());
+
+    // Simplified rings can cross themselves, filled even-odd
+    const QList<QPointF> bowtie = { { 0.5, 0.5 }, { 0.5001, 0.5001 }, { 0.5001, 0.5 }, { 0.5, 0.5001 } };
+    const GeoZoneMapLayer::Triangulation crossed = GeoZoneMapLayer::triangulatePolygon({ bowtie });
+    QVERIFY(qAbs(area(crossed.triangles) - 0.5e-8) < 1e-11);
+    for (const QPointF &vertex : crossed.triangles) {
+        QVERIFY((vertex.x() >= 0.5 - 1e-9) && (vertex.x() <= 0.5001 + 1e-9) && (vertex.y() >= 0.5 - 1e-9) && (vertex.y() <= 0.5001 + 1e-9));
+    }
+
+    // The map transform is found next to the antimeridian, where coordinates east of it can't be projected
+    const QPointF itemCenter(800, 450);
+    for (const QGeoCoordinate &mapCenter : { QGeoCoordinate(47, 179.999), QGeoCoordinate(47, 8), QGeoCoordinate(-85, 8) }) {
+        const double pixels = GeoZoneShape::mercatorPixels(13);
+        const auto toItem = [&mapCenter, &itemCenter, pixels](const QGeoCoordinate &coordinate) {
+            if (!coordinate.isValid()) {
+                return QPointF(qQNaN(), qQNaN());
+            }
+            QPointF offset = GeoZoneShape::toMercator(coordinate) - GeoZoneShape::toMercator(mapCenter);
+            offset.rx() -= std::round(offset.x());
+            return itemCenter + (offset * pixels);
+        };
+        QTransform transform;
+        QVERIFY(GeoZoneMapLayer::mercatorTransform(mapCenter, 13, toItem, transform));
+        const QPointF mapped = transform.map(GeoZoneShape::toMercator(mapCenter.atDistanceAndAzimuth(500, 225)));
+        const QPointF expected = toItem(mapCenter.atDistanceAndAzimuth(500, 225));
+        QVERIFY2((mapped - expected).manhattanLength() < 0.01, qPrintable(QStringLiteral("%1 %2").arg(mapped.x()).arg(expected.x())));
+    }
+    QTransform transform;
+    QVERIFY(!GeoZoneMapLayer::mercatorTransform(QGeoCoordinate(), 13, [](const QGeoCoordinate &) { return QPointF(); }, transform));
 }
