@@ -42,7 +42,8 @@ public:
     static QList<GeoZoneMissionItem> items(MissionController *missionController);
 
     /// @return Where the vehicle can return to in the plan: the planned home, the rally points and the breach return
-    ///         point above it, and the destinations of the mission items
+    ///         point above it, and the destinations of the mission items, see GeoZoneReturnDestinations::fromMission
+    /// @param items Of the mission, see items()
     static GeoZoneReturnModel::Destinations destinations(MissionController *missionController, const QList<GeoZoneMissionItem> &items);
 
     /// see GeoZoneMissionPath::returnParameters

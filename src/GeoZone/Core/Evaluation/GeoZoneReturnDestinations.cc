@@ -24,10 +24,22 @@ GeoZone::Position positionOf(const GeoZone::Position &position)
 
 } // namespace
 
-GeoZoneReturnModel::Destinations GeoZoneReturnDestinations::fromMission(const QList<GeoZoneMissionItem> &items)
+GeoZoneReturnModel::Destinations GeoZoneReturnDestinations::fromMission(const QList<GeoZoneMissionItem> &items, const GeoZone::Position &home,
+                                                                        const QList<GeoZone::Position> &rallyPoints, const GeoZone::Position &breachReturnPoint)
 {
     using Kind = GeoZoneMissionItem::Kind;
     GeoZoneReturnModel::Destinations destinations;
+    if (home.coordinate.isValid()) {
+        destinations.home = positionOf(home);
+    }
+    for (const GeoZone::Position &rallyPoint : rallyPoints) {
+        if (rallyPoint.coordinate.isValid()) {
+            destinations.rallyPoints.append(positionOf(rallyPoint));
+        }
+    }
+    if (breachReturnPoint.coordinate.isValid()) {
+        destinations.breachReturnPoint = positionOf(breachReturnPoint);
+    }
 
     // Returning along the mission in reverse, PX4 lands at home once it reaches a takeoff instead of flying to it, see
     // RtlMissionFastReverse::setActiveMissionItems

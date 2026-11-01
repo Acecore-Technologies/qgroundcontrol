@@ -19,11 +19,16 @@
 class GeoZoneReturnDestinations
 {
 public:
-    /// @return The destinations the mission has: the first waypoint after the takeoff, which PX4 returns to along the
-    ///         mission in reverse before flying home, the
-    ///         landing sequences from their DO_LAND_START or landing pattern, and the positions after an ArduPlane
-    ///         DO_RETURN_PATH_START up to its landing. Home, the rally points and the breach return point are the plan's,
-    ///         left invalid and empty. The coordinates are without altitude, the altitudes those of the items.
-    /// @param items Of the mission after the planned home, in mission order
-    static GeoZoneReturnModel::Destinations fromMission(const QList<GeoZoneMissionItem> &items);
+    /// @return Where the vehicle can return to: home, the rally points and the breach return point of the plan as given,
+    ///         and those the mission has: the first waypoint after the takeoff, which PX4 returns to along the mission
+    ///         in reverse before flying home, the landing sequences from their DO_LAND_START or landing pattern, and the
+    ///         positions after an ArduPlane DO_RETURN_PATH_START up to its landing. The coordinates are without altitude,
+    ///         the altitudes AMSL those given and those of the items. Rally points without coordinate are left out.
+    /// @param items Of the mission after the planned home, in mission order, see GeoZoneMissionReader::items
+    /// @param home Planned home with its ground altitude, invalid without
+    /// @param rallyPoints With their altitudes AMSL, which are above home in the plan
+    /// @param breachReturnPoint Of the fence, with its altitude AMSL, invalid without
+    static GeoZoneReturnModel::Destinations fromMission(const QList<GeoZoneMissionItem> &items, const GeoZone::Position &home = GeoZone::Position(),
+                                                        const QList<GeoZone::Position> &rallyPoints = {},
+                                                        const GeoZone::Position &breachReturnPoint = GeoZone::Position());
 };

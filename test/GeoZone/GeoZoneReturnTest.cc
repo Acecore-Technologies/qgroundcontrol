@@ -640,6 +640,17 @@ void GeoZoneReturnTest::_testMissionDestinations()
     QVERIFY(near(landings.landings[1].entry, position(-1000, 0, 80)));
     QVERIFY(near(landings.landings[1].touchdown, position(-1500, 0, 0)));
     QVERIFY(landings.landings[1].marker.distanceTo(offset(-1000, 0)) < 0.01);
+    // The destinations of the plan are taken as given, without the altitudes of their coordinates
+    const GeoZone::Position rallyPoint{ QGeoCoordinate(offset(0, 1000).latitude(), offset(0, 1000).longitude(), 30), kHomeAltitude + 30 };
+    const GeoZone::Position breachReturnPoint{ offset(0, -1000), kHomeAltitude + 40 };
+    const Model::Destinations plan = GeoZoneReturnDestinations::fromMission(items, position(0, 0, 0), { rallyPoint, GeoZone::Position() }, breachReturnPoint);
+    QVERIFY(near(plan.home, position(0, 0, 0)));
+    QCOMPARE(plan.rallyPoints.count(), 1);
+    QVERIFY(near(plan.rallyPoints[0], position(0, 1000, 30)));
+    QVERIFY(near(plan.breachReturnPoint, position(0, -1000, 40)));
+    QCOMPARE(plan.landings.count(), 1);
+    QVERIFY(near(plan.firstWaypoint, destinations.firstWaypoint));
+
     // A DO_LAND_START without a landing after it isn't a landing sequence
     QVERIFY(GeoZoneReturnDestinations::fromMission({ landStart, item(Kind::Other, 4, position(1500, 0, 40)) }).landings.isEmpty());
 }

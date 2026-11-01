@@ -259,34 +259,26 @@ QList<GeoZoneMissionItem> GeoZoneMissionReader::items(MissionController *mission
 
 GeoZoneReturnModel::Destinations GeoZoneMissionReader::destinations(MissionController *missionController, const QList<GeoZoneMissionItem> &items)
 {
-    GeoZoneReturnModel::Destinations destinations = GeoZoneReturnDestinations::fromMission(items.mid(1));
-    const QGeoCoordinate home = missionController->plannedHomePosition();
-    const double homeAltitude = home.isValid() ? home.altitude() : qQNaN();
-    if (home.isValid()) {
-        destinations.home = GeoZone::Position{ QGeoCoordinate(home.latitude(), home.longitude()), homeAltitude };
-    }
-    const auto positionOf = [](const QGeoCoordinate &coordinate, double altitudeAMSL) {
-        return GeoZone::Position{ coordinate.isValid() ? QGeoCoordinate(coordinate.latitude(), coordinate.longitude()) : QGeoCoordinate(), altitudeAMSL };
-    };
+    const QGeoCoordinate homeCoordinate = missionController->plannedHomePosition();
+    const double homeAltitude = homeCoordinate.isValid() ? homeCoordinate.altitude() : qQNaN();
+    const GeoZone::Position home{ homeCoordinate, homeAltitude };
 
     // Rally points and the breach return point are above home
+    QList<GeoZone::Position> rallyPoints;
+    GeoZone::Position breachReturnPoint;
     if (PlanMasterController *const masterController = missionController->masterController()) {
-        const QmlObjectListModel *const rallyPoints = masterController->rallyPointController()->points();
-        for (int i = 0; i < rallyPoints->count(); i++) {
-            if (const RallyPoint *const rallyPoint = rallyPoints->value<const RallyPoint*>(i)) {
+        const QmlObjectListModel *const points = masterController->rallyPointController()->points();
+        for (int i = 0; i < points->count(); i++) {
+            if (const RallyPoint *const rallyPoint = points->value<const RallyPoint*>(i)) {
                 const QGeoCoordinate coordinate = rallyPoint->coordinate();
-                if (coordinate.isValid()) {
-                    destinations.rallyPoints.append(positionOf(coordinate, homeAltitude + coordinate.altitude()));
-                }
+                rallyPoints.append(GeoZone::Position{ coordinate, homeAltitude + coordinate.altitude() });
             }
         }
         GeoFenceController *const geoFenceController = masterController->geoFenceController();
-        if (geoFenceController->breachReturnPoint().isValid()) {
-            destinations.breachReturnPoint = positionOf(geoFenceController->breachReturnPoint(),
-                                                        homeAltitude + geoFenceController->breachReturnAltitude()->rawValue().toDouble());
-        }
+        breachReturnPoint = GeoZone::Position{ geoFenceController->breachReturnPoint(),
+                                               homeAltitude + geoFenceController->breachReturnAltitude()->rawValue().toDouble() };
     }
-    return destinations;
+    return GeoZoneReturnDestinations::fromMission(items.mid(1), home, rallyPoints, breachReturnPoint);
 }
 
 std::pair<int, int> GeoZoneMissionReader::_setFlightPaths(GeoZoneMissionPath &path, const QList<GeoZoneMissionItem> &items,
