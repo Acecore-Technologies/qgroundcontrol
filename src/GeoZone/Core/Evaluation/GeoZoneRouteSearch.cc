@@ -478,10 +478,12 @@ private:
             _items.append(Item{ index, obstacle.center, obstacle.center });
             _edgeGrid.insertRect(static_cast<int>(_items.count() - 1), obstacle.bounds);
         } else {
+            // Exact near the ends, which must be inside or outside like for the zone
             const GeoZone::Volume &data = obstacle.zone->data().volumes[obstacle.volume];
+            const bool simplify = !obstacle.bounds.contains(_start) && !obstacle.bounds.contains(_end);
             for (qsizetype ringIndex = 0; ringIndex < data.rings.count(); ringIndex++) {
                 QList<QPointF> ring;
-                for (const QPointF &point : _projection.lonLatToLocal((ringIndex == 0) ? _outerRing(obstacle.zone, obstacle.volume) : data.rings[ringIndex])) {
+                for (const QPointF &point : _projection.lonLatToLocal(((ringIndex == 0) && simplify) ? _outerRing(obstacle.zone, obstacle.volume) : data.rings[ringIndex])) {
                     if (ring.isEmpty() || (point != ring.constLast())) {
                         ring.append(point);
                     }
@@ -550,7 +552,8 @@ private:
         }
     }
 
-    /// @return Outer ring of the polygon volume in degrees, simplified outward by a quarter of the margin when detailed
+    /// @return Outer ring of the polygon volume in degrees, simplified outward by a quarter of the margin when detailed,
+    ///         so that it extends up to half the margin beyond the zone
     GeoZone::Ring _outerRing(const GeoZone *zone, int volume)
     {
         const GeoZone::Ring &ring = zone->data().volumes[volume].rings.constFirst();

@@ -1700,23 +1700,33 @@ void GeoZonePlanningTest::_testRouteConcave_data()
     QTest::addColumn<int>("failure");
     QTest::addColumn<int>("minWaypoints");
     QTest::addColumn<double>("maxLength");   ///< Meters, 0 for no limit
+    QTest::addColumn<double>("clearance");   ///< Meters the path keeps from the zone at least
 
     using Failure = GeoZoneRouteSearch::Failure;
     // A notch wider than twice the margin can be entered, the corner of the U's arm is passed at the margin. Convex
     // hulls would block it.
     QTest::newRow("into wide notch") << _uShape(1500, 1500, 600, 1000) << QList<QPointF>() << QPointF(1500, 2500) << QPointF(0, 0)
-                                     << int(Failure::None) << 1 << 3000.0;
+                                     << int(Failure::None) << 1 << 3000.0 << 99.0;
     // A notch narrower than twice the margin is passed around, not through
     QTest::newRow("across narrow notch") << _uShape(1500, 1500, 120, 1000) << QList<QPointF>() << QPointF(-2000, 300) << QPointF(2000, 300)
-                                         << int(Failure::None) << 2 << 5200.0;
+                                         << int(Failure::None) << 2 << 5200.0 << 99.0;
     // Around the closed side of a U opening towards the start, not into the notch
     QTest::newRow("around U") << _uShape(1500, 1500, 600, 1000) << QList<QPointF>() << QPointF(0, 2000) << QPointF(0, -2000)
-                              << int(Failure::None) << 2 << 5200.0;
+                              << int(Failure::None) << 2 << 5200.0 << 99.0;
     // Inside a hole the zone is open, so the leg needs no detour, but it surrounds the hole
-    QTest::newRow("within hole") << _square(2000) << _square(1500) << QPointF(-1000, -1000) << QPointF(1000, 1000) << int(Failure::None) << 0 << 0.0;
-    QTest::newRow("into hole") << _square(2000) << _square(1500) << QPointF(-3000, 0) << QPointF(0, 0) << int(Failure::Enclosed) << 0 << 0.0;
-    QTest::newRow("start inside") << _square(500) << QList<QPointF>() << QPointF(0, 0) << QPointF(2000, 0) << int(Failure::StartInside) << 0 << 0.0;
-    QTest::newRow("end inside") << _square(500) << QList<QPointF>() << QPointF(-2000, 0) << QPointF(100, 100) << int(Failure::EndInside) << 0 << 0.0;
+    QTest::newRow("within hole") << _square(2000) << _square(1500) << QPointF(-1000, -1000) << QPointF(1000, 1000) << int(Failure::None) << 0 << 0.0
+                                 << 99.0;
+    QTest::newRow("into hole") << _square(2000) << _square(1500) << QPointF(-3000, 0) << QPointF(0, 0) << int(Failure::Enclosed) << 0 << 0.0 << 0.0;
+    QTest::newRow("start inside") << _square(500) << QList<QPointF>() << QPointF(0, 0) << QPointF(2000, 0) << int(Failure::StartInside) << 0 << 0.0 << 0.0;
+    QTest::newRow("end inside") << _square(500) << QList<QPointF>() << QPointF(-2000, 0) << QPointF(100, 100) << int(Failure::EndInside) << 0 << 0.0 << 0.0;
+    // Detailed outlines are simplified outward, but not near the ends: the start is outside the bay of the east side,
+    // which the simplified outline closes
+    QList<QPointF> bay = { { -500, -500 } };
+    for (int i = 0; i <= 30; i++) {
+        bay.append(QPointF(500 - (20 * std::sin(i * M_PI / 30)), -500 + (i * 1000.0 / 30)));
+    }
+    bay.append(QPointF(-500, 500));
+    QTest::newRow("start near detailed") << bay << QList<QPointF>() << QPointF(490, 0) << QPointF(-2000, 0) << int(Failure::None) << 1 << 0.0 << 8.0;
 }
 
 void GeoZonePlanningTest::_testRouteConcave()
@@ -1728,6 +1738,7 @@ void GeoZonePlanningTest::_testRouteConcave()
     QFETCH(int, failure);
     QFETCH(int, minWaypoints);
     QFETCH(double, maxLength);
+    QFETCH(double, clearance);
 
     const GeoZoneGeometry::LocalProjection projection(QGeoCoordinate(47, 8));
     ZoneOwner owner;
@@ -1745,8 +1756,9 @@ void GeoZonePlanningTest::_testRouteConcave()
     const QList<QGeoCoordinate> path = _routePath(from, route, to);
     QVERIFY(!zone->intersectsPath(path));
     // The margin from the concave outline, not only from its corners
-    const double clearance = _pathClearance(path, { zone });
-    QVERIFY2(clearance > (settings.margin - 1), qPrintable(QString::number(clearance)));
+    const double pathClearance = _pathClearance(path, { zone });
+    QVERIFY2(pathClearance > clearance, qPrintable(QString::number(pathClearance)));
+    QVERIFY(_pathClearance(path.mid(1, path.count() - 2), { zone }) > (settings.margin - 1));
     if (maxLength > 0) {
         QVERIFY2(route.length < maxLength, qPrintable(QString::number(route.length)));
     }
