@@ -468,6 +468,38 @@ private:
 };
 
 #ifndef GEOZONE_CORE_TEST
+/// Shows horizontal and vertical distances in meters while in scope, restoring the units of the settings after, so that
+/// the texts tests compare don't depend on the locale, whose measurement system sets the default units, like feet for
+/// en_US. Create it once the application runs, not in the constructor of a test.
+class ScopedMetricUnits
+{
+public:
+    ScopedMetricUnits()
+    {
+        UnitsSettings *const units = SettingsManager::instance()->unitsSettings();
+        _set(units->horizontalDistanceUnits(), UnitsSettings::HorizontalDistanceUnitsMeters);
+        _set(units->verticalDistanceUnits(), UnitsSettings::VerticalDistanceUnitsMeters);
+    }
+
+    ~ScopedMetricUnits()
+    {
+        for (const auto &[fact, value] : std::as_const(_saved)) {
+            fact->setRawValue(value);
+        }
+    }
+
+    Q_DISABLE_COPY_MOVE(ScopedMetricUnits)
+
+private:
+    void _set(Fact *fact, const QVariant &value)
+    {
+        _saved.append({ fact, fact->rawValue() });
+        fact->setRawValue(value);
+    }
+
+    QList<std::pair<Fact*, QVariant>> _saved;
+};
+
 /// Answers requests by path: /ok with the ED-318 test file, /missing 404, /broken 500, /empty an empty 200 and
 /// /hang never. Counts the requests and keeps them with their headers and bodies, and counts those answered and those
 /// the client abandoned by closing the connection first, like aborted downloads.

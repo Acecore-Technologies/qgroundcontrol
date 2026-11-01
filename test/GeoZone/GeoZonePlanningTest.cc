@@ -28,6 +28,20 @@
 
 using namespace GeoZoneTestHelpers;
 
+GeoZonePlanningTest::GeoZonePlanningTest() = default;
+
+GeoZonePlanningTest::~GeoZonePlanningTest() = default;
+
+void GeoZonePlanningTest::initTestCase()
+{
+    _metricUnits = std::make_unique<ScopedMetricUnits>();
+}
+
+void GeoZonePlanningTest::cleanupTestCase()
+{
+    _metricUnits.reset();
+}
+
 void GeoZonePlanningTest::_testGuidedPathWarning()
 {
     const QGeoCoordinate center(47, 8);

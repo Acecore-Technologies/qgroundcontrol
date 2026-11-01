@@ -11,11 +11,24 @@
 
 #include "UnitTest.h"
 
+#include <memory>
+
+namespace GeoZoneTestHelpers {
+class ScopedMetricUnits;
+}
+
 class GeoZonePlanningTest : public UnitTest
 {
     Q_OBJECT
 
+public:
+    GeoZonePlanningTest();
+    ~GeoZonePlanningTest() override;
+
 private slots:
+    void initTestCase();
+    void cleanupTestCase();
+
     void _testGuidedPathWarning();
     void _testApproximationReports();
     void _testMissionPathTimes();
@@ -45,4 +58,8 @@ private slots:
     void _testMapModel();
     void _testMapModelShapeLimit();
     void _testMapModelFilters();
+
+private:
+    /// The texts compared are in meters, whatever the locale
+    std::unique_ptr<GeoZoneTestHelpers::ScopedMetricUnits> _metricUnits;
 };
