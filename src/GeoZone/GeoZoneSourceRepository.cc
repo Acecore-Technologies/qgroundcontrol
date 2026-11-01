@@ -17,6 +17,7 @@
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -418,6 +419,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     } else {
         if (!source) {
             source = _newSource(job.key, job.url);
+            _removeLegacyFileSource(job);
         }
         emit sourceAboutToChange(source);
         source->setResult(loadResult.result, job.loadedAt, job.fileDate);
@@ -522,6 +524,22 @@ void GeoZoneSourceRepository::_idle()
         updateValidity();
         if (!_validityWarning.isEmpty()) {
             emit outdatedDataFound(tr("Some geozone data may be outdated. Load current files in Application Settings > Geozones.\n\n%1").arg(_validityWarning));
+        }
+    }
+}
+
+void GeoZoneSourceRepository::_removeLegacyFileSource(const GeoZoneLoader::Job &job)
+{
+    // Earlier versions keyed files by their name, so the file loaded again from its folder replaces that source
+    if (!job.url.isEmpty()) {
+        return;
+    }
+    const QString legacyKey = QFileInfo(job.key).fileName();
+    for (int i = 0; i < _sources->count(); i++) {
+        const GeoZoneSource *const legacy = _sources->value<GeoZoneSource*>(i);
+        if (!legacy->isFeed() && (legacy->key() == legacyKey) && (legacy->key() != job.key)) {
+            removeSource(i);
+            return;
         }
     }
 }

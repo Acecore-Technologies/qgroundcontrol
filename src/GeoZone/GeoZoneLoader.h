@@ -53,8 +53,11 @@ public:
         QString storeError;
     };
 
-    /// @return Job loading a local file or file: URL, keyed by its file name
+    /// @return Job loading a local file or file: URL, keyed by fileKey
     static Job fileJob(const QString &fileName);
+    /// @return Key of the source of a file: its canonical path, so that files with the same name in different
+    ///         folders are separate sources
+    static QString fileKey(const QString &fileName);
     /// @return Job loading a feed, from downloaded data or, for file: URLs, from the file in place
     static Job feedJob(const QString &url);
 

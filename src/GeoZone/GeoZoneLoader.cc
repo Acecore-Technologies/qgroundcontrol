@@ -14,10 +14,19 @@
 #include "GeoZoneZip.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QUrl>
+
+QString GeoZoneLoader::fileKey(const QString &fileName)
+{
+    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+    const QFileInfo info(localFileName);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty() ? QDir::cleanPath(info.absoluteFilePath()) : canonical;
+}
 
 GeoZoneLoader::Job GeoZoneLoader::fileJob(const QString &fileName)
 {
@@ -25,7 +34,7 @@ GeoZoneLoader::Job GeoZoneLoader::fileJob(const QString &fileName)
     const QFileInfo info(localFileName);
 
     Job job;
-    job.key = info.fileName();
+    job.key = fileKey(localFileName);
     job.sourcePath = localFileName;
     job.storedFileName = GeoZoneStore::newFileName();
     job.loadedAt = QDateTime::currentDateTimeUtc();

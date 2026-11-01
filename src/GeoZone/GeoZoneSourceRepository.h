@@ -50,7 +50,7 @@ public:
     /// Removes a source, its stored copy, and cancels its downloads
     void removeSource(int index);
     void clear();
-    /// Synchronously loads a file, replacing the source loaded from a file with the same name
+    /// Synchronously loads a file, replacing the source loaded from the same file
     bool loadFile(const QString &fileName, QString &errorString);
     /// See GeoZoneManager::loadStoredSources
     void loadStoredSources(LoadMode mode);
@@ -104,6 +104,7 @@ private:
     void _saveIndex();
     /// Appends a source to the list, enabled as stored
     GeoZoneSource *_newSource(const QString &key, const QString &url, bool enabled = true);
+    void _removeLegacyFileSource(const GeoZoneLoader::Job &job);
     void _sourceEnabledChanged(GeoZoneSource *source);
     void _reportStorageError(const QString &message);
 

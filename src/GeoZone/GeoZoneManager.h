@@ -73,7 +73,7 @@ public:
     /// and refreshes feeds periodically
     void init();
 
-    /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from a file with the same name.
+    /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from the same file.
     /// loadFailed is emitted on errors and sourceAdded on success.
     Q_INVOKABLE void addFile(const QString &fileName) { _repository->addFile(fileName); }
 
@@ -90,7 +90,7 @@ public:
     /// Removes all sources
     Q_INVOKABLE void clear() { _repository->clear(); }
 
-    /// Synchronously loads a file, replacing the source loaded from a file with the same name
+    /// Synchronously loads a file, replacing the source loaded from the same file
     bool loadFile(const QString &fileName, QString &errorString) { return _repository->loadFile(fileName, errorString); }
 
     /// Loads the sources stored by a previous session. An unreadable index is moved to a backup folder with the stored

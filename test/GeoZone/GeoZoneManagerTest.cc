@@ -40,7 +40,7 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
 
         QCOMPARE(manager.sources()->count(), 1);
         const GeoZoneSource *const ed318Source = manager.sources()->value<GeoZoneSource*>(0);
-        QCOMPARE(ed318Source->key(), QStringLiteral("zones.json"));
+        QCOMPARE(ed318Source->key(), GeoZoneLoader::fileKey(ed318File));
         QVERIFY(!ed318Source->isFeed());
         QCOMPARE(ed318Source->name(), QStringLiteral("Test GeoZones"));
         QCOMPARE(ed318Source->formatName(), QStringLiteral("ED-318"));
@@ -79,7 +79,7 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         ed269Source->setEnabled(false);
         QCOMPARE(manager.zoneCount(), 3);
         QCOMPARE(manager.disabledSourceCount(), 1);
-        QVERIFY(std::none_of(manager.zoneList().cbegin(), manager.zoneList().cend(), [](const GeoZone *zone) { return zone->sourceKey() == QStringLiteral("other.json"); }));
+        QVERIFY(std::none_of(manager.zoneList().cbegin(), manager.zoneList().cend(), [&ed269File](const GeoZone *zone) { return zone->sourceKey() == GeoZoneLoader::fileKey(ed269File); }));
         QVERIFY2(manager.loadFile(ed269File, errorString), qPrintable(errorString));
         QVERIFY(ed269Source->enabled());
         QCOMPARE(manager.zoneCount(), 6);
@@ -102,9 +102,9 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
         QCOMPARE(manager.zoneCount(), 3);
         manager.sources()->value<GeoZoneSource*>(1)->setEnabled(true);
         QCOMPARE(manager.zoneCount(), 6);
-        QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("zones.json"));
+        QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->key(), GeoZoneLoader::fileKey(ed318File));
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-318"));
-        QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->key(), QStringLiteral("other.json"));
+        QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->key(), GeoZoneLoader::fileKey(ed269File));
         QVERIFY(!strayFile.exists());
 
         manager.removeSource(0);
@@ -139,6 +139,45 @@ void GeoZoneManagerTest::_testManagerLoadPersistClear()
     GeoZoneManager migratedManager(legacyDir.path());
     migratedManager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
     QCOMPARE(migratedManager.zoneCount(), 3);
+
+    // Files with the same name in different folders are separate sources
+    const QTemporaryDir otherDir;
+    QVERIFY(otherDir.isValid());
+    const QString sameName = otherDir.filePath(QStringLiteral("zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed269_test.json"), sameName));
+    QString errorString;
+    {
+        GeoZoneManager pathManager(storageDir.path());
+        QVERIFY2(pathManager.loadFile(ed318File, errorString), qPrintable(errorString));
+        QVERIFY2(pathManager.loadFile(sameName, errorString), qPrintable(errorString));
+        QCOMPARE(pathManager.sources()->count(), 2);
+        QCOMPARE(pathManager.zoneCount(), 6);
+        QCOMPARE(pathManager.sources()->value<GeoZoneSource*>(1)->name(), QStringLiteral("Test UASZoneVersion"));
+        QVERIFY(QFileInfo(pathManager.sources()->value<GeoZoneSource*>(1)->key()).isAbsolute());
+        pathManager.clear();
+    }
+
+    // A source stored by name by an earlier version is replaced when its file is loaded again
+    {
+        GeoZoneManager pathManager(storageDir.path());
+        QVERIFY2(pathManager.loadFile(ed318File, errorString), qPrintable(errorString));
+    }
+    QFile indexFile(QDir(storageDir.path()).filePath(QStringLiteral("sources.json")));
+    QVERIFY(indexFile.open(QIODevice::ReadOnly));
+    QByteArray index = indexFile.readAll();
+    indexFile.close();
+    QVERIFY(index.contains(QJsonDocument(QJsonArray{ GeoZoneLoader::fileKey(ed318File) }).toJson(QJsonDocument::Compact).mid(1).chopped(1)));
+    index.replace(QJsonDocument(QJsonArray{ GeoZoneLoader::fileKey(ed318File) }).toJson(QJsonDocument::Compact).mid(1).chopped(1), "\"zones.json\"");
+    QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(indexFile.write(index), index.size());
+    indexFile.close();
+    GeoZoneManager legacyKeyManager(storageDir.path());
+    legacyKeyManager.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
+    QCOMPARE(legacyKeyManager.sources()->value<GeoZoneSource*>(0)->key(), QStringLiteral("zones.json"));
+    QVERIFY2(legacyKeyManager.loadFile(ed318File, errorString), qPrintable(errorString));
+    QCOMPARE(legacyKeyManager.sources()->count(), 1);
+    QCOMPARE(legacyKeyManager.sources()->value<GeoZoneSource*>(0)->key(), GeoZoneLoader::fileKey(ed318File));
+    QCOMPARE(legacyKeyManager.zoneCount(), 3);
 }
 
 void GeoZoneManagerTest::_testManagerStoreFailures()
@@ -149,7 +188,7 @@ void GeoZoneManagerTest::_testManagerStoreFailures()
     const QString ed318File = sourceDir.filePath(QStringLiteral("zones.json"));
     QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), ed318File));
     const QDir dir(storageDir.path());
-    const QString key = QStringLiteral("zones.json");
+    const QString key = GeoZoneLoader::fileKey(ed318File);
     const QString indexPath = dir.filePath(QStringLiteral("sources.json"));
     QString errorString;
     QString storedFile;
@@ -239,14 +278,16 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     QVERIFY(!manager.busy());
     QCOMPARE(manager.zoneCount(), 3);
 
-    // Only the most recent load of a file name is applied
+    // Only the most recent load of a file is applied, a file with the same name in another folder is another source
     addedSpy.clear();
+    manager.addFile(ed318File);
     manager.addFile(ed318File);
     manager.addFile(ed269File);
     QTRY_VERIFY(!manager.busy());
+    // The unchanged file isn't added again
     QCOMPARE(addedSpy.count(), 1);
-    QCOMPARE(manager.sources()->count(), 1);
-    QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-269"));
+    QCOMPARE(manager.sources()->count(), 2);
+    QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->formatName(), QStringLiteral("ED-269"));
 
     // Removing all sources drops loads in progress
     manager.addFile(ed318File);

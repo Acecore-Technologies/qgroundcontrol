@@ -12,6 +12,7 @@
 #include "GeoZoneSettings.h"
 #include "GeoZoneShape.h"
 
+#include <QtCore/QFileInfo>
 #include <QtCore/QHash>
 #include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
@@ -74,7 +75,7 @@ GeoZoneSource::~GeoZoneSource()
 
 QString GeoZoneSource::name() const
 {
-    QString name = _title.isEmpty() ? (isFeed() ? QUrl(_url).host() : _key) : _title;
+    QString name = _title.isEmpty() ? (isFeed() ? QUrl(_url).host() : QFileInfo(_key).fileName()) : _title;
 
     // Feeds of an area, like the map area downloaded from a WFS, are told apart by where they are
     const QUrlQuery query(QUrl(_url).query());
