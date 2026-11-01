@@ -87,13 +87,23 @@ void GeoZoneMissionCheck::_connectMissionItems()
     if (!visualItems) {
         return;
     }
-    // Loiter radii, commands and transitions change the paths checked besides the flight path
+    // Loiter radii, commands, transitions and jumps change the paths checked besides the flight path
     (void) connect(visualItems, &QmlObjectListModel::countChanged, this, &GeoZoneMissionCheck::_connectMissionItems, Qt::UniqueConnection);
     for (int i = 0; i < visualItems->count(); i++) {
         if (SimpleMissionItem *const item = visualItems->value<SimpleMissionItem*>(i)) {
             (void) connect(item, &SimpleMissionItem::loiterRadiusChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
             (void) connect(item, &SimpleMissionItem::commandChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+            (void) connect(item, &SimpleMissionItem::commandChanged, this, &GeoZoneMissionCheck::_connectMissionItems, Qt::UniqueConnection);
             (void) connect(item, &VisualMissionItem::currentVTOLModeChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+            if (item->command() == MAV_CMD_DO_JUMP) {
+                // The item jumped to and the repeat count
+                const QmlObjectListModel *const facts = item->textFieldFacts();
+                for (int j = 0; j < facts->count(); j++) {
+                    if (Fact *const fact = facts->value<Fact*>(j)) {
+                        (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMissionCheck::_scheduleUpdate, Qt::UniqueConnection);
+                    }
+                }
+            }
         }
     }
 }
@@ -261,10 +271,12 @@ void GeoZoneMissionCheck::_updateConcurrently()
 GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start,
                                                               const QDateTime &end)
 {
-    const GeoZonePathEvaluator evaluator(catalog, GeoZonePolicy::mission(start, end), start);
+    // DO_JUMP items may repeat parts of the mission past its estimated end
+    const QDateTime flightEnd = path.flightEnd(start, end);
+    const GeoZonePathEvaluator evaluator(catalog, GeoZonePolicy::mission(start, flightEnd), start);
     Evaluation evaluation;
     evaluation.start = start;
-    evaluation.end = end;
+    evaluation.end = flightEnd;
     for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate(path.evaluatorPaths(start, end), path.areas()).zones) {
         if (!result.entered()) {
             continue;

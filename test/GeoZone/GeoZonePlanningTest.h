@@ -24,6 +24,7 @@ private slots:
     void _testAntimeridianQueries();
     void _testMissionCheck();
     void _testMissionCoverage();
+    void _testMissionJumps();
     void _testAuthorisations();
     void _testRoutePlanner();
     void _testProfileBands();

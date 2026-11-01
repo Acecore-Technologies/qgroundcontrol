@@ -124,12 +124,23 @@ GeoZoneMissionPath GeoZoneMissionPath::fromMission(MissionController *missionCon
         return path;
     }
 
+    // The mission controller draws a segment home from the last item with a coordinate before a return to launch
+    int returnItem = -1;
+    for (int i = 0; (i < visualItems->count()) && (returnItem < 0); i++) {
+        const SimpleMissionItem *const simpleItem = visualItems->value<const SimpleMissionItem*>(i);
+        if (simpleItem && (simpleItem->command() == MAV_CMD_NAV_RETURN_TO_LAUNCH)) {
+            returnItem = i;
+        }
+    }
+
     // Same order and distances as TerrainProfile: the segments of a pattern, then the segment to the next item
     QList<int> coordinateItems;
+    QList<ItemSegments> itemSegments(visualItems->count());
     double distance = 0;
     const auto appendSegment = [&path, &distance](const Segment &segment) {
         path._segments.append(segment);
         distance += segment.distance;
+        return static_cast<int>(path._segments.count() - 1);
     };
     for (int i = 0; i < visualItems->count(); i++) {
         VisualMissionItem *const visualItem = visualItems->value<VisualMissionItem*>(i);
@@ -137,26 +148,37 @@ GeoZoneMissionPath GeoZoneMissionPath::fromMission(MissionController *missionCon
             continue;
         }
         path._itemDistances.insert(i, distance);
+        path._sequenceNumbers.insert(i, visualItem->sequenceNumber());
         if (ComplexMissionItem *const complexItem = qobject_cast<ComplexMissionItem*>(visualItem)) {
             const QmlObjectListModel *const complexSegments = complexItem->flightPathSegments();
             if (complexSegments->count() == 0) {
                 Segment gap;
                 gap.distance = complexItem->complexDistance();
                 gap.itemIndex = i;
-                appendSegment(gap);
+                itemSegments[i].segments.append(appendSegment(gap));
             }
             for (int j = 0; j < complexSegments->count(); j++) {
-                appendSegment(segmentFrom(complexSegments->value<const FlightPathSegment*>(j), i));
+                itemSegments[i].segments.append(appendSegment(segmentFrom(complexSegments->value<const FlightPathSegment*>(j), i)));
             }
             if (const std::optional<GeoZone::Area> area = areaOf(complexItem)) {
                 path._areas.append(*area);
             }
         }
         if (visualItem->simpleFlightPathSegment()) {
-            appendSegment(segmentFrom(visualItem->simpleFlightPathSegment(), i));
+            itemSegments[i].outgoing = appendSegment(segmentFrom(visualItem->simpleFlightPathSegment(), i));
         }
         if (visualItem->specifiesCoordinate() && !visualItem->isStandaloneCoordinate()) {
             coordinateItems.append(i);
+        }
+    }
+    const QGeoCoordinate home = missionController->plannedHomePosition();
+    for (qsizetype k = coordinateItems.count() - 1; (k >= 0) && (returnItem >= 0); k--) {
+        if (coordinateItems[k] < returnItem) {
+            const int returnSegment = itemSegments[coordinateItems[k]].outgoing;
+            if ((returnSegment >= 0) && home.isValid() && (path._segments[returnSegment].to.distanceTo(home) < 1)) {
+                path._returnSegment = returnSegment;
+            }
+            break;
         }
     }
 
@@ -183,9 +205,130 @@ GeoZoneMissionPath GeoZoneMissionPath::fromMission(MissionController *missionCon
         path._legs.append(leg);
     }
 
-    path._paths = pathsFromSegments(path._segments);
+    path._setFlightPaths(missionController, coordinateItems, itemSegments);
     path._appendCoverage(missionController, coordinateItems);
     return path;
+}
+
+void GeoZoneMissionPath::_setFlightPaths(MissionController *missionController, const QList<int> &coordinateItems, const QList<ItemSegments> &itemSegments)
+{
+    const QmlObjectListModel *const visualItems = missionController->visualItems();
+    const int count = visualItems->count();
+
+    // DO_JUMP items with the item they jump to and how many times
+    struct Jump {
+        int target = -1;
+        int repeat = 0;     ///< Negative without end
+    };
+    QHash<int, Jump> jumps;
+    for (int i = 1; i < count; i++) {
+        const SimpleMissionItem *const simpleItem = visualItems->value<const SimpleMissionItem*>(i);
+        if (!simpleItem || (simpleItem->command() != MAV_CMD_DO_JUMP)) {
+            continue;
+        }
+        const int targetSequence = qRound(simpleItem->missionItem().param1());
+        for (int j = 1; j < count; j++) {
+            const VisualMissionItem *const item = visualItems->value<const VisualMissionItem*>(j);
+            if (item && (j != i) && (item->sequenceNumber() <= targetSequence) && (targetSequence <= item->lastSequenceNumber())) {
+                jumps.insert(i, Jump{ j, qRound(simpleItem->missionItem().param2()) });
+                break;
+            }
+        }
+    }
+    if (jumps.isEmpty()) {
+        _paths = pathsFromSegments(_segments);
+        _itemFlightDistances = _itemDistances;
+        _flightDistance = totalDistance();
+        return;
+    }
+
+    // Walks the mission like the vehicle: on to the next item along the drawn segment, or straight to the item jumped to
+    QHash<int, int> nextCoordinateItems;
+    for (qsizetype k = 1; k < coordinateItems.count(); k++) {
+        nextCoordinateItems.insert(coordinateItems[k - 1], coordinateItems[k]);
+    }
+    const qsizetype maxSegments = (std::max)(static_cast<qsizetype>(maxFlightSegments), 2 * _segments.count());
+    QList<Segment> flown;
+    double flownDistance = 0;
+    const auto fly = [&flown, &flownDistance](const Segment &segment) {
+        flown.append(segment);
+        flownDistance += segment.distance;
+    };
+    QHash<int, int> jumpsLeft;
+    qsizetype jumpCount = 0;
+    int lastCoordinateItem = -1;
+    int jumpItem = -1;  ///< Jumped at, until the next item with a coordinate
+    for (int i = 0; i < count; i++) {
+        const VisualMissionItem *const item = visualItems->value<const VisualMissionItem*>(i);
+        if (!item) {
+            continue;
+        }
+        if (const auto jump = jumps.constFind(i); jump != jumps.cend()) {
+            if (!jumpsLeft.contains(i)) {
+                // Loops without end are flown twice
+                jumpsLeft.insert(i, (jump->repeat < 0) ? 1 : jump->repeat);
+                _repeatsIndefinitely |= (jump->repeat < 0);
+            }
+            // Also limited for loops without segments
+            if ((jumpsLeft[i] > 0) && (flown.count() < maxSegments) && (jumpCount < maxSegments)) {
+                jumpsLeft[i]--;
+                jumpCount++;
+                jumpItem = i;
+                i = jump->target - 1;
+            }
+            continue;
+        }
+        const SimpleMissionItem *const simpleItem = qobject_cast<const SimpleMissionItem*>(item);
+        if (simpleItem && (simpleItem->command() == MAV_CMD_NAV_RETURN_TO_LAUNCH)) {
+            break;
+        }
+        const bool coordinateItem = item->specifiesCoordinate() && !item->isStandaloneCoordinate();
+        if (coordinateItem && (lastCoordinateItem >= 0)) {
+            if ((jumpItem < 0) && (nextCoordinateItems.value(lastCoordinateItem, -1) == i)) {
+                if (itemSegments[lastCoordinateItem].outgoing >= 0) {
+                    fly(_segments[itemSegments[lastCoordinateItem].outgoing]);
+                }
+            } else {
+                const VisualMissionItem *const fromItem = visualItems->value<const VisualMissionItem*>(lastCoordinateItem);
+                Segment segment;
+                segment.from = fromItem->exitCoordinate();
+                segment.to = item->coordinate();
+                segment.fromAltitudeAMSL = fromItem->amslExitAlt();
+                segment.toAltitudeAMSL = item->amslEntryAlt();
+                segment.itemIndex = lastCoordinateItem;
+                if (jumpItem >= 0) {
+                    const int jumpSequence = _sequenceNumbers.value(jumpItem);
+                    segment.label = (jumps.value(jumpItem).repeat < 0) ? tr("the jump at item %1, repeated without end").arg(jumpSequence) :
+                                                                         tr("the jump at item %1").arg(jumpSequence);
+                }
+                if (segment.isValid() && (segment.from.distanceTo(segment.to) > 0.01)) {
+                    segment.distance = segment.from.distanceTo(segment.to);
+                    fly(segment);
+                }
+            }
+            jumpItem = -1;
+        }
+        if (!_itemFlightDistances.contains(i)) {
+            _itemFlightDistances.insert(i, flownDistance);
+        }
+        for (const int segment : itemSegments[i].segments) {
+            fly(_segments[segment]);
+        }
+        if (coordinateItem) {
+            lastCoordinateItem = i;
+        }
+    }
+    if ((_returnSegment >= 0) && (lastCoordinateItem >= 0) && (itemSegments[lastCoordinateItem].outgoing == _returnSegment)) {
+        fly(_segments[_returnSegment]);
+    }
+    // Items the vehicle doesn't reach keep their place on the drawn path
+    for (auto it = _itemDistances.cbegin(); it != _itemDistances.cend(); ++it) {
+        if (!_itemFlightDistances.contains(it.key())) {
+            _itemFlightDistances.insert(it.key(), it.value());
+        }
+    }
+    _paths = pathsFromSegments(flown);
+    _flightDistance = flownDistance;
 }
 
 void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, const QList<int> &coordinateItems)
@@ -239,7 +382,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
                 const double radius = std::abs(simpleItem->loiterRadius());
                 if (radius > 0) {
                     appendPath(circle(simpleItem->coordinate(), radius, simpleItem->amslEntryAlt(), qQNaN()), i,
-                               tr("the loiter at item %1").arg(simpleItem->sequenceNumber()), itemDistance(i));
+                               tr("the loiter at item %1").arg(simpleItem->sequenceNumber()), itemFlightDistance(i));
                 }
             } else if (command == MAV_CMD_DO_VTOL_TRANSITION) {
                 // Transitions take about the transition distance, flying on past the waypoints they follow or lead to
@@ -274,7 +417,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
                 if (overshootFrom.isValid() && (overshoot > 0)) {
                     const double altitude = startItem->amslExitAlt();
                     appendPath({ GeoZone::Position{ overshootFrom, altitude }, GeoZone::Position{ overshootFrom.atDistanceAndAzimuth(overshoot, azimuth), altitude } }, i,
-                               tr("the VTOL transition at item %1").arg(simpleItem->sequenceNumber()), itemDistance(i));
+                               tr("the VTOL transition at item %1").arg(simpleItem->sequenceNumber()), itemFlightDistance(i));
                 }
             } else if (command == MAV_CMD_NAV_RETURN_TO_LAUNCH) {
                 returnItem = i;
@@ -283,7 +426,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
             const double radius = landingItem->loiterRadius()->rawValue().toDouble();
             if (landingItem->useLoiterToAlt()->rawValue().toBool() && landingItem->finalApproachCoordinate().isValid() && (radius > 0)) {
                 appendPath(circle(landingItem->finalApproachCoordinate(), radius, landingItem->amslEntryAlt(), qQNaN()), i,
-                           tr("the landing pattern loiter at item %1").arg(landingItem->sequenceNumber()), itemDistance(i));
+                           tr("the landing pattern loiter at item %1").arg(landingItem->sequenceNumber()), itemFlightDistance(i));
             }
         }
     }
@@ -307,7 +450,7 @@ void GeoZoneMissionPath::_appendCoverage(MissionController *missionController, c
         if (from.isValid() && (from.distanceTo(homePosition) > 1)) {
             for (const Path &returnPath : pathsFromSegments({ Segment{ from, from, fromAltitude, cruise }, Segment{ from, homePosition, cruise, cruise },
                                                               Segment{ homePosition, homePosition, cruise, homeAltitude } })) {
-                appendPath(returnPath.positions, returnItem, label, totalDistance());
+                appendPath(returnPath.positions, returnItem, label, flightDistance());
             }
         }
     }
@@ -351,6 +494,7 @@ GeoZoneMissionPath GeoZoneMissionPath::fromSegments(const QList<Segment> &segmen
     path._segments = segments;
     path._areas = areas;
     path._paths = pathsFromSegments(segments);
+    path._flightDistance = path.totalDistance();
     return path;
 }
 
@@ -382,15 +526,25 @@ QDateTime GeoZoneMissionPath::timeAt(double distance, double totalDistance, cons
     return start.addMSecs(std::llround(static_cast<double>((std::max)(start.msecsTo(end), qint64{ 0 })) * fraction));
 }
 
-QList<GeoZonePathEvaluator::Path> GeoZoneMissionPath::evaluatorPaths(const QDateTime &start, const QDateTime &end) const
+QDateTime GeoZoneMissionPath::flightEnd(const QDateTime &start, const QDateTime &end) const
 {
     const double total = totalDistance();
+    if (!start.isValid() || !end.isValid() || !(total > 0) || !(_flightDistance > total)) {
+        return end;
+    }
+    return start.addMSecs(std::llround(static_cast<double>((std::max)(start.msecsTo(end), qint64{ 0 })) * (_flightDistance / total)));
+}
+
+QList<GeoZonePathEvaluator::Path> GeoZoneMissionPath::evaluatorPaths(const QDateTime &start, const QDateTime &end) const
+{
+    // At the pace of the drawn flight path through the repeats of DO_JUMP items
+    const QDateTime flownEnd = flightEnd(start, end);
     QList<GeoZonePathEvaluator::Path> paths;
     paths.reserve(_paths.count());
     for (const Path &path : _paths) {
         GeoZonePathEvaluator::Path evaluatorPath = GeoZonePathEvaluator::Path::fromPositions(path.positions, path.label);
         for (qsizetype i = 0; i < evaluatorPath.vertices.count(); i++) {
-            evaluatorPath.vertices[i].time = timeAt(path.distances.value(i, qQNaN()), total, start, end);
+            evaluatorPath.vertices[i].time = timeAt(path.distances.value(i, qQNaN()), _flightDistance, start, flownEnd);
         }
         paths.append(evaluatorPath);
     }
@@ -457,7 +611,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
         }
 
         // Continue the previous path, keeping both ends when the altitude changes at the shared waypoint
-        if (connected && (paths.last().positions.last().coordinate == segment.from)) {
+        if (connected && (paths.last().label == segment.label) && (paths.last().positions.last().coordinate == segment.from)) {
             GeoZone::Position &last = paths.last().positions.last();
             const bool sameAltitude = (last.altitudeAMSL == positions.first().altitudeAMSL) ||
                                       (qIsNaN(last.altitudeAMSL) && qIsNaN(positions.first().altitudeAMSL));
@@ -471,7 +625,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
             paths.last().positions.append(positions);
             paths.last().distances.append(distances);
         } else {
-            paths.append(Path{ positions, segment.itemIndex, QString(), distances });
+            paths.append(Path{ positions, segment.itemIndex, segment.label, distances });
         }
         connected = true;
     }

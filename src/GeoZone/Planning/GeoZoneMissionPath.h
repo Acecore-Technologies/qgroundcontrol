@@ -24,8 +24,8 @@ class Vehicle;
 /// Flight path of a planned mission as the geozone checks see it: the segments flown with their altitudes and
 /// terrain, the areas of patterns, and the legs between mission items. Besides the flight path the mission
 /// controller draws, it covers loiter circles, the loiter of landing patterns, the distance VTOL transitions
-/// overshoot and the return to launch at the vehicle's return altitude. Built on the GUI thread from the
-/// MissionController, then only read, so that zone checks can run on other threads.
+/// overshoot, the loops of DO_JUMP items and the return to launch at the vehicle's return altitude. Built on the GUI
+/// thread from the MissionController, then only read, so that zone checks can run on other threads.
 class GeoZoneMissionPath
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionPath)
@@ -41,6 +41,7 @@ public:
         double terrainSpacing = 0;
         double distance = 0;        ///< Meters along the mission, which can differ slightly from the great circle
         int itemIndex = -1;         ///< Visual item of the mission the segment belongs to or starts from
+        QString label;              ///< Of the path the segment is flown on, see Path::label, empty for the flight path
 
         /// Segments without coordinates, like patterns without a flight path yet, only advance the distance
         bool isValid() const { return from.isValid() && to.isValid(); }
@@ -89,9 +90,18 @@ public:
     double totalDistance() const;
     /// @return Meters along the mission where the vehicle reaches the item, NaN for unknown items
     double itemDistance(int itemIndex) const { return _itemDistances.value(itemIndex, qQNaN()); }
+    /// @return Meters the vehicle flies along the mission, more than totalDistance when DO_JUMP items repeat parts of it
+    double flightDistance() const { return _flightDistance; }
+    /// @return Meters flown along the mission when the vehicle first reaches the item, NaN for unknown items
+    double itemFlightDistance(int itemIndex) const { return _itemFlightDistances.value(itemIndex, qQNaN()); }
+    /// @return End of a flight from start which ends at end without the repeats of DO_JUMP items, at the same pace
+    QDateTime flightEnd(const QDateTime &start, const QDateTime &end) const;
+    /// @return true if a DO_JUMP repeats without end, the paths include its loop once
+    bool repeatsIndefinitely() const { return _repeatsIndefinitely; }
 
     /// @return The paths for GeoZonePathEvaluator, with times estimated from start to end in proportion to the distance
-    ///         along the mission, all at start without end and unknown without start
+    ///         along the mission, all at start without end and unknown without start. With the repeats of DO_JUMP items
+    ///         the flight ends after end, see flightEnd.
     QList<GeoZonePathEvaluator::Path> evaluatorPaths(const QDateTime &start = QDateTime(), const QDateTime &end = QDateTime()) const;
     /// @return Estimated time at the distance along a mission flown from start to end, see evaluatorPaths
     static QDateTime timeAt(double distance, double totalDistance, const QDateTime &start, const QDateTime &end);
@@ -99,6 +109,7 @@ public:
     static constexpr double maxStepDistance = 1000;     ///< Meters between positions along long legs without terrain
     static constexpr int maxStepsPerSegment = 10000;
     static constexpr int circleVertexCount = 36;        ///< Of loiter circles
+    static constexpr int maxFlightSegments = 5000;      ///< Segments flown with the repeats of DO_JUMP items, they repeat less beyond
 
     /// @return Return altitude above home in meters from the vehicle's parameters, 0 to return at the current
     ///         altitude, NaN when unknown like for the offline vehicle
@@ -108,10 +119,19 @@ public:
     static QList<GeoZone::Position> circle(const QGeoCoordinate &center, double radius, double altitudeAMSL, double terrainAMSL);
 
     /// Splits segments into connected paths with a position at each terrain sample, or along the great circle every
-    /// maxStepDistance without terrain samples. Altitudes are interpolated. Segments without coordinates end a path.
+    /// maxStepDistance without terrain samples. Altitudes are interpolated. Segments without coordinates end a path, as
+    /// do segments with another label.
     static QList<Path> pathsFromSegments(const QList<Segment> &segments);
 
 private:
+    /// Segments of a visual item
+    struct ItemSegments {
+        QList<int> segments;            ///< Of the item itself, like the flight lines of a pattern
+        int outgoing = -1;              ///< To the next item of the drawn flight path, -1 without
+    };
+
+    /// Sets the paths flown, following the DO_JUMP items of the mission
+    void _setFlightPaths(MissionController *missionController, const QList<int> &coordinateItems, const QList<ItemSegments> &itemSegments);
     /// Adds the paths the drawn flight path leaves out
     void _appendCoverage(MissionController *missionController, const QList<int> &coordinateItems);
 
@@ -120,4 +140,9 @@ private:
     QList<Leg> _legs;
     QList<Path> _paths;
     QHash<int, double> _itemDistances;  ///< Of the visual items, by index
+    QHash<int, double> _itemFlightDistances;
+    QHash<int, int> _sequenceNumbers;   ///< Of the visual items, by index
+    double _flightDistance = 0;
+    bool _repeatsIndefinitely = false;
+    int _returnSegment = -1;            ///< Index of the drawn segment home after a return to launch item
 };
