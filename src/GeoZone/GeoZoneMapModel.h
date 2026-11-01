@@ -73,9 +73,9 @@ private:
     QGeoShape _geoShape;
 };
 
-/// Selects the GeoZone shapes and labels shown on one map. Only shapes in or near the view are shown,
-/// limited to maxShapeCount preferring the largest, with polygons simplified for the zoom level.
-/// Map items cost time on every frame even when off screen, so this keeps large files usable.
+/// Selects the GeoZone shapes and labels shown on one map, drawn by GeoZoneMapLayer. Only shapes in or near the view
+/// are shown, limited to maxShapeCount preferring the largest, with polygons simplified for the zoom level, which
+/// keeps the vertices drawn on each frame and the triangulation of new shapes bounded for large files.
 class GeoZoneMapModel : public QObject
 {
     Q_OBJECT
@@ -88,7 +88,7 @@ class GeoZoneMapModel : public QObject
     Q_PROPERTY(QVariantList         highlightedZones READ highlightedZones  WRITE setHighlightedZones NOTIFY highlightedZonesChanged FINAL)  ///< GeoZoneInfo of the zones drawn highlighted
 
 public:
-    static constexpr int maxShapeCount = 2000;
+    static constexpr int maxShapeCount = 10000;
     static constexpr double viewMargin = 0.25;  ///< Shapes are prepared this fraction of the view size beyond each edge
 
     explicit GeoZoneMapModel(QObject *parent = nullptr);

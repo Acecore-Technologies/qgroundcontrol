@@ -607,3 +607,39 @@ void GeoZoneGeometryTest::_testShapeSimplification()
     QVERIFY2(qAbs(widthPixels - 19.18) < 0.2, qPrintable(QString::number(widthPixels)));
     QCOMPARE(circle.mercatorBounds().height(), circle.mercatorBounds().width());
 }
+
+void GeoZoneGeometryTest::_testMapLayerTriangulation()
+{
+    const auto area = [](const QList<QPointF> &triangles) {
+        double total = 0;
+        for (qsizetype i = 0; (i + 2) < triangles.count(); i += 3) {
+            const QPointF a = triangles[i + 1] - triangles[i];
+            const QPointF b = triangles[i + 2] - triangles[i];
+            total += std::abs((a.x() * b.y()) - (a.y() * b.x())) / 2;
+        }
+        return total;
+    };
+
+    // A square with a square hole fills the area between them
+    const QList<QPointF> outer = { { 0.5, 0.5 }, { 0.5001, 0.5 }, { 0.5001, 0.5001 }, { 0.5, 0.5001 } };
+    const QList<QPointF> hole = { { 0.50004, 0.50004 }, { 0.50006, 0.50004 }, { 0.50006, 0.50006 }, { 0.50004, 0.50006 } };
+    const GeoZoneMapLayer::Triangulation square = GeoZoneMapLayer::triangulatePolygon({ outer, hole });
+    QCOMPARE(square.rings.count(), 2);
+    QVERIFY(qAbs(area(square.triangles) - (1e-8 - 4e-10)) < 1e-11);
+    QVERIFY(qAbs(square.center.x() - 0.50005) < 1e-9);
+
+    // A shape crossing the antimeridian stays in one piece
+    const QList<QPointF> crossing = { { 0.9999, 0.5 }, { 0.0001, 0.5 }, { 0.0001, 0.5001 }, { 0.9999, 0.5001 } };
+    const GeoZoneMapLayer::Triangulation wrapped = GeoZoneMapLayer::triangulatePolygon({ crossing });
+    QVERIFY(qAbs(area(wrapped.triangles) - 2e-8) < 1e-11);
+    QVERIFY(qAbs(wrapped.center.x() - 1.0) < 1e-9);
+
+    // Circles follow the radius in meters
+    const QGeoCoordinate center(47, 8);
+    const GeoZoneMapLayer::Triangulation circle = GeoZoneMapLayer::triangulateCircle(center, 1000);
+    const QPointF mercatorCenter = GeoZoneShape::toMercator(center);
+    const double mercatorRadius = (GeoZoneShape::toMercator(center.atDistanceAndAzimuth(1000, 90)) - mercatorCenter).x();
+    QVERIFY(qAbs((area(circle.triangles) / (M_PI * mercatorRadius * mercatorRadius)) - 1) < 0.01);
+    QVERIFY(GeoZoneMapLayer::triangulateCircle(center, 0).triangles.isEmpty());
+    QVERIFY(GeoZoneMapLayer::triangulatePolygon({ { { 0.5, 0.5 }, { 0.6, 0.6 } } }).triangles.isEmpty());
+}

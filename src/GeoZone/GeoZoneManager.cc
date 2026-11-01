@@ -18,6 +18,7 @@
 #include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneMapLayer.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
@@ -90,6 +91,7 @@ void GeoZoneManager::registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>("QGroundControl.GeoZone", 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapModel");
+    (void) qmlRegisterType<GeoZoneMapLayer>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapLayer");
     (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
     (void) qmlRegisterType<GeoZoneFenceImporter>("QGroundControl.GeoZone", 1, 0, "GeoZoneFenceImporter");
     (void) qmlRegisterType<GeoZoneProfile>("QGroundControl.GeoZone", 1, 0, "GeoZoneProfile");

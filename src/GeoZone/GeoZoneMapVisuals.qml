@@ -34,17 +34,6 @@ Item {
     readonly property bool  _showZones:         showZones && _geoZoneManager.visible && map.visible // Items are not kept for maps in hidden views
     readonly property bool  _showLabels:        _showZones && map.zoomLevel >= labelMinZoomLevel
 
-    // More restrictive zones are drawn on top
-    function _restrictionZ(restriction) {
-        switch (restriction) {
-        case GeoZone.Prohibited:        return 0.5
-        case GeoZone.ReqAuthorisation:  return 0.4
-        case GeoZone.Conditional:       return 0.3
-        case GeoZone.USpace:            return 0.2
-        default:                        return 0.1
-        }
-    }
-
     function _showZoneInfo(zone, zones) {
         geoZoneInfoDialogComponent.createObject(mainWindow, { geoZone: zone, zones: zones ? zones : [] }).open()
     }
@@ -151,40 +140,19 @@ Item {
 
     Component.onCompleted: _scheduleViewUpdate()
 
-    // Map items must be added to the map itself, so Instantiator is used instead of MapItemView
-    Instantiator {
-        model: _mapModel.polygons
-
-        delegate: MapPolygon {
-            required property var object
-
-            geoShape:       object.geoShape
-            color:          GeoZoneStyle.fillColor(object.restriction, object.active)
-            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.restriction)
-            border.width:   object.highlighted ? 3 : (object.active ? 2 : 1)
-            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.restriction)
-        }
-
-        onObjectAdded:      (index, object) => _root.map.addMapItem(object)
-        onObjectRemoved:    (index, object) => _root.map.removeMapItem(object)
-    }
-
-    Instantiator {
-        model: _mapModel.circles
-
-        delegate: MapCircle {
-            required property var object
-
-            center:         object.center
-            radius:         object.radius
-            color:          GeoZoneStyle.fillColor(object.restriction, object.active)
-            border.color:   object.highlighted ? GeoZoneStyle.highlightColor : GeoZoneStyle.restrictionColor(object.restriction)
-            border.width:   object.highlighted ? 3 : (object.active ? 2 : 1)
-            z:              QGroundControl.zOrderMapItems - 3 + _root._restrictionZ(object.restriction)
-        }
-
-        onObjectAdded:      (index, object) => _root.map.addMapItem(object)
-        onObjectRemoved:    (index, object) => _root.map.removeMapItem(object)
+    // All shapes are drawn by one item over the map, below the other map items
+    GeoZoneMapLayer {
+        parent:             _root.map
+        anchors.fill:       parent
+        map:                _root.map
+        model:              _mapModel
+        visible:            _root._showZones
+        z:                  QGroundControl.zOrderMapItems - 3
+        restrictionColors:  [ GeoZone.Prohibited, GeoZone.ReqAuthorisation, GeoZone.Conditional, GeoZone.NoRestriction, GeoZone.USpace, GeoZone.Unknown ]
+                                .map(restriction => GeoZoneStyle.restrictionColor(restriction))
+        highlightColor:     GeoZoneStyle.highlightColor
+        activeFillAlpha:    GeoZoneStyle.activeFillAlpha
+        inactiveFillAlpha:  GeoZoneStyle.inactiveFillAlpha
     }
 
     // Clickable zone labels which show the zone details

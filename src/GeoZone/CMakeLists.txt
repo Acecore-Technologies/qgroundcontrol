@@ -28,6 +28,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneLoader.h
         GeoZoneManager.cc
         GeoZoneManager.h
+        GeoZoneMapLayer.cc
+        GeoZoneMapLayer.h
         GeoZoneMapModel.cc
         GeoZoneMapModel.h
         GeoZoneMissionCheck.cc
@@ -71,6 +73,9 @@ target_sources(${CMAKE_PROJECT_NAME}
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# GeoZoneMapLayer triangulates the zone polygons with the triangulator of Qt Quick
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::GuiPrivate)
 
 qt_add_library(GeoZoneModule STATIC)
 

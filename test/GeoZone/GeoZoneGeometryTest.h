@@ -26,4 +26,5 @@ private slots:
     void _testAltitudeLimits();
     void _testAreaIntersection();
     void _testShapeSimplification();
+    void _testMapLayerTriangulation();
 };
