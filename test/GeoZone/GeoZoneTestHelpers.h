@@ -15,6 +15,7 @@
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneGeometry.h"
+#include "GeoZoneGuidedCheck.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneLoader.h"

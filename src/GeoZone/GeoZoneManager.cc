@@ -12,6 +12,7 @@
 #include "GeoZoneInfo.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneGuidedCheck.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneProfile.h"
 #include "GeoZoneRoutePlanner.h"
@@ -80,6 +81,7 @@ void GeoZoneManager::registerQmlTypes()
 {
     (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, "QGroundControl.GeoZone", 1, 0, "GeoZone", "Enums only");
     (void) qmlRegisterUncreatableType<GeoZoneMonitor>("QGroundControl.GeoZone", 1, 0, "GeoZoneMonitor", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>("QGroundControl.GeoZone", 1, 0, "GeoZoneMapModel");
     (void) qmlRegisterType<GeoZoneMissionCheck>("QGroundControl.GeoZone", 1, 0, "GeoZoneMissionCheck");
     (void) qmlRegisterType<GeoZoneFenceImporter>("QGroundControl.GeoZone", 1, 0, "GeoZoneFenceImporter");

@@ -12,6 +12,7 @@
 #include "AudioOutput.h"
 #include "GeoZone.h"
 #include "GeoZoneAlertLog.h"
+#include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSettings.h"
@@ -22,74 +23,11 @@
 #include "Vehicle.h"
 
 #include <QtCore/qapplicationstatic.h>
-#include <QtCore/QSet>
-#include <QtCore/QtMath>
-#include <QtPositioning/QGeoCircle>
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 QGC_LOGGING_CATEGORY(GeoZoneMonitorLog, "qgc.geozone.geozonemonitor")
-
-GeoZoneNearbyModel::GeoZoneNearbyModel(QObject *parent)
-    : QAbstractListModel(parent)
-{
-}
-
-void GeoZoneNearbyModel::setItems(const QList<Item> &items)
-{
-    const bool sameZones = (items.count() == _items.count()) &&
-                           std::equal(items.cbegin(), items.cend(), _items.cbegin(), [](const Item &a, const Item &b) { return a.zone == b.zone; });
-    if (!sameZones) {
-        const bool countChanged = (items.count() != _items.count());
-        beginResetModel();
-        _items = items;
-        endResetModel();
-        if (countChanged) {
-            emit this->countChanged();
-        }
-        return;
-    }
-
-    for (qsizetype row = 0; row < items.count(); row++) {
-        if (items[row] != _items[row]) {
-            _items[row] = items[row];
-            const QModelIndex changed = index(static_cast<int>(row));
-            emit dataChanged(changed, changed, { InsideRole, DistanceRole, TimeToEntryRole });
-        }
-    }
-}
-
-int GeoZoneNearbyModel::rowCount(const QModelIndex &parent) const
-{
-    return parent.isValid() ? 0 : count();
-}
-
-QVariant GeoZoneNearbyModel::data(const QModelIndex &index, int role) const
-{
-    if (!checkIndex(index, CheckIndexOption::IndexIsValid | CheckIndexOption::ParentIsInvalid)) {
-        return QVariant();
-    }
-    const Item &item = _items[index.row()];
-    switch (role) {
-    case ZoneRole:
-        return QVariant::fromValue(GeoZoneInfo(item.zone));
-    case InsideRole:
-        return item.inside;
-    case DistanceRole:
-        return item.distance;
-    case TimeToEntryRole:
-        return item.timeToEntry;
-    default:
-        return QVariant();
-    }
-}
-
-QHash<int, QByteArray> GeoZoneNearbyModel::roleNames() const
-{
-    return { { ZoneRole, "zone" }, { InsideRole, "inside" }, { DistanceRole, "distance" }, { TimeToEntryRole, "timeToEntry" } };
-}
 
 Q_APPLICATION_STATIC(GeoZoneMonitor, _geoZoneMonitor);
 
@@ -121,6 +59,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
     , _nearbyModel(new GeoZoneNearbyModel(this))
+    , _guidedCheck(new GeoZoneGuidedCheck(this))
 {
     _clock.start();
     // Zones of a source are about to be deleted. Their alert states are kept so reloading the source doesn't repeat alerts.
@@ -196,7 +135,7 @@ void GeoZoneMonitor::_evaluateVehicles()
     for (const QPointer<Vehicle> &vehicle : std::as_const(_vehicles)) {
         if (vehicle && vehicle->coordinate().isValid()) {
             const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate());
-            const Velocity velocity = _estimateVelocity(_trackers[vehicle->id()].samples, msecs, position);
+            const Velocity velocity = _trackers[vehicle->id()].velocity.add(msecs, position);
             evaluate(position, vehicle->id(), velocity);
         }
     }
@@ -290,7 +229,7 @@ QVariantList GeoZoneMonitor::verticalBands() const
     if (!tracker) {
         return bands;
     }
-    for (const VerticalBand &band : tracker->bands) {
+    for (const GeoZoneVerticalBand &band : tracker->bands) {
         bands.append(QVariantMap{
             { QStringLiteral("restriction"), static_cast<int>(band.zone->restriction()) },
             { QStringLiteral("name"), band.zone->displayName() },
@@ -314,104 +253,6 @@ double GeoZoneMonitor::terrainAMSL() const
     return tracker ? tracker->position.terrainAMSL : qQNaN();
 }
 
-QList<GeoZoneMonitor::VerticalBand> GeoZoneMonitor::_verticalBands(const GeoZone::Position &position) const
-{
-    const GeoZonePolicy policy = GeoZonePolicy::alerts();
-    QList<VerticalBand> bands;
-    for (GeoZone *zone : _manager->catalog().zonesAt(position.coordinate)) {
-        if (!policy.accepts(zone)) {
-            continue;
-        }
-        for (const GeoZone::Volume &volume : zone->data().volumes) {
-            if (GeoZone::volumeContains(volume, position.coordinate)) {
-                bands.append(VerticalBand{ zone, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) });
-            }
-        }
-    }
-    return bands;
-}
-
-QString GeoZoneMonitor::pathWarning(const QList<GeoZone::Position> &path) const
-{
-    QList<GeoZone*> zones;
-    for (const GeoZoneCatalog::PathHit &hit : _manager->catalog().pathHits(path, GeoZonePolicy::alerts())) {
-        // Zones the vehicle is already in were alerted when it entered them
-        if ((hit.entry.segment > 0) || (hit.entry.fraction > 0)) {
-            zones.append(hit.zone);
-        }
-    }
-    if (zones.isEmpty()) {
-        return QString();
-    }
-    std::stable_sort(zones.begin(), zones.end(), [](const GeoZone *a, const GeoZone *b) {
-        return GeoZone::restrictionSeverity(a->restriction()) < GeoZone::restrictionSeverity(b->restriction());
-    });
-
-    constexpr qsizetype maxListed = 4;
-    QStringList names;
-    for (qsizetype i = 0; i < (std::min)(zones.count(), maxListed); i++) {
-        names.append(QStringLiteral("%1 (%2)").arg(zones[i]->displayName(), zones[i]->restrictionText()));
-    }
-    QString text = names.join(QStringLiteral(", "));
-    if (zones.count() > maxListed) {
-        text += tr(" and %1 more").arg(zones.count() - maxListed);
-    }
-    return tr("The vehicle would enter geozones: %1").arg(text);
-}
-
-QString GeoZoneMonitor::gotoWarning(QObject *vehicle, const QGeoCoordinate &coordinate, double altitudeAMSL) const
-{
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
-    if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || !coordinate.isValid()) {
-        return QString();
-    }
-    const GeoZone::Position from = vehiclePosition(guidedVehicle, guidedVehicle->coordinate());
-    GeoZone::Position to = from;
-    to.coordinate = coordinate;
-    if (!std::isnan(altitudeAMSL)) {
-        to.altitudeAMSL = altitudeAMSL;
-    }
-    return pathWarning({ from, to });
-}
-
-QString GeoZoneMonitor::orbitWarning(QObject *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const
-{
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
-    if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || !center.isValid() || !(radius > 0)) {
-        return QString();
-    }
-    const GeoZone::Position from = vehiclePosition(guidedVehicle, guidedVehicle->coordinate());
-    QList<GeoZone::Position> path = { from };
-    constexpr int circlePoints = 36;
-    const double startAzimuth = center.azimuthTo(from.coordinate);
-    for (int i = 0; i <= circlePoints; i++) {
-        GeoZone::Position position = from;
-        position.coordinate = center.atDistanceAndAzimuth(radius, startAzimuth + (360.0 * i / circlePoints));
-        if (!std::isnan(altitudeAMSL)) {
-            position.altitudeAMSL = altitudeAMSL;
-        }
-        path.append(position);
-    }
-    return pathWarning(path);
-}
-
-QString GeoZoneMonitor::altitudeWarning(QObject *vehicle, double relativeAltitude) const
-{
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
-    if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || std::isnan(relativeAltitude)) {
-        return QString();
-    }
-    const GeoZone::Position from = vehiclePosition(guidedVehicle, guidedVehicle->coordinate());
-    const double currentRelative = guidedVehicle->altitudeRelative()->rawValue().toDouble();
-    if (std::isnan(from.altitudeAMSL) || std::isnan(currentRelative)) {
-        // Unknown altitudes are inside all limits, so only zones applying at any altitude would be named
-        return pathWarning({ from, from });
-    }
-    GeoZone::Position to = from;
-    to.altitudeAMSL = from.altitudeAMSL + (relativeAltitude - currentRelative);
-    return pathWarning({ from, to });
-}
-
 void GeoZoneMonitor::_resetTrackers()
 {
     const bool hadNearby = !_activeNearby().isEmpty();
@@ -427,7 +268,7 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
 {
     bool activeChanged = false;
     for (auto it = _trackers.begin(); it != _trackers.end(); ++it) {
-        const qsizetype removedBands = it->bands.removeIf([source](const VerticalBand &band) { return band.zone->sourceKey() == source->key(); });
+        const qsizetype removedBands = it->bands.removeIf([source](const GeoZoneVerticalBand &band) { return band.zone->sourceKey() == source->key(); });
         if ((it->nearby.removeIf([source](const Nearby &nearby) { return nearby.zone->sourceKey() == source->key(); }) + removedBands) > 0) {
             activeChanged = activeChanged || (it.key() == _activeVehicleId);
         }
@@ -446,45 +287,37 @@ QString GeoZoneMonitor::_vehicleLabel(int vehicleId) const
     return (vehicleCount > 1) ? tr("Vehicle %1").arg(vehicleId) : QString();
 }
 
-GeoZone::Position GeoZoneMonitor::_predictedPosition(const GeoZone::Position &position, const Velocity &velocity, double seconds)
+GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZoneAlertTracker::Alert &alert, const GeoZone::Position &position, int vehicleId) const
 {
-    GeoZone::Position predicted = position;
-    const double course = qRadiansToDegrees(std::atan2(velocity.east, velocity.north));
-    predicted.coordinate = position.coordinate.atDistanceAndAzimuth(velocity.groundSpeed() * seconds, course);
-    if (!std::isnan(position.altitudeAMSL)) {
-        predicted.altitudeAMSL = position.altitudeAMSL + (velocity.up * seconds);
+    const GeoZone *const zone = alert.zone;
+    const QString name = zone->displayName();
+    QString message;
+    if (alert.inside) {
+        message = tr("Entered geozone %1 (%2)").arg(name, zone->restrictionText());
+    } else if (!std::isnan(alert.timeToEntry)) {
+        message = tr("Approaching geozone %1 (%2), entry in about %3 s").arg(name, zone->restrictionText()).arg(std::lround(alert.timeToEntry));
+    } else {
+        message = tr("Approaching geozone %1 (%2)").arg(name, zone->restrictionText());
     }
-    // The terrain ahead is unknown, limits above ground use the terrain below the vehicle
-    return predicted;
-}
-
-double GeoZoneMonitor::_timeToEntry(const GeoZone *zone, const GeoZone::Position &position, const Velocity &velocity, double horizon)
-{
-    // The vehicle moves along the path at a constant velocity, so the time is proportional to the fraction
-    const auto entry = zone->pathEntry(QList<GeoZone::Position>{ position, _predictedPosition(position, velocity, horizon) });
-    return entry ? (entry->fraction * horizon) : qQNaN();
-}
-
-GeoZoneMonitor::Velocity GeoZoneMonitor::_estimateVelocity(QList<Sample> &samples, qint64 msecs, const GeoZone::Position &position)
-{
-    samples.removeIf([msecs](const Sample &sample) { return (msecs - sample.msecs) > velocityWindowMSecs; });
-    samples.append(Sample{ msecs, position });
-
-    Velocity velocity;
-    const Sample &oldest = samples.constFirst();
-    const double seconds = static_cast<double>(msecs - oldest.msecs) / 1000.0;
-    if ((seconds < 0.5) || !oldest.position.coordinate.isValid()) {
-        return velocity;
+    const QString vehicleLabel = _vehicleLabel(vehicleId);
+    if (!vehicleLabel.isEmpty()) {
+        message = QStringLiteral("%1: %2").arg(vehicleLabel, message);
     }
-    const double distance = oldest.position.coordinate.distanceTo(position.coordinate);
-    const double azimuth = qDegreesToRadians(oldest.position.coordinate.azimuthTo(position.coordinate));
-    velocity.north = distance * std::cos(azimuth) / seconds;
-    velocity.east = distance * std::sin(azimuth) / seconds;
-    if (!std::isnan(oldest.position.altitudeAMSL) && !std::isnan(position.altitudeAMSL)) {
-        velocity.up = (position.altitudeAMSL - oldest.position.altitudeAMSL) / seconds;
-    }
-    velocity.valid = true;
-    return velocity;
+    qCDebug(GeoZoneMonitorLog) << message << "distance" << alert.distance << "time to entry" << alert.timeToEntry;
+
+    AlertEvent event;
+    event.time = QDateTime::currentDateTimeUtc();
+    event.vehicleId = vehicleId;
+    event.position = position;
+    event.inside = alert.inside;
+    event.distance = alert.distance;
+    event.zoneIdentifier = zone->identifier();
+    event.zoneName = zone->name();
+    event.restriction = zone->restriction();
+    event.sourceText = zone->sourceText();
+    event.message = message;
+    event.timeToEntry = alert.timeToEntry;
+    return event;
 }
 
 void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, const Velocity &velocity)
@@ -494,117 +327,15 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
     }
 
     GeoZoneSettings *const settings = SettingsManager::instance()->geoZoneSettings();
-    const double approachDistance = settings->approachDistance()->rawValue().toDouble();
-    const double approachVerticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
-    const double approachTime = settings->approachTime()->rawValue().toDouble();
-    QGeoRectangle area = QGeoCircle(position.coordinate, approachDistance + hysteresisDistance).boundingGeoRectangle();
-
-    // Zones the vehicle would enter at its velocity within the approach time are near too
-    const bool predict = velocity.valid && (approachTime > 0) &&
-                         ((velocity.groundSpeed() >= minPredictionSpeed) || (std::abs(velocity.up) >= minPredictionSpeed));
-    const double horizon = approachTime + hysteresisTime;
-    if (predict) {
-        const GeoZone::Position ahead = _predictedPosition(position, velocity, horizon);
-        area = area.united(QGeoRectangle(QList<QGeoCoordinate>{ position.coordinate, ahead.coordinate }));
-    }
+    GeoZoneAlertTracker::Limits limits;
+    limits.distance = settings->approachDistance()->rawValue().toDouble();
+    limits.verticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
+    limits.time = settings->approachTime()->rawValue().toDouble();
 
     Tracker &tracker = _trackers[vehicleId];
-    const QString vehicleLabel = _vehicleLabel(vehicleId);
-
-    QSet<QString> nearbyZones;
-    QList<Nearby> nearby;
-    QList<AlertEvent> alerts;
-    for (GeoZone *zone : _manager->catalog().zonesInArea(area, GeoZonePolicy::alerts())) {
-        const QString &key = zone->key();
-        const State previous = tracker.states.value(key, State::Away);
-        const double nearLimit = approachDistance + ((previous != State::Away) ? hysteresisDistance : 0);
-        // The approach margin includes the inside margin, so a zone which isn't near isn't entered either
-        const double nearDistance = zone->distanceTo(position, approachVerticalDistance + ((previous != State::Away) ? hysteresisDistance : 0), nearLimit);
-        const bool nearByDistance = (nearDistance <= nearLimit);
-        double insideDistance = qInf();
-        if (nearByDistance) {
-            insideDistance = zone->distanceTo(position, (previous == State::Inside) ? hysteresisDistance : 0, hysteresisDistance);
-        }
-        const bool inside = (insideDistance <= 0) || ((previous == State::Inside) && (insideDistance <= hysteresisDistance));
-
-        double timeToEntry = qQNaN();
-        if (!inside && predict) {
-            timeToEntry = _timeToEntry(zone, position, velocity, horizon);
-        }
-        const double timeLimit = approachTime + ((previous != State::Away) ? hysteresisTime : 0);
-        const bool nearByTime = !std::isnan(timeToEntry) && (timeToEntry <= timeLimit);
-        if (!inside && !nearByDistance && !nearByTime) {
-            continue;
-        }
-
-        const State state = inside ? State::Inside : State::Near;
-        // Zones only near in time can be far, or above or below the vehicle
-        const double distance = nearByDistance ? (std::min)(insideDistance, nearDistance) : zone->distanceTo(position, std::numeric_limits<double>::max());
-
-        nearbyZones.insert(key);
-        tracker.states[key] = state;
-        nearby.append(Nearby{ zone, inside, static_cast<int>(std::lround(distance)), std::isnan(timeToEntry) ? -1 : static_cast<int>(std::lround(timeToEntry)) });
-        if (state <= previous) {
-            continue;
-        }
-
-        const QString name = zone->displayName();
-        QString message;
-        if (state == State::Inside) {
-            message = tr("Entered geozone %1 (%2)").arg(name, zone->restrictionText());
-        } else if (!std::isnan(timeToEntry)) {
-            message = tr("Approaching geozone %1 (%2), entry in about %3 s").arg(name, zone->restrictionText()).arg(std::lround(timeToEntry));
-        } else {
-            message = tr("Approaching geozone %1 (%2)").arg(name, zone->restrictionText());
-        }
-        if (!vehicleLabel.isEmpty()) {
-            message = QStringLiteral("%1: %2").arg(vehicleLabel, message);
-        }
-        qCDebug(GeoZoneMonitorLog) << message << "distance" << distance << "time to entry" << timeToEntry;
-
-        AlertEvent event;
-        event.time = QDateTime::currentDateTimeUtc();
-        event.vehicleId = vehicleId;
-        event.position = position;
-        event.inside = (state == State::Inside);
-        event.distance = event.inside ? 0 : distance;
-        event.zoneIdentifier = zone->identifier();
-        event.zoneName = zone->name();
-        event.restriction = zone->restriction();
-        event.sourceText = zone->sourceText();
-        event.message = message;
-        event.timeToEntry = timeToEntry;
-        alerts.append(event);
-    }
-
-    // Simultaneous alerts most severe first, entries before approaches
-    std::stable_sort(alerts.begin(), alerts.end(), [](const AlertEvent &a, const AlertEvent &b) {
-        const int severityA = GeoZone::restrictionSeverity(a.restriction);
-        const int severityB = GeoZone::restrictionSeverity(b.restriction);
-        return (severityA != severityB) ? (severityA < severityB) : (a.inside && !b.inside);
-    });
-
-    // Zones out of range or no longer active can alert again
-    for (auto it = tracker.states.begin(); it != tracker.states.end();) {
-        it = nearbyZones.contains(it.key()) ? std::next(it) : tracker.states.erase(it);
-    }
-
-    // The most restrictive first, so being inside large U-space airspace doesn't hide a prohibited zone ahead,
-    // then zones the vehicle is in, then the closest
-    std::stable_sort(nearby.begin(), nearby.end(), [](const Nearby &a, const Nearby &b) {
-        const int severityA = GeoZone::restrictionSeverity(a.zone->restriction());
-        const int severityB = GeoZone::restrictionSeverity(b.zone->restriction());
-        if (severityA != severityB) {
-            return severityA < severityB;
-        }
-        if (a.inside != b.inside) {
-            return a.inside;
-        }
-        return a.distance < b.distance;
-    });
-
-    if (nearby != tracker.nearby) {
-        tracker.nearby = nearby;
+    const GeoZoneAlertTracker::Update update = tracker.alerts.update(_manager->catalog(), position, velocity, limits);
+    if (update.nearby != tracker.nearby) {
+        tracker.nearby = update.nearby;
         if (vehicleId == _activeVehicleId) {
             _publishNearby();
         }
@@ -612,7 +343,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
 
     // Zones above and below are only shown for the active vehicle
     if (vehicleId == _activeVehicleId) {
-        const QList<VerticalBand> bands = _verticalBands(position);
+        const QList<GeoZoneVerticalBand> bands = GeoZoneVerticalBand::at(_manager->catalog(), position);
         const bool altitudeChanged = (std::isnan(position.altitudeAMSL) != std::isnan(tracker.position.altitudeAMSL)) ||
                                      (std::abs(position.altitudeAMSL - tracker.position.altitudeAMSL) >= 0.5) ||
                                      (std::isnan(position.terrainAMSL) != std::isnan(tracker.position.terrainAMSL)) ||
@@ -624,7 +355,8 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         }
     }
 
-    for (const AlertEvent &event : std::as_const(alerts)) {
+    for (const GeoZoneAlertTracker::Alert &zoneAlert : update.alerts) {
+        const AlertEvent event = _alertEvent(zoneAlert, position, vehicleId);
         emit alertEvent(event);
         emit alert(event.message, GeoZone::restrictionSeverity(event.restriction));
     }

@@ -4,6 +4,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZone.h
         GeoZoneAlertLog.cc
         GeoZoneAlertLog.h
+        GeoZoneAlertTracker.cc
+        GeoZoneAlertTracker.h
         GeoZoneCatalog.cc
         GeoZoneCatalog.h
         GeoZoneDownloader.cc
@@ -14,6 +16,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneFormat.h
         GeoZoneGeometry.cc
         GeoZoneGeometry.h
+        GeoZoneGuidedCheck.cc
+        GeoZoneGuidedCheck.h
         GeoZoneIndex.cc
         GeoZoneIndex.h
         GeoZoneInfo.cc
@@ -28,6 +32,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneMissionCheck.h
         GeoZoneMonitor.cc
         GeoZoneMonitor.h
+        GeoZoneNearbyModel.cc
+        GeoZoneNearbyModel.h
         GeoZoneParser.cc
         GeoZoneParser.h
         GeoZoneParserUtils.cc

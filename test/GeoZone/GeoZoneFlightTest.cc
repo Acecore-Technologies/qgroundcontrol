@@ -10,6 +10,7 @@
 #include "GeoZoneFlightTest.h"
 #include "GeoZone.h"
 #include "GeoZoneAlertLog.h"
+#include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
@@ -252,15 +253,15 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(nearbyIdentifiers(monitor), ctrs);
 
     // Guided commands name the zones they would enter, not those the vehicle is in
-    const QString airportWarning = monitor.gotoWarning(vehicle, coordinate(kAirport.east, kAirport.north));
+    const QString airportWarning = monitor.guidedCheck()->gotoWarning(vehicle, coordinate(kAirport.east, kAirport.north));
     QVERIFY2(airportWarning.contains(findZone(*manager, QStringLiteral("LSZH001"))->name()), qPrintable(airportWarning));
     QVERIFY(!airportWarning.contains(QStringLiteral("CTR")));
     const double terrainAMSL = vehicle->altitudeAMSL()->rawValue().toDouble() - vehicle->altitudeAboveTerr()->rawValue().toDouble();
-    const QString prisonWarning = monitor.gotoWarning(vehicle, coordinate(kPrison.east, kPrison.north), std::isnan(terrainAMSL) ? kTerrainAMSL + 60 : terrainAMSL + 60);
+    const QString prisonWarning = monitor.guidedCheck()->gotoWarning(vehicle, coordinate(kPrison.east, kPrison.north), std::isnan(terrainAMSL) ? kTerrainAMSL + 60 : terrainAMSL + 60);
     QVERIFY2(prisonWarning.contains(findZone(*manager, QStringLiteral("GZW0001"))->name()), qPrintable(prisonWarning));
-    const QString orbitWarning = monitor.orbitWarning(vehicle, coordinate(kAirport.east, kAirport.north), 200, vehicle->altitudeAMSL()->rawValue().toDouble());
+    const QString orbitWarning = monitor.guidedCheck()->orbitWarning(vehicle, coordinate(kAirport.east, kAirport.north), 200, vehicle->altitudeAMSL()->rawValue().toDouble());
     QVERIFY2(orbitWarning.contains(findZone(*manager, QStringLiteral("LSZH001"))->name()), qPrintable(orbitWarning));
-    QVERIFY(monitor.gotoWarning(nullptr, coordinate(kAirport.east, kAirport.north)).isEmpty());
+    QVERIFY(monitor.guidedCheck()->gotoWarning(nullptr, coordinate(kAirport.east, kAirport.north)).isEmpty());
 
     QStringList entered = spiedAlerts(alertSpy).filter(QStringLiteral("Entered"));
     entered.sort();

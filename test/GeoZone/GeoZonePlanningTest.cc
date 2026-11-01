@@ -52,7 +52,7 @@ void GeoZonePlanningTest::_testPathHits()
 
     // Restricted zones and unknown restrictions are warned about, others are information
     GeoZoneMonitor monitor(&manager);
-    const QString warning = monitor.pathWarning(east);
+    const QString warning = monitor.guidedCheck()->pathWarning(east);
     QVERIFY(warning.contains(QStringLiteral("A (Prohibited)")));
     QVERIFY(warning.contains(QStringLiteral("X (Unknown)")));
     QVERIFY(!warning.contains(QStringLiteral("N (")));
