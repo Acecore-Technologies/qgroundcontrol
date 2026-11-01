@@ -66,6 +66,15 @@ void GeoZoneMissionCheck::setMissionController(MissionController *missionControl
     _scheduleUpdate();
 }
 
+void GeoZoneMissionCheck::setFlightNow(bool flightNow)
+{
+    if (flightNow != _flightNow) {
+        _flightNow = flightNow;
+        emit flightNowChanged();
+        _scheduleUpdate();
+    }
+}
+
 QList<QObject*> GeoZoneMissionCheck::crossedZones() const
 {
     return QList<QObject*>(_crossedZones.cbegin(), _crossedZones.cend());
@@ -108,7 +117,7 @@ QString GeoZoneMissionCheck::infoText() const
     if (!_permittedZones.isEmpty()) {
         lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(_zoneNames(_permittedZones, NameStyle::Name)));
     }
-    if (_inactiveZoneCount > 0) {
+    if ((_inactiveZoneCount > 0) && !_flightNow) {
         lines.append(tr("%n zone(s) on the path are not active at the planned flight time.", nullptr, _inactiveZoneCount));
     }
     return lines.join(QStringLiteral("\n"));
@@ -168,7 +177,11 @@ void GeoZoneMissionCheck::update()
 
     // Zones which aren't active at any time during the planned flight don't apply
     int inactiveZoneCount = 0;
-    const auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
+    auto [plannedStart, plannedEnd] = plannedFlightTimes(_manager, _missionController);
+    if (_flightNow) {
+        plannedStart = QDateTime::currentDateTimeUtc();
+        plannedEnd = plannedStart.addSecs(std::llround((std::max)(_missionController ? _missionController->missionTime() : 0.0, 0.0)));
+    }
     if (plannedStart.isValid()) {
         inactiveZoneCount = static_cast<int>(zones.removeIf([&plannedStart, &plannedEnd](const GeoZone *zone) { return !zone->isActiveDuring(plannedStart, plannedEnd); }));
     }

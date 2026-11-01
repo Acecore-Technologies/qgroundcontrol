@@ -29,6 +29,8 @@ Item {
         Speed
     }
 
+    readonly property real value: parseFloat(_clampedSliderValueString(_sliderValue))   ///< Value in the units shown, like getOutputValue
+
     property real   _sliderMaxVal:          0
     property real   _sliderMinVal:          0
     property int    _sliderType:            GuidedValueSlider.SliderType.Altitude

@@ -692,7 +692,9 @@ FlightMap {
                             mapClickDropPanel.close()
                             gotoLocationItem.show(mapClickCoord)
 
-                            if ((_activeVehicle.flightMode == _activeVehicle.gotoFlightMode) && !_flyViewSettings.goToLocationRequiresConfirmInGuided.value) {
+                            // Entering geozones is always confirmed
+                            if ((_activeVehicle.flightMode == _activeVehicle.gotoFlightMode) && !_flyViewSettings.goToLocationRequiresConfirmInGuided.value &&
+                                    !globals.guidedControllerFlyView.gotoEntersGeoZones(mapClickCoord)) {
                                 globals.guidedControllerFlyView.executeAction(globals.guidedControllerFlyView.actionGoto, mapClickCoord, gotoLocationItem)
                                 gotoLocationItem.actionConfirmed() // Still need to call this to commit the new coordinate and radius
                             } else {

@@ -29,6 +29,7 @@ Rectangle {
     property var    guidedValueSlider
     property string title                                       // Currently unused
     property alias  message:            messageText.text
+    property string geoZoneWarning                              ///< Geozones the action would enter, empty when none
     property int    action
     property var    actionData
     property bool   hideTrigger:        false
@@ -100,6 +101,16 @@ Rectangle {
             wrapMode:               Text.WordWrap
             font.pointSize:         ScreenTools.defaultFontPointSize
             font.bold:              true
+        }
+
+        QGCLabel {
+            Layout.fillWidth:       true
+            horizontalAlignment:    Text.AlignHCenter
+            wrapMode:               Text.WordWrap
+            textFormat:             Text.PlainText
+            color:                  qgcPal.warningText
+            text:                   _root.geoZoneWarning
+            visible:                text !== ""
         }
 
         QGCCheckBox {

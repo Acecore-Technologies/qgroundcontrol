@@ -246,6 +246,17 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QTRY_COMPARE_WITH_TIMEOUT(nearbyIdentifiers(monitor), ctrs, 5000);
     QVERIFY(monitor.inside());
 
+    // Guided commands name the zones they would enter, not those the vehicle is in
+    const QString airportWarning = monitor.gotoWarning(vehicle, coordinate(kAirport.east, kAirport.north));
+    QVERIFY2(airportWarning.contains(findZone(*manager, QStringLiteral("LSZH001"))->name()), qPrintable(airportWarning));
+    QVERIFY(!airportWarning.contains(QStringLiteral("CTR")));
+    const double terrainAMSL = vehicle->altitudeAMSL()->rawValue().toDouble() - vehicle->altitudeAboveTerr()->rawValue().toDouble();
+    const QString prisonWarning = monitor.gotoWarning(vehicle, coordinate(kPrison.east, kPrison.north), std::isnan(terrainAMSL) ? kTerrainAMSL + 60 : terrainAMSL + 60);
+    QVERIFY2(prisonWarning.contains(findZone(*manager, QStringLiteral("GZW0001"))->name()), qPrintable(prisonWarning));
+    const QString orbitWarning = monitor.orbitWarning(vehicle, coordinate(kAirport.east, kAirport.north), 200, vehicle->altitudeAMSL()->rawValue().toDouble());
+    QVERIFY2(orbitWarning.contains(findZone(*manager, QStringLiteral("LSZH001"))->name()), qPrintable(orbitWarning));
+    QVERIFY(monitor.gotoWarning(nullptr, coordinate(kAirport.east, kAirport.north)).isEmpty());
+
     QStringList entered = spiedAlerts(alertSpy).filter(QStringLiteral("Entered"));
     entered.sort();
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));

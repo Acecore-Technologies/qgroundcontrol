@@ -138,6 +138,21 @@ public:
     ///         altitude above terrain, which is unknown without terrain data
     static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate);
 
+    /// Checks of guided commands, each returning a warning naming the active restricted zones and U-space airspaces
+    /// the vehicle would enter, or an empty string. Zones the vehicle is in are left out. Limits above ground use the
+    /// terrain below the vehicle.
+    /// @param vehicle Vehicle object, the checks return an empty string without a position
+    /// @param altitudeAMSL Target altitude in meters above mean sea level, NaN to keep the vehicle's altitude
+    Q_INVOKABLE QString gotoWarning(QObject *vehicle, const QGeoCoordinate &coordinate, double altitudeAMSL = qQNaN()) const;
+    /// Flying to and around the circle
+    Q_INVOKABLE QString orbitWarning(QObject *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const;
+    /// Climbing or descending at the vehicle's position, also for takeoffs
+    /// @param relativeAltitude Target altitude in meters above the vehicle's home
+    Q_INVOKABLE QString altitudeWarning(QObject *vehicle, double relativeAltitude) const;
+
+    /// @return Warning naming the active zones matching the monitored restrictions which the path enters, empty without
+    QString pathWarning(const QList<GeoZone::Position> &path) const;
+
     bool monitoring() const;
     QVariantList nearbyZones() const;
     int alertRestriction() const;

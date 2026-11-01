@@ -39,6 +39,7 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QList<QObject*>      permittedZones      READ permittedZones                                 NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
     Q_PROPERTY(int                  inactiveZoneCount   READ inactiveZoneCount                              NOTIFY crossedZonesChanged FINAL)     ///< Zones entered which aren't active during the planned flight
+    Q_PROPERTY(bool                 flightNow           READ flightNow          WRITE setFlightNow          NOTIFY flightNowChanged FINAL)        ///< Checks a flight starting now instead of at the planned start, like a mission on the vehicle
 
 public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
@@ -60,6 +61,8 @@ public:
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
     int inactiveZoneCount() const { return _inactiveZoneCount; }
+    bool flightNow() const { return _flightNow; }
+    void setFlightNow(bool flightNow);
 
     /// @return Start and end of the planned flight from the planned start of the manager and the mission duration,
     ///         invalid without a planned start
@@ -85,6 +88,7 @@ public:
 signals:
     void missionControllerChanged();
     void crossedZonesChanged();
+    void flightNowChanged();
 
 private:
     void _scheduleUpdate();
@@ -99,6 +103,7 @@ private:
     QList<GeoZone*> _uSpaceZones;
     QList<GeoZone*> _permittedZones;
     int _inactiveZoneCount = 0;
+    bool _flightNow = false;
     QTimer _updateTimer;
 
     static constexpr int _updateDelayMSecs = 500;
