@@ -2,6 +2,7 @@
 
 The geozone module loads UAS geographical zones (ED-269, ED-318, AIXM 5.1, FAA TFRs and airspace layers, DiPUL, IGN and OpenAIP), shows them on the maps, checks missions and guided commands against them and alerts in flight.
 This page describes how the module is built, for developers changing it. What it does for users is described in the [Geozones user guide](../qgc-user-guide/geozones/geozones.md).
+The data providers which were evaluated, the data a provider must supply and the user flows are compared in [Geozone Data Providers](geozones-providers.md).
 
 ## Architecture {#architecture}
 

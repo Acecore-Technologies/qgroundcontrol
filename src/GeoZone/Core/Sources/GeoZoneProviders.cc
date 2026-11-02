@@ -191,6 +191,20 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
                             "Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation.");
     templates.append(openAipExport);
 
+    // The Airspace Link AirHub API briefs an area posted as GeoJSON with OAuth2 client credentials and an API key header
+    ServiceTemplate airspaceLink;
+    airspaceLink.url = QStringLiteral("https://airhub-api.airspacelink.com/v2/briefing/b4ufly/area");
+    airspaceLink.service.id = QStringLiteral("airspacelink");
+    airspaceLink.service.name = tr("United States advisories (Airspace Link)");
+    airspaceLink.service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    airspaceLink.service.tokenUrl = QStringLiteral("https://airhub-api.airspacelink.com/v1/oauth/token");
+    airspaceLink.service.scope = QStringLiteral("briefing:area:read");
+    airspaceLink.service.areaOfInterest = true;
+    airspaceLink.note = tr("Configuration only: QGroundControl does not post GeoJSON areas or read Airspace Link notices yet, and the API also takes "
+                           "an API key header (x-api-key). Airspace Link grants the key and client credentials on request (developers.airspacelink.com).");
+    airspaceLink.supported = false;
+    templates.append(airspaceLink);
+
     // The FAA's public airspace layers, also offered for the map area, following the area of interest
     const QList<Service> all = services();
     for (const FaaLayer &layer : kFaaLayers) {
