@@ -61,10 +61,10 @@ bool GeoZoneMapFilter::accepts(const GeoZone &zone, const QDateTime &now, const 
         break;
     }
 
-    return !altitudes || nearAltitudes(zone, altitudeRange, altitudeMargin);
+    return !altitudes || nearAltitudes(zone, altitudeRange);
 }
 
-bool GeoZoneMapFilter::nearAltitudes(const GeoZone &zone, const GeoZoneAltitudeRange &range, double margin)
+bool GeoZoneMapFilter::nearAltitudes(const GeoZone &zone, const GeoZoneAltitudeRange &range)
 {
     const QList<GeoZone::Volume> &volumes = zone.data().volumes;
     if (!range.isValid() || volumes.isEmpty()) {
@@ -77,7 +77,7 @@ bool GeoZoneMapFilter::nearAltitudes(const GeoZone &zone, const GeoZoneAltitudeR
     for (const GeoZone::Volume &volume : volumes) {
         const double floor = GeoZone::limitAMSL(volume, false, highest);
         const double ceiling = GeoZone::limitAMSL(volume, true, lowest);
-        if ((std::isnan(floor) || (floor <= (range.maxAMSL + margin))) && (std::isnan(ceiling) || (ceiling >= (range.minAMSL - margin)))) {
+        if ((std::isnan(floor) || (floor <= (range.maxAMSL + altitudeMargin))) && (std::isnan(ceiling) || (ceiling >= (range.minAMSL - altitudeMargin)))) {
             return true;
         }
     }
@@ -90,8 +90,7 @@ GeoZoneDisplay::GeoZoneDisplay(QObject *parent)
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     (void) connect(settings->showZones(), &Fact::rawValueChanged, this, [this]() { emit visibleChanged(visible()); });
     (void) connect(settings->hiddenRestrictions(), &Fact::rawValueChanged, this, &GeoZoneDisplay::hiddenRestrictionsChanged);
-    for (Fact *const fact : { settings->hiddenRestrictions(), settings->altitudeFilter(), settings->altitudeFilterMargin(), settings->scheduleFilter(),
-                              settings->scheduleFilterHours(), settings->mapSource() }) {
+    for (Fact *const fact : { settings->hiddenRestrictions(), settings->altitudeFilter(), settings->scheduleFilter(), settings->mapSource() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneDisplay::filtersChanged);
     }
 }
@@ -125,10 +124,8 @@ GeoZoneMapFilter GeoZoneDisplay::filter() const
     filter.hiddenRestrictions = hiddenRestrictions();
     filter.source = settings->mapSource()->rawValue().toString();
     filter.altitudes = settings->altitudeFilter()->rawValue().toBool();
-    filter.altitudeMargin = settings->altitudeFilterMargin()->rawValue().toDouble();
     filter.schedule = static_cast<GeoZoneMapFilter::Schedule>(std::clamp(settings->scheduleFilter()->rawValue().toInt(),
                                                                          static_cast<int>(GeoZoneMapFilter::AnyTime), static_cast<int>(GeoZoneMapFilter::ActiveSoon)));
-    filter.scheduleHours = settings->scheduleFilterHours()->rawValue().toInt();
     return filter;
 }
 

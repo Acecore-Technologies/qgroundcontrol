@@ -44,12 +44,13 @@ struct GeoZoneMapFilter
         ActiveSoon,     ///< Zones active now or within scheduleHours
     };
 
+    static constexpr double altitudeMargin = 100;   ///< Meters from the altitudes of the flight within which zones are near them
+    static constexpr int scheduleHours = 12;        ///< Hours ahead in which zones active soon become active
+
     int hiddenRestrictions = 0;     ///< Bit mask, 1 << GeoZone::Restriction
     QString source;                 ///< Key of the only source shown, empty for all
     bool altitudes = false;         ///< Only zones near the altitudes of the flight
-    double altitudeMargin = 0;      ///< Meters
     Schedule schedule = AnyTime;
-    int scheduleHours = 0;
 
     /// @return true if the filters can hide zones
     bool isActive() const;
@@ -59,11 +60,11 @@ struct GeoZoneMapFilter
     /// @param altitudeRange Of the flight, all zones pass the altitude filter without it
     bool accepts(const GeoZone &zone, const QDateTime &now, const GeoZoneAltitudeRange &altitudeRange) const;
 
-    /// @return true if the floor of a volume of the zone is at most margin meters above the highest altitudes and its
-    ///         ceiling at least margin meters below the lowest ones. Limits above ground are compared with the heights
+    /// @return true if the floor of a volume of the zone is at most altitudeMargin above the highest altitudes and its
+    ///         ceiling at least altitudeMargin below the lowest ones. Limits above ground are compared with the heights
     ///         above the terrain, the others with the altitudes. Limits which can't be compared, like limits above
     ///         ground without the heights above the terrain, don't hide the zone.
-    static bool nearAltitudes(const GeoZone &zone, const GeoZoneAltitudeRange &range, double margin);
+    static bool nearAltitudes(const GeoZone &zone, const GeoZoneAltitudeRange &range);
 
     bool operator==(const GeoZoneMapFilter &other) const = default;
 };
@@ -99,6 +100,6 @@ public:
 signals:
     void visibleChanged(bool visible);
     void hiddenRestrictionsChanged();
-    /// A filter or its margin or hours changed
+    /// A filter changed
     void filtersChanged();
 };

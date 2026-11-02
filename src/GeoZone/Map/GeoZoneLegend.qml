@@ -28,7 +28,6 @@ ColumnLayout {
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property var   _settings:          _geoZoneManager.settings
     readonly property var   _sources:           _geoZoneManager.sources
-    readonly property int   _activeSoon:        2
     readonly property int   _sourceIndex: {
         const key = _settings.mapSource.rawValue
         for (let i = 0; i < _sources.count; i++) {
@@ -121,23 +120,11 @@ ColumnLayout {
         fact:               root._settings.altitudeFilter
     }
 
-    LabelledFactTextField {
-        Layout.fillWidth:   true
-        fact:               root._settings.altitudeFilterMargin
-        visible:            root._settings.altitudeFilter.rawValue
-    }
-
     LabelledFactComboBox {
         Layout.fillWidth:   true
         label:              fact.shortDescription
         fact:               root._settings.scheduleFilter
         indexModel:         false
-    }
-
-    LabelledFactTextField {
-        Layout.fillWidth:   true
-        fact:               root._settings.scheduleFilterHours
-        visible:            root._settings.scheduleFilter.rawValue === root._activeSoon
     }
 
     LabelledComboBox {

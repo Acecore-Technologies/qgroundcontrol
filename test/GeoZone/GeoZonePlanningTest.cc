@@ -2641,13 +2641,7 @@ void GeoZonePlanningTest::_testMapModelFilters()
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     GeoZoneDisplay *const display = manager.display();
-    const auto restoreFilters = qScopeGuard([settings, display]() {
-        display->resetFilters();
-        settings->altitudeFilterMargin()->setRawValue(settings->altitudeFilterMargin()->rawDefaultValue());
-        settings->scheduleFilterHours()->setRawValue(settings->scheduleFilterHours()->rawDefaultValue());
-    });
-    settings->altitudeFilterMargin()->setRawValue(100);
-    settings->scheduleFilterHours()->setRawValue(12);
+    const auto restoreFilters = qScopeGuard([display]() { display->resetFilters(); });
 
     GeoZoneMapModel model(&manager);
     const QGeoRectangle view(center.atDistanceAndAzimuth(5000, 315), center.atDistanceAndAzimuth(5000, 135));
@@ -2698,9 +2692,8 @@ void GeoZonePlanningTest::_testMapModelFilters()
     QCOMPARE(model.filteredZoneCount(), 1);
     model.setAltitudeRange(altitudes(1450, 450));
     QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER OTHER"));
-    settings->altitudeFilterMargin()->setRawValue(1000);
-    QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
-    settings->altitudeFilterMargin()->setRawValue(100);
+    model.setAltitudeRange(altitudes(1500 - GeoZoneMapFilter::altitudeMargin - 2, 450));
+    QCOMPARE(shown(), QStringLiteral("ALL LATER OTHER"));
     // Limits above ground are kept without the terrain
     model.setAltitudeRange(altitudes(1450, qQNaN()));
     QCOMPARE(shown(), QStringLiteral("ALL HIGH LATER LOW OTHER"));
@@ -2717,7 +2710,10 @@ void GeoZonePlanningTest::_testMapModelFilters()
     QCOMPARE(model.filteredZoneCount(), 2);
     settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveSoon);
     QCOMPARE(shown(), QStringLiteral("ALL LATER LOW OTHER"));
-    settings->scheduleFilterHours()->setRawValue(2);
+    // LATER becomes active later than the hours ahead
+    environment.setNow(now.addSecs(qint64{ 6 - GeoZoneMapFilter::scheduleHours - 1 } * 3600));
+    settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::AnyTime);
+    settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveSoon);
     QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
 
     // Sources, with the other filters
