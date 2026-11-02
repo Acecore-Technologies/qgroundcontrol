@@ -140,8 +140,8 @@ Rectangle {
         // The banner updates after changes settle, so check the current plan
         check.update()
         const reasons = Array.from(check.uploadReasons())
-        // Outdated data can miss zones
-        if (_outdatedText !== "") {
+        // Outdated data can miss zones, the mission check already gives expired data as a reason
+        if (_outdatedText !== "" && !_dataInvalid) {
             reasons.push(_outdatedText)
         }
         if (reasons.length === 0) {
