@@ -9,7 +9,6 @@
 
 #include "GeoZoneFlightTest.h"
 #include "GeoZone.h"
-#include "GeoZoneAlertLog.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
@@ -258,8 +257,8 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     GeoZoneMonitor monitor;
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
     const QTemporaryDir logDir;
-    QVERIFY(logDir.isValid() && monitor.alertLog());
-    monitor.alertLog()->setDirectory(logDir.path());
+    QVERIFY(logDir.isValid());
+    monitor.alertHistory()->startLog(logDir.path());
     QVERIFY(!monitor.monitoring());
 
     _connectMockLink(MAV_AUTOPILOT_PX4);
@@ -304,11 +303,11 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));
 
     // The alerts are logged with the vehicle, in a file per day
-    monitor.alertLog()->flush();
-    QFile log(monitor.alertLog()->filePath(environment.now().date()));
+    monitor.alertHistory()->flushLog();
+    QFile log(monitor.alertHistory()->logFilePath(environment.now().date()));
     QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
     QStringList logLines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-    (void) logLines.removeAll(GeoZoneAlertLog::header());
+    (void) logLines.removeAll(GeoZoneAlertHistory::logHeader());
     QCOMPARE(logLines.count(), alertSpy.count());
     QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
     QVERIFY(logLines.last().section(QLatin1Char(','), 1, 1) == QString::number(vehicle->id()));

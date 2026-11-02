@@ -38,7 +38,6 @@
 #ifndef GEOZONE_CORE_TEST
 #include "GeoFenceController.h"
 #include "GeoZoneAlertHistory.h"
-#include "GeoZoneAlertLog.h"
 #include "GeoZoneDisplay.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneGuidedCheck.h"

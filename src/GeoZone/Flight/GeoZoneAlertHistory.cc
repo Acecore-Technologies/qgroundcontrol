@@ -8,11 +8,17 @@
  ****************************************************************************/
 
 #include "GeoZoneAlertHistory.h"
+#include "AppSettings.h"
+#include "GeoZoneEnvironment.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneSettings.h"
+#include "SettingsManager.h"
 
-#include <QtCore/QFile>
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include <QtCore/QMetaEnum>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QTextStream>
 
 #include <algorithm>
@@ -20,7 +26,28 @@
 
 namespace {
 
-/// Splits a CSV line written by GeoZoneAlertLog, undoing its quoting
+/// Text from feeds starting like a formula is run by spreadsheets, the log keeps it text with a leading quote
+constexpr QLatin1StringView formulaStarts("=+-@\t\r");
+
+/// Event column of the log by GeoZoneMonitor::AlertEvent::Kind
+const QStringList &eventNames()
+{
+    static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered") };
+    return names;
+}
+
+QString csvField(const QString &text)
+{
+    const QString value = (!text.isEmpty() && formulaStarts.contains(text.front())) ? (QLatin1Char('\'') + text) : text;
+    if (!value.contains(QLatin1Char(',')) && !value.contains(QLatin1Char('"')) && !value.contains(QLatin1Char('\n')) && !value.contains(QLatin1Char('\r'))) {
+        return value;
+    }
+    QString quoted = value;
+    (void) quoted.replace(QStringLiteral("\""), QStringLiteral("\"\""));
+    return QStringLiteral("\"%1\"").arg(quoted);
+}
+
+/// Splits a CSV line of the log, undoing its quoting
 QStringList csvFields(const QString &line)
 {
     QStringList fields;
@@ -50,8 +77,6 @@ QStringList csvFields(const QString &line)
     }
     fields.append(field);
 
-    // Text the log kept from running as a spreadsheet formula
-    static const QString formulaStarts = QStringLiteral("=+-@\t\r");
     for (QString &text : fields) {
         if ((text.size() >= 2) && (text.front() == QLatin1Char('\'')) && formulaStarts.contains(text.at(1))) {
             text.remove(0, 1);
@@ -60,7 +85,12 @@ QStringList csvFields(const QString &line)
     return fields;
 }
 
-double number(const QString &text)
+QString numberText(double value, int decimals)
+{
+    return qIsNaN(value) ? QString() : QString::number(value, 'f', decimals);
+}
+
+double numberValue(const QString &text)
 {
     bool ok = false;
     const double value = text.toDouble(&ok);
@@ -76,6 +106,14 @@ GeoZoneAlertHistory::GeoZoneAlertHistory(GeoZoneManager *manager, QObject *paren
     _shownTimer.setSingleShot(true);
     _shownTimer.setInterval(shownPositionMSecs);
     (void) connect(&_shownTimer, &QTimer::timeout, this, &GeoZoneAlertHistory::clearShownPosition);
+    _logFlushTimer.setSingleShot(true);
+    _logFlushTimer.setInterval(logFlushIntervalMSecs);
+    (void) connect(&_logFlushTimer, &QTimer::timeout, this, &GeoZoneAlertHistory::flushLog);
+}
+
+GeoZoneAlertHistory::~GeoZoneAlertHistory()
+{
+    flushLog();
 }
 
 int GeoZoneAlertHistory::rowCount(const QModelIndex &parent) const
@@ -145,9 +183,130 @@ void GeoZoneAlertHistory::append(const GeoZoneMonitor::AlertEvent &event)
     endInsertRows();
     emit countChanged();
     emit unacknowledgedCountChanged();
+
+    if (!_logging || !GeoZoneSettings::instance()->logAlerts()->rawValue().toBool()) {
+        return;
+    }
+    const QDate date = event.time.toUTC().date();
+    const QString path = logFilePath(date);
+    if (path.isEmpty()) {
+        return;
+    }
+    if (path != _logBufferPath) {
+        flushLog();
+        _logBufferPath = path;
+        _logBufferDate = date;
+    }
+    _logBuffer += (logLine(event) + QLatin1Char('\n')).toUtf8();
+    if (!_logFlushTimer.isActive()) {
+        _logFlushTimer.start();
+    }
 }
 
-void GeoZoneAlertHistory::loadLog(const QString &filePath)
+void GeoZoneAlertHistory::startLog(const QString &directory)
+{
+    flushLog();
+    _logFile.close();
+    _logDirectory = directory;
+    _logging = true;
+    _loadLog(logFilePath(GeoZoneEnvironment::currentDateTimeUtc().date()));
+}
+
+QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
+{
+    const QString directory = _logDirectory.isEmpty() ? SettingsManager::instance()->appSettings()->telemetrySavePath() : _logDirectory;
+    if (directory.isEmpty()) {
+        return QString();
+    }
+    return QDir(directory).filePath(QStringLiteral("GeoZoneAlerts-%1.csv").arg(date.toString(Qt::ISODate)));
+}
+
+QString GeoZoneAlertHistory::logHeader()
+{
+    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic");
+}
+
+QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
+{
+    const QMetaEnum restrictions = QMetaEnum::fromType<GeoZone::Restriction>();
+    return QStringList{
+        event.time.toUTC().toString(Qt::ISODateWithMs),
+        (event.vehicleId == GeoZoneMonitor::noVehicle) ? QString() : QString::number(event.vehicleId),
+        numberText(event.position.coordinate.latitude(), 7),
+        numberText(event.position.coordinate.longitude(), 7),
+        numberText(event.position.altitudeAMSL, 1),
+        numberText(event.position.terrainAMSL, 1),
+        eventNames().value(event.kind),
+        numberText(event.distance, 0),
+        csvField(event.zoneIdentifier),
+        csvField(event.zoneName),
+        QString::fromLatin1(restrictions.valueToKey(event.restriction)),
+        csvField(event.sourceText),
+        numberText(event.timeToEntry, 0),
+        csvField(event.traffic),
+    }.join(QLatin1Char(','));
+}
+
+void GeoZoneAlertHistory::flushLog()
+{
+    _logFlushTimer.stop();
+    if (_logBuffer.isEmpty()) {
+        return;
+    }
+    if (((_logFile.fileName() != _logBufferPath) || !_logFile.isOpen()) && !_openLog()) {
+        _logBuffer.clear();
+        return;
+    }
+    if ((_logFile.write(_logBuffer) != _logBuffer.size()) || !_logFile.flush()) {
+        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << _logFile.fileName() << _logFile.errorString();
+        _logFile.close();
+    }
+    _logBuffer.clear();
+}
+
+bool GeoZoneAlertHistory::_openLog()
+{
+    _logFile.close();
+    (void) QDir().mkpath(QFileInfo(_logBufferPath).absolutePath());
+    _logFile.setFileName(_logBufferPath);
+    if (!_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << _logBufferPath << _logFile.errorString();
+        return false;
+    }
+    if (_logFile.size() == 0) {
+        (void) _logFile.write((logHeader() + QLatin1Char('\n')).toUtf8());
+    }
+
+    // A file is started each day, a good time to delete those past the retention
+    (void) removeOldLogs(_logBufferDate, logRetentionDays);
+    return true;
+}
+
+int GeoZoneAlertHistory::removeOldLogs(const QDate &today, int days)
+{
+    const QString path = logFilePath(today);
+    if (path.isEmpty() || (days <= 0)) {
+        return 0;
+    }
+    const QString directory = QFileInfo(path).absolutePath();
+    static const QRegularExpression namePattern(QStringLiteral("^GeoZoneAlerts-(\\d{4}-\\d{2}-\\d{2})\\.csv$"));
+    const QDate oldest = today.addDays(1 - days);
+    int removed = 0;
+    QDir dir(directory);
+    for (const QString &name : dir.entryList({ QStringLiteral("GeoZoneAlerts-*.csv") }, QDir::Files)) {
+        const QRegularExpressionMatch match = namePattern.match(name);
+        const QDate date = match.hasMatch() ? QDate::fromString(match.captured(1), Qt::ISODate) : QDate();
+        if (date.isValid() && (date < oldest) && dir.remove(name)) {
+            removed++;
+        }
+    }
+    if (removed > 0) {
+        qCDebug(GeoZoneMonitorLog) << "Removed" << removed << "geozone alert logs before" << oldest;
+    }
+    return removed;
+}
+
+void GeoZoneAlertHistory::_loadLog(const QString &filePath)
 {
     QFile file(filePath);
     if (filePath.isEmpty() || !file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -183,25 +342,18 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     }
     GeoZoneMonitor::AlertEvent event;
     event.time = QDateTime::fromString(fields[0], Qt::ISODateWithMs);
-    if (fields[6] == QStringLiteral("entered")) {
-        event.kind = GeoZoneMonitor::AlertEvent::Entry;
-    } else if (fields[6] == QStringLiteral("position_lost")) {
-        event.kind = GeoZoneMonitor::AlertEvent::PositionLost;
-    } else if (fields[6] == QStringLiteral("traffic_entered")) {
-        event.kind = GeoZoneMonitor::AlertEvent::Traffic;
-    } else if (fields[6] != QStringLiteral("approaching")) {
+    const qsizetype kind = eventNames().indexOf(fields[6]);
+    if ((kind < 0) || !event.time.isValid()) {
         return std::nullopt;
     }
-    if (!event.time.isValid()) {
-        return std::nullopt;
-    }
+    event.kind = static_cast<GeoZoneMonitor::AlertEvent::Kind>(kind);
     bool vehicleOk = false;
     const int vehicleId = fields[1].toInt(&vehicleOk);
     event.vehicleId = vehicleOk ? vehicleId : GeoZoneMonitor::noVehicle;
-    event.position.coordinate = QGeoCoordinate(number(fields[2]), number(fields[3]));
-    event.position.altitudeAMSL = number(fields[4]);
-    event.position.terrainAMSL = number(fields[5]);
-    event.distance = number(fields[7]);
+    event.position.coordinate = QGeoCoordinate(numberValue(fields[2]), numberValue(fields[3]));
+    event.position.altitudeAMSL = numberValue(fields[4]);
+    event.position.terrainAMSL = numberValue(fields[5]);
+    event.distance = numberValue(fields[7]);
     event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || (event.kind == GeoZoneMonitor::AlertEvent::Traffic) ||
                    ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
     event.zoneIdentifier = fields[8];
@@ -210,7 +362,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     const int restriction = QMetaEnum::fromType<GeoZone::Restriction>().keyToValue(fields[10].toLatin1().constData(), &restrictionOk);
     event.restriction = restrictionOk ? static_cast<GeoZone::Restriction>(restriction) : GeoZone::Unknown;
     event.sourceText = fields[11];
-    event.timeToEntry = (fields.count() > 12) ? number(fields[12]) : qQNaN();
+    event.timeToEntry = (fields.count() > 12) ? numberValue(fields[12]) : qQNaN();
     event.traffic = (fields.count() > 13) ? fields[13] : QString();
 
     // The messages of the monitor

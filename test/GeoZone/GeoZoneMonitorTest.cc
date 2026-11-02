@@ -480,9 +480,8 @@ void GeoZoneMonitorTest::_testAlertLog()
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
-    GeoZoneAlertLog log;
-    log.setDirectory(dir.filePath(QStringLiteral("logs")));
-    (void) connect(&monitor, &GeoZoneMonitor::alertEvent, &log, &GeoZoneAlertLog::append);
+    GeoZoneAlertHistory &log = *monitor.alertHistory();
+    log.startLog(dir.filePath(QStringLiteral("logs")));
 
     QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
     monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 520, 400 }, 3);
@@ -492,14 +491,14 @@ void GeoZoneMonitorTest::_testAlertLog()
     QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().time, environment.now());
 
     // The alerts are buffered and written to the open file a little later
-    QFile file(log.filePath(logDate));
+    QFile file(log.logFilePath(logDate));
     QVERIFY(!file.exists());
-    QTRY_VERIFY_WITH_TIMEOUT(file.exists() && (file.size() > 0), GeoZoneAlertLog::flushIntervalMSecs * 3);
+    QTRY_VERIFY_WITH_TIMEOUT(file.exists() && (file.size() > 0), GeoZoneAlertHistory::logFlushIntervalMSecs * 3);
     QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
     const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     file.close();
     QCOMPARE(lines.count(), 3);
-    QCOMPARE(lines[0], GeoZoneAlertLog::header());
+    QCOMPARE(lines[0], GeoZoneAlertHistory::logHeader());
     QStringList fields = lines[1].split(QLatin1Char(','));
     QCOMPARE(fields[1], QStringLiteral("3"));
     QCOMPARE(fields[4], QStringLiteral("520.0"));
@@ -519,7 +518,7 @@ void GeoZoneMonitorTest::_testAlertLog()
     settings->logAlerts()->setRawValue(false);
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
-    log.flush();
+    log.flushLog();
     QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
     QCOMPARE(QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 3);
     file.close();
@@ -527,8 +526,8 @@ void GeoZoneMonitorTest::_testAlertLog()
     // The files of the days past the retention are deleted when a file is started, others are kept
     const QDir logDir(dir.filePath(QStringLiteral("logs")));
     const QDate today = logDate.addDays(1);
-    const QStringList kept = { log.filePath(today.addDays(-29)), log.filePath(logDate), dir.filePath(QStringLiteral("logs/GeoZoneAlerts-notes.csv")) };
-    const QStringList old = { log.filePath(today.addDays(-30)), log.filePath(today.addDays(-400)) };
+    const QStringList kept = { log.logFilePath(today.addDays(-29)), log.logFilePath(logDate), dir.filePath(QStringLiteral("logs/GeoZoneAlerts-notes.csv")) };
+    const QStringList old = { log.logFilePath(today.addDays(-30)), log.logFilePath(today.addDays(-400)) };
     for (const QString &path : kept + old) {
         QFile touched(path);
         QVERIFY(touched.open(QIODevice::Append));
@@ -537,16 +536,16 @@ void GeoZoneMonitorTest::_testAlertLog()
     environment.addSecs(24 * 60 * 60);
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
-    log.flush();
-    QVERIFY(QFile::exists(log.filePath(today)));
+    log.flushLog();
+    QVERIFY(QFile::exists(log.logFilePath(today)));
     for (const QString &path : kept) {
         QVERIFY2(QFile::exists(path), qPrintable(path));
     }
     for (const QString &path : old) {
         QVERIFY2(!QFile::exists(path), qPrintable(path));
     }
-    QCOMPARE(log.removeOldFiles(today, 0), 0);
-    QCOMPARE(log.removeOldFiles(today.addDays(30), 30), 3);
+    QCOMPARE(log.removeOldLogs(today, 0), 0);
+    QCOMPARE(log.removeOldLogs(today.addDays(30), 30), 3);
     QCOMPARE(logDir.entryList({ QStringLiteral("*.csv") }, QDir::Files).count(), 1);
 
     // Feed text starting like a spreadsheet formula stays text
@@ -554,7 +553,7 @@ void GeoZoneMonitorTest::_testAlertLog()
     event.time = environment.now();
     event.zoneName = QStringLiteral("=1+1");
     event.zoneIdentifier = QStringLiteral("@A1");
-    QVERIFY(GeoZoneAlertLog::line(event).contains(QStringLiteral(",'@A1,'=1+1,")));
+    QVERIFY(GeoZoneAlertHistory::logLine(event).contains(QStringLiteral(",'@A1,'=1+1,")));
 }
 
 void GeoZoneMonitorTest::_testAlertHistory()
@@ -600,12 +599,11 @@ void GeoZoneMonitorTest::_testAlertHistory()
     QCOMPARE(history->unacknowledgedCount(), 0);
 
     // Alerts an earlier session logged today are read back acknowledged, after those of the session
-    GeoZoneAlertLog log;
-    log.setDirectory(dir.filePath(QStringLiteral("logs")));
+    GeoZoneAlertHistory earlier(&manager);
+    earlier.startLog(dir.filePath(QStringLiteral("logs")));
     for (const QList<QVariant> &arguments : std::as_const(eventSpy)) {
-        log.append(arguments.first().value<GeoZoneMonitor::AlertEvent>());
+        earlier.append(arguments.first().value<GeoZoneMonitor::AlertEvent>());
     }
-    log.flush();
     GeoZoneMonitor::AlertEvent formula;
     formula.time = environment.now();
     formula.zoneIdentifier = QStringLiteral("F1");
@@ -613,12 +611,11 @@ void GeoZoneMonitorTest::_testAlertHistory()
     formula.restriction = GeoZone::Conditional;
     formula.distance = 50;
     formula.timeToEntry = 12;
-    log.append(formula);
-    log.flush();
-    const QDate logDate = formula.time.date();
+    earlier.append(formula);
+    earlier.flushLog();
     GeoZoneAlertHistory later(&manager);
     later.append(formula);
-    later.loadLog(log.filePath(logDate));
+    later.startLog(dir.filePath(QStringLiteral("logs")));
     QCOMPARE(later.count(), 4);
     QCOMPARE(later.unacknowledgedCount(), 1);
     QVERIFY(!later.data(later.index(0), GeoZoneAlertHistory::EarlierRole).toBool());
@@ -628,7 +625,7 @@ void GeoZoneMonitorTest::_testAlertHistory()
     QVERIFY(later.data(later.index(1), GeoZoneAlertHistory::MessageRole).toString().endsWith(QStringLiteral("entry in about 12 s")));
     QCOMPARE(later.data(later.index(2), GeoZoneAlertHistory::MessageRole).toString(), history->data(history->index(0), GeoZoneAlertHistory::MessageRole).toString());
     QCOMPARE(later.data(later.index(3), GeoZoneAlertHistory::AltitudeRole).toDouble(), 520.0);
-    QVERIFY(!GeoZoneAlertHistory::parseLogLine(GeoZoneAlertLog::header()));
+    QVERIFY(!GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logHeader()));
 
     // Earlier alerts are shown by their zone identifier and name
     later.show(2);
@@ -1132,14 +1129,14 @@ void GeoZoneMonitorTest::_testPositionLoss()
 
     // The alert is logged and read back
     const GeoZoneMonitor::AlertEvent nearLost = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
-    const QString line = GeoZoneAlertLog::line(nearLost);
+    const QString line = GeoZoneAlertHistory::logLine(nearLost);
     QCOMPARE(line.section(QLatin1Char(','), 6, 6), QStringLiteral("position_lost"));
     const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(line);
     QVERIFY(read);
     QVERIFY(read->kind == GeoZoneMonitor::AlertEvent::PositionLost);
     QVERIFY(!read->inside);
     QCOMPARE(read->message, QStringLiteral("Position lost near geozone C (Conditional)"));
-    QVERIFY(GeoZoneAlertHistory::parseLogLine(GeoZoneAlertLog::line(lost))->inside);
+    QVERIFY(GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(lost))->inside);
 }
 
 void GeoZoneMonitorTest::_testAlertActions()
@@ -1308,7 +1305,7 @@ void GeoZoneMonitorTest::_testTraffic()
     QCOMPARE(event.traffic, QStringLiteral("SWR123"));
     QCOMPARE(event.vehicleId, GeoZoneMonitor::noVehicle);
     QVERIFY(monitor.alertActions(event.id).isEmpty());
-    const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(GeoZoneAlertLog::line(event));
+    const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(event));
     QVERIFY(read && (read->kind == GeoZoneMonitor::AlertEvent::Traffic));
     QCOMPARE(read->traffic, QStringLiteral("SWR123"));
     QCOMPARE(read->message, event.message);

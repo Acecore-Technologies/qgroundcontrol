@@ -13,7 +13,6 @@
 #include "AudioOutput.h"
 #include "GeoZone.h"
 #include "GeoZoneAlertHistory.h"
-#include "GeoZoneAlertLog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
@@ -48,10 +47,7 @@ public:
 GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     : GeoZoneMonitor(GeoZoneManager::instance(), parent)
 {
-    _alertLog = new GeoZoneAlertLog(this);
-    (void) connect(this, &GeoZoneMonitor::alertEvent, _alertLog, &GeoZoneAlertLog::append);
-    // Alerts of earlier sessions today, before those of this session are logged
-    _alertHistory->loadLog(_alertLog->filePath(GeoZoneEnvironment::currentDateTimeUtc().date()));
+    _alertHistory->startLog();
     _audioSink = std::make_shared<ApplicationAudioSink>();
 
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate

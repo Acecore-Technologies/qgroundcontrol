@@ -39,7 +39,6 @@ Q_MOC_INCLUDE("GeoZoneGuidedCheck.h")
 Q_MOC_INCLUDE("GeoZoneAlertHistory.h")
 
 class GeoZoneAlertHistory;
-class GeoZoneAlertLog;
 class GeoZoneGuidedCheck;
 class GeoZoneManager;
 class GeoZoneSource;
@@ -218,8 +217,7 @@ public:
     GeoZoneVehicleMonitor *activeMonitor() const { return _activeMonitor; }
     GeoZoneTrafficMonitor *traffic() const { return _traffic; }
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
-    /// Log of the alerts of vehicles, null for monitors constructed with a manager
-    GeoZoneAlertLog *alertLog() const { return _alertLog; }
+    /// Alerts of the session, which only the application monitor logs
     GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
 
     bool monitoring() const;
@@ -308,7 +306,6 @@ private:
     std::optional<Settings> _fixedSettings;     ///< Set by setSettings()
     mutable std::optional<Settings> _settings;  ///< Of GeoZoneSettings, until they change
     mutable std::optional<GeoZonePolicy> _policy;   ///< Until the zones change
-    GeoZoneAlertLog *_alertLog = nullptr;
     QPointer<GeoZoneVehicleMonitor> _activeMonitor;
     GeoZoneTrafficMonitor *_traffic = nullptr;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;

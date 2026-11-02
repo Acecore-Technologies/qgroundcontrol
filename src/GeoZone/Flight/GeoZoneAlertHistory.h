@@ -10,6 +10,9 @@
 #pragma once
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QByteArray>
+#include <QtCore/QDate>
+#include <QtCore/QFile>
 #include <QtCore/QTimer>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -20,7 +23,10 @@
 class GeoZoneManager;
 
 /// Geozone alerts of this session, newest first, with those logged earlier today, for reviewing and acknowledging
-/// them after a flight or while the alert popups are gone
+/// them after a flight or while the alert popups are gone. Once started, the log appends the alerts to a CSV file per
+/// UTC day, buffered and written to the open file every logFlushIntervalMSecs rather than opening and flushing the file
+/// for each alert. The files of days older than logRetentionDays are deleted when a new file is started. Logging is
+/// turned on and off in GeoZoneSettings.
 class GeoZoneAlertHistory : public QAbstractListModel
 {
     Q_OBJECT
@@ -44,9 +50,13 @@ public:
 
     static constexpr int maxEntries = 500;
     static constexpr int shownPositionMSecs = 2 * 60 * 1000;   ///< How long the map shows the position of a shown alert
+    static constexpr int logFlushIntervalMSecs = 2000;
+    static constexpr int logRetentionDays = 30;
 
     /// @param manager Zones the alerts are shown on, GeoZoneManager::instance() when null
     explicit GeoZoneAlertHistory(GeoZoneManager *manager = nullptr, QObject *parent = nullptr);
+    /// Writes the buffered alerts
+    ~GeoZoneAlertHistory() override;
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -56,8 +66,16 @@ public:
     int unacknowledgedCount() const;
     QGeoCoordinate shownPosition() const { return _shownPosition; }
 
-    /// Adds the alerts of a log file written by GeoZoneAlertLog before this session as acknowledged entries
-    void loadLog(const QString &filePath);
+    /// Logs the alerts appended from now on, after adding those logged earlier today as acknowledged entries
+    /// @param directory Folder of the log files, the telemetry folder of the application settings when empty
+    void startLog(const QString &directory = QString());
+    /// @return Log file for the date, empty without a folder
+    QString logFilePath(const QDate &date) const;
+    /// Writes the buffered alerts now
+    void flushLog();
+    /// Deletes the log files of the folder for the days before the last ones, today included
+    /// @return Number of files deleted
+    int removeOldLogs(const QDate &today, int days);
 
     Q_INVOKABLE void acknowledge(int row);
     Q_INVOKABLE void acknowledgeAll();
@@ -67,10 +85,13 @@ public:
     Q_INVOKABLE void show(int row);
     Q_INVOKABLE void clearShownPosition();
 
-    /// @return The alert of a line of a GeoZoneAlertLog file, nothing when it can't be read
+    static QString logHeader();
+    static QString logLine(const GeoZoneMonitor::AlertEvent &event);
+    /// @return The alert of a line of a log file, nothing when it can't be read
     static std::optional<GeoZoneMonitor::AlertEvent> parseLogLine(const QString &line);
 
 public slots:
+    /// Adds the alert, and logs it within logFlushIntervalMSecs once the log is started
     void append(const GeoZoneMonitor::AlertEvent &event);
 
 signals:
@@ -88,8 +109,20 @@ private:
         bool earlier = false;
     };
 
+    void _loadLog(const QString &filePath);
+    /// Opens the log file the buffer belongs to, starting it with the header
+    bool _openLog();
+
     GeoZoneManager *_manager = nullptr;
     QList<Entry> _entries;          ///< Newest first
     QGeoCoordinate _shownPosition;
     QTimer _shownTimer;
+
+    bool _logging = false;          ///< Set by startLog()
+    QString _logDirectory;
+    QFile _logFile;                 ///< Kept open between flushes
+    QByteArray _logBuffer;          ///< Lines not written yet
+    QString _logBufferPath;         ///< File the buffered lines belong to
+    QDate _logBufferDate;
+    QTimer _logFlushTimer;
 };
