@@ -59,6 +59,10 @@ target_sources(${CMAKE_PROJECT_NAME}
         Flight/GeoZoneGuidedCheck.h
         Flight/GeoZoneMonitor.cc
         Flight/GeoZoneMonitor.h
+        Flight/GeoZonePreflightCheck.cc
+        Flight/GeoZonePreflightCheck.h
+        Flight/GeoZoneRemoteId.cc
+        Flight/GeoZoneRemoteId.h
         Flight/GeoZoneVehicleMonitor.cc
         Flight/GeoZoneVehicleMonitor.h
 )
@@ -115,6 +119,8 @@ qt_add_qml_module(GeoZoneModule
         Flight/GeoZoneIndicator.qml
         Flight/GeoZoneIndicatorPage.qml
         Flight/GeoZoneMapClickButton.qml
+        Flight/GeoZonePreFlightCheckButton.qml
+        Flight/GeoZonePreFlightCheckList.qml
         Settings/GeoZoneAuthorisationsPanel.qml
         Settings/GeoZoneChoiceComboBox.qml
         Settings/GeoZonePackSigning.qml

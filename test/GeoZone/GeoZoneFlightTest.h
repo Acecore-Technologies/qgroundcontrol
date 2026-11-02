@@ -24,4 +24,5 @@ private slots:
     void _testMockLinkVehicle();
     void _testReturnParameterChanges();
     void _testGuidedReturnLandMission();
+    void _testPreflightChecklist();
 };

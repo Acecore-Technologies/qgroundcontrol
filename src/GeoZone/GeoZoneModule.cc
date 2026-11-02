@@ -24,6 +24,7 @@
 #include "GeoZoneMonitor.h"
 #include "GeoZoneOperationalIntentExport.h"
 #include "GeoZoneParser.h"
+#include "GeoZonePreflightCheck.h"
 #include "GeoZoneProfile.h"
 #include "GeoZoneRoutePlanner.h"
 #include "GeoZoneSearchModel.h"
@@ -117,6 +118,7 @@ void registerQmlTypes()
     (void) qmlRegisterType<GeoZoneFenceImporter>(kUri, 1, 0, "GeoZoneFenceImporter");
     (void) qmlRegisterType<GeoZoneProfile>(kUri, 1, 0, "GeoZoneProfile");
     (void) qmlRegisterType<GeoZoneRoutePlanner>(kUri, 1, 0, "GeoZoneRoutePlanner");
+    (void) qmlRegisterType<GeoZonePreflightCheck>(kUri, 1, 0, "GeoZonePreflightCheck");
 }
 
 void init()

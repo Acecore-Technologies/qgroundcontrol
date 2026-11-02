@@ -113,8 +113,8 @@ public:
     /// @return Yes or no
     virtual bool showMissionStatus() const { return true; }
 
-    /// Provides an optional, custom preflight checklist
-    virtual QUrl preFlightChecklistUrl() const { return QUrl::fromUserInput(QStringLiteral("qrc:/qml/QGroundControl/FlightDisplay/PreFlightCheckList.qml")); }
+    /// Provides an optional, custom preflight checklist: by default that of the vehicle type with the geozone checks
+    virtual QUrl preFlightChecklistUrl() const { return QUrl::fromUserInput(QStringLiteral("qrc:/qml/QGroundControl/GeoZone/Flight/GeoZonePreFlightCheckList.qml")); }
 
     /// Allows replacing the toolbar Light Theme color
     virtual QColor toolbarBackgroundLight() const { return QColorConstants::White; }

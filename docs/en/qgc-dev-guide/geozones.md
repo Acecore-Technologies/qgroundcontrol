@@ -138,6 +138,7 @@ The work of a search is bounded. Testing the edges from each node to all others 
 - What the pilot is shown and answers is logged after the alert as pilot events (`AlertEvent::Notified`, `Approved`, `Dismissed`, `Muted`, see `pilotEvent()`) with the id of the alert, through `GeoZoneAlertHistory::logPilotEvent()`: they are written to the CSV log but not listed with the alerts, also when the log is read back.
 - While traffic is checked, the application monitor passes the traffic of `ADSBVehicleManager` to `evaluateTraffic()` after the vehicles of each evaluation, which checks the closest 100 aircraft within `trafficRadius()` (10 km) of the active vehicle against the zones, with a `GeoZoneAlertTracker` per ICAO address, and publishes those in or near zones as `GeoZoneMonitor.traffic`. Tests pass the aircraft directly. Entries become `Traffic` alerts whose severity is raised by `trafficSeverity`, so they are shown after those of the vehicles, and are never submitted to the arbiter, so never spoken.
 - `GeoZoneAlertHistory` keeps the `AlertEvent`s for the indicator and, once `startLog()` is called (by the application monitor only), logs them: it buffers their CSV lines (`logLine()`, read back by `parseLogLine()`) and writes them to the open file of the day every 2 s (`flushLog()` writes them at once), and deletes the files older than `logRetentionDays` (30) when it starts a file. `startLog()` first adds the alerts logged earlier today.
+- `GeoZonePreflightCheck` computes the items of the Geozones group of the pre-flight checklist from a `GeoZoneMissionCheck` of the Fly View plan, the sources, the QNH setting, `GeoZoneRemoteId` and the fence `GeoZoneFenceUpload::verification()` recorded per vehicle when an upload is verified. The static item functions take plain inputs for tests.
 
 `GeoZoneMonitorTest` tests the arbiter, the speech, position loss, the alert actions, the traffic and the log with a fake clock and offline vehicles; `GeoZoneFlightTest::_testMockLinkVehicle()` flies a MockLink vehicle through the Zurich fixture, including a lost link.
 
@@ -283,6 +284,7 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/FlightDisplay/FlyViewWidgetLayer.qml` | +9 | `GeoZoneAltitudeStrip` |
 | `src/FlightDisplay/GuidedActionConfirm.qml` | +3 | `GeoZoneGuidedActionWarning` |
 | `src/MissionManager/PlanMasterController.cc` | +4 | `GeoZonePlanData::load()` and `save()` of the `geoZones` section of plan files, and `follow()`, which resets the planned start and audit record when the Plan View replaces its mission |
+| `src/API/QGCOptions.h` | +1/-1 | `preFlightChecklistUrl()` points to `GeoZonePreFlightCheckList.qml`, which loads the checklist of the vehicle type and adds the Geozones group of `GeoZonePreflightCheck` |
 | `src/Vehicle/Vehicle.cc` | +2 | Clears `altitudeAboveTerr` when the terrain query fails |
 
 The `fileName` of `QGCFileDialog.qml` and the `Vehicle.cc` change don't depend on the module and could go upstream on their own.

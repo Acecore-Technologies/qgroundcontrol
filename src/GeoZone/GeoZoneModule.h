@@ -27,6 +27,8 @@
 /// - PlanMasterController: GeoZonePlanData in plan files, with the fence names of GeoZoneFenceTags, and following the
 ///   Plan View plan, see GeoZonePlanData::follow
 /// - GeoFenceEditor.qml: GeoZoneFenceGroup, beside the lists of polygon and of circular fences
+/// - QGCOptions::preFlightChecklistUrl: GeoZonePreFlightCheckList.qml, the checklist of the vehicle type with the
+///   geozone checks
 ///
 /// Changes outside the module which don't depend on it and could go upstream on their own: the fileName of
 /// QGCFileDialog.qml, and Vehicle clearing altitudeAboveTerr when the terrain query fails.

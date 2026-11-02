@@ -10,16 +10,27 @@
 #include "GeoZoneFenceUpload.h"
 #include "GeoFenceController.h"
 #include "GeoFenceManager.h"
+#include "GeoZoneEnvironment.h"
+#include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneSourceRepository.h"
 #include "PlanMasterController.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QTimer>
 
 namespace {
+
+/// Of the vehicles, removed when they are destroyed
+QHash<const Vehicle*, GeoZoneFenceUpload::Verification> &verifications()
+{
+    static QHash<const Vehicle*, GeoZoneFenceUpload::Verification> map;
+    return map;
+}
 
 QString _countText(const GeoZoneFenceUpload::FenceSnapshot &fence)
 {
@@ -279,10 +290,41 @@ void GeoZoneFenceUpload::_readBack()
     }
     const QString differences = compareFences(_sentFence, snapshot(_manager->polygons(), _manager->circles(), _manager->breachReturnPoint()));
     if (differences.isEmpty()) {
+        Verification verification;
+        verification.fence = _sentFence;
+        verification.time = GeoZoneEnvironment::currentDateTimeUtc();
+        for (QmlObjectListModel *const fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
+            for (int i = 0; i < fences->count(); i++) {
+                verification.geoZoneFences += GeoZoneFenceTag::isGeoZone(fences->get(i)) ? 1 : 0;
+            }
+        }
+        // The data the fences from geozones were made of
+        for (const GeoZoneSource *const source : GeoZoneManager::instance()->repository()->sourceList()) {
+            verification.sources.append(GeoZoneSourceVersion::fromSource(source));
+        }
+        setVerification(_vehicle, verification);
         (void) _transition(Verified, tr("Verified: the vehicle stores the fence of %1.").arg(_countText(_sentFence)));
     } else {
         (void) _transition(Mismatch, tr("The fence read back differs from the plan. %1").arg(differences));
     }
+}
+
+std::optional<GeoZoneFenceUpload::Verification> GeoZoneFenceUpload::verification(const Vehicle *vehicle)
+{
+    const auto it = verifications().constFind(vehicle);
+    return (it != verifications().cend()) ? std::make_optional(*it) : std::nullopt;
+}
+
+void GeoZoneFenceUpload::setVerification(Vehicle *vehicle, const Verification &verification)
+{
+    if (!vehicle) {
+        return;
+    }
+    if (!verifications().contains(vehicle)) {
+        // The address of a destroyed vehicle may be reused by the next one
+        (void) connect(vehicle, &QObject::destroyed, vehicle, [vehicle]() { (void) verifications().remove(vehicle); });
+    }
+    verifications().insert(vehicle, verification);
 }
 
 int GeoZoneFenceUpload::FenceSnapshot::pointCount() const

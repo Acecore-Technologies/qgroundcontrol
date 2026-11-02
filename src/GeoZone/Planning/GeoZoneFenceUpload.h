@@ -9,12 +9,17 @@
 
 #pragma once
 
+#include <QtCore/QDateTime>
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtPositioning/QGeoCircle>
 #include <QtPositioning/QGeoCoordinate>
+
+#include <optional>
+
+#include "GeoZoneSourceVersion.h"
 
 class GeoFenceController;
 class GeoFenceManager;
@@ -103,6 +108,18 @@ public:
 
     /// @return What differs between the fences beyond verifyTolerance, empty when they match. Fences may be in any order.
     static QString compareFences(const FenceSnapshot &sent, const FenceSnapshot &received);
+
+    /// Fence an upload verified on a vehicle, kept until the next verification or the vehicle is gone
+    struct Verification {
+        FenceSnapshot fence;
+        QDateTime time;                         ///< UTC
+        int geoZoneFences = 0;                  ///< Polygons and circles added from geozones, see GeoZoneFenceTag
+        QList<GeoZoneSourceVersion> sources;    ///< Of the geozone data when it was verified
+    };
+    /// @return The last fence verified on the vehicle, nothing without
+    static std::optional<Verification> verification(const Vehicle *vehicle);
+    /// Records the fence verified on the vehicle, as uploads do
+    static void setVerification(Vehicle *vehicle, const Verification &verification);
 
 signals:
     void geoFenceControllerChanged();

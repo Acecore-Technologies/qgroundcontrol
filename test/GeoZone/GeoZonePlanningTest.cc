@@ -2610,6 +2610,11 @@ void GeoZonePlanningTest::_testGeoFenceUpload()
         QCOMPARE(geoFenceController->polygons()->count(), 1);
         QVERIFY(GeoZoneFenceTag::isGeoZone(geoFenceController->polygons()->get(0)));
         QVERIFY(!geoFenceController->dirty());
+        // The pre-flight checklist finds the fence verified, with both fences from geozones
+        const std::optional<GeoZoneFenceUpload::Verification> verification = GeoZoneFenceUpload::verification(vehicle);
+        QVERIFY(verification);
+        QCOMPARE(verification->geoZoneFences, 2);
+        QVERIFY(GeoZoneFenceUpload::compareFences(verification->fence, GeoZoneFenceUpload::snapshot(manager->polygons(), manager->circles(), manager->breachReturnPoint())).isEmpty());
 
         // A vehicle without room for the fence rejects it
         _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailWriteRequest0ErrorAck, MAV_MISSION_NO_SPACE);

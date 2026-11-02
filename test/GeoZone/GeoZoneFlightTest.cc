@@ -9,12 +9,18 @@
 
 #include "GeoZoneFlightTest.h"
 #include "GeoZone.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneGuidedCheck.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
+#include "GeoZoneMissionPath.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZonePlanning.h"
+#include "GeoZonePreflightCheck.h"
 #include "GeoZoneReturnModel.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneSourceRepository.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneText.h"
@@ -23,13 +29,17 @@
 #include "MultiVehicleManager.h"
 #include "ParameterManager.h"
 #include "PlanMasterController.h"
+#include "QGroundControlQmlGlobal.h"
 #include "QmlObjectListModel.h"
+#include "RemoteIDSettings.h"
+#include "SettingsManager.h"
 #include "SimpleMissionItem.h"
 #include "Vehicle.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
+#include <QtCore/QScopeGuard>
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -507,6 +517,115 @@ void GeoZoneFlightTest::_testGuidedReturnLandMission()
     QVERIFY(!check->pathsWarning(GeoZoneGuidedCheck::returnPaths(reverse, start, destinations, missionPath, 2, home.altitude())).contains(QStringLiteral("EAST")));
 
     _disconnectMockLink();
+}
+
+void GeoZoneFlightTest::_testPreflightChecklist()
+{
+    using Check = GeoZonePreflightCheck;
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(10, 0)));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    Fact *const qnh = GeoZoneSettings::instance()->qnhHPa();
+    Fact *const operatorId = SettingsManager::instance()->remoteIDSettings()->operatorID();
+    const auto restore = qScopeGuard([qnh, operatorId]() {
+        qnh->setRawValue(qnh->rawDefaultValue());
+        operatorId->setRawValue(operatorId->rawDefaultValue());
+    });
+    operatorId->setRawValue(QString());
+
+    // Without zones and mission
+    Check check(&manager);
+    QCOMPARE(check.data().state, Check::Warning);
+    QVERIFY2(check.data().text.contains(QStringLiteral("No geozone data")), qPrintable(check.data().text));
+    QCOMPARE(check.mission().state, Check::NotApplicable);
+    QCOMPARE(check.remoteId().state, Check::NotApplicable);
+
+    // A path west to east through a prohibited zone and U-space airspace, beside a zone limited in flight levels
+    const QGeoCoordinate center(47, 8);
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), center.atDistanceAndAzimuth(700, 90), 150),
+        _withLimits(_circleFeature(QStringLiteral("L"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(800, 0), 200), 400, QStringLiteral("STD"), 700, QStringLiteral("STD")),
+    }), errorString), qPrintable(errorString));
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    // At 500 m above mean sea level, whatever the terrain at the planned home
+    for (const QGeoCoordinate &coordinate : { center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->setAltitudeMode(QGroundControlQmlGlobal::AltitudeModeAbsolute);
+        item->altitude()->setRawValue(500);
+    }
+    check.setPlanController(&masterController);
+    // Not passed until the mission is checked
+    check.update();
+    QCOMPARE(check.mission().state, Check::Checking);
+    QTRY_COMPARE(check.mission().state, Check::Failed);
+    QVERIFY2(check.mission().text.contains(QStringLiteral("P (Prohibited)")), qPrintable(check.mission().text));
+    QCOMPARE(check.data().state, Check::Passed);
+    QCOMPARE(check.remoteId().state, Check::Warning);
+    QVERIFY2(check.remoteId().text.contains(QStringLiteral("operator ID")), qPrintable(check.remoteId().text));
+    QCOMPARE(check.qnh().state, Check::Warning);
+    QVERIFY2(check.qnh().text.startsWith(QStringLiteral("Flight level limits of L")), qPrintable(check.qnh().text));
+    // The fence must exclude the prohibited zone
+    QCOMPARE(check.fence().state, Check::Warning);
+    QVERIFY2(check.fence().text.startsWith(QStringLiteral("The vehicle's fence doesn't exclude the prohibited geozones the mission enters: P.")), qPrintable(check.fence().text));
+
+    // Authorised, with the local QNH and the operator ID set
+    const GeoZone *const prohibited = findZone(manager, QStringLiteral("P"));
+    QVERIFY(prohibited);
+    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(prohibited)), QStringLiteral("P-1"), QString(), QString()).isEmpty());
+    qnh->setRawValue(1002.5);
+    operatorId->setRawValue(QStringLiteral("FIN87astrdge12k8"));
+    QTRY_COMPARE(check.mission().state, Check::Passed);
+    QVERIFY2(check.mission().text.contains(QStringLiteral("authorised at any time")), qPrintable(check.mission().text));
+    QTRY_COMPARE(check.qnh().state, Check::Passed);
+    QVERIFY(check.qnh().text.contains(QStringLiteral("1002.5 hPa")));
+    QTRY_COMPARE(check.remoteId().state, Check::Passed);
+    // Without fence on the offline vehicle
+    QCOMPARE(check.fence().state, Check::NotApplicable);
+
+    // Outdated data and no mission
+    QCOMPARE(Check::dataItem(3, QStringLiteral("A: 40 days old\nB: expired")).text, QStringLiteral("Geozone data may be outdated: A: 40 days old; B: expired"));
+    missionController->removeAll();
+    QTRY_COMPARE(check.mission().state, Check::NotApplicable);
+    QCOMPARE(check.qnh().state, Check::NotApplicable);
+    QCOMPARE(check.remoteId().state, Check::NotApplicable);
+
+    // The fence verified by an upload, with the data it was made from
+    Check::FenceInput fence;
+    QCOMPARE(Check::fenceItem(fence).state, Check::NotApplicable);
+    fence.vehicleFence.circles.append({ false, QGeoCircle(center, 400) });
+    QCOMPARE(Check::fenceItem(fence).state, Check::Warning);
+    QVERIFY(Check::fenceItem(fence).text.contains(QStringLiteral("wasn't verified")));
+    GeoZoneSourceVersion source;
+    source.key = QStringLiteral("zones.json");
+    source.name = QStringLiteral("Zones");
+    source.contentHash = QByteArrayLiteral("1");
+    GeoZoneFenceUpload::Verification verification;
+    verification.fence = fence.vehicleFence;
+    verification.time = environment.now();
+    verification.geoZoneFences = 1;
+    verification.sources = { source };
+    fence.verification = verification;
+    fence.sources = { source };
+    QCOMPARE(Check::fenceItem(fence).state, Check::Passed);
+    QVERIFY(Check::fenceItem(fence).text.contains(QStringLiteral("made from the current geozone data")));
+    fence.sources[0].contentHash = QByteArrayLiteral("2");
+    QCOMPARE(Check::fenceItem(fence).state, Check::Warning);
+    QVERIFY(Check::fenceItem(fence).text.contains(QStringLiteral("data which changed since: Zones")));
+    fence.sources = { source };
+    fence.vehicleFence.circles[0].circle.setRadius(500);
+    QVERIFY(Check::fenceItem(fence).text.contains(QStringLiteral("changed since it was verified")));
+    fence.vehicleFence = verification.fence;
+    fence.unfenced = { prohibited };
+    QVERIFY(Check::fenceItem(fence).text.startsWith(QStringLiteral("The vehicle's fence doesn't exclude the prohibited geozones the mission enters: P.")));
+    manager.repository()->clear();
 }
 
 GEOZONE_TEST(GeoZoneFlightTest)

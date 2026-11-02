@@ -326,6 +326,18 @@ Holes in zone polygons are also dropped. The ArduPilot fence storage is estimate
 
 ## Flight {#flight}
 
+### Pre-flight Checklist {#pre-flight-checklist}
+
+With the pre-flight checklist turned on (_Application Settings > Fly View > Use Preflight Checklist_), the checklist of the vehicle type ends with a **Geozones** group whose items check themselves for the active vehicle and its mission:
+
+- **Geozone data**: zones are loaded and no source is [outdated](#managing-sources).
+- **Mission**: the mission on the vehicle enters no restricted zone, or only zones with an [authorisation](#authorisations) covering the [planned start](#flight-time) (at any time without one). A prohibited zone fails the check.
+- **Fence**: the vehicle's fence is the one an upload of the [fence import](#add-geozones-to-the-geofence) verified, its fences from geozones were made from data which hasn't changed since, and it excludes the prohibited zones the mission enters. A fence uploaded otherwise is reported as not verified.
+- **QNH**: limits published as flight levels within 1 km of the mission and 300 m of its altitudes are converted with a [QNH](#settings-reference) other than the standard pressure.
+- **Remote ID**: when the mission enters U-space airspace, the operator ID is set (and valid in the EU) in _Application Settings > Remote ID_ and the vehicle's Remote ID reports it is ready to arm.
+
+Each item shows its state and why: green when it passed or doesn't apply, orange for a warning, which you can accept by clicking it, and red for a failure, which you can't. The checklist passes when the vehicle checklist and the geozone group pass, so with _Enforce Preflight Checklist_ a failed geozone item prevents arming.
+
 ### Flight Alerts {#flight-alerts}
 
 While flying, _QGroundControl_ warns once (with a message and audio) when a connected vehicle comes within 100 m by default (or 30 m vertically) of an active prohibited, authorisation required, conditional, unknown or U-space zone, or would enter it within 30 seconds at its current speed, direction and climb rate, and again when it enters the zone. Alerts based on the velocity give the time to entry, so fast vehicles are warned in time. The approach distances are never shorter than 6 seconds at the vehicle's current speed (300 m at 50 m/s), so with the checks every second the pilot gets at least 5 seconds of warning also when the entry isn't predicted, for example while the vehicle turns. The velocity is the one the vehicle sends with its position, or is estimated from its positions when it sends none. Limits above ground use the vehicle's height above terrain, and the predicted path and guided commands use the terrain ahead where its data is loaded, so rising ground towards a zone counts. Where it isn't loaded, the terrain ahead is unknown rather than taken from the last known position, so zones with limits above ground count as reaching any altitude there. When the vehicle sends no height above terrain, its height above ground is estimated from the terrain data of _QGroundControl_, which is less accurate: the altitude strip shows an **AGL estimated** badge and the indicator says so. Without terrain data for the vehicle position, zones with limits above ground are assumed to apply at any altitude once the vehicle is armed; a disarmed vehicle is taken to be on the ground.
