@@ -1893,6 +1893,22 @@ void GeoZonePlanningTest::_testRoutePlanner()
     QTRY_VERIFY2((lowerPlanner.update(), suggestionTexts().contains(QStringLiteral("No descent: flying under T leaves 5 m above the terrain, less than 10 m."))),
                  qPrintable(suggestionTexts()));
     QCOMPARE(floorSuggestion(), -1);
+
+    // A climb above the maximum altitude is suggested with the altitude it needs
+    manager.repository()->clear();
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("sea_high.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("H"), QStringLiteral("PROHIBITED"), seaCenter, 200), 0, QStringLiteral("AMSL"), 200, QStringLiteral("AMSL")) }), errorString), qPrintable(errorString));
+    lowerPlanner.update();
+    const double suggestedMaxAltitude = lowerPlanner.suggestions().isEmpty() ? qQNaN() :
+                                            lowerPlanner.suggestions().constLast().toMap()[QStringLiteral("suggestedMaxAltitude")].toDouble();
+    QVERIFY2((suggestedMaxAltitude >= 210) && (suggestedMaxAltitude <= 211), qPrintable(suggestionTexts()));
+    lowerPlanner.setMaxAltitude(suggestedMaxAltitude);
+    lowerPlanner.update();
+    const QVariantList climbSuggestions = lowerPlanner.suggestions();
+    QVERIFY2(std::any_of(climbSuggestions.cbegin(), climbSuggestions.cend(), [](const QVariant &suggestion) {
+        return suggestion.toMap()[QStringLiteral("kind")].toString() == QStringLiteral("climb");
+    }), qPrintable(suggestionTexts()));
+    QVERIFY(!climbSuggestions.constLast().toMap().contains(QStringLiteral("suggestedMaxAltitude")));
 }
 
 void GeoZonePlanningTest::_testRoutePlannerWorker()

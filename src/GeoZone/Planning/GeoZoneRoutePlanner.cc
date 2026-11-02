@@ -220,7 +220,7 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
 {
     QVariantList suggestions;
     for (const Suggestion &suggestion : _suggestions) {
-        suggestions.append(QVariantMap{
+        QVariantMap map{
             { QStringLiteral("text"), suggestion.text },
             { QStringLiteral("kind"), suggestion.kind },
             { QStringLiteral("legText"), suggestion.legText },
@@ -229,7 +229,12 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
             { QStringLiteral("first"), suggestion.first },
             { QStringLiteral("canApply"), (suggestion.insertIndex >= 0) || !suggestion.altitudes.isEmpty() },
             { QStringLiteral("applyText"), suggestion.altitudes.isEmpty() ? tr("Insert") : tr("Apply") },
-        });
+        };
+        // Only when there is one, NaN would make equal suggestions differ
+        if (!qIsNaN(suggestion.suggestedMaxAltitude)) {
+            map.insert(QStringLiteral("suggestedMaxAltitude"), suggestion.suggestedMaxAltitude);
+        }
+        suggestions.append(map);
     }
     return suggestions;
 }
@@ -488,10 +493,15 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
         const LegJob &legJob = job.legs[legResult.leg];
         const QString legText = tr("Leg to item %1").arg(legJob.toSequenceNumber);
         QStringList notes;
+        double climbAltitude = qQNaN();
         QList<Suggestion> legSuggestions;
         for (const GeoZoneRouteSearch::Route &route : result.routes) {
             if (!route.isValid()) {
                 notes.append(_failureText(legJob, route));
+                // A higher maximum altitude allows the climb
+                if ((route.kind == GeoZoneRouteSearch::Kind::Climb) && (route.failure == GeoZoneRouteSearch::Failure::AboveMaxAltitude) && (route.limit > 0)) {
+                    climbAltitude = std::ceil(route.limit);
+                }
                 continue;
             }
             Suggestion suggestion;
@@ -536,6 +546,7 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
         }
         legSuggestions.first().first = true;
         legSuggestions.last().notes = notes;
+        legSuggestions.last().suggestedMaxAltitude = climbAltitude;
         suggestions.append(legSuggestions);
     }
     _suggestions = suggestions;

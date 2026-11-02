@@ -43,7 +43,8 @@ class GeoZoneRoutePlanner : public QObject
     /// Maps with text, canApply when the suggestion can change the mission and applyText for the button doing it, kind
     /// ("detour", "climb", "descent", or "none" for legs without a way around the zones), recommended for the cheapest
     /// way of each leg, legText naming the leg, first for the first suggestion of each leg, and notes, on the last one,
-    /// explaining why the other ways don't work
+    /// explaining why the other ways don't work, with suggestedMaxAltitude, the meters above the terrain a climb blocked
+    /// by maxAltitude needs (absent without), which can be set as maxAltitude
     Q_PROPERTY(QVariantList         suggestions         READ suggestions                                    NOTIFY suggestionsChanged FINAL)
     /// Suggestions are computed and follow mission and zone changes while active, like while they are shown
     Q_PROPERTY(bool                 active              READ active             WRITE setActive             NOTIFY activeChanged FINAL)
@@ -151,6 +152,7 @@ private:
         QList<QGeoCoordinate> waypoints;
         QList<double> waypointAltitudes;    ///< Meters AMSL of the waypoints, changing evenly along the detour, NaN when unknown
         QList<std::pair<int, double>> altitudes;    ///< Visual item indexes with their new altitude in the item's altitude mode
+        double suggestedMaxAltitude = qQNaN();      ///< Last of a leg: meters above the terrain a climb needs beyond maxAltitude, NaN without
     };
 
     Job _makeJob() const;

@@ -119,25 +119,23 @@ QGCPopupDialog {
             }
         }
 
+        // One line per way around the zones, or per leg without one, with why the other ways don't work on demand
         Repeater {
             model: planner.suggestions
 
             ColumnLayout {
                 id:                     suggestionColumn
                 Layout.preferredWidth:  root._width
+                Layout.topMargin:       (suggestionColumn.modelData.first && suggestionColumn.index > 0) ? ScreenTools.defaultFontPixelHeight / 2 : 0
                 spacing:                ScreenTools.defaultFontPixelHeight / 4
 
                 required property var   modelData
                 required property int   index
 
-                QGCLabel {
-                    Layout.fillWidth:   true
-                    Layout.topMargin:   suggestionColumn.index > 0 ? ScreenTools.defaultFontPixelHeight / 2 : 0
-                    visible:            suggestionColumn.modelData.first
-                    font.bold:          true
-                    wrapMode:           Text.WordWrap
-                    text:               suggestionColumn.modelData.legText
-                }
+                readonly property bool  _noRoute:       modelData.kind === "none"
+                // The climb only needs a higher maximum altitude
+                readonly property bool  _canAllowClimb: modelData.suggestedMaxAltitude !== undefined
+                property bool           _showReasons:   false
 
                 RowLayout {
                     Layout.fillWidth:   true
@@ -148,7 +146,7 @@ QGCPopupDialog {
                         wrapMode:           Text.WordWrap
                         textFormat:         Text.PlainText
                         text:               suggestionColumn.modelData.text
-                        color:              suggestionColumn.modelData.kind === "none" ? qgcPal.warningText : qgcPal.text
+                        color:              suggestionColumn._noRoute ? qgcPal.warningText : qgcPal.text
                     }
 
                     QGCLabel {
@@ -162,10 +160,22 @@ QGCPopupDialog {
                         visible:    suggestionColumn.modelData.canApply
                         onClicked:  planner.applySuggestion(suggestionColumn.index)
                     }
+
+                    QGCButton {
+                        text:       qsTr("Allow Climb to %1").arg(root._verticalText(suggestionColumn.modelData.suggestedMaxAltitude))
+                        visible:    suggestionColumn._noRoute && suggestionColumn._canAllowClimb
+                        onClicked:  planner.maxAltitude = suggestionColumn.modelData.suggestedMaxAltitude
+                    }
+
+                    QGCButton {
+                        text:       qsTr("Why") + (suggestionColumn._showReasons ? " \u25B4" : " \u25BE")
+                        visible:    suggestionColumn.modelData.notes.length > 0
+                        onClicked:  suggestionColumn._showReasons = !suggestionColumn._showReasons
+                    }
                 }
 
                 Repeater {
-                    model: suggestionColumn.modelData.notes
+                    model: suggestionColumn._showReasons ? suggestionColumn.modelData.notes : []
 
                     QGCLabel {
                         required property string modelData
@@ -177,6 +187,13 @@ QGCPopupDialog {
                         font.pointSize:     ScreenTools.smallFontPointSize
                         text:               modelData
                     }
+                }
+
+                QGCButton {
+                    Layout.leftMargin:  ScreenTools.defaultFontPixelWidth * 2
+                    text:               qsTr("Allow Climb to %1").arg(root._verticalText(suggestionColumn.modelData.suggestedMaxAltitude))
+                    visible:            suggestionColumn._showReasons && !suggestionColumn._noRoute && suggestionColumn._canAllowClimb
+                    onClicked:          planner.maxAltitude = suggestionColumn.modelData.suggestedMaxAltitude
                 }
             }
         }
