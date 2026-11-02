@@ -44,8 +44,4 @@ public:
     DEFINE_SETTINGFACT(packSigningKeyFile)
     DEFINE_SETTINGFACT(packPublisherName)
     DEFINE_SETTINGFACT(trustedPackPublishers)
-    DEFINE_SETTINGFACT(intentHorizontalBuffer)
-    DEFINE_SETTINGFACT(intentVerticalBuffer)
-    DEFINE_SETTINGFACT(intentTimeBuffer)
-    DEFINE_SETTINGFACT(intentMaxVolumes)
 };

@@ -14,7 +14,6 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZonePlanning.h"
-#include "GeoZoneSettings.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
 #include "Vehicle.h"
@@ -25,17 +24,6 @@
 GeoZoneOperationalIntentExport::GeoZoneOperationalIntentExport(GeoZoneManager *manager, QObject *parent)
     : GeoZoneMissionExport(manager, { tr("JSON data (*.json)") }, QStringLiteral("-intent.json"), QStringLiteral("operational-intent.json"), parent)
 {
-}
-
-GeoZoneOperationalIntent::Parameters GeoZoneOperationalIntentExport::parameters()
-{
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    GeoZoneOperationalIntent::Parameters parameters;
-    parameters.horizontalBuffer = settings->intentHorizontalBuffer()->rawValue().toDouble();
-    parameters.verticalBuffer = settings->intentVerticalBuffer()->rawValue().toDouble();
-    parameters.timeBuffer = settings->intentTimeBuffer()->rawValue().toInt() * 60;
-    parameters.maxVolumes = settings->intentMaxVolumes()->rawValue().toInt();
-    return parameters;
 }
 
 std::optional<GeoZoneOperationalIntent> GeoZoneOperationalIntentExport::intent(QString &errorString) const
@@ -52,7 +40,6 @@ std::optional<GeoZoneOperationalIntent> GeoZoneOperationalIntentExport::intent(Q
     }
 
     GeoZoneOperationalIntent intent;
-    intent.parameters = parameters();
     intent.generatedAt = GeoZoneEnvironment::currentDateTimeUtc();
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController);
     const QDateTime flightEnd = path.flightEnd(start, end);

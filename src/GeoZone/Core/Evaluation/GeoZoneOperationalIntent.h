@@ -40,6 +40,7 @@ public:
     static constexpr const char *jsonSchema = "qgc-operational-intent";
     static constexpr int jsonVersion = 1;
 
+    /// Of the operational intents the application exports, see Parameters
     static constexpr double defaultHorizontalBuffer = 50;   ///< Meters
     static constexpr double defaultVerticalBuffer = 20;     ///< Meters
     static constexpr int defaultTimeBufferSecs = GeoZonePathEvaluator::defaultScheduleToleranceSecs;

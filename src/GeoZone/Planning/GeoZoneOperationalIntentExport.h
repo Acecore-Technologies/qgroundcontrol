@@ -16,7 +16,7 @@
 
 /// Exports the operational intent of the planned mission, see GeoZoneOperationalIntent, as JSON for a U-space or UTM
 /// flight authorisation request: the 4D volumes of the flight from its planned start in the ASTM F3548-21 data model,
-/// with the buffers of the settings, the U-space airspaces it enters and the authorisations held for the zones it
+/// with the default buffers of GeoZoneOperationalIntent::Parameters, the U-space airspaces it enters and the authorisations held for the zones it
 /// enters. It isn't submitted to a service provider. See docs/en/qgc-user-guide/geozones/geozones.md for the schema.
 class GeoZoneOperationalIntentExport : public GeoZoneMissionExport
 {
@@ -33,6 +33,4 @@ public:
     /// @return The operational intent of the current mission from the planned start, nothing on errors with
     ///         errorString set
     std::optional<GeoZoneOperationalIntent> intent(QString &errorString) const;
-    /// @return The buffers and the maximum volume count of the settings
-    static GeoZoneOperationalIntent::Parameters parameters();
 };

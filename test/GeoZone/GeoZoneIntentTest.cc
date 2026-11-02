@@ -484,16 +484,7 @@ void GeoZoneIntentTest::_testExport()
     manager.planning()->setPlannedStart(GeoZoneEnvironment::currentDateTimeUtc().addSecs(-7200));
     QVERIFY(!exporter.exportIntent(fileName));
 
-    // With the buffers of the settings, without extension
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const QVariant savedBuffer = settings->intentHorizontalBuffer()->rawValue();
-    const QVariant savedTimeBuffer = settings->intentTimeBuffer()->rawValue();
-    const auto restore = qScopeGuard([&]() {
-        settings->intentHorizontalBuffer()->setRawValue(savedBuffer);
-        settings->intentTimeBuffer()->setRawValue(savedTimeBuffer);
-    });
-    settings->intentHorizontalBuffer()->setRawValue(80);
-    settings->intentTimeBuffer()->setRawValue(10);
+    // With the default buffers, without extension
     const QDateTime start = QDateTime::fromSecsSinceEpoch(GeoZoneEnvironment::currentDateTimeUtc().toSecsSinceEpoch() + 3600, QTimeZone::UTC);
     manager.planning()->setPlannedStart(start);
     QVERIFY2(exporter.exportIntent(dir.filePath(QStringLiteral("intent"))), qPrintable(exporter.errorString()));
@@ -502,17 +493,17 @@ void GeoZoneIntentTest::_testExport()
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
     QCOMPARE(json[QStringLiteral("schema")].toString(), QString::fromLatin1(GeoZoneOperationalIntent::jsonSchema));
-    QCOMPARE(json[QStringLiteral("parameters")].toObject()[QStringLiteral("horizontalBufferMeters")].toDouble(), 80.0);
-    QCOMPARE(json[QStringLiteral("parameters")].toObject()[QStringLiteral("timeBufferSeconds")].toInt(), 600);
+    QCOMPARE(json[QStringLiteral("parameters")].toObject()[QStringLiteral("horizontalBufferMeters")].toDouble(), GeoZoneOperationalIntent::defaultHorizontalBuffer);
+    QCOMPARE(json[QStringLiteral("parameters")].toObject()[QStringLiteral("timeBufferSeconds")].toInt(), GeoZoneOperationalIntent::defaultTimeBufferSecs);
     const QJsonObject flight = json[QStringLiteral("flight")].toObject();
     QCOMPARE(flight[QStringLiteral("plannedStart")].toString(), start.toString(Qt::ISODate));
     QVERIFY(flight[QStringLiteral("distanceMeters")].toDouble() > 3900);
     const QJsonObject operationalIntent = json[QStringLiteral("operational_intent")].toObject();
     QCOMPARE(operationalIntent[QStringLiteral("reference")].toObject()[QStringLiteral("time_start")].toObject()[QStringLiteral("value")].toString(),
-             start.addSecs(-600).toString(Qt::ISODate));
+             start.addSecs(-GeoZoneOperationalIntent::defaultTimeBufferSecs).toString(Qt::ISODate));
     const QJsonArray volumes = operationalIntent[QStringLiteral("details")].toObject()[QStringLiteral("volumes")].toArray();
     QVERIFY(!volumes.isEmpty());
-    QVERIFY(volumes.count() <= settings->intentMaxVolumes()->rawValue().toInt());
+    QVERIFY(volumes.count() <= GeoZoneOperationalIntent::defaultMaxVolumes);
 
     const QJsonArray airspaces = json[QStringLiteral("uSpaceAirspaces")].toArray();
     QCOMPARE(airspaces.count(), 1);
