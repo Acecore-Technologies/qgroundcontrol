@@ -73,10 +73,10 @@
 {
     "name":         "approachTime",
     "shortDesc":    "Approach alert time",
-    "longDesc":     "Seconds before the vehicle would enter a geozone at its current speed, direction and climb rate at which it is alerted. 0 alerts by distance only.",
+    "longDesc":     "Seconds before the vehicle would enter a geozone at its current speed, direction and climb rate at which it is alerted. At least 6 s: 5 s of warning and 1 s between the checks. The approach distance also covers at least 6 s at the current speed.",
     "type":         "uint32",
     "units":        "s",
-    "min":          0,
+    "min":          6,
     "max":          600,
     "default":      30
 },

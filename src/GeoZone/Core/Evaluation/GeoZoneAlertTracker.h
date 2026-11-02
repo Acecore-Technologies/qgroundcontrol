@@ -25,13 +25,17 @@ class GeoZonePolicy;
 /// Approach and entry states of the zones around one vehicle. Each zone alerts once
 /// when the vehicle comes near it, by distance or by its predicted entry, and once when the vehicle enters it, with
 /// hysteresis so that alerts don't repeat while the vehicle stays at a limit. States are kept by GeoZone::key, so
-/// reloading a source doesn't repeat alerts.
+/// reloading a source doesn't repeat alerts. The approach distances cover at least minWarningTime at the vehicle's
+/// speed, so a fast vehicle is warned in time also when its entry isn't predicted.
 class GeoZoneAlertTracker
 {
 public:
     static constexpr double hysteresisDistance = 20;        ///< Meters to move away before an alert can repeat
     static constexpr double hysteresisTime = 5;             ///< Seconds added to the approach time while a zone is near
     static constexpr double minPredictionSpeed = 0.5;       ///< Meters per second below which entries aren't predicted
+    /// Seconds of flight at the current speed within which a zone is always near: 5 s of warning for the pilot and
+    /// the evaluation interval of 1 s
+    static constexpr double minWarningTime = 6;
 
     /// Velocity over ground and vertical speed
     struct Velocity {
@@ -45,8 +49,8 @@ public:
 
     /// When a zone is near, see GeoZoneSettings
     struct Limits {
-        double distance = 0;            ///< Meters horizontally
-        double verticalDistance = 0;    ///< Meters vertically
+        double distance = 0;            ///< Meters horizontally, at least minWarningTime at the ground speed
+        double verticalDistance = 0;    ///< Meters vertically, at least minWarningTime at the vertical speed
         double time = 0;                ///< Seconds until the predicted entry, 0 to not predict entries
     };
 

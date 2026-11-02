@@ -119,7 +119,8 @@ GeoZoneMonitor::Settings GeoZoneMonitor::Settings::fromApplication()
     result.audioAlerts = settings->audioAlerts()->rawValue().toBool();
     result.limits.distance = settings->approachDistance()->rawValue().toDouble();
     result.limits.verticalDistance = approachVerticalDistance;
-    result.limits.time = settings->approachTime()->rawValue().toDouble();
+    // Stored before the minimum was raised
+    result.limits.time = (std::max)(settings->approachTime()->rawValue().toDouble(), GeoZoneAlertTracker::minWarningTime);
     result.trafficEnabled = settings->trafficEnabled()->rawValue().toBool();
     return result;
 }

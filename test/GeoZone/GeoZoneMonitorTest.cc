@@ -297,12 +297,63 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
     climbMonitor.evaluate({ center.atDistanceAndAzimuth(5000, 270), 400, 300 });
     QVERIFY(climbMonitor.activeMonitor()->verticalBands().isEmpty());
 
-    // Turned off
+    // An approach time stored below the minimum, like 0 s which turned it off, is the minimum warning time
     settings->approachTime()->setRawValue(0);
-    GeoZoneMonitor offMonitor(&manager);
-    QSignalSpy offSpy(&offMonitor, &GeoZoneMonitor::alert);
-    offMonitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
-    QCOMPARE(offSpy.count(), 0);
+    GeoZoneMonitor shortMonitor(&manager);
+    QCOMPARE(shortMonitor.settings().limits.time, GeoZoneAlertTracker::minWarningTime);
+    QSignalSpy shortSpy(&shortMonitor, &GeoZoneMonitor::alert);
+    shortMonitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
+    QCOMPARE(shortSpy.count(), 0);
+}
+
+void GeoZoneMonitorTest::_testMinimumWarningTime()
+{
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
+    settings->approachTime()->setRawValue(0);
+
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+
+    // At 50 m/s straight towards the zone, evaluated every second, the vehicle is alerted at least 5 s and 250 m before
+    // it enters the zone: by the approach distance alone, without predicting entries, and with the approach time of the
+    // application settings, which is at least 6 s
+    const GeoZoneMonitor::Velocity north{ 50, 0, 0, true };
+    for (const bool predicted : { false, true }) {
+        for (const double offset : { 5.0, 20.0, 35.0, 49.0 }) {
+            GeoZoneMonitor monitor(&manager);
+            if (!predicted) {
+                GeoZoneMonitor::Settings distanceOnly;
+                distanceOnly.limits.distance = 100;
+                distanceOnly.limits.verticalDistance = GeoZoneMonitor::approachVerticalDistance;
+                monitor.setSettings(distanceOnly);
+            }
+            QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+            int approachTick = -1;
+            int entryTick = -1;
+            for (int tick = 0; (tick < 60) && (entryTick < 0); tick++) {
+                const double toZone = 1000 + offset - (50.0 * tick);
+                monitor.evaluate({ center.atDistanceAndAzimuth(300 + toZone, 180) }, GeoZoneMonitor::noVehicle, north);
+                if ((approachTick < 0) && !eventSpy.isEmpty()) {
+                    const GeoZoneMonitor::AlertEvent approach = eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>();
+                    QVERIFY(approach.kind == GeoZoneMonitor::AlertEvent::Approach);
+                    QVERIFY2(approach.distance >= 250, qPrintable(QStringLiteral("%1 m").arg(approach.distance)));
+                    approachTick = tick;
+                }
+                if (monitor.activeMonitor()->inside()) {
+                    entryTick = tick;
+                }
+            }
+            QVERIFY(approachTick >= 0);
+            QVERIFY(entryTick >= 0);
+            QVERIFY2((entryTick - approachTick) >= 5, qPrintable(QStringLiteral("%1 s, predicted %2").arg(entryTick - approachTick).arg(predicted)));
+        }
+    }
 }
 
 void GeoZoneMonitorTest::_testTerrainAhead()

@@ -27,7 +27,11 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         return update;
     }
 
-    GeoZoneBox area(QGeoCircle(position.coordinate, limits.distance + hysteresisDistance).boundingGeoRectangle());
+    // Never less than minWarningTime at the current speed, so the distance alone warns fast vehicles in time too
+    const double distanceLimit = velocity.valid ? (std::max)(limits.distance, velocity.groundSpeed() * minWarningTime) : limits.distance;
+    const double verticalLimit = velocity.valid ? (std::max)(limits.verticalDistance, std::abs(velocity.up) * minWarningTime) : limits.verticalDistance;
+
+    GeoZoneBox area(QGeoCircle(position.coordinate, distanceLimit + hysteresisDistance).boundingGeoRectangle());
     // Zones the vehicle would enter at its velocity within the approach time are near too
     const bool predict = velocity.valid && (limits.time > 0) &&
                          ((velocity.groundSpeed() >= minPredictionSpeed) || (std::abs(velocity.up) >= minPredictionSpeed));
@@ -42,9 +46,9 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     for (const GeoZone *zone : catalog.zonesInArea(area, policy)) {
         const QString &key = zone->key();
         const State previous = _states.value(key, State::Away);
-        const double nearLimit = limits.distance + ((previous != State::Away) ? hysteresisDistance : 0);
+        const double nearLimit = distanceLimit + ((previous != State::Away) ? hysteresisDistance : 0);
         // The approach margin includes the inside margin, so a zone which isn't near isn't entered either
-        const double nearDistance = zone->distanceTo(position, limits.verticalDistance + ((previous != State::Away) ? hysteresisDistance : 0), nearLimit);
+        const double nearDistance = zone->distanceTo(position, verticalLimit + ((previous != State::Away) ? hysteresisDistance : 0), nearLimit);
         const bool nearByDistance = (nearDistance <= nearLimit);
         double insideDistance = qInf();
         if (nearByDistance) {
