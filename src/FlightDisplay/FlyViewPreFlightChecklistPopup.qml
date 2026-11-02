@@ -20,6 +20,8 @@ QGCPopupDialog {
     id:         _root
     title:      qsTr("Pre-Flight Checklist")
     buttons:    Dialog.Close
+    // Created by a Loader in FlyViewWidgetLayer, which keeps it for the next opening
+    destroyOnClose: false
 
     property var    _activeVehicle:     QGroundControl.multiVehicleManager.activeVehicle
     property bool   _useChecklist:      QGroundControl.settingsManager.appSettings.useChecklist.rawValue && QGroundControl.corePlugin.options.preFlightChecklistUrl.toString().length
