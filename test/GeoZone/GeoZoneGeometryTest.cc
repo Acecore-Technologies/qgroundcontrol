@@ -1172,7 +1172,8 @@ void GeoZoneGeometryTest::_testShapeSimplification()
     const QList<QGeoCoordinate> smallRing = _circleRing(center, 50, 200);
     const GeoZoneShape smallShape(nullptr, { GeoZone::toRing(smallRing) });
     QList<QGeoCoordinate> triangle;
-    for (const QPointF &point : smallShape.mercatorRings(5).first()) {
+    const QList<QList<QPointF>> smallRings = smallShape.mercatorRings(5);
+    for (const QPointF &point : smallRings.first()) {
         triangle.append(GeoZoneShape::fromMercator(point));
     }
     QCOMPARE(triangle.count(), 3);

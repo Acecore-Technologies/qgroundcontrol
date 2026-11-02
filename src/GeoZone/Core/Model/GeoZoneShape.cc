@@ -232,19 +232,9 @@ QList<QList<QPointF>> GeoZoneShape::mercatorRings(int zoomLevel) const
     }
 
     const int level = std::clamp(zoomLevel, 0, fullDetailZoomLevel);
-    {
-        const QMutexLocker locker(&_mercatorMutex);
-        for (const auto &[cachedLevel, cachedRings] : _mercatorCache) {
-            if (cachedLevel == level) {
-                return cachedRings;
-            }
-        }
-    }
-
     QList<QList<QPointF>> rings;
     const QList<QPointF> perimeter = toMercator(_rings.first());
     if (level == fullDetailZoomLevel) {
-        // Not cached, since it is as large as the zone and the map caches its triangulation
         rings.append(perimeter);
         for (qsizetype i = 1; i < _rings.count(); i++) {
             rings.append(toMercator(_rings[i]));
@@ -265,14 +255,5 @@ QList<QList<QPointF>> GeoZoneShape::mercatorRings(int zoomLevel) const
             rings.append(hole);
         }
     }
-
-    const QMutexLocker locker(&_mercatorMutex);
-    // Another thread may have made the rings of the level meanwhile
-    for (const auto &[cachedLevel, cachedRings] : _mercatorCache) {
-        if (cachedLevel == level) {
-            return cachedRings;
-        }
-    }
-    _mercatorCache.append({ level, rings });
     return rings;
 }

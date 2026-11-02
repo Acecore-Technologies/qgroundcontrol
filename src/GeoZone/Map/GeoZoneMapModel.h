@@ -12,6 +12,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
@@ -24,56 +25,6 @@ class GeoZoneManager;
 class GeoZoneShape;
 class GeoZoneSource;
 class MissionController;
-class QmlObjectListModel;
-
-/// A GeoZoneShape displayed on one map, at that map's level of detail
-class GeoZoneMapItem : public QObject
-{
-    Q_OBJECT
-
-    Q_PROPERTY(GeoZoneInfo      zone        READ zoneInfo   CONSTANT FINAL)
-    Q_PROPERTY(int              restriction READ restriction CONSTANT FINAL)               ///< GeoZone::Restriction of the zone
-    Q_PROPERTY(bool             active      READ active     NOTIFY activeChanged FINAL)    ///< The zone is active now
-    Q_PROPERTY(QGeoCoordinate   center      READ center     CONSTANT FINAL)               ///< Circle only
-    Q_PROPERTY(double           radius      READ radius     CONSTANT FINAL)               ///< Circle only, meters
-    Q_PROPERTY(bool             highlighted READ highlighted NOTIFY highlightedChanged FINAL) ///< The zone is one of the model's highlightedZones
-
-public:
-    GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent = nullptr);
-
-    /// Identifies the item, only valid until the zones of its source change
-    const GeoZoneShape *shape() const { return _shape; }
-    GeoZone *zone() const { return _zone; }
-    GeoZoneInfo zoneInfo() const { return GeoZoneInfo(_zone); }
-    int restriction() const;
-    bool active() const { return _active; }
-    /// Re-reads whether the zone is active
-    void updateActive();
-    /// Polygon rings at the item's level of detail, see GeoZoneShape::mercatorRings
-    QList<QList<QPointF>> mercatorRings() const;
-    int zoomLevel() const { return _zoomLevel; }
-    QGeoCoordinate center() const { return _center; }
-    double radius() const { return _radius; }
-    bool highlighted() const { return _highlighted; }
-    void setHighlighted(bool highlighted);
-
-    void setZoomLevel(int zoomLevel);
-
-signals:
-    void zoomLevelChanged();
-    void highlightedChanged();
-    void activeChanged();
-
-private:
-    const GeoZoneShape *_shape = nullptr;
-    GeoZone *_zone = nullptr;
-    bool _active = false;
-    QGeoCoordinate _center;
-    double _radius = 0;
-    bool _isCircle = false;
-    bool _highlighted = false;
-    int _zoomLevel = -1;
-};
 
 /// Selects the GeoZone shapes and labels shown on one map, drawn by GeoZoneMapLayer. Only shapes in or near the view
 /// are shown, limited to maxShapeCount preferring the largest, with polygons simplified for the zoom level, which
@@ -85,10 +36,7 @@ class GeoZoneMapModel : public QObject
 {
     Q_OBJECT
     Q_MOC_INCLUDE("MissionController.h")
-    Q_MOC_INCLUDE("QmlObjectListModel.h")
 
-    Q_PROPERTY(QmlObjectListModel*  polygons        READ polygons           CONSTANT FINAL)                       ///< GeoZoneMapItem polygons
-    Q_PROPERTY(QmlObjectListModel*  circles         READ circles            CONSTANT FINAL)                       ///< GeoZoneMapItem circles
     Q_PROPERTY(QVariantList         labelZones      READ labelZones         NOTIFY labelZonesChanged FINAL)       ///< GeoZoneInfo of the zones to label
     Q_PROPERTY(int                  hiddenZoneCount READ hiddenZoneCount    NOTIFY hiddenZoneCountChanged FINAL)  ///< Zones in view not shown because of the limit
     Q_PROPERTY(QVariantList         highlightedZones READ highlightedZones  WRITE setHighlightedZones NOTIFY highlightedZonesChanged FINAL)  ///< GeoZoneInfo of the zones drawn highlighted, which filters don't hide
@@ -111,8 +59,12 @@ public:
     /// Updates the shapes and labels for the map view. An invalid region removes everything.
     Q_INVOKABLE void setView(const QGeoRectangle &visibleRegion, double zoomLevel, bool showLabels);
 
-    QmlObjectListModel *polygons() const { return _polygons; }
-    QmlObjectListModel *circles() const { return _circles; }
+    /// Shapes shown, drawn by GeoZoneMapLayer
+    const QSet<const GeoZoneShape*> &shapes() const { return _shapes; }
+    /// Zoom level the polygons are drawn at, see GeoZoneShape::mercatorRings
+    int detailLevel() const { return _detailLevel; }
+    /// @return true if the zone is one of the highlightedZones
+    bool highlighted(const GeoZone *zone) const { return _highlightedZoneSet.contains(zone); }
     QVariantList labelZones() const { return _labelZones; }
     int hiddenZoneCount() const { return _hiddenZoneCount; }
     QVariantList highlightedZones() const { return _highlightedZones; }
@@ -138,6 +90,9 @@ public:
     Q_INVOKABLE QVariantList zonesAt(const QGeoCoordinate &coordinate);
 
 signals:
+    /// The shapes, their detail level, or whether their zones are active or highlighted changed. The shapes left out
+    /// may be deleted once it returns.
+    void shapesChanged();
     void hiddenZoneCountChanged(int hiddenZoneCount);
     void highlightedZonesChanged();
     void labelZonesChanged();
@@ -155,7 +110,6 @@ private slots:
     void _updateAltitudes();
 
 private:
-    void _syncItems(QmlObjectListModel *model, const QList<const GeoZoneShape*> &shapes, int zoomLevel);
     void _setHiddenZoneCount(int hiddenZoneCount);
     void _setFilteredZoneCount(int filteredZoneCount);
     /// Drops the filter results, after the filters, altitudes, times or zones changed
@@ -165,10 +119,9 @@ private:
     GeoZoneAltitudeRange _readAltitudes() const;
 
     GeoZoneManager *_manager = nullptr;
-    QmlObjectListModel *_polygons = nullptr;
-    QmlObjectListModel *_circles = nullptr;
+    QSet<const GeoZoneShape*> _shapes;
+    int _detailLevel = 0;
     QVariantList _labelZones;
-    QHash<const GeoZoneShape*, GeoZoneMapItem*> _items;
     int _hiddenZoneCount = 0;
     QVariantList _highlightedZones;
     QSet<const GeoZone*> _highlightedZoneSet;

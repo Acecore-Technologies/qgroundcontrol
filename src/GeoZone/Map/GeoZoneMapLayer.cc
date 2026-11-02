@@ -11,7 +11,6 @@
 #include "GeoZone.h"
 #include "GeoZoneMapModel.h"
 #include "GeoZoneShape.h"
-#include "QmlObjectListModel.h"
 
 #include <QtGui/QPainterPath>
 #include <QtGui/private/qtriangulator_p.h>
@@ -33,6 +32,7 @@ namespace {
 constexpr int kCircleSegments = 72;
 constexpr double kMaxZoomDrift = 1.41;      ///< Scale change from the vertices, half a zoom level, before they are rebuilt
 constexpr double kMaxOriginOffset = 1e5;    ///< Pixels from the item to the origin of the vertices before they are rebuilt
+constexpr int kCachedDetailLevels = 3;      ///< Triangulations kept per polygon, for zooming back and forth
 
 /// Keeps a ring on the side of the antimeridian of its first vertex
 QList<QPointF> unwrapped(const QList<QPointF> &ring, double referenceX)
@@ -99,17 +99,12 @@ void GeoZoneMapLayer::setModel(GeoZoneMapModel *model)
         return;
     }
     if (_model) {
-        (void) disconnect(_model->polygons(), nullptr, this, nullptr);
-        (void) disconnect(_model->circles(), nullptr, this, nullptr);
+        (void) disconnect(_model, nullptr, this, nullptr);
     }
     _model = model;
     _cache.clear();
     if (_model) {
-        for (QmlObjectListModel *list : { _model->polygons(), _model->circles() }) {
-            (void) connect(list, &QAbstractItemModel::rowsInserted, this, &GeoZoneMapLayer::_scheduleRebuild);
-            (void) connect(list, &QAbstractItemModel::rowsRemoved, this, &GeoZoneMapLayer::_scheduleRebuild);
-            (void) connect(list, &QAbstractItemModel::modelReset, this, &GeoZoneMapLayer::_scheduleRebuild);
-        }
+        (void) connect(_model, &GeoZoneMapModel::shapesChanged, this, &GeoZoneMapLayer::_shapesChanged);
     }
     emit modelChanged();
     _scheduleRebuild();
@@ -162,6 +157,16 @@ void GeoZoneMapLayer::setInactiveFillAlpha(qreal alpha)
         emit stylesChanged();
         _scheduleRebuild();
     }
+}
+
+void GeoZoneMapLayer::_shapesChanged()
+{
+    // Shapes the model left out may be deleted, and new ones made at their addresses
+    const QSet<const GeoZoneShape*> &shapes = _model->shapes();
+    for (auto it = _cache.begin(); it != _cache.end();) {
+        it = shapes.contains(it.key()) ? std::next(it) : _cache.erase(it);
+    }
+    _scheduleRebuild();
 }
 
 void GeoZoneMapLayer::_scheduleRebuild()
@@ -267,52 +272,40 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
     _strokeVertices.clear();
     _geometryDirty = true;
 
-    QList<const GeoZoneMapItem*> items;
-    if (_model) {
-        for (const QmlObjectListModel *list : { _model->polygons(), _model->circles() }) {
-            for (int i = 0; i < list->count(); i++) {
-                GeoZoneMapItem *const item = list->value<GeoZoneMapItem*>(i);
-                (void) connect(item, &GeoZoneMapItem::zoomLevelChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
-                (void) connect(item, &GeoZoneMapItem::activeChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
-                (void) connect(item, &GeoZoneMapItem::highlightedChanged, this, &GeoZoneMapLayer::_scheduleRebuild, Qt::UniqueConnection);
-                items.append(item);
-            }
-        }
-    }
-    // The most restrictive zones are drawn last, on top
-    std::stable_sort(items.begin(), items.end(), [](const GeoZoneMapItem *a, const GeoZoneMapItem *b) {
-        return GeoZone::restrictionSeverity(a->zone()->restriction()) > GeoZone::restrictionSeverity(b->zone()->restriction());
+    QList<const GeoZoneShape*> shapes = _model ? _model->shapes().values() : QList<const GeoZoneShape*>();
+    // The most restrictive zones are drawn last, on top, the others in the same order on each rebuild
+    std::sort(shapes.begin(), shapes.end(), [](const GeoZoneShape *a, const GeoZoneShape *b) {
+        const int severityA = GeoZone::restrictionSeverity(a->zone()->restriction());
+        const int severityB = GeoZone::restrictionSeverity(b->zone()->restriction());
+        return (severityA != severityB) ? (severityA > severityB) : std::less<>()(a, b);
     });
-
-    // Items removed from the model are forgotten
-    const QSet<const GeoZoneMapItem*> current(items.cbegin(), items.cend());
-    for (auto it = _cache.begin(); it != _cache.end();) {
-        it = current.contains(it.key()) ? std::next(it) : _cache.erase(it);
-    }
 
     const auto premultiplied = [](const QColor &color, qreal alpha) {
         const qreal a = color.alphaF() * alpha;
         return std::array<uchar, 4>{ static_cast<uchar>(std::lround(color.redF() * a * 255)), static_cast<uchar>(std::lround(color.greenF() * a * 255)),
                                      static_cast<uchar>(std::lround(color.blueF() * a * 255)), static_cast<uchar>(std::lround(a * 255)) };
     };
-    for (const GeoZoneMapItem *item : std::as_const(items)) {
-        const Triangulation &triangulation = _triangulation(item);
+    for (const GeoZoneShape *shape : std::as_const(shapes)) {
+        const Triangulation &triangulation = _triangulation(shape, _model->detailLevel());
+        const GeoZone *const zone = shape->zone();
+        const bool active = zone->active();
+        const bool highlighted = _model->highlighted(zone);
         // Shapes are drawn on the copy of the world nearest to the view
         const double shiftX = std::round(_origin.x() - triangulation.center.x());
         const auto toVertex = [this, shiftX](const QPointF &mercator) {
             return QPointF((mercator.x() + shiftX - _origin.x()) * _scale, (mercator.y() - _origin.y()) * _scale);
         };
 
-        const QColor restrictionColor = _restrictionColor(item->restriction());
-        const auto fill = premultiplied(restrictionColor, item->active() ? _activeFillAlpha : _inactiveFillAlpha);
+        const QColor restrictionColor = _restrictionColor(static_cast<int>(zone->restriction()));
+        const auto fill = premultiplied(restrictionColor, active ? _activeFillAlpha : _inactiveFillAlpha);
         for (const QPointF &mercator : triangulation.triangles) {
             const QPointF point = toVertex(mercator);
             _fillVertices.append(Vertex{ static_cast<float>(point.x()), static_cast<float>(point.y()), fill[0], fill[1], fill[2], fill[3] });
         }
 
         // Outlines as quads with square caps, which cover the joins
-        const auto stroke = premultiplied(item->highlighted() ? _highlightColor : restrictionColor, 1);
-        const double halfWidth = (item->highlighted() ? 3.0 : (item->active() ? 2.0 : 1.0)) / 2;
+        const auto stroke = premultiplied(highlighted ? _highlightColor : restrictionColor, 1);
+        const double halfWidth = (highlighted ? 3.0 : (active ? 2.0 : 1.0)) / 2;
         const auto appendStrokeVertex = [this, &stroke](const QPointF &point) {
             _strokeVertices.append(Vertex{ static_cast<float>(point.x()), static_cast<float>(point.y()), stroke[0], stroke[1], stroke[2], stroke[3] });
         };
@@ -341,23 +334,20 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
     emit vertexCountChanged();
 }
 
-const GeoZoneMapLayer::Triangulation &GeoZoneMapLayer::_triangulation(const GeoZoneMapItem *item)
+const GeoZoneMapLayer::Triangulation &GeoZoneMapLayer::_triangulation(const GeoZoneShape *shape, int detailLevel)
 {
-    const bool circle = item->shape()->isCircle();
-    // Circles don't change, polygons change with the zoom level
-    auto it = _cache.find(item);
-    if ((it != _cache.end()) && (it->zoomLevel == item->zoomLevel())) {
-        return it->triangulation;
+    // Circles don't change, polygons change with the detail level
+    QList<CachedShape> &levels = _cache[shape];
+    for (const CachedShape &cached : std::as_const(levels)) {
+        if (shape->isCircle() || (cached.detailLevel == detailLevel)) {
+            return cached.triangulation;
+        }
     }
-
-    CachedShape cached;
-    cached.zoomLevel = item->zoomLevel();
-    if (circle) {
-        cached.triangulation = triangulateCircle(item->center(), item->radius());
-    } else {
-        cached.triangulation = triangulatePolygon(item->mercatorRings());
+    if (levels.count() >= kCachedDetailLevels) {
+        levels.removeFirst();
     }
-    return _cache.insert(item, cached)->triangulation;
+    levels.append({ detailLevel, shape->isCircle() ? triangulateCircle(shape->center(), shape->radius()) : triangulatePolygon(shape->mercatorRings(detailLevel)) });
+    return levels.last().triangulation;
 }
 
 GeoZoneMapLayer::Triangulation GeoZoneMapLayer::triangulatePolygon(const QList<QList<QPointF>> &rings)

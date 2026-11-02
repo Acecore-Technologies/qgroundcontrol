@@ -19,15 +19,15 @@
 
 #include <functional>
 
-class GeoZoneMapItem;
 class GeoZoneMapModel;
+class GeoZoneShape;
 class QDeclarativeGeoMap;
 
 /// Draws the polygons and circles of a GeoZoneMapModel on a map in two scene graph nodes, the fills then the
-/// outlines, instead of one map item per shape. Shapes are triangulated once per level of detail in Web Mercator
-/// coordinates, and moved with the map by a transform, so panning, zooming and rotating only rebuild the vertices
-/// when the zoom changes by half a level. Add it as a child of the map filling it; it doesn't take mouse events.
-/// The map is expected to be flat, tilted maps aren't supported.
+/// outlines, instead of one map item per shape. Shapes are triangulated once per detail level in Web Mercator
+/// coordinates, kept for the last few levels while the model shows them, and moved with the map by a transform, so
+/// panning, zooming and rotating only rebuild the vertices when the zoom changes by half a level. Add it as a child of
+/// the map filling it; it doesn't take mouse events. The map is expected to be flat, tilted maps aren't supported.
 class GeoZoneMapLayer : public QQuickItem
 {
     Q_OBJECT
@@ -98,16 +98,17 @@ private:
     };
 
     struct CachedShape {
-        int zoomLevel = -1;             ///< Of the item the triangulation was made for
+        int detailLevel = -1;           ///< Of the polygon rings triangulated, see GeoZoneShape::mercatorRings
         Triangulation triangulation;
     };
 
+    void _shapesChanged();
     void _scheduleRebuild();
     void _updateCamera();
     /// @return Mercator to item coordinates, an invalid transform without a map
     bool _mercatorTransform(QTransform &transform) const;
     void _rebuild(const QTransform &mercatorToItem);
-    const Triangulation &_triangulation(const GeoZoneMapItem *item);
+    const Triangulation &_triangulation(const GeoZoneShape *shape, int detailLevel);
     QColor _restrictionColor(int restriction) const;
 
     QPointer<QDeclarativeGeoMap> _mapView;
@@ -118,7 +119,7 @@ private:
     qreal _activeFillAlpha = 0.25;
     qreal _inactiveFillAlpha = 0.08;
 
-    QHash<const GeoZoneMapItem*, CachedShape> _cache;
+    QHash<const GeoZoneShape*, QList<CachedShape>> _cache;   ///< Of the shapes of the model, the latest detail levels last
     bool _rebuildNeeded = true;
     QPointF _origin;                    ///< Mercator coordinates at the origin of the vertices
     double _scale = 0;                  ///< Pixels per mercator unit of the vertices

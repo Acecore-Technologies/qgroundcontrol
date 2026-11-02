@@ -2792,21 +2792,22 @@ void GeoZoneManagerTest::_testZoneSearch()
     QCOMPARE(showSpy.count(), 1);
     QCOMPARE(GeoZoneInfo::fromVariant(showSpy.first().first()), manager.zoneList().first());
 
-    // Highlighted zones are marked on their map items
+    // Highlighted zones are marked for the map layer
     GeoZoneMapModel model(&manager);
     model.setView(QGeoRectangle(center.atDistanceAndAzimuth(5000, 315), center.atDistanceAndAzimuth(5000, 135)), 12, false);
-    QCOMPARE(model.circles()->count(), 2);
+    QCOMPARE(model.shapes().count(), 2);
     const QVariant prisonZone = manager.searchZones(QStringLiteral("GZW1")).first();
+    QSignalSpy shapesSpy(&model, &GeoZoneMapModel::shapesChanged);
     model.setHighlightedZones({ prisonZone });
-    for (int i = 0; i < model.circles()->count(); i++) {
-        const GeoZoneMapItem *const item = model.circles()->value<GeoZoneMapItem*>(i);
-        QCOMPARE(item->highlighted(), item->zone() == GeoZoneInfo::fromVariant(prisonZone));
+    QCOMPARE(shapesSpy.count(), 1);
+    for (const GeoZoneShape *shape : model.shapes()) {
+        QCOMPARE(model.highlighted(shape->zone()), shape->zone() == GeoZoneInfo::fromVariant(prisonZone));
     }
 
     // Values given to QML stay readable after their source is removed
     manager.repository()->clear();
     QCOMPARE(manager.zoneCount(), 0);
-    QCOMPARE(model.circles()->count(), 0);
+    QVERIFY(model.shapes().isEmpty());
     QVERIFY(prisonZone.value<GeoZoneInfo>().valid());
     QCOMPARE(prisonZone.value<GeoZoneInfo>().identifier(), QStringLiteral("GZW1"));
 }

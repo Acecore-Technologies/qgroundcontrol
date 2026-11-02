@@ -2502,64 +2502,76 @@ void GeoZonePlanningTest::_testMapModel()
     QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString), qPrintable(errorString));
 
     GeoZoneMapModel model(&manager);
-    const auto identifiers = [](const QmlObjectListModel *list) {
+    QSignalSpy shapesSpy(&model, &GeoZoneMapModel::shapesChanged);
+    const auto identifiers = [&model]() {
         QStringList result;
-        for (int i = 0; i < list->count(); i++) {
-            result.append(list->value<GeoZoneMapItem*>(i)->zone()->identifier());
+        for (const GeoZoneShape *shape : model.shapes()) {
+            result.append(shape->zone()->identifier());
         }
         result.sort();
         return result;
     };
+    const auto polygon = [&model]() {
+        const QSet<const GeoZoneShape*> &shapes = model.shapes();
+        const auto it = std::find_if(shapes.cbegin(), shapes.cend(), [](const GeoZoneShape *shape) { return !shape->isCircle(); });
+        return (it != shapes.cend()) ? *it : nullptr;
+    };
 
     // Only shapes in or near the view
     model.setView(view, 10, false);
-    QCOMPARE(identifiers(model.polygons()), QStringList({ QStringLiteral("BIG") }));
-    QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("NEAR"), QStringLiteral("TINY") }));
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("BIG"), QStringLiteral("NEAR"), QStringLiteral("TINY") }));
+    QCOMPARE(model.detailLevel(), 10);
     QCOMPARE(model.hiddenZoneCount(), 0);
     QCOMPARE(model.labelZones().count(), 0);
+    const GeoZoneShape *const polygonShape = polygon();
+    QVERIFY(polygonShape);
 
-    GeoZoneMapItem *const polygonItem = model.polygons()->value<GeoZoneMapItem*>(0);
-    const qsizetype lowDetailCount = polygonItem->mercatorRings().first().count();
-    QVERIFY(lowDetailCount < 2000);
-
-    // Zooming in keeps the items and adds detail. Only zones centered in the view are labelled.
-    model.setView(view, 16, true);
-    QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
+    // Zooming in keeps the shapes and adds detail. Only zones centered in the view are labelled.
+    shapesSpy.clear();
+    model.setView(view, 16.5, true);
+    QCOMPARE(shapesSpy.count(), 1);
+    QCOMPARE(model.detailLevel(), 16);
+    QCOMPARE(polygon(), polygonShape);
     QCOMPARE(model.labelZones().count(), 2);
-    QVERIFY(polygonItem->mercatorRings().first().count() > lowDetailCount);
+    model.setView(view, 16, true);
+    QCOMPARE(shapesSpy.count(), 1);
 
-    // Another file adds items, removing a source removes its items
+    // Another file adds shapes, removing a source removes its shapes
     QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("other.json"),
         { _circleFeature(QStringLiteral("OTHER"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.0, 8.0), 1000) }), errorString), qPrintable(errorString));
-    QCOMPARE(model.polygons()->count(), 1);
-    QVERIFY(identifiers(model.circles()).contains(QStringLiteral("OTHER")));
-    // Items of the other sources are kept when a source reloads
-    QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
+    QVERIFY(identifiers().contains(QStringLiteral("OTHER")));
+    // Shapes of the other sources are kept when a source reloads
+    QCOMPARE(polygon(), polygonShape);
     QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("other.json"),
         { _circleFeature(QStringLiteral("OTHER"), QStringLiteral("CONDITIONAL"), QGeoCoordinate(47.0, 8.0), 1000) }), errorString), qPrintable(errorString));
-    QCOMPARE(model.polygons()->value<GeoZoneMapItem*>(0), polygonItem);
-    QVERIFY(identifiers(model.circles()).contains(QStringLiteral("OTHER")));
+    QCOMPARE(polygon(), polygonShape);
+    QVERIFY(identifiers().contains(QStringLiteral("OTHER")));
+    // Shapes are left out before their source deletes them
+    shapesSpy.clear();
+    qsizetype changesBeforeRemoval = -1;
+    const QMetaObject::Connection removal = connect(&manager, &GeoZoneManager::zonesAboutToChange, &model, [&]() { changesBeforeRemoval = shapesSpy.count(); });
     manager.repository()->removeSource(0);
-    QCOMPARE(model.polygons()->count(), 0);
-    QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
+    (void) disconnect(removal);
+    QCOMPARE(changesBeforeRemoval, 1);
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("OTHER") }));
 
     // Restrictions hidden on maps leave out their shapes and labels
     const auto restoreRestrictions = qScopeGuard([&manager]() { manager.display()->setRestrictionVisible(GeoZone::Conditional, true); });
     QVERIFY(!model.labelZones().isEmpty());
     manager.display()->setRestrictionVisible(GeoZone::Conditional, false);
     QVERIFY(!manager.display()->restrictionVisible(GeoZone::Conditional));
-    QCOMPARE(model.circles()->count(), 0);
+    QVERIFY(model.shapes().isEmpty());
     QVERIFY(model.labelZones().isEmpty());
     manager.display()->setRestrictionVisible(GeoZone::Conditional, true);
-    QCOMPARE(identifiers(model.circles()), QStringList({ QStringLiteral("OTHER") }));
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("OTHER") }));
 
     model.setView(QGeoRectangle(), 16, true);
-    QCOMPARE(model.circles()->count(), 0);
+    QVERIFY(model.shapes().isEmpty());
     QCOMPARE(model.labelZones().count(), 0);
 
     model.setView(view, 16, true);
     manager.repository()->clear();
-    QCOMPARE(model.circles()->count(), 0);
+    QVERIFY(model.shapes().isEmpty());
 }
 
 void GeoZonePlanningTest::_testMapModelShapeLimit()
@@ -2580,10 +2592,10 @@ void GeoZonePlanningTest::_testMapModelShapeLimit()
     // The smallest zones are dropped and not labelled
     GeoZoneMapModel model(&manager);
     model.setView(manager.boundingBox(), 12, true);
-    QCOMPARE(model.circles()->count(), GeoZoneMapModel::maxShapeCount);
+    QCOMPARE(model.shapes().count(), GeoZoneMapModel::maxShapeCount);
     QCOMPARE(model.hiddenZoneCount(), extraZones);
-    for (int i = 0; i < model.circles()->count(); i++) {
-        QVERIFY(model.circles()->value<GeoZoneMapItem*>(i)->radius() >= 100 + extraZones);
+    for (const GeoZoneShape *shape : model.shapes()) {
+        QVERIFY(shape->radius() >= 100 + extraZones);
     }
     QVERIFY(model.labelZones().count() > 0);
     for (int i = 0; i < model.labelZones().count(); i++) {
@@ -2642,8 +2654,8 @@ void GeoZonePlanningTest::_testMapModelFilters()
     model.setView(view, 12, false);
     const auto shown = [&model]() {
         QStringList identifiers;
-        for (int i = 0; i < model.circles()->count(); i++) {
-            identifiers.append(model.circles()->value<GeoZoneMapItem*>(i)->zone()->identifier());
+        for (const GeoZoneShape *shape : model.shapes()) {
+            identifiers.append(shape->zone()->identifier());
         }
         identifiers.sort();
         return identifiers.join(QLatin1Char(' '));

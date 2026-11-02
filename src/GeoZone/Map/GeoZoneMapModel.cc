@@ -18,61 +18,12 @@
 #include "GeoZoneVehicleMonitor.h"
 #include "MissionController.h"
 #include "MultiVehicleManager.h"
-#include "QmlObjectListModel.h"
 #include "Vehicle.h"
 
 #include <QtCore/QSet>
 #include <QtCore/QtMath>
 
 #include <algorithm>
-
-GeoZoneMapItem::GeoZoneMapItem(const GeoZoneShape *shape, QObject *parent)
-    : QObject(parent)
-    , _shape(shape)
-    , _zone(shape->zone())
-    , _active(shape->zone()->active())
-    , _center(shape->center())
-    , _radius(shape->radius())
-    , _isCircle(shape->isCircle())
-{
-}
-
-void GeoZoneMapItem::setHighlighted(bool highlighted)
-{
-    if (highlighted != _highlighted) {
-        _highlighted = highlighted;
-        emit highlightedChanged();
-    }
-}
-
-int GeoZoneMapItem::restriction() const
-{
-    return static_cast<int>(_zone->restriction());
-}
-
-void GeoZoneMapItem::updateActive()
-{
-    if (_zone->active() != _active) {
-        _active = _zone->active();
-        emit activeChanged();
-    }
-}
-
-void GeoZoneMapItem::setZoomLevel(int zoomLevel)
-{
-    // Only called while the shape exists, the item is removed before its zone's shapes are deleted
-    if (_isCircle || (zoomLevel == _zoomLevel)) {
-        return;
-    }
-
-    _zoomLevel = zoomLevel;
-    emit zoomLevelChanged();
-}
-
-QList<QList<QPointF>> GeoZoneMapItem::mercatorRings() const
-{
-    return _shape->mercatorRings(_zoomLevel);
-}
 
 GeoZoneMapModel::GeoZoneMapModel(QObject *parent)
     : GeoZoneMapModel(GeoZoneManager::instance(), parent)
@@ -82,10 +33,8 @@ GeoZoneMapModel::GeoZoneMapModel(QObject *parent)
 GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
-    , _polygons(new QmlObjectListModel(this))
-    , _circles(new QmlObjectListModel(this))
 {
-    // Shapes are deleted when zones change, so items referencing them must go first
+    // Shapes are deleted when zones change, so the map layer must forget them first
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_removeSource);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_updateFilter);
     (void) connect(_manager, &GeoZoneManager::activeZonesChanged, this, &GeoZoneMapModel::_updateActive);
@@ -194,19 +143,17 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         candidates.resize(maxShapeCount);
     }
 
-    QList<const GeoZoneShape*> polygonShapes;
-    QList<const GeoZoneShape*> circleShapes;
+    QSet<const GeoZoneShape*> shapes;
     QSet<const GeoZone*> shownZones;
     for (const Candidate &candidate : candidates) {
-        (candidate.shape->isCircle() ? circleShapes : polygonShapes).append(candidate.shape);
+        shapes.insert(candidate.shape);
         shownZones.insert(candidate.shape->zone());
     }
-
-    const int level = qFloor(zoomLevel);
-    _syncItems(_polygons, polygonShapes, level);
-    _syncItems(_circles, circleShapes, level);
-    for (int i = 0; i < _polygons->count(); i++) {
-        _polygons->value<GeoZoneMapItem*>(i)->setZoomLevel(level);
+    const int detailLevel = qFloor(zoomLevel);
+    if ((shapes != _shapes) || (detailLevel != _detailLevel)) {
+        _shapes = shapes;
+        _detailLevel = detailLevel;
+        emit shapesChanged();
     }
 
     QList<const GeoZone*> labelZones;
@@ -232,70 +179,16 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
     _setHiddenZoneCount(hiddenZoneCount);
 }
 
-void GeoZoneMapModel::_syncItems(QmlObjectListModel *model, const QList<const GeoZoneShape*> &shapes, int zoomLevel)
-{
-    const QSet<const GeoZoneShape*> wanted(shapes.cbegin(), shapes.cend());
-
-    QList<QObject*> keptItems;
-    QList<GeoZoneMapItem*> removedItems;
-    for (int i = 0; i < model->count(); i++) {
-        GeoZoneMapItem *const item = model->value<GeoZoneMapItem*>(i);
-        if (wanted.contains(item->shape())) {
-            keptItems.append(item);
-        } else {
-            removedItems.append(item);
-        }
-    }
-
-    QList<QObject*> newItems;
-    for (const GeoZoneShape *shape : shapes) {
-        if (!_items.contains(shape)) {
-            GeoZoneMapItem *const item = new GeoZoneMapItem(shape, this);
-            item->setZoomLevel(zoomLevel);
-            item->setHighlighted(_highlightedZoneSet.contains(item->zone()));
-            _items.insert(shape, item);
-            newItems.append(item);
-        }
-    }
-
-    if (removedItems.count() > keptItems.count()) {
-        // Removing most rows one at a time is slower than recreating the remaining delegates
-        model->clear();
-        keptItems.append(newItems);
-        if (!keptItems.isEmpty()) {
-            model->append(keptItems);
-        }
-    } else {
-        if (!removedItems.isEmpty()) {
-            for (int i = model->count() - 1; i >= 0; i--) {
-                if (!wanted.contains(model->value<GeoZoneMapItem*>(i)->shape())) {
-                    (void) model->removeAt(i);
-                }
-            }
-        }
-        if (!newItems.isEmpty()) {
-            model->append(newItems);
-        }
-    }
-
-    for (GeoZoneMapItem *item : std::as_const(removedItems)) {
-        (void) _items.remove(item->shape());
-        item->deleteLater();
-    }
-}
-
 void GeoZoneMapModel::_clear()
 {
     if (!_labelZones.isEmpty()) {
         _labelZones.clear();
         emit labelZonesChanged();
     }
-    _polygons->clear();
-    _circles->clear();
-    for (GeoZoneMapItem *item : std::as_const(_items)) {
-        item->deleteLater();
+    if (!_shapes.isEmpty()) {
+        _shapes.clear();
+        emit shapesChanged();
     }
-    _items.clear();
     _setHiddenZoneCount(0);
     _setFilteredZoneCount(0);
 }
@@ -308,9 +201,7 @@ void GeoZoneMapModel::setHighlightedZones(const QVariantList &zones)
     _highlightedZones = zones;
     const QList<const GeoZone*> highlighted = GeoZoneInfo::fromVariantList(zones);
     _highlightedZoneSet = QSet<const GeoZone*>(highlighted.cbegin(), highlighted.cend());
-    for (GeoZoneMapItem *item : std::as_const(_items)) {
-        item->setHighlighted(_highlightedZoneSet.contains(item->zone()));
-    }
+    emit shapesChanged();
     emit highlightedZonesChanged();
     if (_filter.isActive()) {
         _refresh();
@@ -408,14 +299,8 @@ QVariantList GeoZoneMapModel::zonesAt(const QGeoCoordinate &coordinate)
 
 void GeoZoneMapModel::_removeSource(GeoZoneSource *source)
 {
-    const auto fromSource = [source](const QObject *object) {
-        return qobject_cast<const GeoZoneMapItem*>(object)->zone()->sourceKey() == source->key();
-    };
-    for (QmlObjectListModel *model : { _polygons, _circles }) {
-        QList<QObject*> kept = *model->objectList();
-        if (kept.removeIf(fromSource) > 0) {
-            (void) model->swapObjectList(kept);
-        }
+    if (_shapes.removeIf([source](const GeoZoneShape *shape) { return shape->zone()->sourceKey() == source->key(); }) > 0) {
+        emit shapesChanged();
     }
     _invalidateFilter();
     const qsizetype labelCount = _labelZones.count();
@@ -423,20 +308,12 @@ void GeoZoneMapModel::_removeSource(GeoZoneSource *source)
     if (_labelZones.count() != labelCount) {
         emit labelZonesChanged();
     }
-    for (auto it = _items.begin(); it != _items.end();) {
-        if (fromSource(it.value())) {
-            it.value()->deleteLater();
-            it = _items.erase(it);
-        } else {
-            ++it;
-        }
-    }
 }
 
 void GeoZoneMapModel::_updateActive()
 {
-    for (GeoZoneMapItem *item : std::as_const(_items)) {
-        item->updateActive();
+    if (!_shapes.isEmpty()) {
+        emit shapesChanged();
     }
     if (_filter.schedule != GeoZoneMapFilter::AnyTime) {
         _invalidateFilter();
