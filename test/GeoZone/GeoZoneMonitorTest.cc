@@ -1439,9 +1439,15 @@ void GeoZoneMonitorTest::_testAlertActions()
     QVERIFY(!shownAlert(monitor, lastId));
     QVERIFY(monitor.approvedZoneKeys().isEmpty());
 
-    // The same zone from two sources is shown once, entering it replaces its approach, and confirming the permission
-    // covers both
-    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ prohibited }), errorString), qPrintable(errorString));
+    // The same zone published with other limits by a second source (identical copies are merged by the catalog) is
+    // shown once, entering it replaces its approach, and confirming the permission covers both
+    QJsonObject copy = prohibited;
+    QJsonArray copyGeometry = copy[QStringLiteral("geometry")].toArray();
+    QJsonObject copyLayer = copyGeometry[0].toObject();
+    copyLayer[QStringLiteral("upperLimit")] = 150;
+    copyGeometry[0] = copyLayer;
+    copy[QStringLiteral("geometry")] = copyGeometry;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ copy }), errorString), qPrintable(errorString));
     monitor.closeAlerts();
     const int earlierUnacknowledged = history->unacknowledgedCount();
     monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 450, 400 }, 9);
