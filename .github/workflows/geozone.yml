@@ -80,8 +80,8 @@ jobs:
         run: |
           set -o pipefail
           status=0
-          # All geozone tests but the benchmark and the fuzzers: the application tests, the headless core tests, the
-          # validator and the Qt Quick tests. A test fails on any failed test function, a crash or a sanitizer abort.
+          # All geozone tests but the benchmark and the fuzzers: the application tests, the headless core tests and the
+          # validator. A test fails on any failed test function, a crash or a sanitizer abort.
           # GeoZoneFlightTest is left out: MockLink copies short strings into fixed size MAVLink fields, which
           # AddressSanitizer reports as overflows.
           ctest --test-dir test --no-tests=error -V -L geozone -LE "benchmark|fuzz" -E "^GeoZoneFlightTest$" 2>&1 | tee ctest.log || status=1
