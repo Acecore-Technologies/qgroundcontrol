@@ -1,31 +1,17 @@
 name: Geozone
 
 # The geozone tests, which parse untrusted files and feeds, with AddressSanitizer and UndefinedBehaviorSanitizer, the
-# fuzzers of the parsers, and the headless core tests built with MSVC. The tests are those test/GeoZone/CMakeLists.txt
+# fuzzers of the parsers, and the headless core tests built with MSVC, weekly and on demand. The application tests of
+# the module run with the other unit tests of the Linux workflow. The tests are those test/GeoZone/CMakeLists.txt
 # labels geozone, see the Testing section of docs/en/qgc-dev-guide/geozones.md.
 
 on:
-  push:
-    branches:
-      - master
-      - 'Stable*'
-    paths:
-      - '.github/workflows/geozone.yml'
-      - 'src/GeoZone/**'
-      - 'test/GeoZone/**'
-  pull_request:
-    paths:
-      - '.github/workflows/geozone.yml'
-      - 'src/GeoZone/**'
-      - 'test/GeoZone/**'
   schedule:
-    # Weekly, the fuzzers run longer, from the corpus grown by the previous weekly runs
     - cron: '23 2 * * 1'
   workflow_dispatch:
 
 jobs:
   sanitizers:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-22.04
 
     defaults:
@@ -106,8 +92,8 @@ jobs:
           fi
           exit $status
 
-  # Fuzzes the parsers with libFuzzer, building only the GeoZoneCore library and the fuzz targets: a minute each for
-  # pushes and pull requests, 20 minutes each in the weekly run, which keeps the corpus it grows for the next one
+  # Fuzzes the parsers with libFuzzer, building only the GeoZoneCore library and the fuzz targets: a minute each when
+  # started by hand, 20 minutes each in the weekly run, which keeps the corpus it grows for the next one
   fuzz:
     runs-on: ubuntu-24.04
 
@@ -182,7 +168,6 @@ jobs:
   # Builds the GeoZoneCore library, its headless tests and the validator with MSVC and runs them, which the Windows
   # workflow doesn't: it builds releases, without tests
   windows-core:
-    if: github.event_name != 'schedule'
     runs-on: windows-latest
 
     defaults:

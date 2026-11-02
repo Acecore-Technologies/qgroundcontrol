@@ -258,10 +258,10 @@ Its CTest tests, labeled `geozone` and `core`, check the fixtures and the failur
 
 The jobs select the tests by their CTest labels, so a class added to the lists of `test/GeoZone/CMakeLists.txt` runs everywhere without changes to the workflows:
 
-- **Linux** (`.github/workflows/linux.yml`): the debug build runs all unit tests with `--unittest`, which includes the application tests of the module, then `ctest --test-dir test -L geozone -LE "app|benchmark|fuzz"` for the headless tests, the validator and the Qt Quick tests.
-- **Geozone** (`.github/workflows/geozone.yml`, for changes of `src/GeoZone`, `test/GeoZone` and the workflow):
+- **Linux** (`.github/workflows/linux.yml`): the debug build runs all unit tests with `--unittest`, which includes the application tests of the module.
+- **Geozone** (`.github/workflows/geozone.yml`, weekly and on demand with _Run workflow_ (`workflow_dispatch`)):
   - `sanitizers` builds with AddressSanitizer and UndefinedBehaviorSanitizer and runs `ctest -L geozone -LE "benchmark|fuzz"` but `GeoZoneFlightTest`, whose MockLink copies short strings into fixed size MAVLink fields, which AddressSanitizer reports as overflows. The job fails on any failed test function, crash or sanitizer abort, and on undefined behavior reported in `src/GeoZone`.
-  - `fuzz` builds the standalone fuzz project with clang and fuzzes each target for a minute; the weekly scheduled run fuzzes 20 minutes each and keeps the corpus it grows in the Actions cache for the next runs. Crashes are uploaded as an artifact.
+  - `fuzz` builds the standalone fuzz project with clang and fuzzes each target for a minute when started by hand; the weekly run fuzzes 20 minutes each and keeps the corpus it grows in the Actions cache for the next runs. Crashes are uploaded as an artifact.
   - `windows-core` builds `GeoZoneCoreTest` and `geozone-validate` with MSVC in a debug build of _QGroundControl_ without GStreamer and runs `ctest -L core`, since the Windows workflow builds releases without tests.
 
 ::: warning
