@@ -129,6 +129,7 @@ QVariantList GeoZoneProfile::toVariantList(const QList<Band> &bands)
         list.append(QVariantMap{
             { QStringLiteral("restriction"), static_cast<int>(band.restriction) },
             { QStringLiteral("name"), band.name },
+            { QStringLiteral("entered"), band.entered },
             { QStringLiteral("points"), points },
         });
     }
@@ -166,7 +167,12 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<GeoZoneMiss
             const auto bandPoint = [&volume](double distance, const GeoZone::Position &position) {
                 return BandPoint{ distance, GeoZoneVertical::limitAMSL(volume, false, position), GeoZoneVertical::limitAMSL(volume, true, position) };
             };
-            Band band{ zoneResult.zone->restriction(), zoneResult.zone->displayName(), { bandPoint(entryDistance, stretch.entry.position) } };
+            // Crossings are inside the zone between its limits, the stretch only inside its horizontal projection
+            const bool entered = std::any_of(zoneResult.crossings.cbegin(), zoneResult.crossings.cend(), [&](const GeoZonePathEvaluator::Crossing &crossing) {
+                return crossing.active && (crossing.entry.path == stretch.entry.path) && (missionDistance(crossing.entry) <= exitDistance) &&
+                       (missionDistance(crossing.exit) >= entryDistance);
+            });
+            Band band{ zoneResult.zone->restriction(), zoneResult.zone->displayName(), entered, { bandPoint(entryDistance, stretch.entry.position) } };
             // Limits above ground follow the terrain, which is linear between the positions
             for (qsizetype i = stretch.entry.segment + 1; i <= stretch.exit.segment; i++) {
                 if (((distances[i] - band.points.constLast().distance) >= spacing) && (distances[i] < exitDistance)) {

@@ -2040,6 +2040,22 @@ void GeoZonePlanningTest::_testProfileBands()
     }
     // Most restrictive last, then along the path. The gap splits the stretch through A.
     QCOMPARE(names, QStringList({ QStringLiteral("A"), QStringLiteral("A"), QStringLiteral("P") }));
+    // Entered at unknown altitudes, not when flown above them
+    for (const QVariant &band : bands) {
+        QVERIFY(band.toMap()[QStringLiteral("entered")].toBool());
+    }
+    GeoZoneMissionPath::Segment westAbove = west;
+    westAbove.fromAltitudeAMSL = 700;
+    westAbove.toAltitudeAMSL = 700;
+    GeoZoneMissionPath::Segment eastAbove = east;
+    eastAbove.fromAltitudeAMSL = 700;
+    eastAbove.toAltitudeAMSL = 450;
+    const QList<GeoZoneProfile::Band> above = GeoZoneProfile::computeBands({ westAbove, eastAbove }, manager.catalog());
+    QCOMPARE(above.count(), 2);
+    for (const GeoZoneProfile::Band &band : above) {
+        // Descending into A at the end of the east segment, above P in the middle
+        QCOMPARE(band.entered, band.name == QStringLiteral("A"));
+    }
 
     const auto points = [&bands](int index) { return bands[index].toMap()[QStringLiteral("points")].toList(); };
     const auto value = [](const QVariant &point, const char *key) { return point.toMap()[QString::fromLatin1(key)].toDouble(); };

@@ -32,7 +32,8 @@ class GeoZoneProfile : public QObject
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
     /// One map per zone volume and stretch of the path inside its horizontal projection while the zone is active, see
-    /// GeoZonePathEvaluator::Stretch: restriction (GeoZone::Restriction), name, and points from the entry to the exit,
+    /// GeoZonePathEvaluator::Stretch: restriction (GeoZone::Restriction), name, entered (the path enters the zone between
+    /// its limits along the stretch, see GeoZonePathEvaluator::Crossing), and points from the entry to the exit,
     /// a list of maps with distance (meters from the start), floor and ceiling (meters AMSL, NaN when the zone extends to
     /// the ground or has no ceiling, or the limit is unknown)
     Q_PROPERTY(QVariantList         bands               READ bands                                          NOTIFY bandsChanged FINAL)
@@ -70,6 +71,7 @@ public:
     struct Band {
         GeoZone::Restriction restriction = GeoZone::Unknown;
         QString name;
+        bool entered = false;       ///< The path enters the zone between its limits along the band
         QList<BandPoint> points;
 
         friend bool operator==(const Band &, const Band &) = default;

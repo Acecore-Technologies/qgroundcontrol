@@ -11,10 +11,13 @@ import QtQuick
 
 import QGroundControl
 import QGroundControl.GeoZone
+import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Draws the vertical extent of the geozones along the flight path behind the TerrainProfile of the Plan View.
-/// Floors and ceilings beyond the profile's altitude range are drawn at its edges.
+/// Draws the vertical extent of the geozones along the flight path behind the TerrainProfile of the Plan View, in the
+/// colors of the maps. Floors and ceilings beyond the profile's altitude range are drawn at its edges. Only the zones the
+/// path enters are labeled, once where their volumes stack, the most restrictive first, stacked where they would overlap
+/// and left out where they don't fit.
 Canvas {
     id:     control
     z:      -1  // Behind the flight and terrain profiles drawn by the parent
@@ -30,6 +33,8 @@ Canvas {
         active:             control.visible && GeoZoneManager.zoneCount > 0
     }
 
+    QGCPalette { id: qgcPal; colorGroupEnabled: true }
+
     // Changes only when the scale does, the profile signals each value as it updates
     readonly property string _scaleKey: [ terrainProfile.pixelsPerMeter, terrainProfile.minAMSLAlt, terrainProfile.maxAMSLAlt ].join("/")
 
@@ -38,41 +43,27 @@ Canvas {
     onWidthChanged:     requestPaint()
     onHeightChanged:    requestPaint()
 
-    function _color(restriction) {
-        switch (restriction) {
-        case GeoZone.Prohibited:        return Qt.rgba(1, 0, 0, 0.3)
-        case GeoZone.ReqAuthorisation:  return Qt.rgba(1, 0.65, 0, 0.3)
-        case GeoZone.Conditional:       return Qt.rgba(1, 1, 0, 0.3)
-        case GeoZone.USpace:            return Qt.rgba(0, 0.75, 1, 0.25)
-        default:                        return Qt.rgba(0.5, 0.5, 0.5, 0.25)
-        }
-    }
-
     onPaint: {
-        var ctx = getContext("2d")
+        const ctx = getContext("2d")
         ctx.reset()
-        var pixelsPerMeter = terrainProfile.pixelsPerMeter
-        var minAlt = terrainProfile.minAMSLAlt
-        var altRange = terrainProfile.maxAMSLAlt - minAlt
+        const pixelsPerMeter = terrainProfile.pixelsPerMeter
+        const minAlt = terrainProfile.minAMSLAlt
+        const altRange = terrainProfile.maxAMSLAlt - minAlt
         if (!(pixelsPerMeter > 0) || !(altRange > 0) || !isFinite(pixelsPerMeter)) {
             return
         }
         // Unknown floors are drawn from the bottom and missing ceilings to the top
-        var yOf = function(altitude, fallback) {
-            return isNaN(altitude) ? fallback : Math.max(-1, Math.min(height + 1, height - ((altitude - minAlt) / altRange) * height))
-        }
-        ctx.font = ScreenTools.smallFontPointSize + "pt sans-serif"
-        for (var i = 0; i < _bands.length; i++) {
-            var band = _bands[i]
-            var points = band.points
-            var color = _color(band.restriction)
-            ctx.fillStyle = color
+        const yOf = (altitude, fallback) => isNaN(altitude) ? fallback : Math.max(-1, Math.min(height + 1, height - ((altitude - minAlt) / altRange) * height))
+        for (const band of _bands) {
+            const points = band.points
+            const color = GeoZoneStyle.restrictionColor(band.restriction)
+            ctx.fillStyle = GeoZoneStyle.fillColor(band.restriction, true)
             ctx.strokeStyle = Qt.rgba(color.r, color.g, color.b, 0.9)
             ctx.lineWidth = 1
             ctx.beginPath()
-            for (var j = 0; j < points.length; j++) {
-                var x = points[j].distance * pixelsPerMeter
-                var y = yOf(points[j].ceiling, -1)
+            for (let j = 0; j < points.length; j++) {
+                const x = points[j].distance * pixelsPerMeter
+                const y = yOf(points[j].ceiling, -1)
                 if (j === 0) {
                     ctx.moveTo(x, y)
                 } else {
@@ -84,24 +75,47 @@ Canvas {
                 ctx.lineTo(points[0].distance * pixelsPerMeter + 2, yOf(points[0].ceiling, -1))
                 ctx.lineTo(points[0].distance * pixelsPerMeter + 2, yOf(points[0].floor, height + 1))
             }
-            for (var k = points.length - 1; k >= 0; k--) {
+            for (let k = points.length - 1; k >= 0; k--) {
                 ctx.lineTo(points[k].distance * pixelsPerMeter, yOf(points[k].floor, height + 1))
             }
             ctx.closePath()
             ctx.fill()
             ctx.stroke()
+        }
 
-            // Labeled in the middle when the band is visible there
-            var left = points[0].distance * pixelsPerMeter
-            var right = points[points.length - 1].distance * pixelsPerMeter
-            var middle = points[Math.floor(points.length / 2)]
-            var top = Math.max(yOf(middle.ceiling, 0), 0)
-            var bottom = Math.min(yOf(middle.floor, height), height)
-            var textWidth = ctx.measureText(band.name).width
-            var textHeight = ScreenTools.smallFontPointSize * 1.6
-            if ((right - left > textWidth + 4) && (bottom - top > textHeight * 1.2)) {
-                ctx.fillStyle = Qt.rgba(1, 1, 1, 0.85)
-                ctx.fillText(band.name, (left + right - textWidth) / 2, top + textHeight)
+        // Labels above all bands, the most restrictive (drawn last) placed first, in the first free row of the band
+        ctx.font = ScreenTools.smallFontPointSize + "pt sans-serif"
+        ctx.fillStyle = qgcPal.text
+        const textHeight = ScreenTools.smallFontPointSize * 1.6
+        const placed = []
+        const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+        for (let i = _bands.length - 1; i >= 0; i--) {
+            const band = _bands[i]
+            if (!band.entered) {
+                continue
+            }
+            const points = band.points
+            const left = Math.max(points[0].distance * pixelsPerMeter, 0)
+            const right = Math.min(points[points.length - 1].distance * pixelsPerMeter, width)
+            const middle = points[Math.floor(points.length / 2)]
+            const top = Math.max(yOf(middle.ceiling, 0), 0)
+            const bottom = Math.min(yOf(middle.floor, height), height)
+            const textWidth = ctx.measureText(band.name).width
+            if (right - left < textWidth + 4) {
+                continue
+            }
+            const x = (left + right - textWidth) / 2
+            // Volumes of a zone stacked at the same place are labeled once
+            if (placed.some(other => other.name === band.name && other.left < right && left < other.right)) {
+                continue
+            }
+            for (let y = top; y + textHeight <= bottom; y += textHeight) {
+                const rect = { name: band.name, left: x - 2, right: x + textWidth + 2, top: y, bottom: y + textHeight }
+                if (!placed.some(other => overlaps(rect, other))) {
+                    placed.push(rect)
+                    ctx.fillText(band.name, x, y + textHeight * 0.8)
+                    break
+                }
             }
         }
     }

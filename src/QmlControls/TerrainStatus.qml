@@ -35,6 +35,21 @@ Rectangle {
     property real _maxAMSLAltitude:         isNaN(terrainProfile.maxAMSLAlt) ? 100 : terrainProfile.maxAMSLAlt
     property real _missionTotalDistance:    isNaN(missionController.missionTotalDistance) ? 100 : missionController.missionTotalDistance
     property var  _unitsConversion:         QGroundControl.unitsConversion
+    // Distances along the mission, long missions in km or miles, with round ticks
+    property real   _axisDistance:          _unitsConversion.metersToAppSettingsHorizontalDistanceUnits(_missionTotalDistance)
+    property bool   _metricDistance:        _unitsConversion.appSettingsHorizontalDistanceUnitsString === "m"
+    property real   _axisScale:             _metricDistance ? (_axisDistance >= 1000 ? 1000 : 1) : (_axisDistance >= 5280 ? 5280 : 1)
+    property string _axisUnit:              _axisScale === 1 ? _unitsConversion.appSettingsHorizontalDistanceUnitsString : (_metricDistance ? qsTr("km") : qsTr("mi"))
+    property real   _axisMax:               _axisDistance / _axisScale
+    property real   _axisTickInterval: {
+        const raw = _axisMax / 4
+        if (!(raw > 0)) {
+            return 1
+        }
+        const magnitude = Math.pow(10, Math.floor(Math.log10(raw)))
+        const fraction = raw / magnitude
+        return (fraction < 1.5 ? 1 : (fraction < 3.5 ? 2 : (fraction < 7.5 ? 5 : 10))) * magnitude
+    }
 
     QGCPalette { id: qgcPal }
 
@@ -76,12 +91,15 @@ Rectangle {
                 ValueAxis {
                     id:                         axisX
                     min:                        0
-                    max:                        _unitsConversion.metersToAppSettingsHorizontalDistanceUnits(missionController.missionTotalDistance)
+                    max:                        _axisMax
                     lineVisible:                true
                     labelsFont.family:          ScreenTools.fixedFontFamily
                     labelsFont.pointSize:       ScreenTools.smallFontPointSize
                     labelsColor:                qgcPal.text
-                    tickCount:                  5
+                    tickType:                   ValueAxis.TicksDynamic
+                    tickAnchor:                 0
+                    tickInterval:               _axisTickInterval
+                    labelFormat:                (_axisTickInterval < 1 ? "%.1f " : "%.0f ") + _axisUnit
                     gridLineColor:              applyOpacity(qgcPal.text, 0.25)
                 }
 
@@ -104,7 +122,7 @@ Rectangle {
                     visible:    true
 
                     XYPoint { x: 0; y: _unitsConversion.metersToAppSettingsVerticalDistanceUnits(_minAMSLAltitude) }
-                    XYPoint { x: _unitsConversion.metersToAppSettingsHorizontalDistanceUnits(_missionTotalDistance); y: _unitsConversion.metersToAppSettingsVerticalDistanceUnits(_maxAMSLAltitude) }
+                    XYPoint { x: _axisMax; y: _unitsConversion.metersToAppSettingsVerticalDistanceUnits(_maxAMSLAltitude) }
                 }
             }
 
