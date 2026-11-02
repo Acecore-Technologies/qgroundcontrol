@@ -57,6 +57,13 @@ class GeoZoneFenceImporter : public QObject
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);
 
+    /// Special values of the activeWithinHours of updateSelection
+    enum ActiveTime {
+        AnyTime = -1,       ///< Whatever the zone schedules
+        AtFlightTime = -2,  ///< Active from the planned start to the estimated end, see GeoZonePlanning, or any time without planned start
+    };
+    Q_ENUM(ActiveTime)
+
     static constexpr int maxListedChoices = 500;    ///< Zones left out listed by choices
 
     /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
@@ -82,7 +89,7 @@ public:
     /// are prepared, unless another selection starts meanwhile
     ///     @param restrictions: GeoZone::Restriction values of the zones
     ///     @param area: Only zones intersecting this area. Invalid for zones anywhere.
-    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours. Negative to ignore zone schedules.
+    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours, see ActiveTime for the others
     ///     @param maxSimplifyTolerance: Meters fences may be simplified by to fit, see GeoZoneFences::zoneFences
     Q_INVOKABLE void updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = -1, double maxSimplifyTolerance = 0);
 

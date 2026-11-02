@@ -142,7 +142,7 @@ Below the legend of the Plan View **Geozones** panel and the Fly View geozone in
 
 - The check boxes of the legend hide or show the zones of each restriction, for example to see the map under large U-space airspace.
 - **Only zones near the flight altitudes** hides zones whose floor is more than 100 m above, or whose ceiling is more than 100 m below, the altitude of the active vehicle in the Fly View, or the range of altitudes of the mission in the Plan View. Limits above ground are compared with the height above the terrain (of the vehicle, or along the mission), the others with the altitude above mean sea level. Without a vehicle altitude or mission, and for limits above ground where the terrain isn't known, no zones are hidden by altitude.
-- **Schedule** shows **All zones**, only those **Active now**, or those **Active within 12 h**: active now or within the next 12 hours.
+- **Schedule** shows **All zones**, only those **Active now**, those **Active within 12 h**: active now or within the next 12 hours, or those **Active at flight time**: active from the planned start to the estimated end of the mission (see [Flight Time](#flight-time)), widened by 15 minutes like the mission check, or active now without a planned start.
 - **Source**, with several sources, shows the zones of one source only. Unlike the source check boxes, it only changes the maps.
 
 The filters are kept between sessions and apply to both views. They only change the maps: zones hidden by them are not picked by map clicks, but the mission check, flight alerts and guided command checks still apply to them. The zones the mission check reports in the Plan View (those the mission or its returns enter) and the zones near the vehicle or reached at its velocity in the Fly View are always shown. When filters hide zones in view, a hint at the bottom of the map shows how many, with **Reset Filters**, which shows all restrictions, altitudes, schedules and sources again (also in the panels).
@@ -291,7 +291,7 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 
 1. Check the zone types to add (**Prohibited**, **Authorisation**, **Conditional**).
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
-1. Select when the zones must be **Active**: **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
+1. Select when the zones must be **Active**: **At flight time** (offered and selected when the plan has a planned start: from the planned start to the estimated end of the mission, widened by 15 minutes), **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
 1. Select how far fences may be simplified to fit (**Simplify up to**). Fences are only simplified as far as needed, the most important zones the least. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
 1. Check the zones selected and, with **Show**, those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
 

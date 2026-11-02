@@ -78,6 +78,7 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
     (void) connect(this, &QObject::destroyed, _manager, [manager = _manager, owner = static_cast<const QObject*>(this)]() {
         manager->repository()->setMissionArea(owner, QGeoRectangle());
         manager->planning()->setMissionArea(QGeoRectangle());
+        manager->planning()->setPlannedEnd(QDateTime());
     });
 }
 
@@ -454,6 +455,7 @@ void GeoZoneMissionCheck::_clearResults()
     _relevantZones.clear();
     _area = GeoZoneBox();
     _manager->planning()->setMissionArea(QGeoRectangle());
+    _manager->planning()->setPlannedEnd(QDateTime());
     if (!_entries.isEmpty()) {
         _entries.clear();
         emit zonesChanged();
@@ -657,8 +659,9 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
     }
     _relevantZones = evaluation.relevantZones;
     _area = evaluation.area;
-    // Authorisations can be limited to the area of the mission
+    // Authorisations can be limited to the area of the mission, and zones shown or fenced for the planned flight
     _manager->planning()->setMissionArea(_area.toRectangle());
+    _manager->planning()->setPlannedEnd(evaluation.start.isValid() ? evaluation.end : QDateTime());
     _updateAudit();
 }
 

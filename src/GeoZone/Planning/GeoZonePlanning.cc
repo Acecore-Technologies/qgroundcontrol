@@ -20,8 +20,24 @@ void GeoZonePlanning::setPlannedStart(const QDateTime &plannedStart)
 {
     const QDateTime start = plannedStart.isValid() ? plannedStart.toUTC() : QDateTime();
     if (start != _plannedStart) {
+        const QDateTime end = this->plannedEnd();
         _plannedStart = start;
         emit plannedStartChanged();
+        if (this->plannedEnd() != end) {
+            emit plannedEndChanged();
+        }
+    }
+}
+
+void GeoZonePlanning::setPlannedEnd(const QDateTime &plannedEnd)
+{
+    const QDateTime end = plannedEnd.isValid() ? plannedEnd.toUTC() : QDateTime();
+    if (end != _plannedEnd) {
+        const QDateTime previous = this->plannedEnd();
+        _plannedEnd = end;
+        if (this->plannedEnd() != previous) {
+            emit plannedEndChanged();
+        }
     }
 }
 

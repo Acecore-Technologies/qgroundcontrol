@@ -60,6 +60,12 @@ bool GeoZoneMapFilter::accepts(const GeoZone &zone, const QDateTime &now, const 
             return false;
         }
         break;
+    case ActiveAtFlightTime:
+        if (flightStart.isValid() ? !zone.isActiveDuring(flightStart.addSecs(-scheduleToleranceSecs), (flightEnd.isValid() ? flightEnd : flightStart).addSecs(scheduleToleranceSecs)) :
+                                    !zone.active()) {
+            return false;
+        }
+        break;
     }
 
     return !altitudes || nearAltitudes(zone, altitudeRange);
@@ -126,7 +132,7 @@ GeoZoneMapFilter GeoZoneDisplay::filter() const
     filter.source = settings->mapSource()->rawValue().toString();
     filter.altitudes = settings->altitudeFilter()->rawValue().toBool();
     filter.schedule = static_cast<GeoZoneMapFilter::Schedule>(std::clamp(settings->scheduleFilter()->rawValue().toInt(),
-                                                                         static_cast<int>(GeoZoneMapFilter::AnyTime), static_cast<int>(GeoZoneMapFilter::ActiveSoon)));
+                                                                         static_cast<int>(GeoZoneMapFilter::AnyTime), static_cast<int>(GeoZoneMapFilter::ActiveAtFlightTime)));
     return filter;
 }
 

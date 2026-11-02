@@ -26,10 +26,10 @@
 {
     "name":         "scheduleFilter",
     "shortDesc":    "Schedule",
-    "longDesc":     "Which geozones maps show by their schedule: all, those active now, or those active now or within 12 hours. Checks and alerts still apply to the others.",
+    "longDesc":     "Which geozones maps show by their schedule: all, those active now, those active now or within 12 hours, or those active during the planned flight (from the planned start to the estimated end, or now without a planned start). Checks and alerts still apply to the others.",
     "type":         "uint32",
-    "enumStrings":  "All zones,Active now,Active within 12 h",
-    "enumValues":   "0,1,2",
+    "enumStrings":  "All zones,Active now,Active within 12 h,Active at flight time",
+    "enumValues":   "0,1,2,3",
     "default":      0
 },
 {

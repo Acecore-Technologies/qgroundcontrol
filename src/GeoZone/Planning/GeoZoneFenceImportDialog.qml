@@ -38,6 +38,7 @@ QGCPopupDialog {
     readonly property var   _capacity:          importer.capacity
     readonly property var   _upload:            importer.upload
     readonly property bool  _uploading:         _upload.busy
+    readonly property bool  _planned:           !isNaN(_geoZoneManager.planning.plannedStart.getTime())
 
     // The dialog shows before the first selection is computed
     Component.onCompleted: selectionTimer.start()
@@ -259,13 +260,15 @@ QGCPopupDialog {
             }
 
             QGCLabel { text: qsTr("Active") }
+            // At the planned flight time when there is one
             QGCComboBox {
                 id:                 activeCombo
                 Layout.fillWidth:   true
-                model:              [ qsTr("Any time"), qsTr("Now"), qsTr("Next 3 hours"), qsTr("Next 24 hours") ]
+                model:              (control._planned ? [ qsTr("At flight time") ] : []).concat([ qsTr("Any time"), qsTr("Now"), qsTr("Next 3 hours"), qsTr("Next 24 hours") ])
                 onActivated:        selectionTimer.restart()
+                onModelChanged:     selectionTimer.restart()
 
-                readonly property var hours: [ -1, 0, 3, 24 ]
+                readonly property var hours: (control._planned ? [ GeoZoneFenceImporter.AtFlightTime ] : []).concat([ GeoZoneFenceImporter.AnyTime, 0, 3, 24 ])
             }
 
             QGCLabel { text: qsTr("Simplify up to") }

@@ -13,6 +13,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneVehicleMonitor.h"
@@ -43,6 +44,9 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMapModel::_updateFilter);
     (void) connect(_manager, &GeoZoneManager::activeZonesChanged, this, &GeoZoneMapModel::_updateActive);
     (void) connect(_manager->display(), &GeoZoneDisplay::filtersChanged, this, &GeoZoneMapModel::_updateFilter);
+    // The planned flight time of the ActiveAtFlightTime filter
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, this, &GeoZoneMapModel::_updateFilter);
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedEndChanged, this, &GeoZoneMapModel::_updateFilter);
 
     (void) connect(&_altitudeTimer, &QTimer::timeout, this, &GeoZoneMapModel::_updateAltitudes);
     _scheduleTimer.setInterval(60 * 1000);
@@ -423,6 +427,8 @@ void GeoZoneMapModel::_updateActive()
 void GeoZoneMapModel::_updateFilter()
 {
     GeoZoneMapFilter filter = _manager->display()->filter();
+    filter.flightStart = _manager->planning()->plannedStart();
+    filter.flightEnd = _manager->planning()->plannedEnd();
     // The key of a source which was removed doesn't hide the zones of the others
     if (!filter.source.isEmpty() && !_manager->repository()->source(filter.source)) {
         filter.source.clear();

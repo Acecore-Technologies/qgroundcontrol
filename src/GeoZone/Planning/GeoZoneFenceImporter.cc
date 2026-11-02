@@ -16,6 +16,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZoneMissionWorker.h"
+#include "GeoZonePlanning.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneText.h"
 #include "MissionController.h"
@@ -167,7 +168,13 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
 
     QDateTime activeFrom;
     QDateTime activeTo;
-    if (activeWithinHours >= 0) {
+    const GeoZonePlanning *const planning = GeoZoneManager::instance()->planning();
+    if ((activeWithinHours == AtFlightTime) && planning->plannedStart().isValid()) {
+        // Widened like the mission check, since the flight may start early or late
+        constexpr int tolerance = GeoZonePathEvaluator::defaultScheduleToleranceSecs;
+        activeFrom = planning->plannedStart().addSecs(-tolerance);
+        activeTo = planning->plannedEnd().addSecs(tolerance);
+    } else if (activeWithinHours >= 0) {
         activeFrom = GeoZoneEnvironment::currentDateTimeUtc();
         if (activeWithinHours > 0) {
             activeTo = activeFrom.addSecs(activeWithinHours * 3600);

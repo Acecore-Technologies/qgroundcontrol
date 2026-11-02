@@ -42,15 +42,20 @@ struct GeoZoneMapFilter
         AnyTime,        ///< Zones whatever their schedule
         ActiveNow,      ///< Zones active now, see GeoZone::active
         ActiveSoon,     ///< Zones active now or within scheduleHours
+        ActiveAtFlightTime, ///< Zones active from flightStart to flightEnd, widened by scheduleToleranceSecs, or now
+                            ///< without flightStart
     };
 
     static constexpr double altitudeMargin = 100;   ///< Meters from the altitudes of the flight within which zones are near them
     static constexpr int scheduleHours = 12;        ///< Hours ahead in which zones active soon become active
+    static constexpr int scheduleToleranceSecs = 15 * 60;   ///< Like GeoZonePathEvaluator::defaultScheduleToleranceSecs
 
     int hiddenRestrictions = 0;     ///< Bit mask, 1 << GeoZone::Restriction
     QString source;                 ///< Key of the only source shown, empty for all
     bool altitudes = false;         ///< Only zones near the altitudes of the flight
     Schedule schedule = AnyTime;
+    QDateTime flightStart;          ///< Of the planned flight, see GeoZonePlanning::plannedStart
+    QDateTime flightEnd;
 
     /// @return true if the filters can hide zones
     bool isActive() const;

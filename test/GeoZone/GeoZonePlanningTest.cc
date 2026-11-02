@@ -2529,6 +2529,17 @@ void GeoZonePlanningTest::_testGeoFenceStale()
     QTRY_VERIFY(!importer.staleText().isEmpty());
     QCOMPARE(importer.rebuild(), 1);
     QVERIFY(importer.staleText().isEmpty());
+
+    // Zones active at the planned flight time, which rebuilding follows
+    QVERIFY(load({ _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 400), temporary }));
+    QTRY_COMPARE(manager->zoneCount(), 2);
+    GeoZonePlanning *const planning = manager->planning();
+    const auto clearPlannedStart = qScopeGuard([planning]() { planning->clearPlannedStart(); });
+    planning->setPlannedStart(now.addSecs(2 * 3600));
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), GeoZoneFenceImporter::AtFlightTime, 25);
+    QCOMPARE(importer.applySelection(), 1);
+    planning->setPlannedStart(now.addSecs(1800));
+    QCOMPARE(importer.rebuild(), 2);
 }
 
 void GeoZonePlanningTest::_testGeoFenceUpload()
@@ -2998,6 +3009,20 @@ void GeoZonePlanningTest::_testMapModelFilters()
     settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::AnyTime);
     settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveSoon);
     QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
+
+    // At the planned flight time, from its start to its estimated end, or now without planned start
+    settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveAtFlightTime);
+    QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
+    manager.planning()->setPlannedStart(now.addSecs(7 * 3600));
+    QCOMPARE(shown(), QStringLiteral("ALL LATER LOW OTHER"));
+    manager.planning()->setPlannedStart(now.addSecs(4 * 3600));
+    QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
+    manager.planning()->setPlannedEnd(now.addSecs((6 * 3600) - GeoZoneMapFilter::scheduleToleranceSecs + 60));
+    QCOMPARE(shown(), QStringLiteral("ALL LATER LOW OTHER"));
+    manager.planning()->clearPlannedStart();
+    manager.planning()->setPlannedEnd(QDateTime());
+    QCOMPARE(shown(), QStringLiteral("ALL LOW OTHER"));
+    settings->scheduleFilter()->setRawValue(GeoZoneMapFilter::ActiveSoon);
 
     // Sources, with the other filters
     settings->mapSource()->setRawValue(zone(QStringLiteral("OTHER"))->sourceKey());

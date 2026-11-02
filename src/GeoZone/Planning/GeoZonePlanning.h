@@ -29,6 +29,7 @@ class GeoZonePlanning : public QObject
     Q_PROPERTY(QDateTime                plannedStart    READ plannedStart   WRITE setPlannedStart   NOTIFY plannedStartChanged FINAL)  ///< Invalid to check zones whatever their schedule
     Q_PROPERTY(GeoZoneAuthorisations*   authorisations  READ authorisations                         CONSTANT FINAL)                    ///< Zones the operator is authorised to fly in
     Q_PROPERTY(QGeoRectangle            missionArea     READ missionArea                            NOTIFY missionAreaChanged FINAL)   ///< Bounds of the mission the Plan View checks, invalid without
+    Q_PROPERTY(QDateTime                plannedEnd      READ plannedEnd                             NOTIFY plannedEndChanged FINAL)    ///< Estimated end of the flight from the planned start, invalid without
 
 public:
     /// @param authorisationsFile Where the authorisations are kept
@@ -43,6 +44,10 @@ public:
     QGeoRectangle missionArea() const { return _missionArea; }
     /// Set by the mission check of the Plan View, see GeoZoneMissionCheck::missionArea
     void setMissionArea(const QGeoRectangle &missionArea);
+    /// @return The estimated end of the planned flight, its start for a flight without duration, invalid without planned start
+    QDateTime plannedEnd() const { return _plannedStart.isValid() ? ((_plannedEnd > _plannedStart) ? _plannedEnd : _plannedStart) : QDateTime(); }
+    /// Set by the mission check of the Plan View from the mission duration, see GeoZoneMissionCheck::plannedFlightTimes
+    void setPlannedEnd(const QDateTime &plannedEnd);
 
     /// Geozone data the open plan was saved with, nothing for plans without it, like new or older plans
     const std::optional<GeoZonePlanAudit::Record> &planAudit() const { return _planAudit; }
@@ -52,10 +57,12 @@ signals:
     void plannedStartChanged();
     void planAuditChanged();
     void missionAreaChanged();
+    void plannedEndChanged();
 
 private:
     QDateTime _plannedStart;
     QGeoRectangle _missionArea;
+    QDateTime _plannedEnd;
     std::optional<GeoZonePlanAudit::Record> _planAudit;
     GeoZoneAuthorisations *_authorisations = nullptr;
 };
