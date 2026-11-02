@@ -47,6 +47,7 @@ qt_add_library(GeoZoneCore STATIC
     Formats/GeoZoneFormat.cc
     Formats/GeoZoneFormat.h
     Formats/GeoZoneFranceUasFormat.cc
+    Formats/GeoZoneOpenAipFormat.cc
     Formats/GeoZoneParser.cc
     Formats/GeoZoneParser.h
     Formats/GeoZoneParserUtils.cc

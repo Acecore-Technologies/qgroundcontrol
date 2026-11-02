@@ -54,6 +54,7 @@ set(GEOZONE_TEST_DATA
     data/faa_airspace_test.json
     data/faa_tfr_test.json
     data/france_uas_test.json
+    data/openaip_test.json
     data/uk_aixm_test.xml
 )
 

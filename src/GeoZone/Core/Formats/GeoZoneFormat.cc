@@ -55,6 +55,7 @@ const GeoZoneFormat *GeoZoneEd318FormatInstance();
 const GeoZoneFormat *GeoZoneFaaAirspaceFormatInstance();
 const GeoZoneFormat *GeoZoneFaaTfrFormatInstance();
 const GeoZoneFormat *GeoZoneFranceUasFormatInstance();
+const GeoZoneFormat *GeoZoneOpenAipFormatInstance();
 
 const QList<const GeoZoneFormat*> &GeoZoneFormat::formats()
 {
@@ -67,6 +68,7 @@ const QList<const GeoZoneFormat*> &GeoZoneFormat::formats()
             GeoZoneFaaAirspaceFormatInstance(),
             GeoZoneFaaTfrFormatInstance(),
             GeoZoneFranceUasFormatInstance(),
+            GeoZoneOpenAipFormatInstance(),
         };
         std::stable_sort(sorted.begin(), sorted.end(), [](const GeoZoneFormat *a, const GeoZoneFormat *b) { return a->detectionOrder() < b->detectionOrder(); });
         return sorted;

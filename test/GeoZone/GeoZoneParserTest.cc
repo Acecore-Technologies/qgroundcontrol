@@ -180,7 +180,7 @@ constexpr int _fieldCount()
 }
 
 /// GeoZoneParser::version the hashes of the fixtures' results in _testParseFixtures_data were recorded for
-constexpr quint16 kResultHashVersion = 9;
+constexpr quint16 kResultHashVersion = 10;
 
 /// @return Hash of a serialized result, with the vertices rounded to 1e-7 degrees, which the differences of the math
 ///         libraries computing arcs and geodesics don't change
@@ -299,6 +299,7 @@ void GeoZoneParserTest::_testParseFixtures_data()
     row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 1, 0, "72b6048c5599c493");
     row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
     row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
+    row("openaip_test.json", Format::Unknown, Format::OpenAip, 6, 2, 0, "eead3aceba3c7a5f");
     row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "1cc47a3d61d437ed");
 }
 
@@ -388,6 +389,9 @@ void GeoZoneParserTest::_testEmptyResponses_data()
     const QByteArray arcGisArea = R"({ "type": "FeatureCollection", "crs": { "type": "name", "properties": { "name": "EPSG:4326" } }, "features": [] })";
     row("ArcGIS area from FAA", arcGisArea, Format::FaaAirspace, Format::FaaAirspace);
     row("ArcGIS area without hint", arcGisArea, Format::Unknown, Format::Unknown);
+    // The OpenAIP API answers an area without airspaces with an empty list of items
+    const QByteArray openAipArea = R"({ "type": "FeatureCollection", "features": [] })";
+    row("OpenAIP area", openAipArea, Format::OpenAip, Format::OpenAip);
 }
 
 void GeoZoneParserTest::_testEmptyResponses()
@@ -668,6 +672,74 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     QVERIFY(!GeoZoneParser::parse(R"({"error":{"code":429,"message":"Unable to perform query. Too many requests.","details":["Retry after 60 sec."]}})",
                                   result, errorString, GeoZoneParser::Format::FaaAirspace));
     QCOMPARE(errorString, QStringLiteral("The server reported an error: Unable to perform query. Too many requests. Retry after 60 sec."));
+}
+
+void GeoZoneParserTest::_testParseOpenAip()
+{
+    // A synthetic export of OpenAIP airspaces, of which those concerning drones flying low are kept
+    QFile file(QStringLiteral(":/unittest/openaip_test.json"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray bytes = file.readAll();
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(bytes, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::OpenAip);
+    QCOMPARE(result.title, QStringLiteral("Airspaces of CH (OpenAIP, unofficial, CC BY-NC 4.0)"));
+    QCOMPARE(result.provider, QStringLiteral("OpenAIP (unofficial, CC BY-NC 4.0)"));
+    QCOMPARE(result.zones.count(), 6);
+    QCOMPARE(result.skippedFeatures, 2);     // The class E TMA and the FIR
+    QMap<QString, GeoZone::Data> byName;
+    for (const GeoZone::Data &zone : std::as_const(result.zones)) {
+        QVERIFY(zone.extendedProperties.join(QLatin1Char('\n')).contains(QStringLiteral("unofficial community data (CC BY-NC 4.0")));
+        QCOMPARE(zone.country, QStringLiteral("CH"));
+        byName.insert(zone.name, zone);
+    }
+
+    const GeoZone::Data &ctr = byName.value(QStringLiteral("TESTHAUSEN CTR"));
+    QCOMPARE(ctr.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(ctr.restrictionCode, QStringLiteral("CTR (class D)"));
+    QCOMPARE(ctr.reasons, QStringList(QStringLiteral("AIR_TRAFFIC")));
+    QCOMPARE(ctr.identifier, QStringLiteral("650000000000000000000001"));
+    QVERIFY(ctr.extendedProperties.contains(QStringLiteral("Frequency: 118.100 MHz TESTHAUSEN TOWER")));
+    QVERIFY(ctr.volumes[0].feet);
+    QCOMPARE(ctr.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    QCOMPARE(ctr.volumes[0].upperLimit, 2500.0);
+    QCOMPARE(ctr.volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
+
+    // Flight levels, hours of operation and activation
+    const GeoZone::Data &restricted = byName.value(QStringLiteral("R-TEST RANGE"));
+    QCOMPARE(restricted.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(restricted.volumes[0].upperLimit, 9500.0);
+    QCOMPARE(restricted.volumes[0].upperReference, GeoZone::VerticalReference::FlightLevel);
+    QCOMPARE(restricted.restrictionConditions, QStringLiteral("Activated by NOTAM"));
+    QVERIFY(restricted.extendedProperties.contains(QStringLiteral("Hours of operation: Mon 08:00-17:00, Tue 08:00-17:00, Wed 08:00-17:00, Thu 08:00-17:00, Fri 08:00-17:00")));
+    QVERIFY(restricted.extendedProperties.contains(QStringLiteral("Remarks: Firing range")));
+
+    // Limits in meters are converted to feet
+    const GeoZone::Data &prohibited = byName.value(QStringLiteral("P-TEST PLANT"));
+    QCOMPARE(prohibited.restriction, GeoZone::Prohibited);
+    QVERIFY(qAbs(prohibited.volumes[0].upperLimit - (1000 / 0.3048)) < 0.01);
+    QVERIFY(qAbs(byName.value(QStringLiteral("TEST NATURE RESERVE")).volumes[0].upperLimit - (150 / 0.3048)) < 0.01);
+    QCOMPARE(byName.value(QStringLiteral("TEST NATURE RESERVE")).restriction, GeoZone::Conditional);
+    QCOMPARE(byName.value(QStringLiteral("TEST NATURE RESERVE")).reasons, QStringList(QStringLiteral("NATURE")));
+    QCOMPARE(byName.value(QStringLiteral("TESTHAUSEN TMA 1")).restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(byName.value(QStringLiteral("D-TEST GLIDING")).restriction, GeoZone::Conditional);
+    QCOMPARE(byName.value(QStringLiteral("D-TEST GLIDING")).restrictionConditions, QStringLiteral("Active on demand"));
+
+    // The items of the API's lists are the airspaces themselves, with their geometry
+    QJsonArray items;
+    for (const QJsonValue &feature : QJsonDocument::fromJson(bytes).object().value(QStringLiteral("features")).toArray()) {
+        QJsonObject item = feature.toObject().value(QStringLiteral("properties")).toObject();
+        item.insert(QStringLiteral("geometry"), feature.toObject().value(QStringLiteral("geometry")));
+        items.append(item);
+    }
+    const QByteArray response = QJsonDocument(QJsonObject{ { "limit", 1000 }, { "totalCount", items.count() }, { "totalPages", 1 }, { "page", 1 }, { "items", items } }).toJson();
+    const QByteArray list = GeoZoneService::extractMember(response, QStringLiteral("items"), errorString);
+    GeoZoneParser::Result api;
+    QVERIFY2(GeoZoneParser::parse(list, api, errorString), qPrintable(errorString));
+    QCOMPARE(api.format, GeoZoneParser::Format::OpenAip);
+    QCOMPARE(api.zones.count(), 6);
+    QCOMPARE(api.zones[0].volumes[0].rings, result.zones[0].volumes[0].rings);
 }
 
 void GeoZoneParserTest::_testParseFaaTfr()
@@ -1600,6 +1672,10 @@ void GeoZoneParserTest::_testProviders()
     QVERIFY(GeoZoneProviders::areaDownloaded(QStringLiteral("faa-sua"), { sua }, washington));
     QVERIFY(!GeoZoneProviders::areaDownloaded(QStringLiteral("faa-class"), { sua }, washington));
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://services6.arcgis.com/other/arcgis/rest/services/Layer/FeatureServer/0/query")), GeoZoneParser::Format::Unknown);
+
+    // The OpenAIP templates' responses are expected in its format, also when empty
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://api.core.openaip.net/api/airspaces?bbox=8,47,9,48&limit=1000&page=1")), GeoZoneParser::Format::OpenAip);
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://storage.openaip.net/openaip-system-exports/de_asp.geojson")), GeoZoneParser::Format::OpenAip);
 
     // Further pages of ArcGIS and numbered responses
     using Paging = GeoZoneProviders::Paging;

@@ -3205,6 +3205,59 @@ void GeoZoneManagerTest::_testArcGisPaging()
     QVERIFY2(source->errorString().contains(QStringLiteral("Too many requests")), qPrintable(source->errorString()));
 }
 
+void GeoZoneManagerTest::_testOpenAipService()
+{
+    // The OpenAIP API: an API key header, the airspaces as the items of numbered pages
+    QFile fixture(QStringLiteral(":/unittest/openaip_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    QJsonArray items;
+    for (const QJsonValue &feature : QJsonDocument::fromJson(fixture.readAll()).object().value(QStringLiteral("features")).toArray()) {
+        QJsonObject item = feature.toObject().value(QStringLiteral("properties")).toObject();
+        item.insert(QStringLiteral("geometry"), feature.toObject().value(QStringLiteral("geometry")));
+        items.append(item);
+    }
+    constexpr int pageSize = 4;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [&](const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &) {
+        if (TestFeedServer::header(request, "x-openaip-api-key") != "open-s3cret") {
+            status = "401 Unauthorized";
+            return true;
+        }
+        const QUrlQuery query(QUrl(QString::fromLatin1(request.split(' ').value(1))));
+        const int page = query.queryItemValue(QStringLiteral("page")).toInt();
+        QJsonArray pageItems;
+        for (int i = (page - 1) * pageSize; (i < page * pageSize) && (i < items.count()); i++) {
+            pageItems.append(items[i]);
+        }
+        content = QJsonDocument(QJsonObject{ { "limit", pageSize }, { "totalCount", items.count() }, { "totalPages", 2 }, { "page", page }, { "items", pageItems } })
+                      .toJson(QJsonDocument::Compact);
+        return true;
+    };
+
+    const QList<GeoZoneProviders::ServiceTemplate> templates = GeoZoneProviders::serviceTemplates();
+    const auto openAip = std::find_if(templates.cbegin(), templates.cend(), [](const GeoZoneProviders::ServiceTemplate &serviceTemplate) {
+        return serviceTemplate.service.id == QStringLiteral("openaip");
+    });
+    QVERIFY(openAip != templates.cend());
+    const QString url = server.url(QStringLiteral("/api/airspaces?bbox={bbox}&limit=4&page=1"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    manager.repository()->setVehiclePosition(QGeoCoordinate(47.01, 8.1));
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.addService(url, openAip->service.toVariantMap(), QStringLiteral("open-s3cret"));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(server.requestCount, 2);
+    QVERIFY(server.requestedPaths[1].endsWith("&limit=4&page=2"));
+    QCOMPARE(manager.zoneCount(), 6);
+    const GeoZoneSource *const source = manager.repository()->source(url);
+    QCOMPARE(source->format(), GeoZoneParser::Format::OpenAip);
+    QCOMPARE(source->name(), QStringLiteral("Airspaces (OpenAIP, unofficial)"));
+    QCOMPARE(source->provider(), QStringLiteral("OpenAIP (unofficial, CC BY-NC 4.0)"));
+}
+
 void GeoZoneManagerTest::_testCatalogSnapshot()
 {
     // Checks on worker threads query copies of the catalog, which share its data and keep its zones while the

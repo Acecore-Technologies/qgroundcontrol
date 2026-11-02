@@ -35,7 +35,7 @@ public:
     /// GeoZoneParserUtils which changes the result for the same bytes: the zones and their fields, texts, issues and
     /// hashes, or the metadata. Stored sources are restored from parse caches of the same version only, the others
     /// are parsed again, see GeoZoneParseCache.
-    static constexpr quint16 version = 9;
+    static constexpr quint16 version = 10;
 
     enum class Format {
         Unknown,
@@ -46,6 +46,7 @@ public:
         FranceUas,  ///< French UAS restrictions GeoJSON of the IGN Géoplateforme WFS
         Aixm,       ///< AIXM 5.1 airspaces, like the UK flight restriction zones from NATS
         FaaAirspace,    ///< GeoJSON of the FAA's ArcGIS airspace layers: UAS facility maps, national security restrictions, class and special use airspace
+        OpenAip,        ///< Airspaces of OpenAIP, from its API or its GeoJSON exports (unofficial, CC BY-NC 4.0)
     };
 
     /// Document a feed's features refer to, like the details of an FAA NOTAM, with its version

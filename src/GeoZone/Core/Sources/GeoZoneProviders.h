@@ -49,8 +49,12 @@ public:
     struct ServiceTemplate {
         QString url;                ///< URL template, see GeoZoneService, empty when the user enters it
         GeoZoneService service;     ///< id and name are those of the template
+        /// Name of the template when the service has none, whose sources then take the title of their data
+        QString name;
         QString note;               ///< How to get access, or what QGroundControl doesn't read yet
         bool supported = true;      ///< false when QGroundControl can't read the data yet: configuration only
+        /// Format of the service's responses, see formatHint, Unknown to detect it
+        GeoZoneParser::Format format = GeoZoneParser::Format::Unknown;
     };
 
     static constexpr double maxAreaDegrees = 1.0;   ///< Largest area downloaded from services serving zones by area
@@ -76,7 +80,8 @@ public:
     ///         again would add nothing
     static bool areaDownloaded(const QString &serviceId, const QStringList &feedUrls, const QGeoRectangle &area);
 
-    /// @return The format to expect from a URL, Unknown for URLs of unknown services
+    /// @return The format to expect from a URL, of the services or the service templates, Unknown for URLs of unknown
+    ///         services
     static GeoZoneParser::Format formatHint(const QString &url);
     /// @return Service::id of the service of a URL, empty for URLs of unknown services
     static QString serviceId(const QString &url);

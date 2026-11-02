@@ -186,7 +186,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         return false;
     }
     if (!document.isObject() || !featuresValue.isArray()) {
-        errorString = tr("Not a geozone file. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces and the FAA, DiPUL and IGN GeoJSON are supported.");
+        errorString = tr("Not a geozone file. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces, the FAA, DiPUL and IGN GeoJSON and OpenAIP airspaces are supported.");
         return false;
     }
     const QJsonArray features = featuresValue.toArray();
@@ -200,7 +200,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
 
     const GeoZoneFormat *const format = GeoZoneFormat::detectJson(root, features, options.formatHint);
     if (!format) {
-        errorString = tr("The file is not in a supported geozone format. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces and the FAA, DiPUL and IGN GeoJSON are supported.");
+        errorString = tr("The file is not in a supported geozone format. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces, the FAA, DiPUL and IGN GeoJSON and OpenAIP airspaces are supported.");
         return false;
     }
     if (!_acceptsFormat(format, options, errorString)) {

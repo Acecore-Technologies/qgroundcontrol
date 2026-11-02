@@ -165,6 +165,32 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
 
     // The FAA NOTAM Management Service isn't offered until its NOTAM GeoJSON can be read
 
+    // OpenAIP airspaces, unofficial community data, by area with an API key or by country without
+    ServiceTemplate openAip;
+    openAip.url = QStringLiteral("https://api.core.openaip.net/api/airspaces?bbox={bbox}&limit=1000&page=1");
+    openAip.service.id = QStringLiteral("openaip");
+    openAip.service.name = tr("Airspaces (OpenAIP, unofficial)");
+    openAip.service.auth = GeoZoneService::Auth::ApiKeyHeader;
+    openAip.service.authParameter = QStringLiteral("x-openaip-api-key");
+    openAip.service.responseMember = QStringLiteral("items");
+    openAip.service.areaOfInterest = true;
+    // The API answers areas up to 5 degrees wide and high
+    openAip.service.maxAreaKm2 = 40000;
+    openAip.format = GeoZoneParser::Format::OpenAip;
+    openAip.note = tr("Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation: "
+                      "check the official drone zones. Enter the API key of an API client created in your openaip.net profile.");
+    templates.append(openAip);
+
+    ServiceTemplate openAipExport;
+    openAipExport.url = QStringLiteral("https://storage.openaip.net/openaip-system-exports/ch_asp.geojson");
+    openAipExport.service.id = QStringLiteral("openaip-export");
+    // Its sources are named after the country of their data, see GeoZoneOpenAipFormat
+    openAipExport.name = tr("Airspaces of a country (OpenAIP, unofficial)");
+    openAipExport.format = GeoZoneParser::Format::OpenAip;
+    openAipExport.note = tr("The daily export of a country's airspaces, without an account: replace ch with the two-letter code of the country. "
+                            "Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation.");
+    templates.append(openAipExport);
+
     // The FAA's public airspace layers, also offered for the map area, following the area of interest
     const QList<Service> all = services();
     for (const FaaLayer &layer : kFaaLayers) {
@@ -193,7 +219,7 @@ QVariantList GeoZoneProviders::serviceTemplateList()
     QVariantList list;
     for (const ServiceTemplate &serviceTemplate : std::as_const(templates)) {
         list.append(QVariantMap{
-            { QStringLiteral("name"), serviceTemplate.service.name },
+            { QStringLiteral("name"), serviceTemplate.service.name.isEmpty() ? serviceTemplate.name : serviceTemplate.service.name },
             { QStringLiteral("url"), serviceTemplate.url },
             { QStringLiteral("note"), serviceTemplate.note },
             { QStringLiteral("supported"), serviceTemplate.supported },
@@ -309,6 +335,11 @@ GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
     for (const Service &service : services()) {
         if ((service.format != GeoZoneParser::Format::Unknown) && _matches(service, parsedUrl)) {
             return service.format;
+        }
+    }
+    for (const ServiceTemplate &serviceTemplate : serviceTemplates()) {
+        if ((serviceTemplate.format != GeoZoneParser::Format::Unknown) && (QUrl(serviceTemplate.url).host() == parsedUrl.host())) {
+            return serviceTemplate.format;
         }
     }
     return GeoZoneParser::Format::Unknown;

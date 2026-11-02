@@ -23,6 +23,7 @@ private slots:
     void _testFeedDatasetLink();
     void _testWfsPaging();
     void _testArcGisPaging();
+    void _testOpenAipService();
     void _testFeedCompanions();
     void _testFeedFetchFormatCompanions();
     void _testFeedCancellation();
