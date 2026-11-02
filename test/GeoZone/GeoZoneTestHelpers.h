@@ -104,13 +104,8 @@ namespace GeoZoneTestHelpers {
 struct ZoneOwner {
     QList<QSharedPointer<GeoZone>> zones;
 
-    GeoZone *add(const GeoZone::Data &data)
-    {
-        zones.append(QSharedPointer<GeoZone>::create(data));
-        return zones.last().data();
-    }
+    GeoZone *add(const GeoZone::Data &data);
 };
-
 
 /// Replaces the clock, the terrain and the QNH of GeoZoneEnvironment while in scope, so that tests don't depend on when
 /// and where they run. The clock stands still at the second it was created, or the time it is set to, until the test
@@ -121,27 +116,8 @@ class ScopedEnvironment
 public:
     using Terrain = std::function<double(const QGeoCoordinate &coordinate)>;
 
-    ScopedEnvironment()
-        : _saved(GeoZoneEnvironment::hooks())
-    {
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        _state->msecs = now - (now % 1000);
-        GeoZoneEnvironment::Hooks hooks = _saved;
-        hooks.currentDateTimeUtc = [state = _state]() { return QDateTime::fromMSecsSinceEpoch(state->msecs, QTimeZone::UTC); };
-        hooks.terrainElevation = [state = _state](const QGeoCoordinate &coordinate) {
-            const QMutexLocker locker(&state->mutex);
-            return state->terrain ? state->terrain(coordinate) : qQNaN();
-        };
-        hooks.qnhHPa = [state = _state]() { return state->qnhHPa.load(); };
-        GeoZoneEnvironment::setHooks(hooks);
-    }
-
-    ~ScopedEnvironment()
-    {
-        // Evaluations on worker threads may still use the hooks
-        (void) QThreadPool::globalInstance()->waitForDone(10000);
-        GeoZoneEnvironment::setHooks(_saved);
-    }
+    ScopedEnvironment();
+    ~ScopedEnvironment();
 
     Q_DISABLE_COPY_MOVE(ScopedEnvironment)
 
@@ -150,11 +126,7 @@ public:
     void addSecs(qint64 secs) { _state->msecs += secs * 1000; }
 
     /// @param terrain Ground elevation in meters AMSL, NaN where unknown
-    void setTerrain(const Terrain &terrain)
-    {
-        const QMutexLocker locker(&_state->mutex);
-        _state->terrain = terrain;
-    }
+    void setTerrain(const Terrain &terrain);
     void setTerrain(double elevation) { setTerrain([elevation](const QGeoCoordinate &) { return elevation; }); }
     void setQnh(double qnhHPa) { _state->qnhHPa = qnhHPa; }
 
@@ -173,192 +145,40 @@ private:
 /// Waits for the evaluations running on the global thread pool, then delivers the results they posted, so that a test
 /// can check that outdated results are dropped without waiting for a fixed time
 /// @return false when they didn't finish within the timeout
-inline bool _settleWorkers(int timeoutMSecs = 10000)
-{
-    if (!QThreadPool::globalInstance()->waitForDone(timeoutMSecs)) {
-        return false;
-    }
-    QCoreApplication::sendPostedEvents();
-    QCoreApplication::processEvents();
-    return true;
-}
+bool _settleWorkers(int timeoutMSecs = 10000);
 
-inline GeoZoneParser::Result _parseResource(const QString &name)
-{
-    GeoZoneParser::Result result;
-    QString errorString;
-    if (!GeoZoneParser::parseFile(QStringLiteral(":/unittest/%1").arg(name), result, errorString)) {
-        qWarning() << "Parse failed" << name << errorString;
-    }
-    return result;
-}
-
-inline QDateTime _utc(const QDate &date, const QTime &time)
-{
-    return QDateTime(date, time, QTimeZone::UTC);
-}
-
-inline QJsonObject _circleFeature(const QString &identifier, const QString &restriction, const QGeoCoordinate &center, double radius)
-{
-    return QJsonObject{
-        { "identifier", identifier },
-        { "restriction", restriction },
-        { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", QJsonObject{
-            { "type", "Circle" }, { "center", QJsonArray{ center.longitude(), center.latitude() } }, { "radius", radius } } } } } },
-    };
-}
-
-inline QJsonObject _polygonFeature(const QString &identifier, const QString &restriction, const QList<QGeoCoordinate> &ring)
-{
-    QJsonArray positions;
-    for (const QGeoCoordinate &coordinate : ring) {
-        positions.append(QJsonArray{ coordinate.longitude(), coordinate.latitude() });
-    }
-    positions.append(positions.first());
-    return QJsonObject{
-        { "identifier", identifier },
-        { "restriction", restriction },
-        { "geometry", QJsonArray{ QJsonObject{ { "horizontalProjection", QJsonObject{
-            { "type", "Polygon" }, { "coordinates", QJsonArray{ positions } } } } } } },
-    };
-}
+GeoZoneParser::Result _parseResource(const QString &name);
+inline QDateTime _utc(const QDate &date, const QTime &time) { return QDateTime(date, time, QTimeZone::UTC); }
+QJsonObject _circleFeature(const QString &identifier, const QString &restriction, const QGeoCoordinate &center, double radius);
+QJsonObject _polygonFeature(const QString &identifier, const QString &restriction, const QList<QGeoCoordinate> &ring);
 
 /// Writes an ED-269 file with the features to the directory
-inline QString _writeFeatures(const QTemporaryDir &dir, const QString &name, const QJsonArray &features)
-{
-    const QString fileName = dir.filePath(name);
-    QFile file(fileName);
-    if (file.open(QIODevice::WriteOnly)) {
-        (void) file.write(QJsonDocument(QJsonObject{ { "features", features } }).toJson(QJsonDocument::Compact));
-    }
-    return fileName;
-}
+QString _writeFeatures(const QTemporaryDir &dir, const QString &name, const QJsonArray &features);
 
-inline QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double radius, int vertexCount)
-{
-    QList<QGeoCoordinate> ring;
-    for (int i = 0; i < vertexCount; i++) {
-        ring.append(center.atDistanceAndAzimuth(radius, i * 360.0 / vertexCount));
-    }
-    return ring;
-}
+QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double radius, int vertexCount);
 
 /// Prohibited zones on a grid of columns by rows cells of the pitch in meters, north-east of the corner: circles and
 /// irregular polygons of random sizes and positions, so that about half the gaps between them are narrower than twice
 /// the default margin of the route search, a maze
-inline QJsonArray _mazeFeatures(const QGeoCoordinate &southWest, int columns, int rows, double pitch, quint32 seed)
-{
-    QRandomGenerator random(seed);
-    const GeoZoneGeometry::LocalProjection projection(southWest);
-    QJsonArray features;
-    for (int row = 0; row < rows; row++) {
-        for (int column = 0; column < columns; column++) {
-            const QPointF offset((random.generateDouble() - 0.5) * 0.2 * pitch, (random.generateDouble() - 0.5) * 0.2 * pitch);
-            const QGeoCoordinate center = projection.toGeo((QPointF(column + 0.5, row + 0.5) * pitch) + offset);
-            const double radius = pitch * (0.18 + (0.2 * random.generateDouble()));
-            const QString identifier = QStringLiteral("Maze %1-%2").arg(column).arg(row);
-            if (random.bounded(2) == 0) {
-                features.append(_circleFeature(identifier, QStringLiteral("PROHIBITED"), center, radius));
-                continue;
-            }
-            QList<QGeoCoordinate> ring;
-            const int vertexCount = 5 + random.bounded(8);
-            for (int vertex = 0; vertex < vertexCount; vertex++) {
-                ring.append(center.atDistanceAndAzimuth(radius * (0.6 + (0.4 * random.generateDouble())), vertex * 360.0 / vertexCount));
-            }
-            features.append(_polygonFeature(identifier, QStringLiteral("PROHIBITED"), ring));
-        }
-    }
-    return features;
-}
+QJsonArray _mazeFeatures(const QGeoCoordinate &southWest, int columns, int rows, double pitch, quint32 seed);
 
-inline double _distanceToRing(const QPointF &point, const QList<QPointF> &ring)
-{
-    double minDistance = std::numeric_limits<double>::max();
-    for (qsizetype i = 0; i < ring.count(); i++) {
-        const QPointF a = ring[i];
-        const QPointF b = ring[(i + 1) % ring.count()];
-        const QPointF ab = b - a;
-        const double lengthSquared = QPointF::dotProduct(ab, ab);
-        const double t = (lengthSquared > 0) ? std::clamp(QPointF::dotProduct(point - a, ab) / lengthSquared, 0.0, 1.0) : 0.0;
-        const QPointF offset = a + (t * ab) - point;
-        minDistance = qMin(minDistance, std::hypot(offset.x(), offset.y()));
-    }
-    return minDistance;
-}
+double _distanceToRing(const QPointF &point, const QList<QPointF> &ring);
 
 /// @return The ED-269 feature with limits in meters of its first layer
-inline QJsonObject _withLimits(QJsonObject feature, double lower, const QString &lowerReference, double upper, const QString &upperReference)
-{
-    QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
-    QJsonObject layer = geometry[0].toObject();
-    layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
-    layer[QStringLiteral("lowerLimit")] = lower;
-    layer[QStringLiteral("lowerVerticalReference")] = lowerReference;
-    layer[QStringLiteral("upperLimit")] = upper;
-    layer[QStringLiteral("upperVerticalReference")] = upperReference;
-    geometry[0] = layer;
-    feature[QStringLiteral("geometry")] = geometry;
-    return feature;
-}
+QJsonObject _withLimits(QJsonObject feature, double lower, const QString &lowerReference, double upper, const QString &upperReference);
 
 /// @return Path through the coordinates at the altitudes AMSL, unknown where not given
-inline GeoZonePathEvaluator::Path _evaluatorPath(const QList<QGeoCoordinate> &coordinates, const QList<double> &altitudes = {}, const QString &label = QString())
-{
-    GeoZonePathEvaluator::Path path;
-    path.label = label;
-    for (qsizetype i = 0; i < coordinates.count(); i++) {
-        path.vertices.append(GeoZonePathEvaluator::Vertex{ coordinates[i], altitudes.value(i, qQNaN()), qQNaN(), QDateTime() });
-    }
-    return path;
-}
+GeoZonePathEvaluator::Path _evaluatorPath(const QList<QGeoCoordinate> &coordinates, const QList<double> &altitudes = {}, const QString &label = QString());
 
 /// @return Smallest horizontal distance from the path, sampled every few meters, to the zones
-inline double _pathClearance(const QList<QGeoCoordinate> &path, const QList<const GeoZone*> &zones, double step = 5)
-{
-    double clearance = std::numeric_limits<double>::infinity();
-    for (qsizetype i = 1; i < path.count(); i++) {
-        const double length = path[i - 1].distanceTo(path[i]);
-        const double azimuth = path[i - 1].azimuthTo(path[i]);
-        for (double along = 0; along <= length; along += step) {
-            const QGeoCoordinate point = path[i - 1].atDistanceAndAzimuth(along, azimuth);
-            for (const GeoZone *zone : zones) {
-                clearance = (std::min)(clearance, zone->distanceTo(point));
-            }
-        }
-    }
-    return clearance;
-}
+double _pathClearance(const QList<QGeoCoordinate> &path, const QList<const GeoZone*> &zones, double step = 5);
 
 /// @return true if the value is within the tolerance of the expected one, which is logged otherwise
-inline bool _near(double value, double expected, double tolerance = 1)
-{
-    if (qAbs(value - expected) <= tolerance) {
-        return true;
-    }
-    qWarning() << "Expected" << expected << "got" << value;
-    return false;
-}
+bool _near(double value, double expected, double tolerance = 1);
 
 /// Shows heights in feet or in meters until the returned guard restores the previous units: those of the
 /// QGroundControl settings, or of GeoZoneEnvironment without the application
-inline QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
-{
-#ifdef GEOZONE_CORE_TEST
-    const GeoZoneEnvironment::Hooks saved = GeoZoneEnvironment::hooks();
-    GeoZoneEnvironment::Hooks hooks = saved;
-    hooks.verticalDistanceUnits = [feet]() { return feet ? QStringLiteral("ft") : QStringLiteral("m"); };
-    hooks.metersToVerticalDistanceUnits = [feet](double meters) { return feet ? (meters / 0.3048) : meters; };
-    GeoZoneEnvironment::setHooks(hooks);
-    return QScopeGuard<std::function<void()>>([saved]() { GeoZoneEnvironment::setHooks(saved); });
-#else
-    Fact *const verticalUnits = SettingsManager::instance()->unitsSettings()->verticalDistanceUnits();
-    const QVariant saved = verticalUnits->rawValue();
-    verticalUnits->setRawValue(feet ? UnitsSettings::VerticalDistanceUnitsFeet : UnitsSettings::VerticalDistanceUnitsMeters);
-    return QScopeGuard<std::function<void()>>([verticalUnits, saved]() { verticalUnits->setRawValue(saved); });
-#endif
-}
-
+QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet);
 
 /// Loads files into the sources of a repository and indexes the enabled ones in a catalog, like GeoZoneManager, with
 /// the GeoZoneCore library only
@@ -366,20 +186,10 @@ class ZoneCatalog
 {
 public:
     /// @param storageDir Directory in which the repository keeps the copies of the sources
-    explicit ZoneCatalog(const QString &storageDir)
-        : _repository(storageDir)
-    {
-    }
+    explicit ZoneCatalog(const QString &storageDir) : _repository(storageDir) {}
 
     /// Loads the file as a source, or reloads it, see GeoZoneSourceRepository::loadFile
-    bool loadFile(const QString &fileName, QString &errorString)
-    {
-        const bool loaded = _repository.loadFile(fileName, errorString);
-        QList<const GeoZoneSource*> sources = _repository.sourceList();
-        (void) sources.removeIf([](const GeoZoneSource *source) { return !source->enabled(); });
-        _catalog.rebuild(sources);
-        return loaded;
-    }
+    bool loadFile(const QString &fileName, QString &errorString);
 
     const GeoZoneCatalog &catalog() const { return _catalog; }
     const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }
@@ -404,59 +214,8 @@ public:
     }
 
     /// Loads the zones and authorises the control zone
-    bool load(QString &errorString)
-    {
-        QJsonObject controlZone = _circleFeature(QStringLiteral("CTR-1"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(1000, 90), 200);
-        controlZone[QStringLiteral("name")] = QStringLiteral("CTR <script>alert(1)</script>");
-        controlZone[QStringLiteral("country")] = QStringLiteral("CHE");
-        controlZone[QStringLiteral("message")] = QStringLiteral("Call the tower");
-        controlZone[QStringLiteral("zoneAuthority")] = QJsonArray{ QJsonObject{ { "name", "Skyguide" }, { "email", "ops@example.org" }, { "phone", "+41 43 931 61 11" } } };
-        controlZone[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:45:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
-        QJsonObject geometry = controlZone[QStringLiteral("geometry")].toArray()[0].toObject();
-        geometry[QStringLiteral("uomDimensions")] = QStringLiteral("M");
-        geometry[QStringLiteral("lowerLimit")] = 0;
-        geometry[QStringLiteral("lowerVerticalReference")] = QStringLiteral("AGL");
-        geometry[QStringLiteral("upperLimit")] = 500;
-        geometry[QStringLiteral("upperVerticalReference")] = QStringLiteral("AMSL");
-        controlZone[QStringLiteral("geometry")] = QJsonArray{ geometry };
-        QJsonObject prison = _circleFeature(QStringLiteral("P-1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2500, 90), 200);
-        prison[QStringLiteral("name")] = QStringLiteral("Prison");
-        if (!zones.loadFile(_writeFeatures(_dir, QStringLiteral("zones.json"), QJsonArray{
-                controlZone, prison,
-                _circleFeature(QStringLiteral("NEAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 0), 150),
-                _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 0), 150),
-                _circleFeature(QStringLiteral("RET"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 90).atDistanceAndAzimuth(1000, 180), 200),
-                _circleFeature(QStringLiteral("INFO"), QStringLiteral("NO_RESTRICTION"), center.atDistanceAndAzimuth(1500, 90).atDistanceAndAzimuth(400, 180), 100),
-            }), errorString)) {
-            return false;
-        }
-        const GeoZone *const ctr = zones.zoneList().constFirst();
-        authorisations.set(GeoZoneAuthorisation{ GeoZoneAuthorisations::zoneKey(ctr), ctr->name(), QStringLiteral("P-77"), QDateTime(), QDateTime() });
-        return true;
-    }
-
-    GeoZoneBriefing build() const
-    {
-        GeoZonePathEvaluator::Path path = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center, 100 }, GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90), 100 } });
-        path.setTimes(start, start.addSecs(600));
-        const QGeoCoordinate halfway = center.atDistanceAndAzimuth(2000, 90);
-        GeoZonePathEvaluator::Path contingency = GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ halfway, 100 },
-                                                                                             GeoZone::Position{ halfway.atDistanceAndAzimuth(1000, 180), 100 } },
-                                                                                           QStringLiteral("a return to rally point 1"));
-        contingency.setTimes(start.addSecs(300), QDateTime());
-        GeoZoneBriefing::Input input;
-        input.mission.name = QStringLiteral("Survey");
-        input.mission.plannedStart = start;
-        input.mission.plannedEnd = start.addSecs(600);
-        input.paths = { path };
-        input.contingencyPaths = { contingency };
-        input.items = { { 1, 0 }, { 2, 4000 } };
-        input.start = start;
-        input.end = start.addSecs(600);
-        input.authorisations = &authorisations;
-        input.sources = GeoZoneSourceVersion::covering(zones.repository()->sourceList(), GeoZoneBox());
-        return GeoZoneBriefing::build(zones.catalog(), input);
-    }
+    bool load(QString &errorString);
+    GeoZoneBriefing build() const;
 
     const QGeoCoordinate center{ 47, 8 };
     const QDateTime start = _utc(QDate(2027, 1, 1), QTime(10, 30));
@@ -474,28 +233,13 @@ private:
 class ScopedMetricUnits
 {
 public:
-    ScopedMetricUnits()
-    {
-        UnitsSettings *const units = SettingsManager::instance()->unitsSettings();
-        _set(units->horizontalDistanceUnits(), UnitsSettings::HorizontalDistanceUnitsMeters);
-        _set(units->verticalDistanceUnits(), UnitsSettings::VerticalDistanceUnitsMeters);
-    }
-
-    ~ScopedMetricUnits()
-    {
-        for (const auto &[fact, value] : std::as_const(_saved)) {
-            fact->setRawValue(value);
-        }
-    }
+    ScopedMetricUnits();
+    ~ScopedMetricUnits();
 
     Q_DISABLE_COPY_MOVE(ScopedMetricUnits)
 
 private:
-    void _set(Fact *fact, const QVariant &value)
-    {
-        _saved.append({ fact, fact->rawValue() });
-        fact->setRawValue(value);
-    }
+    void _set(Fact *fact, const QVariant &value);
 
     QList<std::pair<Fact*, QVariant>> _saved;
 };
@@ -509,55 +253,12 @@ public:
     /// Answers a request instead of the defaults when it returns true
     using Handler = std::function<bool(const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &headers)>;
 
-    TestFeedServer()
-    {
-        QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));
-        if (fixture.open(QIODevice::ReadOnly)) {
-            body = fixture.readAll();
-        }
-        (void) connect(this, &QTcpServer::newConnection, this, [this]() {
-            while (QTcpSocket *const socket = nextPendingConnection()) {
-                (void) connect(socket, &QTcpSocket::readyRead, socket, [this, socket]() {
-                    const QByteArray request = socket->property("request").toByteArray() + socket->readAll();
-                    socket->setProperty("request", request);
-                    const qsizetype headerEnd = request.indexOf("\r\n\r\n");
-                    if ((headerEnd < 0) || ((request.size() - headerEnd - 4) < header(request, "Content-Length").toLongLong())) {
-                        return;
-                    }
-                    requestCount++;
-                    socket->setProperty("counted", true);
-                    requests.append(request);
-                    const QByteArray path = request.split(' ').value(1);
-                    requestedPaths.append(path);
-                    if (delays.value(path) > 0) {
-                        QTimer::singleShot(delays.value(path), socket, [this, socket, path, request]() { _respond(socket, path, request); });
-                    } else {
-                        _respond(socket, path, request);
-                    }
-                });
-                (void) connect(socket, &QTcpSocket::disconnected, socket, [this, socket]() {
-                    if (socket->property("counted").toBool() && !socket->property("answered").toBool()) {
-                        abandonedCount++;
-                    }
-                    socket->deleteLater();
-                });
-            }
-        });
-    }
+    TestFeedServer();
 
     QString url(const QString &path) const { return QStringLiteral("http://127.0.0.1:%1%2").arg(serverPort()).arg(path); }
 
     /// @return Value of the header of a request, empty without
-    static QByteArray header(const QByteArray &request, const QByteArray &name)
-    {
-        for (const QByteArray &line : request.left(request.indexOf("\r\n\r\n")).split('\n')) {
-            const qsizetype colon = line.indexOf(':');
-            if ((colon > 0) && (line.left(colon).trimmed().compare(name, Qt::CaseInsensitive) == 0)) {
-                return line.mid(colon + 1).trimmed();
-            }
-        }
-        return QByteArray();
-    }
+    static QByteArray header(const QByteArray &request, const QByteArray &name);
     static QByteArray requestBody(const QByteArray &request) { return request.mid(request.indexOf("\r\n\r\n") + 4); }
 
     /// @return true when each request was answered or abandoned, so that no response is still to come, like those
@@ -579,58 +280,10 @@ public:
     QList<QByteArray> requests;             ///< Request line, headers and body
 
 private:
-    void _respond(QTcpSocket *socket, const QByteArray &target, const QByteArray &request)
-    {
-        const QByteArray path = files.contains(target) ? target : target.split('?').first();
-        QByteArray status = "200 OK";
-        QByteArray content;
-        QByteArray extraHeaders = headers.value(path);
-        if (handler && handler(request, status, content, extraHeaders)) {
-            _write(socket, status, content, extraHeaders);
-            return;
-        }
-        if (const QByteArray location = redirects.value(path); !location.isEmpty()) {
-            _write(socket, "302 Found", QByteArray(), extraHeaders + "Location: " + location + "\r\n");
-            return;
-        }
-        if (const QByteArray etag = etags.value(path); !etag.isEmpty()) {
-            extraHeaders += "ETag: " + etag + "\r\n";
-            // Header names are case insensitive, Qt sends them in lower case
-            if (request.toLower().contains("if-none-match: " + etag.toLower())) {
-                _answer(socket, "HTTP/1.1 304 Not Modified\r\n" + extraHeaders + "Content-Length: 0\r\nConnection: close\r\n\r\n");
-                return;
-            }
-        }
-        if (files.contains(path)) {
-            content = files.value(path);
-        } else if (path == "/ok") {
-            status = okPathStatus;
-            content = status.startsWith("200") ? body : QByteArray();
-        } else if (path == "/missing") {
-            status = "404 Not Found";
-        } else if (path == "/broken") {
-            status = "500 Internal Server Error";
-        } else if (path == "/hang") {
-            return;
-        }
-        _write(socket, status, content, extraHeaders);
-    }
-
-    void _write(QTcpSocket *socket, const QByteArray &status, const QByteArray &content, const QByteArray &extraHeaders)
-    {
-        _answer(socket, "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\n" + extraHeaders + "Content-Length: " +
-                            QByteArray::number(content.size()) + "\r\n\r\n" + content);
-    }
-
-    void _answer(QTcpSocket *socket, const QByteArray &response)
-    {
-        answeredCount++;
-        socket->setProperty("answered", true);
-        (void) socket->write(response);
-        socket->disconnectFromHost();
-    }
+    void _respond(QTcpSocket *socket, const QByteArray &target, const QByteArray &request);
+    void _write(QTcpSocket *socket, const QByteArray &status, const QByteArray &content, const QByteArray &extraHeaders);
+    void _answer(QTcpSocket *socket, const QByteArray &response);
 };
 #endif
-
 
 } // namespace GeoZoneTestHelpers

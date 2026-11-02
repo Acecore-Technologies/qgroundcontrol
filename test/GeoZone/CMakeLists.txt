@@ -61,6 +61,7 @@ target_sources(${CMAKE_PROJECT_NAME}
         ${GEOZONE_APP_TEST_SOURCES}
         ${CMAKE_CURRENT_BINARY_DIR}/generated/GeoZoneAppTests.h
         GeoZoneTestBase.h
+        GeoZoneTestHelpers.cc
         GeoZoneTestHelpers.h
         GeoZoneUnitTests.cc
 )
@@ -102,6 +103,7 @@ qt_add_executable(GeoZoneCoreTest
     ${CMAKE_CURRENT_BINARY_DIR}/generated/GeoZoneCoreTests.h
     GeoZoneCoreTestMain.cc
     GeoZoneTestBase.h
+    GeoZoneTestHelpers.cc
     GeoZoneTestHelpers.h
 )
 
@@ -137,6 +139,7 @@ add_dependencies(check GeoZoneCoreTest)
 qt_add_executable(GeoZoneBenchmark
     GeoZoneBenchmark.cc
     GeoZoneBenchmark.h
+    GeoZoneTestHelpers.cc
     GeoZoneTestHelpers.h
 )
 
