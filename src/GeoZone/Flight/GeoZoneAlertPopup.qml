@@ -202,7 +202,7 @@ Popup {
 
                 QGCLabel {
                     Layout.fillWidth:       true
-                    wrapMode:               Text.WordWrap
+                    wrapMode:               Text.WrapAtWordBoundaryOrAnywhere
                     horizontalAlignment:    Text.AlignHCenter
                     textFormat:             Text.PlainText
                     color:                  qgcPal.alertText

@@ -37,6 +37,8 @@ Item {
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
     readonly property bool _stale:          _monitor.monitoring && _active.positionUnavailable
+    // Long zone names, alerts and descriptions wrap within the page rather than widening it off the window
+    readonly property real _pageWidth:      ScreenTools.defaultFontPixelWidth * 60
 
     function _restrictionColor(restriction) {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
@@ -120,6 +122,7 @@ Item {
                     spacing: ScreenTools.defaultFontPixelHeight / 2
 
                     SettingsGroupLayout {
+                        Layout.preferredWidth:  control._pageWidth
                         heading:            qsTr("Nearby Geozones")
                         headingDescription: qsTr("Active restricted and U-space zones within %1 of the active vehicle, or reached within %2 s at its velocity.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
 
@@ -199,9 +202,10 @@ Item {
                             model: control._monitor.monitoring ? control._active.nearbyModel : null
 
                             RowLayout {
-                                id:         nearbyRow
-                                spacing:    ScreenTools.defaultFontPixelWidth
-                                opacity:    control._stale ? 0.5 : 1
+                                id:                 nearbyRow
+                                Layout.fillWidth:   true
+                                spacing:            ScreenTools.defaultFontPixelWidth
+                                opacity:            control._stale ? 0.5 : 1
 
                                 required property var   zone
                                 required property bool  inside
@@ -219,6 +223,7 @@ Item {
                                     Layout.fillWidth:   true
                                     text:               nearbyRow.zone.displayName
                                     textFormat:         Text.PlainText
+                                    wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                                 }
 
                                 QGCLabel {
@@ -244,6 +249,7 @@ Item {
                     }
 
                     SettingsGroupLayout {
+                        Layout.preferredWidth:  control._pageWidth
                         heading:            qsTr("Traffic in or near Geozones")
                         headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(control._distanceText(control._geoZoneSettings.trafficRadius.rawValue))
                         visible:            control._traffic.enabled
@@ -257,8 +263,9 @@ Item {
                             model: control._traffic.aircraft
 
                             RowLayout {
-                                id:         trafficRow
-                                spacing:    ScreenTools.defaultFontPixelWidth
+                                id:                 trafficRow
+                                Layout.fillWidth:   true
+                                spacing:            ScreenTools.defaultFontPixelWidth
 
                                 required property var modelData
 
@@ -295,6 +302,7 @@ Item {
                     }
 
                     SettingsGroupLayout {
+                        Layout.preferredWidth:  control._pageWidth
                         heading:            qsTr("Recent Alerts")
                         headingDescription: qsTr("Alerts of this session and earlier today, newest first. Show puts the zone and the vehicle position on the map.")
                         visible:            control._history.count > 0
@@ -333,7 +341,7 @@ Item {
 
                                 QGCLabel {
                                     Layout.fillWidth:   true
-                                    wrapMode:           Text.WordWrap
+                                    wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                                     text:               alertRow.message
                                     textFormat:         Text.PlainText
                                     font.bold:          !alertRow.acknowledged
@@ -358,7 +366,8 @@ Item {
                     }
 
                     SettingsGroupLayout {
-                        heading: qsTr("Map")
+                        Layout.preferredWidth:  control._pageWidth
+                        heading:                qsTr("Map")
 
                         GeoZoneLegend { }
 

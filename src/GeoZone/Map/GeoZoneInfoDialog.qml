@@ -30,8 +30,10 @@ QGCPopupDialog {
     required property var geoZone
     property var zones: []      ///< GeoZone objects to choose from, like those at a clicked point
 
-    readonly property real _labelWidth: ScreenTools.defaultFontPixelWidth * 14
-    readonly property real _valueWidth: ScreenTools.defaultFontPixelWidth * 45
+    // Narrower on small windows, so long texts wrap rather than scroll sideways
+    readonly property real _contentWidth:   Math.min(ScreenTools.defaultFontPixelWidth * 60, mainWindow.width - ScreenTools.defaultFontPixelWidth * 8)
+    readonly property real _labelWidth:     ScreenTools.defaultFontPixelWidth * 14
+    readonly property real _valueWidth:     _contentWidth - _labelWidth - ScreenTools.defaultFontPixelWidth
     readonly property var  _authorisations: GeoZoneManager.planning.authorisations
 
     property int _authorisationRevision: 0  ///< Re-reads the authorisation when the authorisations change
@@ -76,30 +78,31 @@ QGCPopupDialog {
             text:                   infoRow.label
         }
 
+        // Addresses and identifiers without spaces are broken anywhere
         QGCLabel {
             Layout.preferredWidth:  infoRow.valueWidth
             text:                   infoRow.value
             textFormat:             Text.PlainText
-            wrapMode:               Text.WordWrap
+            wrapMode:               Text.WrapAtWordBoundaryOrAnywhere
         }
     }
 
     ColumnLayout {
         spacing: ScreenTools.defaultFontPixelHeight / 4
 
-        QGCComboBox {
-            Layout.fillWidth:   true
-            visible:            root.zones.length > 1
-            model:              root.zones.map(zone => qsTr("%1 (%2)").arg(zone.displayName).arg(zone.restrictionText))
-            currentIndex:       root.zones.findIndex(zone => zone.key === root.geoZone.key)
-            onActivated:        (index) => root.geoZone = root.zones[index]
+        GeoZoneChoiceComboBox {
+            Layout.preferredWidth:  root._contentWidth
+            visible:                root.zones.length > 1
+            model:                  root.zones.map(zone => qsTr("%1 (%2)").arg(zone.displayName).arg(zone.restrictionText))
+            currentIndex:           root.zones.findIndex(zone => zone.key === root.geoZone.key)
+            onActivated:            (index) => root.geoZone = root.zones[index]
         }
 
         QGCLabel {
-            Layout.preferredWidth:  root._labelWidth + root._valueWidth
+            Layout.preferredWidth:  root._contentWidth
             text:                   root.geoZone ? root.geoZone.displayName : ""
             textFormat:             Text.PlainText
-            wrapMode:               Text.WordWrap
+            wrapMode:               Text.WrapAtWordBoundaryOrAnywhere
             font.bold:              true
         }
 
@@ -203,7 +206,7 @@ QGCPopupDialog {
 
         // The operator's authorisation stops the warnings and alerts about the zone while it is valid
         ColumnLayout {
-            Layout.preferredWidth:  root._labelWidth + root._valueWidth
+            Layout.preferredWidth:  root._contentWidth
             spacing:                ScreenTools.defaultFontPixelHeight / 4
             visible:                root.geoZone && root.geoZone.restriction !== GeoZone.NoRestriction
 
@@ -267,7 +270,7 @@ QGCPopupDialog {
                 QGCLabel {
                     id:                     authorisationError
                     Layout.columnSpan:      2
-                    Layout.preferredWidth:  root._labelWidth + root._valueWidth
+                    Layout.preferredWidth:  root._contentWidth
                     wrapMode:               Text.WordWrap
                     color:                  qgcPal.warningText
                     visible:                text !== ""
@@ -275,7 +278,7 @@ QGCPopupDialog {
 
                 QGCLabel {
                     Layout.columnSpan:      2
-                    Layout.preferredWidth:  root._labelWidth + root._valueWidth
+                    Layout.preferredWidth:  root._contentWidth
                     wrapMode:               Text.WordWrap
                     font.pointSize:         ScreenTools.smallFontPointSize
                     text:                   qsTr("While the authorisation is valid, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")

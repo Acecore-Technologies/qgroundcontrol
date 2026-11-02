@@ -135,6 +135,7 @@ QGCPopupDialog {
                     Layout.topMargin:   suggestionColumn.index > 0 ? ScreenTools.defaultFontPixelHeight / 2 : 0
                     visible:            suggestionColumn.modelData.first
                     font.bold:          true
+                    wrapMode:           Text.WordWrap
                     text:               suggestionColumn.modelData.legText
                 }
 

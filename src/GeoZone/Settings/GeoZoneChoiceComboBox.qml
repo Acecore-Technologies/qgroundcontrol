@@ -14,9 +14,8 @@ import QGroundControl.Controls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Combo box of texts some of which can't be chosen, like the feeds already added. They are grayed out with
-/// disabledText. Long texts wrap in the list and are elided in the box. The model is kept when choices are enabled
-/// or disabled, so the current choice stays.
+/// Combo box whose long texts wrap in the list and are elided in the box. Some choices can be grayed out with
+/// disabledText, like the feeds already added; the model is kept when they change, so the current choice stays.
 QGCComboBox {
     id: control
 

@@ -73,7 +73,7 @@ ColumnLayout {
 
             QGCLabel {
                 Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
+                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               object.provenanceText
                 textFormat:         Text.PlainText
@@ -181,7 +181,7 @@ ColumnLayout {
 
                 QGCLabel {
                     Layout.fillWidth:   true
-                    wrapMode:           Text.WordWrap
+                    wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                     font.pointSize:     ScreenTools.smallFontPointSize
                     text:               object.changesText
                     textFormat:         Text.PlainText
@@ -203,7 +203,7 @@ ColumnLayout {
             QGCLabel {
                 id:                 changesDetailsLabel
                 Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
+                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               object.changesDetails
                 textFormat:         Text.PlainText
@@ -212,7 +212,7 @@ ColumnLayout {
 
             QGCLabel {
                 Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
+                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
                 text:               object.warningText
@@ -221,7 +221,7 @@ ColumnLayout {
 
             QGCLabel {
                 Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
+                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
                 text:               qsTr("Last update failed: %1").arg(object.errorString)
