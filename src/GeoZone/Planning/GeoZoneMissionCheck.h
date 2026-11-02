@@ -53,7 +53,7 @@ class GeoZoneMissionCheck : public QObject
     Q_MOC_INCLUDE("GeoFenceController.h")
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
-    Q_PROPERTY(QVariantList         zones               READ zonesInfo                                      NOTIFY zonesChanged FINAL)            ///< The entries as maps of the GeoZoneInfo "zone" and the Kinds "kind"
+    Q_PROPERTY(QVariantList         zones               READ zonesInfo                                      NOTIFY zonesChanged FINAL)            ///< The entries as maps of the GeoZoneInfo "zone", the Kinds "kind", the "labels" and the "approximationTexts"
     Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY zonesChanged FINAL)

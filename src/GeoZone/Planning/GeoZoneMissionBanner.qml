@@ -7,8 +7,12 @@
  *
  ****************************************************************************/
 
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
@@ -16,19 +20,23 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Plan View banner warning when the mission enters restricted geozones or the geozone data changed since the plan was
-/// saved, centered between leftLimit and rightLimit. Exports the geozone briefing of the mission, see exportBriefing(),
-/// and its operational intent for a flight authorisation request, see exportOperationalIntent().
+/// Plan View banner summarising in one line how the mission meets the geozones, centered between leftLimit and
+/// rightLimit: the restricted zones it enters by restriction, the zones the returns from along it enter, and whether
+/// the geozone data changed since the plan was saved or may be outdated. Below are the primary actions and a Details
+/// toggle listing the zones of the mission check by category with the other information. Shown while the mission has
+/// items and zones are loaded, or when the data or the plan's authorisations need attention. Exports the geozone
+/// briefing of the mission, see exportBriefing(), and its operational intent for a flight authorisation request, see
+/// exportOperationalIntent().
 Rectangle {
     id:             control
     x:              leftLimit + ((_availableWidth - width) / 2)
-    width:          Math.min(Math.max(warningLabel.implicitWidth, contingencyLabel.implicitWidth, infoLabel.implicitWidth, outdatedLabel.implicitWidth, auditLabel.implicitWidth, plannedLabel.implicitWidth, fenceLabel.implicitWidth, pendingLabel.implicitWidth, buttonRow.implicitWidth, hintLabel.implicitWidth), _availableWidth - (_margin * 2)) + (_margin * 2)
+    width:          Math.min(Math.max(summaryLabel.implicitWidth, _actionsWidth, detailsButton.checked ? _detailsWidth : 0), _availableWidth - (_margin * 2)) + (_margin * 2)
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
-    border.color:   (missionCheck.warningText !== "" || _outdatedText !== "" || missionCheck.auditText !== "") ? qgcPal.warningText : qgcPal.text
+    border.color:   _attention ? qgcPal.warningText : qgcPal.text
     z:              QGroundControl.zOrderWidgets
-    visible:        missionCheck.warningText !== "" || missionCheck.contingencyText !== "" || missionCheck.infoText !== "" || _outdatedText !== "" || missionCheck.fenceText !== "" || _pendingAuthorisations.length > 0 || missionCheck.auditText !== ""
+    visible:        _checkedMission || check.zones.length > 0 || _outdatedText !== "" || _pendingAuthorisations.length > 0 || check.auditText !== ""
 
     required property var   missionController
     required property var   map                 ///< Fitted to the crossed zones when the banner is clicked
@@ -51,6 +59,74 @@ Rectangle {
     readonly property var  _pendingAuthorisations: GeoZoneManager.planning.authorisations.pendingAuthorisations
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth
     readonly property real _availableWidth: Math.max(rightLimit - leftLimit, ScreenTools.defaultFontPixelWidth * 20)
+    readonly property real _detailsWidth:   ScreenTools.defaultFontPixelWidth * 64
+    readonly property bool _checkedMission: missionController.containsItems && GeoZoneManager.zoneCount > 0
+    readonly property bool _attention:      crossedZones.length > 0 || _outdatedText !== "" || check.auditText !== ""
+    // The actions side by side, which wrap when they don't fit
+    readonly property real _actionsWidth:   [ routeButton, fenceButton, exportButton, detailsButton ].filter(button => button.visible)
+                                                .reduce((width, button) => width + button.implicitWidth + actionFlow.spacing, -actionFlow.spacing)
+
+    /// @return The entries of the mission check with any of the kinds. A zone loaded from overlapping sources is listed
+    ///         once, with the labels of all its entries.
+    function _entries(kind) {
+        const entries = []
+        const byKey = {}
+        for (const entry of check.zones) {
+            if (!(entry.kind & kind)) {
+                continue
+            }
+            const key = entry.zone.displayName + "\u001F" + entry.zone.restriction
+            const existing = byKey[key]
+            if (existing) {
+                existing.labels = existing.labels.concat(entry.labels.filter(label => !existing.labels.includes(label)))
+                continue
+            }
+            byKey[key] = { zone: entry.zone, kind: entry.kind, labels: entry.labels.slice(), approximationTexts: entry.approximationTexts }
+            entries.push(byKey[key])
+        }
+        return entries
+    }
+
+    function _restricted(restriction) {
+        return _entries(GeoZoneMissionCheck.Crossed).filter(entry => entry.zone.restriction === restriction)
+    }
+
+    /// Names of the entries' zones, with the paths only entering them like "the loiter at item 3"
+    function _names(entries) {
+        return entries.map(entry => entry.labels.length > 0 && !(entry.kind & GeoZoneMissionCheck.Contingency) ?
+                               qsTr("%1 (only %2)").arg(entry.zone.displayName).arg(entry.labels.join(", ")) : entry.zone.displayName).join(", ")
+    }
+
+    // One line of counts, the most severe first: [ text, restriction for a dot in its color or -1 ]
+    readonly property var _summaryParts: {
+        const parts = []
+        const add = (count, text, restriction) => {
+            if (count > 0) {
+                parts.push([ text, restriction ])
+            }
+        }
+        const count = kind => _entries(kind).length
+        add(_restricted(GeoZone.Prohibited).length, qsTr("%n prohibited", "", _restricted(GeoZone.Prohibited).length), GeoZone.Prohibited)
+        add(_restricted(GeoZone.ReqAuthorisation).length, qsTr("%n authorisation required", "", _restricted(GeoZone.ReqAuthorisation).length), GeoZone.ReqAuthorisation)
+        add(_restricted(GeoZone.Conditional).length, qsTr("%n conditional", "", _restricted(GeoZone.Conditional).length), GeoZone.Conditional)
+        add(_restricted(GeoZone.Unknown).length, qsTr("%n unknown restriction", "", _restricted(GeoZone.Unknown).length), GeoZone.Unknown)
+        add(count(GeoZoneMissionCheck.Unfenced), qsTr("%n not fenced", "", count(GeoZoneMissionCheck.Unfenced)), -1)
+        add(count(GeoZoneMissionCheck.Contingency), qsTr("returns enter %n zone(s)", "", count(GeoZoneMissionCheck.Contingency)), -1)
+        add(check.auditText !== "" ? 1 : 0, qsTr("data changed"), -1)
+        add(_outdatedText !== "" ? 1 : 0, qsTr("data may be outdated"), -1)
+        add(_pendingAuthorisations.length, qsTr("%n authorisation(s) in the plan", "", _pendingAuthorisations.length), -1)
+        add(count(GeoZoneMissionCheck.USpace), qsTr("%n U-space", "", count(GeoZoneMissionCheck.USpace)), GeoZone.USpace)
+        add(count(GeoZoneMissionCheck.Authorised), qsTr("%n authorised", "", count(GeoZoneMissionCheck.Authorised)), -1)
+        add(count(GeoZoneMissionCheck.Permitted), qsTr("%n without restriction", "", count(GeoZoneMissionCheck.Permitted)), GeoZone.NoRestriction)
+        add(count(GeoZoneMissionCheck.Inactive), qsTr("%n inactive at the flight time", "", count(GeoZoneMissionCheck.Inactive)), -1)
+        add(parts.length === 0 && _checkedMission ? 1 : 0, qsTr("No geozones on the mission path"), -1)
+        return parts
+    }
+
+    // Counts only, no texts from the files, with a dot in the color of the restriction
+    readonly property string _summaryText: _summaryParts.map(part => part[1] < 0 ? part[0] :
+                                                                 "<font color=\"%1\">\u25CF</font>&nbsp;%2".arg(GeoZoneStyle.restrictionColor(part[1])).arg(part[0]))
+                                                        .join(" \u00B7 ")
 
     /// Asks for confirmation before uploading a mission which enters prohibited zones without authorisation, or whose
     /// geozone data changed since the plan was saved, listing why, then calls uploadFunction unless cancelled
@@ -153,173 +229,283 @@ Rectangle {
         geoFenceController: control.geoFenceController
     }
 
+    // A category of the details: a dot in the color of the restriction, a title and the names of the zones
+    component Category: RowLayout {
+        id:         category
+        spacing:    control._margin / 2
+        visible:    text !== ""
+
+        property string title
+        property string text
+        property int    restriction:    -1
+        property bool   warning:        false
+
+        Rectangle {
+            Layout.alignment:       Qt.AlignTop
+            Layout.topMargin:       (ScreenTools.defaultFontPixelHeight - height) / 2
+            Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.6
+            Layout.preferredHeight: Layout.preferredWidth
+            radius:                 width / 2
+            color:                  category.restriction < 0 ? "transparent" : GeoZoneStyle.restrictionColor(category.restriction)
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            textFormat:         Text.PlainText
+            color:              category.warning ? qgcPal.warningText : qgcPal.text
+            text:               category.title + ": " + category.text
+        }
+    }
+
     Column {
         id:                 column
         anchors.centerIn:   parent
         width:              parent.width - (_margin * 2)
+        spacing:            control._margin / 2
 
         QGCLabel {
-            id:                     warningLabel
+            id:                     summaryLabel
             width:                  parent.width
             wrapMode:               Text.WordWrap
             horizontalAlignment:    Text.AlignHCenter
-            color:                  qgcPal.warningText
-            text:                   check.warningText
-            textFormat:             Text.PlainText
-            visible:                text !== ""
+            textFormat:             Text.StyledText
+            color:                  control._attention ? qgcPal.warningText : qgcPal.text
+            text:                   control._summaryText
         }
 
-        // Returns from along the mission after a failsafe or a fence breach, less likely than the planned path
-        QGCLabel {
-            id:                     contingencyLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            text:                   check.contingencyText
-            textFormat:             Text.PlainText
-            visible:                text !== ""
-        }
-
-        QGCLabel {
-            id:                     outdatedLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            color:                  qgcPal.warningText
-            text:                   control._outdatedText
-            textFormat:             Text.PlainText
-            visible:                text !== ""
-        }
-
-        // The zones or sources changed since the plan was saved
-        QGCLabel {
-            id:                     auditLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            color:                  qgcPal.warningText
-            text:                   check.auditText
-            textFormat:             Text.PlainText
-            visible:                text !== ""
-        }
-
-        Row {
+        Flow {
+            id:                         actionFlow
             anchors.horizontalCenter:   parent.horizontalCenter
-            spacing:                    control._margin
-            visible:                    auditLabel.visible
-
-            QGCButton {
-                text:       qsTr("Details")
-                onClicked:  mainWindow.showMessageDialog(qsTr("Geozone Data Changes"), control._plainText(check.auditDetails.join("\n")))
-            }
-
-            QGCButton {
-                text:       qsTr("Acknowledge")
-                onClicked:  check.acknowledgeAudit()
-            }
-        }
-
-        QGCLabel {
-            id:                     infoLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            text:                   check.infoText
-            textFormat:             Text.PlainText
-            visible:                text !== ""
-        }
-
-        QGCLabel {
-            id:                     plannedLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            font.pointSize:         ScreenTools.smallFontPointSize
-            text:                   qsTr("Checked for a flight starting %1 (local time)").arg(Qt.formatDateTime(GeoZoneManager.planning.plannedStart, "yyyy-MM-dd HH:mm"))
-            visible:                !isNaN(GeoZoneManager.planning.plannedStart.getTime())
-        }
-
-        QGCLabel {
-            id:                     fenceLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            textFormat:             Text.PlainText
-            color:                  qgcPal.warningText
-            text:                   check.fenceText
-            visible:                text !== ""
-        }
-
-        // Authorisations of an opened plan are the operator's choice to add
-        QGCLabel {
-            id:                     pendingLabel
-            width:                  parent.width
-            wrapMode:               Text.WordWrap
-            horizontalAlignment:    Text.AlignHCenter
-            textFormat:             Text.PlainText
-            text:                   qsTr("The plan includes authorisations: %1. Add them to your authorisations?")
-                                        .arg(control._pendingAuthorisations.map(authorisation => authorisation.permit !== "" ?
-                                                qsTr("%1 (permit %2, %3)").arg(authorisation.zoneName).arg(authorisation.permit).arg(authorisation.statusText) :
-                                                qsTr("%1 (%2)").arg(authorisation.zoneName).arg(authorisation.statusText)).join(", "))
-            visible:                control._pendingAuthorisations.length > 0
-        }
-
-        Row {
-            anchors.horizontalCenter:   parent.horizontalCenter
-            spacing:                    control._margin
-            visible:                    pendingLabel.visible
-
-            QGCButton {
-                text:       qsTr("Add")
-                onClicked:  GeoZoneManager.planning.authorisations.acceptPending()
-            }
-
-            QGCButton {
-                text:       qsTr("Ignore")
-                onClicked:  GeoZoneManager.planning.authorisations.dismissPending()
-            }
-        }
-
-        QGCButton {
-            anchors.horizontalCenter:   parent.horizontalCenter
-            text:                       qsTr("Add Exclusion Fences")
-            visible:                    fenceLabel.visible
-            onClicked:                  fenceImporter.addZones(control.zones(GeoZoneMissionCheck.Unfenced))
-        }
-
-        Row {
-            id:                         buttonRow
-            anchors.horizontalCenter:   parent.horizontalCenter
+            width:                      Math.min(control._actionsWidth, parent.width)
             spacing:                    control._margin
 
             QGCButton {
+                id:         routeButton
                 text:       qsTr("Route Around Zones...")
-                visible:    check.warningText !== ""
+                visible:    control.crossedZones.length > 0
                 onClicked:  routeDialogComponent.createObject(mainWindow, { missionController: control.missionController }).open()
             }
 
             QGCButton {
-                text:       qsTr("Export Briefing...")
-                onClicked:  control.exportBriefing()
+                id:         fenceButton
+                text:       qsTr("Add Exclusion Fences")
+                visible:    check.fenceText !== ""
+                onClicked:  fenceImporter.addZones(control.zones(GeoZoneMissionCheck.Unfenced))
             }
 
             QGCButton {
-                text:       qsTr("Export Operational Intent...")
-                onClicked:  control.exportOperationalIntent()
+                id:         exportButton
+                text:       qsTr("Export") + " \u25BE"
+                visible:    control._checkedMission
+                onClicked:  exportMenu.popup(exportButton, 0, exportButton.height)
+
+                QGCMenu {
+                    id: exportMenu
+
+                    QGCMenuItem {
+                        text:           qsTr("Geozone Briefing...")
+                        onTriggered:    control.exportBriefing()
+                    }
+
+                    QGCMenuItem {
+                        text:           qsTr("Operational Intent...")
+                        onTriggered:    control.exportOperationalIntent()
+                    }
+                }
+            }
+
+            QGCButton {
+                id:         detailsButton
+                text:       qsTr("Details") + (checked ? " \u25B4" : " \u25BE")
+                checkable:  true
+                visible:    check.zones.length > 0 || control._outdatedText !== "" || control._pendingAuthorisations.length > 0 || check.auditText !== ""
             }
         }
 
-        QGCLabel {
-            id:                     hintLabel
-            width:                  parent.width
-            horizontalAlignment:    Text.AlignHCenter
-            font.pointSize:         ScreenTools.smallFontPointSize
-            text:                   qsTr("Click to show the zones")
-            visible:                check.warningText !== ""
+        // The details scroll when they don't fit in about half the map
+        QGCFlickable {
+            id:             detailsFlickable
+            width:          parent.width
+            height:         Math.min(detailsColumn.height, control.map ? control.map.height / 2 : ScreenTools.defaultFontPixelHeight * 20)
+            contentHeight:  detailsColumn.height
+            clip:           true
+            visible:        detailsButton.checked && detailsButton.visible
+
+            Column {
+                id:         detailsColumn
+                width:      detailsFlickable.width
+                spacing:    control._margin / 2
+
+                Category {
+                    width:          parent.width
+                    title:          qsTr("Prohibited")
+                    restriction:    GeoZone.Prohibited
+                    warning:        true
+                    text:           control._names(control._restricted(GeoZone.Prohibited))
+                }
+
+                Category {
+                    width:          parent.width
+                    title:          qsTr("Authorisation required")
+                    restriction:    GeoZone.ReqAuthorisation
+                    warning:        true
+                    text:           control._names(control._restricted(GeoZone.ReqAuthorisation))
+                }
+
+                Category {
+                    width:          parent.width
+                    title:          qsTr("Conditional")
+                    restriction:    GeoZone.Conditional
+                    warning:        true
+                    text:           control._names(control._restricted(GeoZone.Conditional))
+                }
+
+                Category {
+                    width:          parent.width
+                    title:          qsTr("Unknown restriction")
+                    restriction:    GeoZone.Unknown
+                    warning:        true
+                    text:           control._names(control._restricted(GeoZone.Unknown))
+                }
+
+                // Why the check of the zones entered is approximate
+                Category {
+                    width:  parent.width
+                    title:  qsTr("Approximate")
+                    text:   control._entries(GeoZoneMissionCheck.Crossed).reduce((texts, entry) => texts.concat(entry.approximationTexts.filter(text => !texts.includes(text))), []).join("; ")
+                }
+
+                Category {
+                    width:      parent.width
+                    title:      qsTr("Not excluded by the GeoFence")
+                    warning:    true
+                    text:       control._names(control._entries(GeoZoneMissionCheck.Unfenced))
+                }
+
+                // One line per zone the returns from along the mission enter, with the returns and the items they start from
+                Repeater {
+                    model: control._entries(GeoZoneMissionCheck.Contingency)
+
+                    Category {
+                        width:          detailsColumn.width
+                        title:          qsTr("Returns enter %1").arg(modelData.zone.displayName)
+                        restriction:    modelData.zone.restriction
+                        text:           modelData.labels.join("; ")
+
+                        required property var modelData
+                    }
+                }
+
+                Category {
+                    width:          parent.width
+                    title:          qsTr("U-space")
+                    restriction:    GeoZone.USpace
+                    text:           control._entries(GeoZoneMissionCheck.USpace).length === 0 ? "" :
+                                        qsTr("%1. A flight authorisation from a U-space service provider is required.").arg(control._names(control._entries(GeoZoneMissionCheck.USpace)))
+                }
+
+                Category {
+                    width:  parent.width
+                    title:  qsTr("Authorised")
+                    text:   control._names(control._entries(GeoZoneMissionCheck.Authorised))
+                }
+
+                Category {
+                    width:          parent.width
+                    title:          qsTr("Without restriction")
+                    restriction:    GeoZone.NoRestriction
+                    text:           control._entries(GeoZoneMissionCheck.Permitted).length === 0 ? "" :
+                                        qsTr("%1. Check their conditions.").arg(control._names(control._entries(GeoZoneMissionCheck.Permitted)))
+                }
+
+                Category {
+                    width:  parent.width
+                    title:  qsTr("Not active at the flight time")
+                    text:   control._names(control._entries(GeoZoneMissionCheck.Inactive))
+                }
+
+                QGCLabel {
+                    width:      parent.width
+                    wrapMode:   Text.WordWrap
+                    textFormat: Text.PlainText
+                    color:      qgcPal.warningText
+                    text:       control._outdatedText
+                    visible:    text !== ""
+                }
+
+                // The zones or sources changed since the plan was saved
+                QGCLabel {
+                    width:      parent.width
+                    wrapMode:   Text.WordWrap
+                    textFormat: Text.PlainText
+                    color:      qgcPal.warningText
+                    text:       check.auditText
+                    visible:    text !== ""
+                }
+
+                Row {
+                    spacing:    control._margin
+                    visible:    check.auditText !== ""
+
+                    QGCButton {
+                        text:       qsTr("Changes")
+                        onClicked:  mainWindow.showMessageDialog(qsTr("Geozone Data Changes"), control._plainText(check.auditDetails.join("\n")))
+                    }
+
+                    QGCButton {
+                        text:       qsTr("Acknowledge")
+                        onClicked:  check.acknowledgeAudit()
+                    }
+                }
+
+                // Authorisations of an opened plan are the operator's choice to add
+                QGCLabel {
+                    width:      parent.width
+                    wrapMode:   Text.WordWrap
+                    textFormat: Text.PlainText
+                    text:       qsTr("The plan includes authorisations: %1. Add them to your authorisations?")
+                                    .arg(control._pendingAuthorisations.map(authorisation => authorisation.permit !== "" ?
+                                            qsTr("%1 (permit %2, %3)").arg(authorisation.zoneName).arg(authorisation.permit).arg(authorisation.statusText) :
+                                            qsTr("%1 (%2)").arg(authorisation.zoneName).arg(authorisation.statusText)).join(", "))
+                    visible:    control._pendingAuthorisations.length > 0
+                }
+
+                Row {
+                    spacing:    control._margin
+                    visible:    control._pendingAuthorisations.length > 0
+
+                    QGCButton {
+                        text:       qsTr("Add")
+                        onClicked:  GeoZoneManager.planning.authorisations.acceptPending()
+                    }
+
+                    QGCButton {
+                        text:       qsTr("Ignore")
+                        onClicked:  GeoZoneManager.planning.authorisations.dismissPending()
+                    }
+                }
+
+                QGCLabel {
+                    width:          parent.width
+                    wrapMode:       Text.WordWrap
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    text:           qsTr("Checked for a flight starting %1 (local time).").arg(Qt.formatDateTime(GeoZoneManager.planning.plannedStart, "yyyy-MM-dd HH:mm"))
+                    visible:        !isNaN(GeoZoneManager.planning.plannedStart.getTime())
+                }
+
+                QGCLabel {
+                    width:          parent.width
+                    wrapMode:       Text.WordWrap
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    text:           qsTr("Click the banner to show the restricted zones on the map.")
+                    visible:        control.crossedZones.length > 0
+                }
+            }
         }
     }
 
-    // Below the column, so its button gets its clicks
+    // Below the column, so its buttons get their clicks
     QGCMouseArea {
         anchors.fill:   parent
         z:              -1

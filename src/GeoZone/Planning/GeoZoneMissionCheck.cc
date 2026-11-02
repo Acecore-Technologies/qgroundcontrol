@@ -276,7 +276,12 @@ QVariantList GeoZoneMissionCheck::zonesInfo() const
 {
     QVariantList list;
     for (const Entry &entry : _entries) {
-        list.append(QVariantMap{ { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(entry.zone)) }, { QStringLiteral("kind"), entry.kinds.toInt() } });
+        list.append(QVariantMap{
+            { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(entry.zone)) },
+            { QStringLiteral("kind"), entry.kinds.toInt() },
+            { QStringLiteral("labels"), entry.labels },
+            { QStringLiteral("approximationTexts"), GeoZonePathEvaluator::approximationTexts(entry.approximations) },
+        });
     }
     return list;
 }
