@@ -17,14 +17,20 @@ import QGroundControl.FactSystem
 import QGroundControl.FactControls
 import QGroundControl.Controls
 import QGroundControl.GeoZone
+import QGroundControl.ScreenTools
 
 SettingsPage {
     property var _geoZoneSettings: GeoZoneManager.settings
 
+    // Like the other settings pages, the groups don't stretch with their descriptions so labels stay near their values
+    readonly property real _groupWidth: ScreenTools.defaultFontPixelWidth * 80
+    readonly property real _fieldWidth: ScreenTools.defaultFontPixelWidth * 16
+
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Sources")
-        headingDescription: qsTr("Zones are shown on the maps, checked against missions and alerted in flight. Plan View > Fence > From Geozones... adds them as exclusion fences.")
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Sources")
+        headingDescription:     qsTr("Zones are shown on the maps, checked against missions and alerted in flight. Plan View > Fence > From Geozones... adds them as exclusion fences.")
 
         GeoZoneSourcesPanel {
             Layout.fillWidth: true
@@ -32,9 +38,10 @@ SettingsPage {
     }
 
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Authorisations")
-        headingDescription: qsTr("Zones you are authorised to fly in are left out of the mission check, flight alerts and guided command checks while the authorisation is valid.")
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Authorisations")
+        headingDescription:     qsTr("Zones you are authorised to fly in are left out of the mission check, flight alerts and guided command checks while the authorisation is valid.")
 
         GeoZoneAuthorisationsPanel {
             Layout.fillWidth: true
@@ -42,8 +49,9 @@ SettingsPage {
     }
 
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Display")
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Display")
 
         FactCheckBoxSlider {
             Layout.fillWidth:   true
@@ -54,9 +62,10 @@ SettingsPage {
     }
 
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Flight Alerts")
-        headingDescription: _geoZoneSettings.alertsEnabled.longDescription
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Flight Alerts")
+        headingDescription:     _geoZoneSettings.alertsEnabled.longDescription
 
         FactCheckBoxSlider {
             Layout.fillWidth:   true
@@ -82,42 +91,47 @@ SettingsPage {
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.alertLogRetentionDays
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.alertsEnabled.rawValue && _geoZoneSettings.logAlerts.rawValue
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.alertLogRetentionDays
+            visible:                 fact.visible
+            enabled:                 _geoZoneSettings.alertsEnabled.rawValue && _geoZoneSettings.logAlerts.rawValue
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.approachDistance
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.alertsEnabled.rawValue
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.approachDistance
+            visible:                 fact.visible
+            enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.approachVerticalDistance
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.alertsEnabled.rawValue
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.approachVerticalDistance
+            visible:                 fact.visible
+            enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.approachTime
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.alertsEnabled.rawValue
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.approachTime
+            visible:                 fact.visible
+            enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
     }
 
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Traffic")
-        headingDescription: _geoZoneSettings.trafficEnabled.longDescription
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Traffic")
+        headingDescription:     _geoZoneSettings.trafficEnabled.longDescription
 
         FactCheckBoxSlider {
             Layout.fillWidth:   true
@@ -127,101 +141,115 @@ SettingsPage {
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.trafficRadius
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.trafficEnabled.rawValue
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.trafficRadius
+            visible:                 fact.visible
+            enabled:                 _geoZoneSettings.trafficEnabled.rawValue
         }
 
         LabelledFactComboBox {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.trafficAlerts
-            indexModel:         false
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.trafficEnabled.rawValue && _geoZoneSettings.alertsEnabled.rawValue
+            Layout.fillWidth:        true
+            comboBoxPreferredWidth:  _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.trafficAlerts
+            indexModel:              false
+            visible:                 fact.visible
+            enabled:                 _geoZoneSettings.trafficEnabled.rawValue && _geoZoneSettings.alertsEnabled.rawValue
         }
     }
 
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Operational Intent Export")
-        headingDescription: qsTr("Export Operational Intent... in the Geozones panel of the Plan View writes the volumes of the planned flight for a U-space or UTM flight authorisation request. They contain the flight path with these buffers around it from the planned start.")
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Operational Intent Export")
+        headingDescription:     qsTr("Export Operational Intent... in the Geozones panel of the Plan View writes the volumes of the planned flight for a U-space or UTM flight authorisation request. They contain the flight path with these buffers around it from the planned start.")
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.intentHorizontalBuffer
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.intentHorizontalBuffer
+            visible:                 fact.visible
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.intentVerticalBuffer
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.intentVerticalBuffer
+            visible:                 fact.visible
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.intentTimeBuffer
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.intentTimeBuffer
+            visible:                 fact.visible
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.intentMaxVolumes
-            visible:            fact.visible
-        }
-    }
-
-    SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Altitude Limits")
-        headingDescription: _geoZoneSettings.qnhHPa.longDescription
-
-        LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.qnhHPa
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.intentMaxVolumes
+            visible:                 fact.visible
         }
     }
 
     SettingsGroupLayout {
-        Layout.fillWidth:   true
-        heading:            qsTr("Data Updates")
-        headingDescription: qsTr("Feeds are downloaded again periodically. Sources with older data are reported as outdated. Services taking an area download the zones around the planned mission and the active vehicle.")
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Altitude Limits")
+        headingDescription:     _geoZoneSettings.qnhHPa.longDescription
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.feedRefreshHours
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.qnhHPa
+            visible:                 fact.visible
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Data Updates")
+        headingDescription:     qsTr("Feeds are downloaded again periodically. Sources with older data are reported as outdated. Services taking an area download the zones around the planned mission and the active vehicle.")
+
+        LabelledFactTextField {
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.feedRefreshHours
+            visible:                 fact.visible
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.liveFeedRefreshMinutes
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.liveFeedRefreshMinutes
+            visible:                 fact.visible
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.staleDays
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.staleDays
+            visible:                 fact.visible
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.liveStaleHours
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.liveStaleHours
+            visible:                 fact.visible
         }
 
         FactCheckBoxSlider {
@@ -232,10 +260,11 @@ SettingsPage {
         }
 
         LabelledFactTextField {
-            Layout.fillWidth:   true
-            label:              fact.shortDescription
-            fact:               _geoZoneSettings.areaOfInterestMargin
-            visible:            fact.visible
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.areaOfInterestMargin
+            visible:                 fact.visible
         }
     }
 }
