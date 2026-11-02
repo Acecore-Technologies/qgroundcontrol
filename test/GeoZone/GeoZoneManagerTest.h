@@ -43,7 +43,7 @@ private slots:
     void _testOfflinePack();
     void _testPackServiceTrust();
     void _testStoredFileNames();
-    void _testCredentialStores();
+    void _testCredentials();
     void _testSignedPacks();
     void _testPacksWithoutSigning();
     void _testManagerStartup();

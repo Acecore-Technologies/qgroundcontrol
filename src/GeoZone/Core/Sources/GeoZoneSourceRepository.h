@@ -67,7 +67,7 @@ public:
     void addService(const QString &url, const GeoZoneService &service, const QString &secret, bool allowOtherOrigins = false);
     /// Replaces the secret of the service of a source and downloads it again
     void setSecret(const QString &key, const QString &secret);
-    /// Keeps the secrets of the services, in the application settings by default
+    /// Keeps the secrets of the services
     GeoZoneCredentials &credentials() { return _services.credentials(); }
 
     /// Sets the area of a planned mission, part of the area of interest of the services taking it, see

@@ -59,7 +59,6 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
     Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< See GeoZoneProviders::serviceTemplateList
-    Q_PROPERTY(QString              credentialStoreName READ credentialStoreName CONSTANT FINAL)    ///< Where the secrets of the services are kept, see GeoZoneCredentials
     Q_PROPERTY(bool                 packSigningAvailable READ packSigningAvailable CONSTANT FINAL)  ///< The build can sign packs and check their signatures
     Q_PROPERTY(QString              packPublicKey       READ packPublicKey      NOTIFY packSigningChanged FINAL)   ///< Base64 public key of the pack signing key, empty without
     Q_PROPERTY(QString              packKeyId           READ packKeyId          NOTIFY packSigningChanged FINAL)   ///< See GeoZonePackSignature::keyId
@@ -198,7 +197,6 @@ public:
     /// See GeoZoneProviders::areaProviders
     static QVariantList areaProviders() { return GeoZoneProviders::areaProviders(); }
     static QVariantList serviceTemplates() { return GeoZoneProviders::serviceTemplateList(); }
-    static QString credentialStoreName() { return GeoZoneCredentials::storeName(); }
     static bool packSigningAvailable() { return GeoZonePackSignature::available(); }
     QString packPublicKey() const;
     QString packKeyId() const;
