@@ -685,6 +685,7 @@ void GeoZoneManagerTest::_testFeedCancellation()
     QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), downloadPath));
     GeoZoneLoader::Job job = GeoZoneLoader::feedJob(url);
     job.sourcePath = downloadPath;
+    job.storedFileName = GeoZoneStore::newFileName(downloadPath);
     job.downloaded = true;
     job.cancelToken.cancel();
     const GeoZoneLoader::Result loadResult = GeoZoneLoader::run(job, GeoZoneStore(storageDir.path()));

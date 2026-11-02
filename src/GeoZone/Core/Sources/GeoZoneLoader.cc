@@ -73,8 +73,8 @@ GeoZoneLoader::Job GeoZoneLoader::feedJob(const QString &url)
         const QFileInfo info(parsedUrl.toLocalFile());
         job.sourcePath = info.filePath();
         job.fileDate = info.lastModified().toUTC();
+        job.storedFileName = GeoZoneStore::newFileName(job.sourcePath);
     }
-    job.storedFileName = GeoZoneStore::newFileName(job.sourcePath);
     return job;
 }
 

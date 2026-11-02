@@ -77,7 +77,8 @@ public:
     /// @return Key of the source of a file: its canonical path, so that files with the same name in different
     ///         folders are separate sources
     static QString fileKey(const QString &fileName);
-    /// @return Job loading a feed, from downloaded data or, for file: URLs, from the file in place
+    /// @return Job loading a feed, from downloaded data or, for file: URLs, from the file in place. The source path and
+    ///         stored file name of downloads are those of the download, see downloadJob.
     static Job feedJob(const QString &url);
     /// @return Job loading a feed downloaded by a fetch, with its validators, area and provenance
     static Job downloadJob(const GeoZoneFeedFetch::Request &request, const GeoZoneFeedFetch::Result &result);

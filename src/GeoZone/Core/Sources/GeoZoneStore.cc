@@ -52,7 +52,7 @@ QString GeoZoneStore::newFileName(const QString &sourcePath)
 QString GeoZoneStore::fileSuffix(const QString &filePath)
 {
     QFile file(filePath);
-    QByteArray head = file.open(QIODevice::ReadOnly) ? file.read(1024) : QByteArray();
+    QByteArray head = (!filePath.isEmpty() && file.open(QIODevice::ReadOnly)) ? file.read(1024) : QByteArray();
     if (head.startsWith("PK\x03\x04")) {
         return QStringLiteral("zip");
     }

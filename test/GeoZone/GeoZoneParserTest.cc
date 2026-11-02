@@ -1781,4 +1781,9 @@ void GeoZoneParserTest::_testParseCacheValidation()
     store.removeFile(QStringLiteral("zones.json"));
     QVERIFY(!QFile::exists(cachePath));
     QVERIFY(QDir(dir.path()).entryList(QDir::Files).isEmpty());
+
+    // Feeds from servers have no file to read before their download, which names the stored copy
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("No file name specified")));
+    QVERIFY(GeoZoneLoader::feedJob(QStringLiteral("https://example.com/zones.json")).storedFileName.isEmpty());
+    QCOMPARE(GeoZoneStore::fileSuffix(QString()), QStringLiteral("json"));
 }
