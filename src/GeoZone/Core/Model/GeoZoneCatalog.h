@@ -69,9 +69,13 @@ public:
     /// @return Zones whose horizontal projection contains the coordinate, the active and most restrictive first
     QList<const GeoZone*> zonesAt(const QGeoCoordinate &coordinate) const;
 
-    /// @return Zones whose name or identifier contains the text ignoring case, those starting with it first,
-    ///         then the most restrictive, limited to maxResults
+    /// @return Zones whose name or identifier contains the text ignoring case and diacritics (see searchKey), those
+    ///         starting with it first, then the most restrictive, limited to maxResults. Zones with the same identifier,
+    ///         name and restriction, like the same zone from overlapping sources, are found once.
     QList<const GeoZone*> search(const QString &text, int maxResults) const;
+    /// @return The text case folded without diacritics, like "zurich" for "Zürich", so that names match however
+    ///         their accents are typed
+    static QString searchKey(const QString &text);
 
     /// @return Zones accepted by the policy whose bounding box intersects the area. An invalid area matches all zones.
     QList<const GeoZone*> zonesInArea(const GeoZoneBox &area, const GeoZonePolicy &policy) const;

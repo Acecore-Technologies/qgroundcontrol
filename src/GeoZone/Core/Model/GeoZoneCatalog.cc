@@ -12,6 +12,7 @@
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QSet>
 
 #include <algorithm>
@@ -171,9 +172,41 @@ QList<const GeoZone*> GeoZoneCatalog::zonesAt(const QGeoCoordinate &coordinate) 
     return zones;
 }
 
+QString GeoZoneCatalog::searchKey(const QString &text)
+{
+    const bool ascii = std::all_of(text.cbegin(), text.cend(), [](QChar c) { return c.unicode() < 0x80; });
+    if (ascii) {
+        return text.toCaseFolded();
+    }
+    // Letters which don't decompose into a base letter and marks
+    static const QHash<QChar, QString> letters = {
+        { QChar(0x00DF), QStringLiteral("ss") }, { QChar(0x00E6), QStringLiteral("ae") }, { QChar(0x00C6), QStringLiteral("ae") },
+        { QChar(0x00F8), QStringLiteral("o") }, { QChar(0x00D8), QStringLiteral("o") }, { QChar(0x0153), QStringLiteral("oe") },
+        { QChar(0x0152), QStringLiteral("oe") }, { QChar(0x0142), QStringLiteral("l") }, { QChar(0x0141), QStringLiteral("l") },
+        { QChar(0x0111), QStringLiteral("d") }, { QChar(0x0110), QStringLiteral("d") }, { QChar(0x00F0), QStringLiteral("d") },
+        { QChar(0x00D0), QStringLiteral("d") }, { QChar(0x00FE), QStringLiteral("th") }, { QChar(0x00DE), QStringLiteral("th") },
+        { QChar(0x0131), QStringLiteral("i") },
+    };
+    const QString decomposed = text.normalized(QString::NormalizationForm_D);
+    QString key;
+    key.reserve(decomposed.size());
+    for (const QChar c : decomposed) {
+        if (c.category() == QChar::Mark_NonSpacing) {
+            continue;
+        }
+        const auto letter = letters.constFind(c);
+        if (letter != letters.cend()) {
+            key += letter.value();
+        } else {
+            key += c;
+        }
+    }
+    return key.toCaseFolded();
+}
+
 QList<const GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults) const
 {
-    const QString query = text.trimmed();
+    const QString query = searchKey(text.trimmed());
     if (query.isEmpty() || (maxResults <= 0)) {
         return {};
     }
@@ -183,13 +216,21 @@ QList<const GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults
         bool prefix;
     };
     QList<Match> matches;
+    // The same zone from overlapping sources is found once
+    QSet<QString> found;
     for (const GeoZone *zone : _data->zones) {
-        const QString name = zone->displayName();
-        if (name.startsWith(query, Qt::CaseInsensitive) || zone->identifier().startsWith(query, Qt::CaseInsensitive)) {
-            matches.append({ zone, true });
-        } else if (name.contains(query, Qt::CaseInsensitive) || zone->identifier().contains(query, Qt::CaseInsensitive)) {
-            matches.append({ zone, false });
+        const QString name = searchKey(zone->displayName());
+        const QString identifier = searchKey(zone->identifier());
+        const bool prefix = name.startsWith(query) || identifier.startsWith(query);
+        if (!prefix && !name.contains(query) && !identifier.contains(query)) {
+            continue;
         }
+        const QString key = identifier + QChar(0x1F) + name + QChar(0x1F) + QString::number(static_cast<int>(zone->restriction()));
+        if (found.contains(key)) {
+            continue;
+        }
+        found.insert(key);
+        matches.append({ zone, prefix });
     }
     std::stable_sort(matches.begin(), matches.end(), [](const Match &a, const Match &b) {
         if (a.prefix != b.prefix) {

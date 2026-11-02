@@ -150,7 +150,7 @@ The filters are kept between sessions and apply to both views. They only change 
 
 Click a zone on the map to see its details (restriction, altitude limits in your units, applicability schedule, reason, message, responsible authority, exemptions, U-space class, other published properties and the source it was loaded from). Where zones overlap, choose the zone at the top of the details. In the Plan View this works when the click doesn't add a waypoint or rally point or select a fence. In the Fly View, when guided actions are available, the map click menu has **Geozones here**. From zoom level 12, zones centered in view also show a label with their restriction letter and name, which opens their details. Labels don't overlap each other or the mission items: where they would, the most restrictive zones are labelled first (prohibited, authorisation required, conditional, U-space, unknown), then the largest, and the others are left out until you zoom in. Zones without restriction are only labelled when the mission check or the flight alerts report them.
 
-To find a zone, type part of its name or identifier in the search field of the Plan View **Geozones** panel or the Fly View geozone indicator, then pick a result to move the map to the zone and show its details.
+To find a zone, type part of its name or identifier in the search field of the Plan View **Geozones** panel or the Fly View geozone indicator, then pick a result to move the map to the zone and show its details. Case and accents don't matter (_Zurich_ finds _Zürich_), and a zone loaded from several sources is listed once.
 When many small zones are in view, the smallest are left out until you zoom in, and the Plan View **Geozones** panel shows how many are hidden.
 
 ## Planning {#planning}

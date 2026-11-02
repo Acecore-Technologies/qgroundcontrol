@@ -13,6 +13,7 @@
 #include "GeoZoneAirac.h"
 #include "GeoZoneCredentials.h"
 #include "GeoZonePackSignature.h"
+#include "GeoZoneSearchModel.h"
 #include "GeoZoneSourceVersion.h"
 
 #include <QtCore/QCryptographicHash>
@@ -2786,7 +2787,7 @@ void GeoZoneManagerTest::_testZoneSearch()
 {
     const QGeoCoordinate center(47, 8);
     QJsonObject airport = _circleFeature(QStringLiteral("LSZH"), QStringLiteral("CONDITIONAL"), center, 2000);
-    airport[QStringLiteral("name")] = QStringLiteral("Zurich airport");
+    airport[QStringLiteral("name")] = QStringLiteral("Z\u00FCrich airport");
     QJsonObject prison = _circleFeature(QStringLiteral("GZW1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(500, 90), 300);
     prison[QStringLiteral("name")] = QStringLiteral("Prison Zurich West");
     QJsonObject far = _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(46, 7), 300);
@@ -2821,6 +2822,30 @@ void GeoZoneManagerTest::_testZoneSearch()
     QCOMPARE(identifiers(manager.searchZones(QStringLiteral("fa"))), QStringList({ QStringLiteral("FAR") }));
     QCOMPARE(manager.searchZones(QStringLiteral("zurich"), 1).count(), 1);
     QVERIFY(manager.searchZones(QStringLiteral("  ")).isEmpty());
+    // ignoring accents however they are typed
+    QCOMPARE(identifiers(manager.searchZones(QStringLiteral("Z\u00FCrich a"))), QStringList({ QStringLiteral("LSZH") }));
+    QCOMPARE(identifiers(manager.searchZones(QStringLiteral("zu\u0308rich a"))), QStringList({ QStringLiteral("LSZH") }));
+    QCOMPARE(GeoZoneCatalog::searchKey(QStringLiteral("\u00C9tang Tr\u00F8ndelag \u0141\u00F3d\u017A Stra\u00DFe")), QStringLiteral("etang trondelag lodz strasse"));
+
+    // The same zone from another source is found once, the results update with the zones
+    GeoZoneSearchModel searchModel(&manager);
+    searchModel.setDelay(0);
+    searchModel.setMaxResults(1);
+    searchModel.setText(QStringLiteral("zurich"));
+    QVERIFY(searchModel.pending());
+    QTRY_VERIFY(!searchModel.pending());
+    QCOMPARE(searchModel.count(), 1);
+    QVERIFY(searchModel.hasMore());
+    QCOMPARE(searchModel.data(searchModel.index(0), GeoZoneSearchModel::IdentifierRole).toString(), QStringLiteral("LSZH"));
+    searchModel.setMaxResults(8);
+    QCOMPARE(searchModel.count(), 2);
+    QVERIFY(!searchModel.hasMore());
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ airport }), errorString), qPrintable(errorString));
+    QCOMPARE(manager.zoneCount(), 4);
+    QCOMPARE(identifiers(manager.searchZones(QStringLiteral("zurich"))), QStringList({ QStringLiteral("LSZH"), QStringLiteral("GZW1") }));
+    QCOMPARE(searchModel.count(), 2);
+    manager.repository()->removeSource(1);
+    QCOMPARE(manager.zoneCount(), 3);
 
     QSignalSpy showSpy(&manager, &GeoZoneManager::showZoneRequested);
     manager.showZone(QVariant::fromValue(GeoZoneInfo(manager.zoneList().first())));
@@ -2844,6 +2869,7 @@ void GeoZoneManagerTest::_testZoneSearch()
     manager.repository()->clear();
     QCOMPARE(manager.zoneCount(), 0);
     QVERIFY(model.shapes().isEmpty());
+    QCOMPARE(searchModel.count(), 0);
     QVERIFY(prisonZone.value<GeoZoneInfo>().valid());
     QCOMPARE(prisonZone.value<GeoZoneInfo>().identifier(), QStringLiteral("GZW1"));
 }

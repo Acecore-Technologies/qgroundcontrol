@@ -26,6 +26,7 @@
 #include "GeoZoneParser.h"
 #include "GeoZoneProfile.h"
 #include "GeoZoneRoutePlanner.h"
+#include "GeoZoneSearchModel.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSource.h"
 #include "QGCApplication.h"
@@ -108,6 +109,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneSettings>(kUri, 1, 0, "GeoZoneSettings", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>(kUri, 1, 0, "GeoZoneMapModel");
+    (void) qmlRegisterType<GeoZoneSearchModel>(kUri, 1, 0, "GeoZoneSearchModel");
     (void) qmlRegisterType<GeoZoneMapLayer>(kUri, 1, 0, "GeoZoneMapLayer");
     (void) qmlRegisterType<GeoZoneMissionCheck>(kUri, 1, 0, "GeoZoneMissionCheck");
     (void) qmlRegisterType<GeoZoneBriefingExport>(kUri, 1, 0, "GeoZoneBriefingExport");

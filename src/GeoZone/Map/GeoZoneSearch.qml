@@ -18,7 +18,8 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Finds loaded geozones by name or identifier. Picking a result shows it on the visible map with its details.
+/// Finds loaded geozones by name or identifier, ignoring case and accents (see GeoZoneCatalog::search). Picking a
+/// result shows it on the visible map with its details.
 ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
@@ -29,11 +30,10 @@ ColumnLayout {
 
     readonly property var _geoZoneManager: GeoZoneManager
 
-    property var _results: []
-
-    function _search() {
-        // One more than shown, to tell that there are more matches
-        _results = _geoZoneManager.searchZones(searchField.text, maxResults + 1)
+    GeoZoneSearchModel {
+        id:         searchModel
+        text:       searchField.text
+        maxResults: root.maxResults
     }
 
     QGCTextField {
@@ -41,37 +41,33 @@ ColumnLayout {
         Layout.fillWidth:   true
         placeholderText:    qsTr("Find a geozone by name or identifier")
         enabled:            root._geoZoneManager.zoneCount > 0
-        onTextChanged:      searchTimer.restart()
-    }
-
-    Timer {
-        id:             searchTimer
-        interval:       300
-        onTriggered:    root._search()
-    }
-
-    // The zones change when sources are reloaded
-    Connections {
-        target:                     root._geoZoneManager
-        function onZonesChanged()   { root._search() }
     }
 
     QGCLabel {
         text:       qsTr("No geozones found")
-        visible:    searchField.text.trim() !== "" && root._results.length === 0 && !searchTimer.running
+        visible:    searchField.text.trim() !== "" && searchModel.count === 0 && !searchModel.pending
     }
 
-    Repeater {
-        model: root._results.slice(0, root.maxResults)
+    ListView {
+        Layout.fillWidth:       true
+        Layout.preferredHeight: contentHeight
+        interactive:            false
+        model:                  searchModel
+        visible:                count > 0
 
-        Rectangle {
-            id:                     resultRow
-            Layout.fillWidth:       true
-            Layout.preferredHeight: resultLayout.implicitHeight + ScreenTools.defaultFontPixelHeight / 4
-            color:                  resultMouseArea.containsMouse ? qgcPal.buttonHighlight : "transparent"
-            radius:                 ScreenTools.defaultFontPixelHeight / 4
+        delegate: Rectangle {
+            id:         resultRow
+            width:      ListView.view.width
+            height:     Math.max(resultLayout.implicitHeight + ScreenTools.defaultFontPixelHeight / 4, ScreenTools.implicitButtonHeight)
+            color:      resultMouseArea.containsMouse ? qgcPal.buttonHighlight : "transparent"
+            radius:     ScreenTools.defaultFontPixelHeight / 4
 
-            required property var modelData
+            required property var       zone
+            required property string    displayName
+            required property string    identifier
+            required property int       restriction
+            required property string    restrictionText
+            required property int       sourceCount
 
             RowLayout {
                 id:                     resultLayout
@@ -85,7 +81,7 @@ ColumnLayout {
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
                     Layout.preferredHeight: Layout.preferredWidth
                     radius:                 width / 2
-                    color:                  GeoZoneStyle.restrictionColor(resultRow.modelData.restriction)
+                    color:                  GeoZoneStyle.restrictionColor(resultRow.restriction)
                 }
 
                 ColumnLayout {
@@ -94,15 +90,15 @@ ColumnLayout {
 
                     QGCLabel {
                         Layout.fillWidth:   true
-                        text:               resultRow.modelData.displayName
+                        text:               resultRow.displayName
                         textFormat:         Text.PlainText
                         elide:              Text.ElideRight
                     }
 
                     QGCLabel {
                         Layout.fillWidth:   true
-                        text:               resultRow.modelData.identifier + " - " + resultRow.modelData.restrictionText +
-                                                (resultRow.modelData.sourceCount > 1 ? " · " + qsTr("%n source(s)", "", resultRow.modelData.sourceCount) : "")
+                        text:               resultRow.identifier + " - " + resultRow.restrictionText +
+                                                (resultRow.sourceCount > 1 ? " · " + qsTr("%n source(s)", "", resultRow.sourceCount) : "")
                         textFormat:         Text.PlainText
                         elide:              Text.ElideRight
                         font.pointSize:     ScreenTools.smallFontPointSize
@@ -115,7 +111,7 @@ ColumnLayout {
                 anchors.fill:   parent
                 hoverEnabled:   true
                 onClicked: {
-                    root._geoZoneManager.showZone(resultRow.modelData)
+                    root._geoZoneManager.showZone(resultRow.zone)
                     root.zoneSelected()
                 }
             }
@@ -124,7 +120,7 @@ ColumnLayout {
 
     QGCLabel {
         text:           qsTr("More zones match, refine the search")
-        visible:        root._results.length > root.maxResults
+        visible:        searchModel.hasMore
         font.pointSize: ScreenTools.smallFontPointSize
     }
 
