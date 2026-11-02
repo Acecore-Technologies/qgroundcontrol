@@ -144,6 +144,8 @@ QVariant GeoZoneFenceChoiceModel::data(const QModelIndex &index, int role) const
         return row.selected;
     case IncludedRole:
         return row.included;
+    case IncludableRole:
+        return row.includable;
     case ReasonRole:
         return row.reason;
     default:
@@ -163,6 +165,7 @@ QHash<int, QByteArray> GeoZoneFenceChoiceModel::roleNames() const
         { SimplifyToleranceRole,    "simplifyTolerance" },
         { SelectedRole,             "selected" },
         { IncludedRole,             "included" },
+        { IncludableRole,           "includable" },
         { ReasonRole,               "reason" },
     };
 }

@@ -649,13 +649,27 @@ void GeoZoneGeometryTest::_testFenceSelection()
     QCOMPARE(choiceOf(overflown).status, Status::Excluded);
     QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
     QCOMPARE(choiceOf(duplicate).duplicateOf, farProhibited);
+    QVERIFY(choiceOf(duplicate).duplicateSelected);
+    QVERIFY(!choiceOf(duplicate).includable());
+    QVERIFY(choiceOf(nearConditional).includable());
     QCOMPARE(choiceOf(nearConditional).status, Status::NoRoom);
     QCOMPARE(choiceOf(nearConditional).usage.items, 12);
     for (const Choice &choice : selection.choices) {
         QCOMPARE(statusText(choice).isEmpty(), choice.status == Status::Selected);
         QCOMPARE(choice.fences.isEmpty(), choice.status != Status::Selected);
     }
-    QVERIFY(statusText(choiceOf(duplicate)).contains(QStringLiteral("Prohibited far")));
+    QVERIFY(statusText(choiceOf(duplicate)).contains(QStringLiteral("Prohibited far, covered by its fence")));
+
+    // Leaving out a zone leaves out the zones with its area, which follow it instead of taking its place
+    QList<Candidate> withoutFar = candidateList;
+    for (Candidate &candidate : withoutFar) {
+        candidate.excluded = candidate.excluded || (candidate.zone == farProhibited);
+    }
+    selection = select(withoutFar, Capacity::px4());
+    QCOMPARE(choiceOf(farProhibited).status, Status::Excluded);
+    QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
+    QVERIFY(!choiceOf(duplicate).duplicateSelected);
+    QVERIFY(statusText(choiceOf(duplicate)).contains(QStringLiteral("which is left out")));
 
     // Kept fences take room, and fences which don't fit even alone are too large
     Usage kept;
@@ -673,7 +687,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     userChoice.append(leftOut);
     selection = select(userChoice, Capacity::px4(), kept, { 0, 10, 25, 50 });
     QCOMPARE(choiceOf(uSpace).status, Status::Excluded);
-    QCOMPARE(statusText(choiceOf(uSpace)), QStringLiteral("Left out"));
+    QCOMPARE(statusText(choiceOf(uSpace)), QStringLiteral("Left out by you"));
     QCOMPARE(choiceOf(enteredRound).status, Status::Selected);
     QVERIFY(choiceOf(enteredRound).simplifyTolerance > 0);
     QVERIFY(choiceOf(enteredRound).usage.items < 40);

@@ -2095,7 +2095,8 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     const QVariantMap leftOut = choices.last().toMap();
     QCOMPARE(leftOut[QStringLiteral("key")].toString(), zones[0]->key());
     QVERIFY(!leftOut[QStringLiteral("included")].toBool());
-    QCOMPARE(leftOut[QStringLiteral("reason")].toString(), QStringLiteral("Left out"));
+    QCOMPARE(leftOut[QStringLiteral("reason")].toString(), QStringLiteral("Left out by you"));
+    QVERIFY(leftOut[QStringLiteral("includable")].toBool());
     importer.setZoneIncluded(zones[0]->key(), true);
     QCOMPARE(importer.selectedCount(), 3);
 

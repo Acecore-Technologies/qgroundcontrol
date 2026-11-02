@@ -412,6 +412,7 @@ Selection select(const Prepared &prepared, const Capacity &capacity, const Usage
                 const Choice &earlier = choices[it.value()];
                 if (zoneFences(earlier.candidate.zone) == zoneFences(candidate.zone)) {
                     choice.duplicateOf = earlier.candidate.zone;
+                    choice.duplicateSelected = earlier.status == Status::Selected;
                     break;
                 }
             }
@@ -494,7 +495,7 @@ QString statusText(const Choice &choice)
         if (choice.candidate.proximity == Proximity::Overflown) {
             return QCoreApplication::translate("GeoZoneFences", "The flight passes above or below it, its fence would stop the vehicle there");
         }
-        return QCoreApplication::translate("GeoZoneFences", "Left out");
+        return QCoreApplication::translate("GeoZoneFences", "Left out by you");
     case Status::NoRoom:
         return QCoreApplication::translate("GeoZoneFences", "No room left in the vehicle fence");
     case Status::TooLarge:
@@ -504,7 +505,10 @@ QString statusText(const Choice &choice)
     case Status::NoShape:
         return QCoreApplication::translate("GeoZoneFences", "No area to fence");
     case Status::Duplicate:
-        return QCoreApplication::translate("GeoZoneFences", "Same area as %1").arg(choice.duplicateOf ? choice.duplicateOf->displayName() : QString());
+        if (choice.duplicateSelected) {
+            return QCoreApplication::translate("GeoZoneFences", "Same area as %1, covered by its fence").arg(choice.duplicateOf ? choice.duplicateOf->displayName() : QString());
+        }
+        return QCoreApplication::translate("GeoZoneFences", "Same area as %1, which is left out").arg(choice.duplicateOf ? choice.duplicateOf->displayName() : QString());
     }
     return QString();
 }

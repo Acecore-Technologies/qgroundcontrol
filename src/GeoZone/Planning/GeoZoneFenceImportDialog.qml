@@ -125,15 +125,17 @@ QGCPopupDialog {
             required property real      simplifyTolerance
             required property bool      selected
             required property bool      included
+            required property bool      includable
             required property string    reason
 
+            // Include the zone if it fits. Zones without a fence of their own can't be included.
             QGCCheckBox {
-                checked:    choiceRow.included
-                enabled:    !control._uploading
+                checked:    choiceRow.includable && choiceRow.included
+                enabled:    choiceRow.includable && !control._uploading
                 onClicked: {
                     const included = checked
                     // Follows the zone again, which the importer updates right away
-                    checked = Qt.binding(() => choiceRow.included)
+                    checked = Qt.binding(() => choiceRow.includable && choiceRow.included)
                     importer.setZoneIncluded(choiceRow.key, included)
                 }
             }
@@ -296,6 +298,13 @@ QGCPopupDialog {
                 text:               _capacity.warning ?? ""
                 visible:            text !== ""
             }
+        }
+
+        QGCLabel {
+            Layout.preferredWidth:  _contentWidth
+            wrapMode:               Text.WordWrap
+            font.pointSize:         ScreenTools.smallFontPointSize
+            text:                   qsTr("Checked zones are included in priority order while they fit, unchecked zones are left out. Uncheck a zone to make room for the zones after it. Zones without a fence of their own, like those with the same area as a zone before them, follow that zone and can't be checked.")
         }
 
         RowLayout {

@@ -146,7 +146,13 @@ struct Choice {
     ZoneFences fences;              ///< Of selected zones
     double simplifyTolerance = 0;   ///< Of the fences
     Usage usage;                    ///< Of the fences, or at the largest tolerance for zones left out
-    const GeoZone *duplicateOf = nullptr;
+    const GeoZone *duplicateOf = nullptr;   ///< The zone before it in priority with the same fences
+    bool duplicateSelected = false;         ///< duplicateOf is selected, so that its fences cover the zone
+
+    /// @return false if the zone can't be included whatever the user chooses, since it adds no fence of its own: it
+    ///         has no area, has the same area as a zone before it, which it follows, or the vehicle stores no
+    ///         exclusion fences
+    bool includable() const { return (status != Status::NoShape) && (status != Status::Duplicate) && (status != Status::Unsupported); }
 };
 
 struct Selection {
@@ -185,6 +191,8 @@ Prepared prepare(const QList<Candidate> &candidates, const QList<double> &simpli
 /// Selects the zones whose fences fit into the capacity besides the reserved fences, in priority order, see
 /// sortedByPriority. Zones are added while they fit at the largest simplification tolerance, then the selected zones
 /// take the smallest tolerance which fits, in priority order. Simplified fences only grow, see zoneFences.
+/// Zones with the same fences as a zone before them are duplicates, whether that zone is selected or not, so that
+/// leaving out a zone leaves out its area.
 /// @param simplifyTolerances Ascending meters, 0 for unsimplified fences
 Selection select(const QList<Candidate> &candidates, const Capacity &capacity, const Usage &reserved = Usage(), const QList<double> &simplifyTolerances = { 0 });
 /// Same as select with the prepared candidates, prepared for the circles of the capacity

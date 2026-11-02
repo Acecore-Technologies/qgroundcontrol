@@ -472,6 +472,7 @@ GeoZoneFenceChoiceModel::Row GeoZoneFenceImporter::_row(const GeoZoneFences::Cho
     row.simplifyTolerance = choice.simplifyTolerance;
     row.selected = choice.status == GeoZoneFences::Status::Selected;
     row.included = !choice.candidate.excluded;
+    row.includable = choice.includable();
     row.reason = GeoZoneFences::statusText(choice);
     return row;
 }

@@ -14,7 +14,7 @@
 #include <QtCore/QVariantList>
 
 /// Zones of a fence selection, see GeoZoneFenceImporter, with roles key, name, restriction, restrictionText,
-/// proximityText, points, simplifyTolerance, selected, included and reason.
+/// proximityText, points, simplifyTolerance, selected, included, includable and reason.
 /// Rows keep their order relative to each other from one selection to the next, so rows are inserted, removed and
 /// updated in place: views keep their delegates and their scroll position while zones move between lists.
 class GeoZoneFenceChoiceModel : public QAbstractListModel
@@ -33,6 +33,7 @@ public:
         double simplifyTolerance = 0;   ///< Meters
         bool selected = false;
         bool included = true;           ///< Not left out by the user
+        bool includable = true;         ///< The user may include or leave out the zone, see GeoZoneFences::Choice::includable
         QString reason;                 ///< Why the zone is left out
 
         friend bool operator==(const Row &, const Row &) = default;
@@ -48,6 +49,7 @@ public:
         SimplifyToleranceRole,
         SelectedRole,
         IncludedRole,
+        IncludableRole,
         ReasonRole,
     };
 
