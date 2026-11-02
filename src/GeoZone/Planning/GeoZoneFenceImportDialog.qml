@@ -34,8 +34,6 @@ QGCPopupDialog {
     readonly property real  _margin:            ScreenTools.defaultFontPixelHeight / 2
     readonly property real  _contentWidth:      ScreenTools.defaultFontPixelWidth * 56
     readonly property var   _capacity:          importer.capacity
-    readonly property var   _selected:          importer.choices.filter(choice => choice.selected)
-    readonly property var   _leftOut:           importer.choices.filter(choice => !choice.selected)
     readonly property var   _upload:            importer.upload
     readonly property bool  _uploading:         _upload.busy
 
@@ -109,6 +107,7 @@ QGCPopupDialog {
         return parts.join(" · ")
     }
 
+    // Rows of GeoZoneFenceChoiceModel
     Component {
         id: choiceDelegate
 
@@ -117,19 +116,33 @@ QGCPopupDialog {
             width:      ListView.view ? ListView.view.width : implicitWidth
             spacing:    ScreenTools.defaultFontPixelWidth
 
-            required property var modelData
+            required property string    key
+            required property string    name
+            required property int       restriction
+            required property string    restrictionText
+            required property string    proximityText
+            required property int       points
+            required property real      simplifyTolerance
+            required property bool      selected
+            required property bool      included
+            required property string    reason
 
             QGCCheckBox {
-                checked:    choiceRow.modelData.included
+                checked:    choiceRow.included
                 enabled:    !control._uploading
-                onClicked:  importer.setZoneIncluded(choiceRow.modelData.key, checked)
+                onClicked: {
+                    const included = checked
+                    // Follows the zone again, which the importer updates right away
+                    checked = Qt.binding(() => choiceRow.included)
+                    importer.setZoneIncluded(choiceRow.key, included)
+                }
             }
 
             Rectangle {
                 Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
                 Layout.preferredHeight: Layout.preferredWidth
                 radius:                 width / 2
-                color:                  GeoZoneStyle.restrictionColor(choiceRow.modelData.restriction)
+                color:                  GeoZoneStyle.restrictionColor(choiceRow.restriction)
             }
 
             ColumnLayout {
@@ -138,18 +151,18 @@ QGCPopupDialog {
 
                 QGCLabel {
                     Layout.fillWidth:   true
-                    text:               choiceRow.modelData.name
+                    text:               choiceRow.name
                     textFormat:         Text.PlainText
                     elide:              Text.ElideRight
                 }
 
                 QGCLabel {
                     Layout.fillWidth:   true
-                    text:               control._choiceDetail(choiceRow.modelData)
+                    text:               control._choiceDetail(choiceRow)
                     textFormat:         Text.PlainText
                     elide:              Text.ElideRight
                     font.pointSize:     ScreenTools.smallFontPointSize
-                    color:              choiceRow.modelData.selected ? qgcPal.text : qgcPal.warningText
+                    color:              choiceRow.selected ? qgcPal.text : qgcPal.warningText
                 }
             }
         }
@@ -269,9 +282,20 @@ QGCPopupDialog {
             }
         }
 
-        QGCLabel {
-            text:       _selected.length > 0 ? qsTr("Selected zones (%1)").arg(_selected.length) : qsTr("No zones selected")
-            font.bold:  true
+        RowLayout {
+            Layout.preferredWidth:  _contentWidth
+            spacing:                _margin
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                text:               importer.selectedCount > 0 ? qsTr("Selected zones (%1)").arg(importer.selectedCount) : qsTr("No zones selected")
+                font.bold:          true
+            }
+
+            QGCLabel {
+                text:       qsTr("Selecting zones...")
+                visible:    importer.busy || selectionTimer.running
+            }
         }
 
         QGCListView {
@@ -279,15 +303,19 @@ QGCPopupDialog {
             Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 12)
             clip:                   true
             spacing:                ScreenTools.defaultFontPixelHeight / 4
-            model:                  _selected
-            visible:                _selected.length > 0
+            model:                  importer.selectedChoices
+            visible:                importer.selectedCount > 0
             delegate:               choiceDelegate
         }
 
         QGCLabel {
-            text:       qsTr("Left out (%1)").arg(_leftOut.length)
-            font.bold:  true
-            visible:    _leftOut.length > 0
+            Layout.preferredWidth:  _contentWidth
+            text:                   importer.leftOutCount > importer.leftOutChoices.count ?
+                                        qsTr("Left out (%1, the first %2 listed)").arg(importer.leftOutCount).arg(importer.leftOutChoices.count) :
+                                        qsTr("Left out (%1)").arg(importer.leftOutCount)
+            elide:                  Text.ElideRight
+            font.bold:              true
+            visible:                importer.leftOutCount > 0
         }
 
         QGCListView {
@@ -295,8 +323,8 @@ QGCPopupDialog {
             Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 8)
             clip:                   true
             spacing:                ScreenTools.defaultFontPixelHeight / 4
-            model:                  _leftOut
-            visible:                _leftOut.length > 0
+            model:                  importer.leftOutChoices
+            visible:                importer.leftOutCount > 0
             delegate:               choiceDelegate
         }
 
@@ -306,7 +334,7 @@ QGCPopupDialog {
 
             QGCButton {
                 text:       qsTr("Upload to Vehicle")
-                enabled:    _upload.canUpload && !control._uploading && _selected.length > 0
+                enabled:    _upload.canUpload && !control._uploading && importer.selectedCount > 0
                 onClicked: {
                     if (selectionTimer.running) {
                         selectionTimer.stop()

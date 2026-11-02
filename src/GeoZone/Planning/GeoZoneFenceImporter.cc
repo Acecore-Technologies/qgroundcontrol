@@ -15,6 +15,7 @@
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionWorker.h"
 #include "MissionController.h"
 #include "ParameterManager.h"
 #include "PlanMasterController.h"
@@ -29,12 +30,20 @@
 
 GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
     : QObject(parent)
+    , _worker(new GeoZoneMissionWorker(0, this))
+    , _selectedModel(new GeoZoneFenceChoiceModel(this))
+    , _leftOutModel(new GeoZoneFenceChoiceModel(this))
     , _upload(new GeoZoneFenceUpload(this))
 {
     (void) connect(GeoZoneManager::instance(), &GeoZoneManager::zonesChanged, this, [this]() {
         // The zones of the last selection may be gone
+        _worker->invalidate();
+        _setBusy(false);
         _zones.clear();
+        _prepared = Prepared();
         _selection = GeoZoneFences::Selection();
+        _selectedModel->setRows({});
+        _leftOutModel->setRows({});
         emit selectionChanged();
     });
 }
@@ -45,7 +54,12 @@ void GeoZoneFenceImporter::setGeoFenceController(GeoFenceController *geoFenceCon
         _geoFenceController = geoFenceController;
         _upload->setGeoFenceController(geoFenceController);
         _connectVehicle();
-        _select();
+        // The proximity of the zones depends on the plan's mission
+        if (_query || !_zones.isEmpty()) {
+            _prepareSelection(!_query);
+        } else {
+            _select();
+        }
         emit geoFenceControllerChanged();
     }
 }
@@ -72,11 +86,11 @@ void GeoZoneFenceImporter::_connectVehicle()
     PlanMasterController *const masterController = _geoFenceController->masterController();
     (void) connect(masterController, &PlanMasterController::managerVehicleChanged, _vehicleConnections, [this]() {
         _connectVehicle();
-        _select();
+        _updateCapacity();
     }, Qt::QueuedConnection);
     if (Vehicle *const vehicle = _vehicle()) {
         // The capacity and warnings depend on the parameters
-        (void) connect(vehicle->parameterManager(), &ParameterManager::parametersReadyChanged, _vehicleConnections, [this]() { _select(); });
+        (void) connect(vehicle->parameterManager(), &ParameterManager::parametersReadyChanged, _vehicleConnections, [this]() { _updateCapacity(); });
     }
 }
 
@@ -140,12 +154,22 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
         }
     }
 
-    select(GeoZoneManager::instance()->catalog().zonesInArea(area, GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo)), maxSimplifyTolerance);
+    _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo) };
+    _zones.clear();
+    _setSimplifyTolerances(maxSimplifyTolerance);
+    _prepareSelection(false);
 }
 
 void GeoZoneFenceImporter::select(const QList<const GeoZone*> &zones, double maxSimplifyTolerance)
 {
+    _query.reset();
     _zones = zones;
+    _setSimplifyTolerances(maxSimplifyTolerance);
+    _prepareSelection(true);
+}
+
+void GeoZoneFenceImporter::_setSimplifyTolerances(double maxSimplifyTolerance)
+{
     _simplifyTolerances.clear();
     for (const double tolerance : _simplifySteps) {
         if (tolerance <= maxSimplifyTolerance) {
@@ -155,7 +179,109 @@ void GeoZoneFenceImporter::select(const QList<const GeoZone*> &zones, double max
     if (_simplifyTolerances.last() < maxSimplifyTolerance) {
         _simplifyTolerances.append(maxSimplifyTolerance);
     }
+}
+
+void GeoZoneFenceImporter::_prepareSelection(bool now)
+{
+    if (!_geoFenceController) {
+        return;
+    }
+    _capacity = vehicleCapacity(_vehicle());
+
+    PrepareInput input;
+    input.catalog = GeoZoneManager::instance()->catalog();
+    input.query = _query;
+    input.zones = _zones;
+    input.now = GeoZoneEnvironment::currentDateTimeUtc();
+    input.simplifyTolerances = _simplifyTolerances;
+    input.circlesAsPolygons = !_capacity.circles;
+
+    // Proximity to the planned flight: its paths and the areas of its patterns, or the planned home without them
+    MissionController *const missionController = _geoFenceController->masterController() ? _geoFenceController->masterController()->missionController() : nullptr;
+    if (missionController && (_query || !_zones.isEmpty())) {
+        const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
+        input.paths = missionPath.evaluatorPaths();
+        input.areas = missionPath.areas();
+        for (const GeoZoneMissionPath::Segment &segment : missionPath.segments()) {
+            if (segment.isValid()) {
+                input.lines.append({ segment.from, segment.to });
+            }
+        }
+        for (const GeoZone::Area &area : std::as_const(input.areas)) {
+            if (!area.polygon.isEmpty()) {
+                input.lines.append(area.polygon);
+                input.lines.last().append(area.polygon.first());
+            }
+        }
+        if (input.lines.isEmpty() && missionController->plannedHomePosition().isValid()) {
+            input.lines.append({ missionController->plannedHomePosition() });
+        }
+    }
+
+    const auto apply = [this](const Prepared &prepared) {
+        _setBusy(false);
+        _applyPrepared(prepared);
+    };
+    if (now) {
+        _worker->runNow([input]() { return _prepare(input); }, apply);
+        _setBusy(false);
+    } else {
+        _worker->run([input]() { return _prepare(input); }, apply);
+        _setBusy(true);
+    }
+}
+
+GeoZoneFenceImporter::Prepared GeoZoneFenceImporter::_prepare(const PrepareInput &input)
+{
+    const QList<const GeoZone*> zones = input.query ? input.catalog.zonesInArea(input.query->area, input.query->policy) : input.zones;
+
+    QList<GeoZone::Restriction> restrictions;
+    for (const GeoZone *zone : zones) {
+        if (!restrictions.contains(zone->restriction())) {
+            restrictions.append(zone->restriction());
+        }
+    }
+    GeoZonePathEvaluator::Result evaluation;
+    if (!zones.isEmpty() && (!input.paths.isEmpty() || !input.areas.isEmpty())) {
+        const GeoZonePathEvaluator evaluator(input.catalog, GeoZonePolicy(restrictions), input.now);
+        evaluation = evaluator.evaluate(input.paths, input.areas);
+    }
+
+    Prepared prepared{ input.catalog, GeoZoneFences::prepare(GeoZoneFences::candidates(zones, evaluation, input.lines), input.simplifyTolerances, input.circlesAsPolygons) };
+    prepared.indexes.reserve(prepared.fences.entries.count());
+    for (qsizetype i = 0; i < prepared.fences.entries.count(); i++) {
+        prepared.indexes.insert(prepared.fences.entries[i].candidate.zone->key(), i);
+    }
+    return prepared;
+}
+
+void GeoZoneFenceImporter::_applyPrepared(const Prepared &prepared)
+{
+    _prepared = prepared;
+    for (auto it = _included.cbegin(); it != _included.cend(); ++it) {
+        const qsizetype index = _prepared.indexes.value(it.key(), -1);
+        if (index >= 0) {
+            _prepared.fences.entries[index].candidate.excluded = !it.value();
+        }
+    }
     _select();
+}
+
+void GeoZoneFenceImporter::_finishSelection()
+{
+    if ((_query || !_zones.isEmpty()) && (!_worker->settled() || (_prepared.fences.circlesAsPolygons != !vehicleCapacity(_vehicle()).circles))) {
+        _prepareSelection(true);
+    }
+}
+
+void GeoZoneFenceImporter::_updateCapacity()
+{
+    // Circles are prepared as polygons for vehicles without them
+    if ((_query || !_zones.isEmpty()) && (_prepared.fences.circlesAsPolygons != !vehicleCapacity(_vehicle()).circles)) {
+        _prepareSelection(!_query);
+    } else {
+        _select();
+    }
 }
 
 void GeoZoneFenceImporter::_select()
@@ -164,66 +290,40 @@ void GeoZoneFenceImporter::_select()
         return;
     }
 
-    // Proximity to the planned flight: its paths and the areas of its patterns, or the planned home without them
-    QList<GeoZonePathEvaluator::Path> paths;
-    QList<GeoZone::Area> areas;
-    QList<QList<QGeoCoordinate>> lines;
-    MissionController *const missionController = _geoFenceController->masterController() ? _geoFenceController->masterController()->missionController() : nullptr;
-    if (missionController && !_zones.isEmpty()) {
-        const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
-        paths = missionPath.evaluatorPaths();
-        areas = missionPath.areas();
-        for (const GeoZoneMissionPath::Segment &segment : missionPath.segments()) {
-            if (segment.isValid()) {
-                lines.append({ segment.from, segment.to });
-            }
-        }
-        for (const GeoZone::Area &area : std::as_const(areas)) {
-            if (!area.polygon.isEmpty()) {
-                lines.append(area.polygon);
-                lines.last().append(area.polygon.first());
-            }
-        }
-        if (lines.isEmpty() && missionController->plannedHomePosition().isValid()) {
-            lines.append({ missionController->plannedHomePosition() });
-        }
-    }
-
-    QList<GeoZone::Restriction> restrictions;
-    for (const GeoZone *zone : std::as_const(_zones)) {
-        if (!restrictions.contains(zone->restriction())) {
-            restrictions.append(zone->restriction());
-        }
-    }
-    GeoZonePathEvaluator::Result evaluation;
-    if (!paths.isEmpty() || !areas.isEmpty()) {
-        const GeoZonePathEvaluator evaluator(GeoZoneManager::instance()->catalog(), GeoZonePolicy(restrictions), GeoZoneEnvironment::currentDateTimeUtc());
-        evaluation = evaluator.evaluate(paths, areas);
-    }
-
-    QList<GeoZoneFences::Candidate> candidates = GeoZoneFences::candidates(_zones, evaluation, lines);
-    for (GeoZoneFences::Candidate &candidate : candidates) {
-        const auto included = _included.constFind(candidate.zone->key());
-        if (included != _included.cend()) {
-            candidate.excluded = !included.value();
-        }
-    }
-
     _capacity = vehicleCapacity(_vehicle());
-    _selection = GeoZoneFences::select(candidates, _capacity, keptUsage(_geoFenceController), _simplifyTolerances);
+    _selection = GeoZoneFences::select(_prepared.fences, _capacity, keptUsage(_geoFenceController));
+
+    QList<GeoZoneFenceChoiceModel::Row> selectedRows;
+    QList<GeoZoneFenceChoiceModel::Row> leftOutRows;
+    for (const GeoZoneFences::Choice &choice : std::as_const(_selection.choices)) {
+        if (choice.status == GeoZoneFences::Status::Selected) {
+            selectedRows.append(_row(choice));
+        } else if (leftOutRows.count() < maxListedChoices) {
+            leftOutRows.append(_row(choice));
+        } else {
+            break;
+        }
+    }
+    _selectedModel->setRows(selectedRows);
+    _leftOutModel->setRows(leftOutRows);
     emit selectionChanged();
 }
 
-int GeoZoneFenceImporter::selectedCount() const
+void GeoZoneFenceImporter::_setBusy(bool busy)
 {
-    return static_cast<int>(std::count_if(_selection.choices.cbegin(), _selection.choices.cend(), [](const GeoZoneFences::Choice &choice) {
-        return choice.status == GeoZoneFences::Status::Selected;
-    }));
+    if (busy != _busy) {
+        _busy = busy;
+        emit busyChanged();
+    }
 }
 
 void GeoZoneFenceImporter::setZoneIncluded(const QString &key, bool included)
 {
     _included.insert(key, included);
+    const qsizetype index = _prepared.indexes.value(key, -1);
+    if (index >= 0) {
+        _prepared.fences.entries[index].candidate.excluded = !included;
+    }
     _select();
 }
 
@@ -232,6 +332,7 @@ int GeoZoneFenceImporter::applySelection()
     if (!_geoFenceController) {
         return 0;
     }
+    _finishSelection();
     GeoZoneFenceTags::deleteFences(_geoFenceController, true /* geoZoneOnly */);
 
     Fences fences;
@@ -341,46 +442,43 @@ QVariantMap GeoZoneFenceImporter::capacityInfo() const
     };
 }
 
+GeoZoneFenceChoiceModel::Row GeoZoneFenceImporter::_row(const GeoZoneFences::Choice &choice) const
+{
+    const GeoZone *const zone = choice.candidate.zone;
+    QString proximity;
+    switch (choice.candidate.proximity) {
+    case GeoZoneFences::Proximity::Entered:
+        proximity = tr("Entered by the flight");
+        break;
+    case GeoZoneFences::Proximity::Overflown:
+        proximity = tr("Flown above or below");
+        break;
+    case GeoZoneFences::Proximity::Near:
+    case GeoZoneFences::Proximity::Far:
+        if (std::isfinite(choice.candidate.distance)) {
+            proximity = (choice.candidate.distance < 1000) ? tr("%1 m from the flight").arg(qRound(choice.candidate.distance))
+                                                           : tr("%1 km from the flight").arg(choice.candidate.distance / 1000, 0, 'f', 1);
+        }
+        break;
+    }
+
+    GeoZoneFenceChoiceModel::Row row;
+    row.key = zone->key();
+    row.name = zone->displayName();
+    row.restriction = static_cast<int>(zone->restriction());
+    row.restrictionText = zone->restrictionText();
+    row.proximityText = proximity;
+    row.points = choice.usage.items;
+    row.simplifyTolerance = choice.simplifyTolerance;
+    row.selected = choice.status == GeoZoneFences::Status::Selected;
+    row.included = !choice.candidate.excluded;
+    row.reason = GeoZoneFences::statusText(choice);
+    return row;
+}
+
 QVariantList GeoZoneFenceImporter::choicesInfo() const
 {
-    QVariantList list;
-    int leftOut = 0;
-    for (const GeoZoneFences::Choice &choice : _selection.choices) {
-        const bool selected = choice.status == GeoZoneFences::Status::Selected;
-        if (!selected && (++leftOut > maxListedChoices)) {
-            break;
-        }
-        const GeoZone *const zone = choice.candidate.zone;
-        QString proximity;
-        switch (choice.candidate.proximity) {
-        case GeoZoneFences::Proximity::Entered:
-            proximity = tr("Entered by the flight");
-            break;
-        case GeoZoneFences::Proximity::Overflown:
-            proximity = tr("Flown above or below");
-            break;
-        case GeoZoneFences::Proximity::Near:
-        case GeoZoneFences::Proximity::Far:
-            if (std::isfinite(choice.candidate.distance)) {
-                proximity = (choice.candidate.distance < 1000) ? tr("%1 m from the flight").arg(qRound(choice.candidate.distance))
-                                                               : tr("%1 km from the flight").arg(choice.candidate.distance / 1000, 0, 'f', 1);
-            }
-            break;
-        }
-        list.append(QVariantMap{
-            { QStringLiteral("key"),                zone->key() },
-            { QStringLiteral("name"),               zone->displayName() },
-            { QStringLiteral("restriction"),        static_cast<int>(zone->restriction()) },
-            { QStringLiteral("restrictionText"),    zone->restrictionText() },
-            { QStringLiteral("proximityText"),      proximity },
-            { QStringLiteral("points"),             choice.usage.items },
-            { QStringLiteral("simplifyTolerance"),  choice.simplifyTolerance },
-            { QStringLiteral("selected"),           selected },
-            { QStringLiteral("included"),           !choice.candidate.excluded },
-            { QStringLiteral("reason"),             GeoZoneFences::statusText(choice) },
-        });
-    }
-    return list;
+    return _selectedModel->toVariantList() + _leftOutModel->toVariantList();
 }
 
 namespace {

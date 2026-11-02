@@ -102,6 +102,7 @@ void registerQmlTypes()
     (void) qmlRegisterSingletonType<GeoZoneFenceTags>(kUri, 1, 0, "GeoZoneFenceTags", [](QQmlEngine*, QJSEngine*) -> QObject* { return new GeoZoneFenceTags(); });
     (void) qmlRegisterUncreatableType<GeoZoneFenceTag>(kUri, 1, 0, "GeoZoneFenceTag", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneFenceUpload>(kUri, 1, 0, "GeoZoneFenceUpload", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneFenceChoiceModel>(kUri, 1, 0, "GeoZoneFenceChoiceModel", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneActiveVehicleView>(kUri, 1, 0, "GeoZoneActiveVehicleView", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneTrafficMonitor>(kUri, 1, 0, "GeoZoneTrafficMonitor", "Reference only");

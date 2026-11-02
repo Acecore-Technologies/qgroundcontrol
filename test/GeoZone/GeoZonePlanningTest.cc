@@ -2098,6 +2098,38 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     QCOMPARE(leftOut[QStringLiteral("reason")].toString(), QStringLiteral("Left out"));
     importer.setZoneIncluded(zones[0]->key(), true);
     QCOMPARE(importer.selectedCount(), 3);
+
+    // Zones of the manager are prepared on the thread pool, and the lists change in place when zones are left out
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    const auto clearZones = qScopeGuard([manager]() { manager->clear(); });
+    QString errorString;
+    QVERIFY2(manager->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 300),
+        _circleFeature(QStringLiteral("B"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8.1), 300),
+        _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(50, 15), 300),
+    }), errorString), qPrintable(errorString));
+    QTRY_COMPARE(manager->zoneCount(), 3);
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(QGeoCoordinate(47.1, 7.9), QGeoCoordinate(46.9, 8.2)), -1, 25);
+    QVERIFY(importer.busy());
+    QTRY_VERIFY(!importer.busy());
+    QCOMPARE(importer.selectedCount(), 2);
+    QCOMPARE(importer.leftOutCount(), 0);
+    QSignalSpy resetSpy(importer.selectedChoices(), &QAbstractItemModel::modelReset);
+    QSignalSpy removedSpy(importer.selectedChoices(), &QAbstractItemModel::rowsRemoved);
+    const QString first = importer.selectedChoices()->rows().constFirst().key;
+    importer.setZoneIncluded(first, false);
+    QCOMPARE(importer.selectedCount(), 1);
+    QCOMPARE(importer.leftOutChoices()->rows().constFirst().key, first);
+    QCOMPARE(removedSpy.count(), 1);
+    QCOMPARE(resetSpy.count(), 0);
+    // Applying while the zones are prepared applies the selection of the new zones, leaving out those left out before
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), -1, 25);
+    QVERIFY(importer.busy());
+    QCOMPARE(importer.applySelection(), 2);
+    QVERIFY(!importer.busy());
+    QCOMPARE(importer.leftOutCount(), 1);
 }
 
 void GeoZonePlanningTest::_testGeoFenceUpload()

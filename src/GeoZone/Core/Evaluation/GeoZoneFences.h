@@ -162,11 +162,33 @@ struct Selection {
 ///         those with fewer fence items at the largest simplification
 QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances = { 0 }, bool circlesAsPolygons = false);
 
+/// Candidates in priority order with the fences of their zones measured: what selections need besides the capacity,
+/// the reserved fences and which candidates are excluded, so that selecting again is quick, like after the user
+/// includes or leaves out a zone
+struct Prepared {
+    struct Entry {
+        Candidate candidate;        ///< Its excluded flag may be changed between selections
+        Usage usage;                ///< Of the zone's fences at the largest simplification tolerance
+        size_t shapeHash = 0;       ///< Of the zone's unsimplified fences, to find duplicates
+        bool hasShape = false;      ///< Importing the zone adds fences
+    };
+
+    QList<Entry> entries;                       ///< In priority order, see sortedByPriority
+    QList<double> simplifyTolerances = { 0 };   ///< Ascending meters, 0 for unsimplified fences
+    bool circlesAsPolygons = false;
+};
+
+/// @param simplifyTolerances Ascending meters, 0 for unsimplified fences
+/// @param circlesAsPolygons For capacities without circles, see Capacity::circles
+Prepared prepare(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances = { 0 }, bool circlesAsPolygons = false);
+
 /// Selects the zones whose fences fit into the capacity besides the reserved fences, in priority order, see
 /// sortedByPriority. Zones are added while they fit at the largest simplification tolerance, then the selected zones
 /// take the smallest tolerance which fits, in priority order. Simplified fences only grow, see zoneFences.
 /// @param simplifyTolerances Ascending meters, 0 for unsimplified fences
 Selection select(const QList<Candidate> &candidates, const Capacity &capacity, const Usage &reserved = Usage(), const QList<double> &simplifyTolerances = { 0 });
+/// Same as select with the prepared candidates, prepared for the circles of the capacity
+Selection select(const Prepared &prepared, const Capacity &capacity, const Usage &reserved = Usage());
 
 /// @return Why the zone of the choice is left out, empty for selected zones
 QString statusText(const Choice &choice);

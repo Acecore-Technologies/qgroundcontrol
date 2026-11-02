@@ -329,28 +329,32 @@ size_t _fencesHash(const ZoneFences &fences)
 
 } // namespace
 
-QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances, bool circlesAsPolygons)
+Prepared prepare(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances, bool circlesAsPolygons)
 {
-    const double tolerance = simplifyTolerances.isEmpty() ? 0 : simplifyTolerances.last();
-    struct Keyed {
-        Candidate candidate;
-        int items = 0;
-    };
-    QList<Keyed> keyed;
-    keyed.reserve(candidates.count());
-    for (const Candidate &candidate : candidates) {
-        Usage usage;
-        usage.add(zoneFences(candidate.zone, tolerance, circlesAsPolygons));
-        keyed.append({ candidate, usage.items });
+    Prepared prepared;
+    if (!simplifyTolerances.isEmpty()) {
+        prepared.simplifyTolerances = simplifyTolerances;
     }
-    std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed &a, const Keyed &b) {
+    prepared.circlesAsPolygons = circlesAsPolygons;
+    const double tolerance = prepared.simplifyTolerances.last();
+
+    prepared.entries.reserve(candidates.count());
+    for (const Candidate &candidate : candidates) {
+        Prepared::Entry entry{ candidate };
+        entry.usage.add(zoneFences(candidate.zone, tolerance, circlesAsPolygons));
+        const ZoneFences original = zoneFences(candidate.zone);
+        entry.hasShape = !original.isEmpty();
+        entry.shapeHash = _fencesHash(original);
+        prepared.entries.append(entry);
+    }
+    std::stable_sort(prepared.entries.begin(), prepared.entries.end(), [](const Prepared::Entry &a, const Prepared::Entry &b) {
         const GeoZone *const zoneA = a.candidate.zone;
         const GeoZone *const zoneB = b.candidate.zone;
-        const auto key = [](const Keyed &keyed) {
-            const Candidate &candidate = keyed.candidate;
+        const auto key = [](const Prepared::Entry &entry) {
+            const Candidate &candidate = entry.candidate;
             return std::make_tuple(_tier(candidate.zone->restriction()), static_cast<int>(candidate.proximity),
                                    (candidate.proximity == Proximity::Far) ? candidate.distance : 0.0,
-                                   GeoZone::restrictionSeverity(candidate.zone->restriction()), keyed.items);
+                                   GeoZone::restrictionSeverity(candidate.zone->restriction()), entry.usage.items);
         };
         const auto keyA = key(a);
         const auto keyB = key(b);
@@ -359,9 +363,15 @@ QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QLis
         }
         return zoneA->displayName().localeAwareCompare(zoneB->displayName()) < 0;
     });
+    return prepared;
+}
+
+QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances, bool circlesAsPolygons)
+{
+    const Prepared prepared = prepare(candidates, simplifyTolerances, circlesAsPolygons);
     QList<Candidate> sorted;
-    sorted.reserve(keyed.count());
-    for (const Keyed &entry : std::as_const(keyed)) {
+    sorted.reserve(prepared.entries.count());
+    for (const Prepared::Entry &entry : prepared.entries) {
         sorted.append(entry.candidate);
     }
     return sorted;
@@ -380,32 +390,39 @@ QList<const GeoZone*> Selection::selectedZones() const
 
 Selection select(const QList<Candidate> &candidates, const Capacity &capacity, const Usage &reserved, const QList<double> &simplifyTolerances)
 {
-    const QList<double> tolerances = simplifyTolerances.isEmpty() ? QList<double>{ 0 } : simplifyTolerances;
+    return select(prepare(candidates, simplifyTolerances, !capacity.circles), capacity, reserved);
+}
+
+Selection select(const Prepared &prepared, const Capacity &capacity, const Usage &reserved)
+{
+    const QList<double> &tolerances = prepared.simplifyTolerances;
     const double largest = tolerances.last();
-    const bool circlesAsPolygons = !capacity.circles;
+    const bool circlesAsPolygons = prepared.circlesAsPolygons;
 
     QList<Choice> choices;
-    QMultiHash<size_t, qsizetype> shapes;   // Unsimplified fences of the zones before, to find duplicates
+    choices.reserve(prepared.entries.count());
+    QList<qsizetype> selected;
+    QMultiHash<size_t, qsizetype> shapes;   // Fences of the zones before, to find duplicates
     Usage usage = reserved;
-    for (const Candidate &candidate : sortedByPriority(candidates, tolerances, circlesAsPolygons)) {
+    for (const Prepared::Entry &entry : prepared.entries) {
+        const Candidate &candidate = entry.candidate;
         Choice choice{ candidate };
-        const ZoneFences original = zoneFences(candidate.zone);
-        const size_t hash = _fencesHash(original);
-        for (auto it = shapes.constFind(hash); (it != shapes.cend()) && (it.key() == hash); ++it) {
-            const Choice &earlier = choices[it.value()];
-            if (zoneFences(earlier.candidate.zone) == original) {
-                choice.duplicateOf = earlier.candidate.zone;
-                break;
+        if (entry.hasShape) {
+            for (auto it = shapes.constFind(entry.shapeHash); (it != shapes.cend()) && (it.key() == entry.shapeHash); ++it) {
+                const Choice &earlier = choices[it.value()];
+                if (zoneFences(earlier.candidate.zone) == zoneFences(candidate.zone)) {
+                    choice.duplicateOf = earlier.candidate.zone;
+                    break;
+                }
+            }
+            if (!choice.duplicateOf) {
+                shapes.insert(entry.shapeHash, choices.count());
             }
         }
-        if (!original.isEmpty() && !choice.duplicateOf) {
-            shapes.insert(hash, choices.count());
-        }
 
-        choice.fences = zoneFences(candidate.zone, largest, circlesAsPolygons);
         choice.simplifyTolerance = largest;
-        choice.usage.add(choice.fences);
-        if (original.isEmpty()) {
+        choice.usage = entry.usage;
+        if (!entry.hasShape) {
             choice.status = Status::NoShape;
         } else if (choice.duplicateOf) {
             choice.status = Status::Duplicate;
@@ -415,25 +432,24 @@ Selection select(const QList<Candidate> &candidates, const Capacity &capacity, c
             choice.status = Status::Unsupported;
         } else if (capacity.fits(usage + choice.usage)) {
             choice.status = Status::Selected;
+            choice.fences = zoneFences(candidate.zone, largest, circlesAsPolygons);
             usage += choice.usage;
+            selected.append(choices.count());
         } else {
             choice.status = capacity.fits(reserved + choice.usage) ? Status::NoRoom : Status::TooLarge;
-        }
-        if (choice.status != Status::Selected) {
-            choice.fences = ZoneFences();
         }
         choices.append(choice);
     }
 
     // The zones first in priority get the least simplified fences which fit
-    for (qsizetype i = 0; i < choices.count(); i++) {
-        Choice &choice = choices[i];
-        if ((choice.status != Status::Selected) || (tolerances.count() < 2)) {
-            continue;
+    for (const qsizetype i : std::as_const(selected)) {
+        if (tolerances.count() < 2) {
+            break;
         }
+        Choice &choice = choices[i];
         Usage others = reserved;
-        for (qsizetype j = 0; j < choices.count(); j++) {
-            if ((j != i) && (choices[j].status == Status::Selected)) {
+        for (const qsizetype j : std::as_const(selected)) {
+            if (j != i) {
                 others += choices[j].usage;
             }
         }
@@ -456,11 +472,10 @@ Selection select(const QList<Candidate> &candidates, const Capacity &capacity, c
     Selection selection;
     selection.reserved = reserved;
     selection.usage = reserved;
-    for (const Choice &choice : std::as_const(choices)) {
-        if (choice.status == Status::Selected) {
-            selection.usage += choice.usage;
-            selection.choices.append(choice);
-        }
+    selection.choices.reserve(choices.count());
+    for (const qsizetype i : std::as_const(selected)) {
+        selection.usage += choices[i].usage;
+        selection.choices.append(choices[i]);
     }
     for (const Choice &choice : std::as_const(choices)) {
         if (choice.status != Status::Selected) {
