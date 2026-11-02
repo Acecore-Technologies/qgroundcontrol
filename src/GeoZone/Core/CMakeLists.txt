@@ -1,6 +1,7 @@
-# Headless geozone library: zones and their geometry, the formats and parsers, the sources with their downloads and
-# storage, and the evaluation of positions and paths. It only depends on Qt, QGroundControl connects it to the
-# application through GeoZoneEnvironment.
+# Headless geozone library: zones and their geometry (Model), the formats and parsers (Formats), the sources with their
+# downloads and storage (Sources), the evaluation of positions and paths (Evaluation), the route search (Route), the
+# briefings and operational intents (Report) and the geoid (Geoid). It only depends on Qt, QGroundControl connects it to
+# the application through GeoZoneEnvironment.
 qt_add_library(GeoZoneCore STATIC
     GeoZoneCancelToken.h
     GeoZoneEnvironment.cc
@@ -12,8 +13,6 @@ qt_add_library(GeoZoneCore STATIC
     Model/GeoZoneCatalog.cc
     Model/GeoZoneCatalog.h
     Model/GeoZoneDataStream.h
-    Model/GeoZoneGeoid.cc
-    Model/GeoZoneGeoid.h
     Model/GeoZoneGeometry.h
     Model/GeoZoneGreatCircle.cc
     Model/GeoZoneGreatCircle.h
@@ -60,6 +59,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneAirac.h
     Sources/GeoZoneAreaOfInterest.cc
     Sources/GeoZoneAreaOfInterest.h
+    Sources/GeoZoneAuthorisations.cc
+    Sources/GeoZoneAuthorisations.h
     Sources/GeoZoneCredentials.cc
     Sources/GeoZoneCredentials.h
     Sources/GeoZoneDownloader.cc
@@ -94,43 +95,43 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneSourceIndex.h
     Sources/GeoZoneSourceRepository.cc
     Sources/GeoZoneSourceRepository.h
+    Sources/GeoZoneSourceVersion.cc
+    Sources/GeoZoneSourceVersion.h
     Sources/GeoZoneStore.cc
     Sources/GeoZoneStore.h
     Evaluation/GeoZoneAlertTracker.cc
     Evaluation/GeoZoneAlertTracker.h
-    Evaluation/GeoZoneAuthorisations.cc
-    Evaluation/GeoZoneAuthorisations.h
-    Evaluation/GeoZoneBriefing.cc
-    Evaluation/GeoZoneBriefing.h
     Evaluation/GeoZoneFences.cc
     Evaluation/GeoZoneFences.h
     Evaluation/GeoZoneMissionItem.h
-    Evaluation/GeoZoneOperationalIntent.cc
-    Evaluation/GeoZoneOperationalIntent.h
-    Evaluation/GeoZoneOperatorDetails.cc
-    Evaluation/GeoZoneOperatorDetails.h
     Evaluation/GeoZonePathEvaluator.cc
     Evaluation/GeoZonePathEvaluator.h
-    Evaluation/GeoZonePlanAudit.cc
-    Evaluation/GeoZonePlanAudit.h
-    Evaluation/GeoZoneReturnModel.cc
     Evaluation/GeoZoneReturnDestinations.cc
     Evaluation/GeoZoneReturnDestinations.h
+    Evaluation/GeoZoneReturnModel.cc
     Evaluation/GeoZoneReturnModel.h
-    Evaluation/GeoZoneRouteDetour.cc
-    Evaluation/GeoZoneRouteDetour.h
-    Evaluation/GeoZoneRouteGraph.cc
-    Evaluation/GeoZoneRouteGraph.h
-    Evaluation/GeoZoneRouteObstacles.cc
-    Evaluation/GeoZoneRouteObstacles.h
-    Evaluation/GeoZoneRouteSearch.cc
-    Evaluation/GeoZoneRouteSearch.h
-    Evaluation/GeoZoneRouteVertical.cc
-    Evaluation/GeoZoneRouteVertical.h
-    Evaluation/GeoZoneSourceVersion.cc
-    Evaluation/GeoZoneSourceVersion.h
     Evaluation/GeoZoneTerrain.cc
     Evaluation/GeoZoneTerrain.h
+    Route/GeoZoneRouteDetour.cc
+    Route/GeoZoneRouteDetour.h
+    Route/GeoZoneRouteGraph.cc
+    Route/GeoZoneRouteGraph.h
+    Route/GeoZoneRouteObstacles.cc
+    Route/GeoZoneRouteObstacles.h
+    Route/GeoZoneRouteSearch.cc
+    Route/GeoZoneRouteSearch.h
+    Route/GeoZoneRouteVertical.cc
+    Route/GeoZoneRouteVertical.h
+    Report/GeoZoneBriefing.cc
+    Report/GeoZoneBriefing.h
+    Report/GeoZoneOperationalIntent.cc
+    Report/GeoZoneOperationalIntent.h
+    Report/GeoZoneOperatorDetails.cc
+    Report/GeoZoneOperatorDetails.h
+    Report/GeoZonePlanAudit.cc
+    Report/GeoZonePlanAudit.h
+    Geoid/GeoZoneGeoid.cc
+    Geoid/GeoZoneGeoid.h
 )
 
 target_include_directories(GeoZoneCore
@@ -140,6 +141,9 @@ target_include_directories(GeoZoneCore
         ${CMAKE_CURRENT_SOURCE_DIR}/Formats
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources
         ${CMAKE_CURRENT_SOURCE_DIR}/Evaluation
+        ${CMAKE_CURRENT_SOURCE_DIR}/Route
+        ${CMAKE_CURRENT_SOURCE_DIR}/Report
+        ${CMAKE_CURRENT_SOURCE_DIR}/Geoid
 )
 
 target_link_libraries(GeoZoneCore

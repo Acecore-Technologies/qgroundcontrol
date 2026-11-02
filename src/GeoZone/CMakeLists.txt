@@ -1,96 +1,27 @@
 add_subdirectory(Core)
 
-# The application layer: zones on the maps, mission checks, flight monitoring, settings and QML
+# The application layer: zones on the maps (Map), mission checks (Planning) and their exports (Export), flight
+# monitoring (Flight) and settings (Settings), each directory listing its C++. GeoZoneManager publishes the zones to
+# C++ and QML, GeoZoneModule registers the types.
 target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
         GeoZoneManager.cc
         GeoZoneManager.h
         GeoZoneModule.cc
         GeoZoneModule.h
-        GeoZoneSettings.cc
-        GeoZoneSettings.h
-        Map/GeoZoneDisplay.cc
-        Map/GeoZoneDisplay.h
-        Map/GeoZoneMapLayer.cc
-        Map/GeoZoneMapLayer.h
-        Map/GeoZoneMapModel.cc
-        Map/GeoZoneMapModel.h
-        Map/GeoZoneNearbyModel.cc
-        Map/GeoZoneNearbyModel.h
-        Map/GeoZoneSearchModel.cc
-        Map/GeoZoneSearchModel.h
-        Planning/GeoZoneBriefingExport.cc
-        Planning/GeoZoneBriefingExport.h
-        Planning/GeoZoneFenceChoiceModel.cc
-        Planning/GeoZoneFenceChoiceModel.h
-        Planning/GeoZoneFenceImporter.cc
-        Planning/GeoZoneFenceImporter.h
-        Planning/GeoZoneFenceTags.cc
-        Planning/GeoZoneFenceTags.h
-        Planning/GeoZoneFenceUpload.cc
-        Planning/GeoZoneFenceUpload.h
-        Planning/GeoZoneMissionCheck.cc
-        Planning/GeoZoneMissionCheck.h
-        Planning/GeoZoneMissionExport.cc
-        Planning/GeoZoneMissionExport.h
-        Planning/GeoZoneMissionJumps.cc
-        Planning/GeoZoneMissionJumps.h
-        Planning/GeoZoneMissionPath.cc
-        Planning/GeoZoneMissionPath.h
-        Planning/GeoZoneMissionWorker.cc
-        Planning/GeoZoneMissionWorker.h
-        Planning/GeoZoneOperationalIntentExport.cc
-        Planning/GeoZoneOperationalIntentExport.h
-        Planning/GeoZoneOperatorZones.cc
-        Planning/GeoZoneOperatorZones.h
-        Planning/GeoZonePlanData.cc
-        Planning/GeoZonePlanData.h
-        Planning/GeoZonePlanning.cc
-        Planning/GeoZonePlanning.h
-        Planning/GeoZoneProfile.cc
-        Planning/GeoZoneProfile.h
-        Planning/GeoZoneRoutePlanner.cc
-        Planning/GeoZoneRoutePlanner.h
-        Flight/GeoZoneAlertArbiter.cc
-        Flight/GeoZoneAlertArbiter.h
-        Flight/GeoZoneAlertHistory.cc
-        Flight/GeoZoneAlertHistory.h
-        Flight/GeoZoneAlertModel.cc
-        Flight/GeoZoneAlertModel.h
-        Flight/GeoZoneConformance.cc
-        Flight/GeoZoneConformance.h
-        Flight/GeoZoneFlightRecorder.cc
-        Flight/GeoZoneFlightRecorder.h
-        Flight/GeoZoneGuidedCheck.cc
-        Flight/GeoZoneGuidedCheck.h
-        Flight/GeoZoneMonitor.cc
-        Flight/GeoZoneMonitor.h
-        Flight/GeoZonePreflightCheck.cc
-        Flight/GeoZonePreflightCheck.h
-        Flight/GeoZoneRemoteId.cc
-        Flight/GeoZoneRemoteId.h
-        Flight/GeoZoneVehicleMonitor.cc
-        Flight/GeoZoneVehicleMonitor.h
 )
 
-target_include_directories(${CMAKE_PROJECT_NAME}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/Map
-        ${CMAKE_CURRENT_SOURCE_DIR}/Planning
-        ${CMAKE_CURRENT_SOURCE_DIR}/Flight
-)
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE GeoZoneCore)
 
-# Settings metadata
-qt_add_resources(${CMAKE_PROJECT_NAME} "geozone_resources"
-    PREFIX "/json"
-    FILES GeoZone.SettingsGroup.json
-)
+add_subdirectory(Map)
+add_subdirectory(Planning)
+add_subdirectory(Export)
+add_subdirectory(Flight)
+add_subdirectory(Settings)
 
-# GeoZoneMapLayer triangulates the zone polygons with the triangulator of Qt Quick
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::GuiPrivate)
-
+# The QML of all the directories, next to their C++, in one module. The application refers to some of the files by
+# their qrc URL, like qrc:/qml/QGroundControl/GeoZone/Settings/GeoZoneSettingsPage.qml.
 qt_add_library(GeoZoneModule STATIC)
 
 set_source_files_properties(Map/GeoZoneStyle.qml PROPERTIES
