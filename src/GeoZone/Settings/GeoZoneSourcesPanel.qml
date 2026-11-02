@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 
 import QGroundControl
@@ -231,8 +232,11 @@ ColumnLayout {
 
         QGCButton {
             Layout.fillWidth:   true
-            text:               qsTr("Remove All")
-            onClicked:          _repository.clear()
+            text:               qsTr("Remove All...")
+            onClicked:          mainWindow.showMessageDialog(qsTr("Remove All Geozone Sources"),
+                                                             qsTr("Remove all %n geozone source(s) with their zones and stored copies?", "", _geoZoneManager.sources.count),
+                                                             Dialog.Yes | Dialog.No,
+                                                             () => _repository.clear())
         }
     }
 

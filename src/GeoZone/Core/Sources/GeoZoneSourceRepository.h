@@ -117,6 +117,8 @@ public:
     int importPack(const QString &packPath, QString &errorString, QString *signatureText = nullptr);
     /// Downloads all feeds again. Failures keep the previous data.
     Q_INVOKABLE void refreshFeeds();
+    /// Downloads the feed with the key again, files are left as they are. Failures keep the previous data.
+    Q_INVOKABLE void refreshSource(const QString &key);
     /// Removes a source, its stored copy, and cancels its downloads
     Q_INVOKABLE void removeSource(int index);
     /// Removes all sources

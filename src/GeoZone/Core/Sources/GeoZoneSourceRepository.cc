@@ -269,6 +269,14 @@ void GeoZoneSourceRepository::refreshFeeds()
     }
 }
 
+void GeoZoneSourceRepository::refreshSource(const QString &key)
+{
+    const GeoZoneSource *const feed = source(key);
+    if (feed && feed->isFeed()) {
+        _download(feed->url(), GeoZoneLoader::Request::User);
+    }
+}
+
 void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Request request)
 {
     GeoZoneSource *const existing = source(url);

@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 
 import QGroundControl
@@ -16,7 +17,8 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.GeoZone
 
-/// The geozone sources with their details, turned on and off, and their secrets and publishers set
+/// The geozone sources with their details, turned on and off, and their secrets and publishers set. Each source has
+/// a menu to refresh a feed, show the details of its data and remove it after a confirmation.
 ColumnLayout {
     spacing:    _margin
     visible:    _geoZoneManager.sources.count > 0
@@ -25,14 +27,32 @@ ColumnLayout {
     readonly property var   _repository:        GeoZoneManager.repository
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
 
+    /// Removes the source with the key after a confirmation, it may have moved in the list meanwhile
+    function _confirmRemove(key, name, zoneCount) {
+        mainWindow.showMessageDialog(qsTr("Remove Geozone Source"),
+                                     qsTr("Remove %1 and its %n zone(s)? Its stored copy is deleted.", "", zoneCount).arg(name.replace(/</g, "\u2039").replace(/>/g, "\u203A")),
+                                     Dialog.Yes | Dialog.No,
+                                     () => {
+                                         for (let i = 0; i < _geoZoneManager.sources.count; i++) {
+                                             if (_geoZoneManager.sources.get(i).key === key) {
+                                                 _repository.removeSource(i)
+                                                 return
+                                             }
+                                         }
+                                     })
+    }
+
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
     Repeater {
         model: _geoZoneManager.sources
 
         ColumnLayout {
+            id:                 sourceColumn
             Layout.fillWidth:   true
             spacing:            _margin / 2
+
+            property bool _expanded: false  ///< Shows the provenance, area and changed zones
 
             RowLayout {
                 Layout.fillWidth:   true
@@ -51,8 +71,30 @@ ColumnLayout {
                 }
 
                 QGCButton {
-                    text:       qsTr("Remove")
-                    onClicked:  _repository.removeSource(index)
+                    id:                     menuButton
+                    Layout.preferredWidth:  height
+                    text:                   "\u22EF"
+                    onClicked:              sourceMenu.popup(menuButton, menuButton.width - sourceMenu.width, menuButton.height)
+
+                    QGCMenu {
+                        id: sourceMenu
+
+                        QGCMenuItem {
+                            text:           qsTr("Refresh")
+                            enabled:        object.url !== "" && !object.busy
+                            onTriggered:    _repository.refreshSource(object.key)
+                        }
+
+                        QGCMenuItem {
+                            text:           sourceColumn._expanded ? qsTr("Hide Details") : qsTr("Details")
+                            onTriggered:    sourceColumn._expanded = !sourceColumn._expanded
+                        }
+
+                        QGCMenuItem {
+                            text:           qsTr("Remove...")
+                            onTriggered:    _confirmRemove(object.key, object.name, object.zoneCount)
+                        }
+                    }
                 }
             }
 
@@ -70,7 +112,7 @@ ColumnLayout {
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               object.provenanceText
                 textFormat:         Text.PlainText
-                visible:            text !== ""
+                visible:            sourceColumn._expanded && text !== ""
             }
 
             QGCLabel {
@@ -78,7 +120,7 @@ ColumnLayout {
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               object.areaText
-                visible:            object.followsArea && text !== ""
+                visible:            sourceColumn._expanded && object.followsArea && text !== ""
             }
 
             QGCLabel {
@@ -180,27 +222,19 @@ ColumnLayout {
                     textFormat:         Text.PlainText
                 }
 
-                QGCLabel {
-                    font.pointSize:     ScreenTools.smallFontPointSize
-                    font.underline:     true
-                    color:              qgcPal.buttonHighlight
-                    text:               changesDetailsLabel.visible ? qsTr("Hide") : qsTr("Details")
-
-                    MouseArea {
-                        anchors.fill:   parent
-                        onClicked:      changesDetailsLabel.visible = !changesDetailsLabel.visible
-                    }
+                QGCButton {
+                    text:       sourceColumn._expanded ? qsTr("Hide Details") : qsTr("Details")
+                    onClicked:  sourceColumn._expanded = !sourceColumn._expanded
                 }
             }
 
             QGCLabel {
-                id:                 changesDetailsLabel
                 Layout.fillWidth:   true
                 wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               object.changesDetails
                 textFormat:         Text.PlainText
-                visible:            false
+                visible:            sourceColumn._expanded && text !== ""
             }
 
             QGCLabel {

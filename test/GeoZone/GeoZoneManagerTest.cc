@@ -490,6 +490,13 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     QVERIFY(!manager.repository()->scheduler()->isDue(*feed, now));
     QVERIFY(manager.repository()->scheduler()->isDue(*feed, now.addSecs(25 * 3600)));
 
+    // A feed can be refreshed on its own
+    manager.repository()->refreshSource(feedUrl);
+    QVERIFY(feed->busy());
+    QTRY_VERIFY(!manager.repository()->busy());
+    QVERIFY(feed->errorString().isEmpty());
+    QCOMPARE(manager.zoneCount(), 3);
+
     // A failed refresh keeps the previous data
     QVERIFY(QFile::remove(ed318File));
     manager.repository()->refreshFeeds();
