@@ -33,6 +33,7 @@ struct GeoZoneSourceVersion
     QDateTime validTo;
     QString airacCycle;     ///< AIRAC cycle in effect at the data date, like "2601", empty for live data
     QByteArray contentHash; ///< Of the loaded file, see GeoZoneSource::contentHash
+    QJsonObject provenance; ///< Where and how the data was obtained, see GeoZoneProvenance::toJson. Not kept by plan audits.
 
     /// @return The version of the source's current data
     static GeoZoneSourceVersion fromSource(const GeoZoneSource *source);

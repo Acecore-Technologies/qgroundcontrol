@@ -1769,9 +1769,8 @@ void GeoZoneManagerTest::_testProvenance()
     const QString url = server.url(QStringLiteral("/latest"));
 
     const QTemporaryDir storageDir;
-    const QTemporaryDir exportDir;
-    QVERIFY(storageDir.isValid() && exportDir.isValid());
-    QJsonObject report;
+    QVERIFY(storageDir.isValid());
+    QJsonObject provenanceJson;
     {
         GeoZoneManager manager(storageDir.path());
         QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
@@ -1808,30 +1807,25 @@ void GeoZoneManagerTest::_testProvenance()
         QCOMPARE(file->provenance().contentHash.size(), 32);
         QVERIFY(file->provenance().sha256.isEmpty());
 
-        // The report for briefings
-        QVERIFY(manager.exportProvenance(exportDir.filePath(QStringLiteral("provenance.json"))));
-        QFile exported(exportDir.filePath(QStringLiteral("provenance.json")));
-        QVERIFY(exported.open(QIODevice::ReadOnly));
-        report = QJsonDocument::fromJson(exported.readAll()).object();
-        QCOMPARE(report, manager.provenanceReport());
-        QCOMPARE(report.value("sources").toArray().count(), 2);
-        const QJsonObject feedReport = report.value("sources").toArray().first().toObject();
+        // The report of packs, and the sources of briefings
+        const QJsonObject feedReport = GeoZoneSourceRepository::sourceReport(*feed);
         QCOMPARE(feedReport.value("url").toString(), url);
         QCOMPARE(feedReport.value("zoneCount").toInt(), 3);
         QCOMPARE(feedReport.value("format").toString(), QStringLiteral("ED-318"));
-        const QJsonObject provenanceReport = feedReport.value("provenance").toObject();
-        QCOMPARE(provenanceReport.value("finalUrl").toString(), server.url(QStringLiteral("/v2/zones.json")));
-        QCOMPARE(provenanceReport.value("sha256").toString(), QString::fromLatin1(provenance.sha256.toHex()));
-        QCOMPARE(provenanceReport.value("blake2b256").toString(), QString::fromLatin1(provenance.contentHash.toHex()));
-        QCOMPARE(provenanceReport.value("fetchedAt").toString(), environment.now().toString(Qt::ISODate));
-        QCOMPARE(provenanceReport.value("integrity").toString(), QStringLiteral("unchecked"));
+        provenanceJson = feedReport.value("provenance").toObject();
+        QCOMPARE(provenanceJson.value("finalUrl").toString(), server.url(QStringLiteral("/v2/zones.json")));
+        QCOMPARE(provenanceJson.value("sha256").toString(), QString::fromLatin1(provenance.sha256.toHex()));
+        QCOMPARE(provenanceJson.value("blake2b256").toString(), QString::fromLatin1(provenance.contentHash.toHex()));
+        QCOMPARE(provenanceJson.value("fetchedAt").toString(), environment.now().toString(Qt::ISODate));
+        QCOMPARE(provenanceJson.value("integrity").toString(), QStringLiteral("unchecked"));
+        QCOMPARE(GeoZoneSourceVersion::fromSource(feed).toJson().value("provenance").toObject(), provenanceJson);
     }
 
     // The provenance is kept with the stored copies
     GeoZoneManager restarted(storageDir.path());
     restarted.loadStoredSources(GeoZoneManager::LoadMode::Synchronous);
     QVERIFY(restarted.source(url));
-    QCOMPARE(restarted.source(url)->provenance().toJson(), report.value("sources").toArray().first().toObject().value("provenance").toObject());
+    QCOMPARE(restarted.source(url)->provenance().toJson(), provenanceJson);
     QCOMPARE(GeoZoneProvenance::fromJson(restarted.source(url)->provenance().toJson()).toJson(), restarted.source(url)->provenance().toJson());
 }
 
@@ -1991,7 +1985,7 @@ void GeoZoneManagerTest::_testOfflinePack()
             manifest = QJsonDocument::fromJson(file.data).object();
         }
     }
-    QVERIFY(!QJsonDocument(manager.provenanceReport()).toJson().contains("pack-header-s3cret"));
+    QVERIFY(!QJsonDocument(GeoZoneSourceRepository::sourceReport(*manager.source(keyedUrl))).toJson().contains("pack-header-s3cret"));
     QCOMPARE(manager.source(keyedUrl)->service().headers.count(), 1);
     QCOMPARE(manifest.value("format").toString(), QStringLiteral("qgc-geozone-pack"));
     const QJsonArray packSources = manifest.value("sources").toArray();

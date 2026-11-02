@@ -56,7 +56,7 @@ public:
     QString tokenUrl;           ///< OAuth2 token endpoint
     QString scope;              ///< OAuth2 scope, optional
     /// Further request headers, like the response format. They may hold keys: like the credentials, they are only
-    /// sent to the origin of the feed, and they are left out of packs and provenance reports.
+    /// sent to the origin of the feed, and they are left out of packs and briefings.
     QList<std::pair<QString, QString>> headers;
     QString responseMember;     ///< Member of the JSON response holding the zones, dot separated, like "data.geojson"
     bool areaOfInterest = false;    ///< The request takes the area of interest, the zones are downloaded again when it moves out

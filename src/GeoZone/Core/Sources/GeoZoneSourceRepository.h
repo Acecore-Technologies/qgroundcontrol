@@ -88,11 +88,9 @@ public:
 
     static constexpr double areaMargin = 5000;  ///< Meters downloaded around the area of interest
 
-    /// @return Description of a source for briefings and offline packs: its origin, dates, service, provenance, the
-    ///         changes of its last reload (lastChanges, see GeoZoneSourceChanges) and its AIRAC cycle. Holds no secrets.
+    /// @return Description of a source for offline packs: its origin, dates, service, provenance, the changes of its
+    ///         last reload (lastChanges, see GeoZoneSourceChanges) and its AIRAC cycle. Holds no secrets.
     static QJsonObject sourceReport(const GeoZoneSource &source);
-    /// @return The reports of the sources, see sourceReport, and when it was made
-    QJsonObject provenanceReport() const;
 
     /// Writes an offline pack of the stored copies of the sources with the keys, see GeoZonePack. Secrets are left out.
     /// The pack is signed with the key of setPackSigner, unless the build can't sign, see GeoZonePackSignature.

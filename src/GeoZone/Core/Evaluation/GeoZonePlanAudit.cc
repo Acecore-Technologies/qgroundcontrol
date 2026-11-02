@@ -54,6 +54,9 @@ GeoZonePlanAudit::Record GeoZonePlanAudit::Record::make(const QList<const GeoZon
     Record record;
     record.savedAt = savedAt.toUTC();
     record.sources = sources;
+    for (GeoZoneSourceVersion &source : record.sources) {
+        source.provenance = QJsonObject();
+    }
     QSet<QString> keys;
     for (const GeoZone *zone : zones) {
         if (zone && !keys.contains(zone->key())) {

@@ -210,7 +210,7 @@ The secrets of the services, their custom headers and the area of interest only 
 - `GeoZoneService::otherOrigins()` lists the token and SHA-256 URLs which aren't on the origin of the feed. **Add Service...** asks the user to confirm them (`GeoZoneManager::serviceOtherOrigins()`, the `allowOtherOrigins` argument of `addService()`), otherwise the service is refused.
 - A secret is kept for the authentication target of its service (`GeoZoneService::sameAuthTarget()`: the authentication and, for OAuth2, the token URL). Setting a service with another target forgets the secret and the token.
 - Imported packs never replace the service of a source already known. A new source takes the service of the pack without its `headers`, forgets any secret kept for its URL, and is left out when `otherOrigins()` isn't empty. Feeds are requested at their key, so a pack source whose `url` isn't its `key` is left out too.
-- Packs and provenance reports write `GeoZoneService::shareableJson()`, without the headers; the index of the sources keeps them locally.
+- Packs write `GeoZoneService::shareableJson()`, without the headers; the index of the sources keeps them locally.
 
 `GeoZoneManagerTest::_testPackServiceTrust()` and `_testDownloadRedirects()` test these rules with two `TestFeedServer`s, whose different ports make different origins.
 

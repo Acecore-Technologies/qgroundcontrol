@@ -19,7 +19,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 /// Where and how the data of a geozone source was obtained, recorded with each download or load and kept with the
-/// source, for briefings and offline packs. Holds no secrets: the URLs are those requested without the credentials of
+/// source, for offline packs and briefings. Holds no secrets: the URLs are those requested without the credentials of
 /// their services.
 struct GeoZoneProvenance
 {

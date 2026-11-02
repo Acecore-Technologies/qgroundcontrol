@@ -549,7 +549,7 @@ ColumnLayout {
         }
     }
 
-    // Offline packs and the provenance of the sources
+    // Offline packs
     RowLayout {
         Layout.fillWidth:   true
         spacing:            _margin
@@ -566,13 +566,6 @@ ColumnLayout {
             text:               qsTr("Export Pack...")
             enabled:            _geoZoneManager.sources.count > _geoZoneManager.disabledSourceCount
             onClicked:          exportPackDialog.openForSave()
-        }
-
-        QGCButton {
-            Layout.fillWidth:   true
-            text:               qsTr("Export Provenance...")
-            enabled:            _geoZoneManager.sources.count > 0
-            onClicked:          provenanceDialog.openForSave()
         }
     }
 
@@ -804,19 +797,6 @@ ColumnLayout {
 
         onAcceptedForSave: (file) => {
             _geoZoneManager.createSigningKey(file)
-            close()
-        }
-    }
-
-    QGCFileDialog {
-        id:             provenanceDialog
-        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Export Geozone Provenance")
-        nameFilters:    [ qsTr("JSON Files (*.json)") ]
-        defaultSuffix:  "json"
-
-        onAcceptedForSave: (file) => {
-            _geoZoneManager.exportProvenance(file)
             close()
         }
     }

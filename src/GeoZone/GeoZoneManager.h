@@ -113,11 +113,6 @@ public:
     /// Downloads all feeds again. Failures keep the previous data.
     Q_INVOKABLE void refreshFeeds() { _repository->refreshFeeds(); }
 
-    /// @return Where and how the data of the sources was obtained, see GeoZoneSourceRepository::provenanceReport
-    QJsonObject provenanceReport() const { return _repository->provenanceReport(); }
-    /// Writes provenanceReport as a JSON file, for briefings. fileOperationFinished tells the outcome.
-    Q_INVOKABLE bool exportProvenance(const QString &fileName);
-
     /// Writes an offline pack of the sources, see GeoZonePack. fileOperationFinished tells the outcome.
     /// @param keys Of the sources, those turned on when empty
     Q_INVOKABLE bool exportPack(const QString &fileName, const QStringList &keys = QStringList());

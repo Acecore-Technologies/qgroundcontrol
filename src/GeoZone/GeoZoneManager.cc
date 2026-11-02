@@ -154,19 +154,6 @@ QStringList GeoZoneManager::fileDialogFilters() const
     return { tr("Geozone Files (*.json *.geojson *.xml *.zip)"), tr("All Files (*)") };
 }
 
-bool GeoZoneManager::exportProvenance(const QString &fileName)
-{
-    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
-    QSaveFile file(localFileName);
-    const QByteArray json = QJsonDocument(provenanceReport()).toJson();
-    if (!file.open(QIODevice::WriteOnly) || (file.write(json) != json.size()) || !file.commit()) {
-        emit fileOperationFinished(false, tr("The geozone source provenance could not be saved to %1: %2").arg(localFileName, file.errorString()));
-        return false;
-    }
-    emit fileOperationFinished(true, tr("The geozone source provenance was saved to %1.").arg(localFileName));
-    return true;
-}
-
 bool GeoZoneManager::exportPack(const QString &fileName, const QStringList &keys)
 {
     const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;

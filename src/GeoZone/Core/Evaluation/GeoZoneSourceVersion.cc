@@ -49,6 +49,9 @@ GeoZoneSourceVersion GeoZoneSourceVersion::fromSource(const GeoZoneSource *sourc
         version.airacCycle = airacCycleOf(version.dataDate.date());
     }
     version.contentHash = source->contentHash();
+    if (!source->provenance().isEmpty()) {
+        version.provenance = source->provenance().toJson();
+    }
     return version;
 }
 
@@ -90,6 +93,9 @@ QJsonObject GeoZoneSourceVersion::toJson() const
     json.insert(QStringLiteral("validTo"), dateText(validTo));
     json.insert(QStringLiteral("airacCycle"), airacCycle);
     json.insert(QStringLiteral("contentHash"), QString::fromLatin1(contentHash.toHex()));
+    if (!provenance.isEmpty()) {
+        json.insert(QStringLiteral("provenance"), provenance);
+    }
     return json;
 }
 
@@ -107,5 +113,6 @@ GeoZoneSourceVersion GeoZoneSourceVersion::fromJson(const QJsonObject &json)
     version.validTo = dateFromText(json.value(QStringLiteral("validTo")));
     version.airacCycle = json.value(QStringLiteral("airacCycle")).toString();
     version.contentHash = QByteArray::fromHex(json.value(QStringLiteral("contentHash")).toString().toLatin1());
+    version.provenance = json.value(QStringLiteral("provenance")).toObject();
     return version;
 }

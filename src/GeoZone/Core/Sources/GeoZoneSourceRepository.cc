@@ -883,18 +883,6 @@ QJsonObject GeoZoneSourceRepository::sourceReport(const GeoZoneSource &source)
     return report;
 }
 
-QJsonObject GeoZoneSourceRepository::provenanceReport() const
-{
-    QJsonArray sources;
-    for (const GeoZoneSource *const source : _sources) {
-        sources.append(sourceReport(*source));
-    }
-    return QJsonObject{
-        { QStringLiteral("generatedAt"), GeoZoneEnvironment::currentDateTimeUtc().toString(Qt::ISODate) },
-        { QStringLiteral("sources"), sources },
-    };
-}
-
 bool GeoZoneSourceRepository::exportPack(const QStringList &keys, const QString &packPath, QString &errorString) const
 {
     QList<GeoZonePackExchange::ExportSource> sources;
