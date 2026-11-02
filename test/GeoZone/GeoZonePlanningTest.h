@@ -54,6 +54,7 @@ private slots:
     void _testRoutePlannerWorker();
     void _testProfileBands();
     void _testGeoFenceImport();
+    void _testOperatorZones();
     void _testGeoFenceSelection();
     void _testGeoFenceStale();
     void _testGeoFenceUpload();

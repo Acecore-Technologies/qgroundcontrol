@@ -90,6 +90,14 @@ Item {
         filterHintBottomMargin: control.map.height - control.map.centerViewport.bottom + ScreenTools.defaultFontPixelHeight * 1.5
     }
 
+    GeoZoneOperatorZoneEditor {
+        anchors.fill:       parent
+        map:                control.map
+        formLeftMargin:     control.leftLimit
+        formTopMargin:      banner.y + banner.height + control.margin
+        formBottomMargin:   mapVisuals.filterHintBottomMargin
+    }
+
     GeoZoneMissionBanner {
         id:                 banner
         anchors.top:        parent.top
@@ -115,6 +123,8 @@ Item {
                 mainWindow.showSettingsTool(qsTr("Geozones"))
             }
             onZoneSelected: dropPanel.hide()
+            drawingEnabled: true
+            onDrawingStarted: dropPanel.hide()
         }
     }
 }

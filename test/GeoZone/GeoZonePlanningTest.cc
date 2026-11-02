@@ -13,6 +13,7 @@
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneMissionJumps.h"
 #include "GeoZoneMissionWorker.h"
+#include "GeoZoneOperatorZones.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneTestBase.h"
@@ -20,6 +21,8 @@
 #include "GeoFenceManager.h"
 #include "MockLink.h"
 #include "MultiVehicleManager.h"
+#include "QGCMapCircle.h"
+#include "QGCMapPolygon.h"
 #include "ParameterManager.h"
 #include "RallyPoint.h"
 #include "RallyPointController.h"
@@ -2332,6 +2335,114 @@ void GeoZonePlanningTest::_testGeoFenceImport()
     QVERIFY(geoFenceController->dirty());
     GeoZoneFenceTags::deleteFences(geoFenceController, false);
     QCOMPARE(geoFenceController->circles()->count(), 0);
+}
+
+void GeoZonePlanningTest::_testOperatorZones()
+{
+    ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoRectangle view(center.atDistanceAndAzimuth(4000, 315), center.atDistanceAndAzimuth(4000, 135));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString storage = dir.filePath(QStringLiteral("storage"));
+    {
+        GeoZoneManager manager(storage);
+        GeoZoneOperatorZones *const zones = manager.operatorZones();
+        QVERIFY(zones->zones().isEmpty());
+
+        // A prohibited square drawn in the middle of the view, from the ground to 120 m
+        zones->startPolygon(view);
+        QVERIFY(zones->editing());
+        QCOMPARE(zones->editIndex(), -1);
+        QCOMPARE(zones->polygon()->count(), 4);
+        QVERIFY(zones->polygon()->containsCoordinate(center));
+        QVERIFY(!zones->polygon()->containsCoordinate(center.atDistanceAndAzimuth(1500, 90)));
+        QVariantMap properties = zones->editProperties();
+        QCOMPARE(properties.value(QStringLiteral("restriction")).toInt(), static_cast<int>(GeoZone::Prohibited));
+        properties.insert(QStringLiteral("name"), QStringLiteral("Quarry"));
+        properties.insert(QStringLiteral("lower"), 0);
+        properties.insert(QStringLiteral("upper"), 120);
+        QVERIFY(zones->saveEdit(properties));
+        QVERIFY(!zones->editing());
+
+        // Kept as an ED-318 source like any other
+        GeoZoneSource *const source = manager.repository()->source(zones->fileName());
+        QVERIFY(source);
+        QCOMPARE(source->name(), QStringLiteral("My zones"));
+        QCOMPARE(source->format(), GeoZoneParser::Format::ED318);
+        QCOMPARE(manager.zoneCount(), 1);
+        const GeoZone *const quarry = manager.catalog().zones().constFirst();
+        QCOMPARE(quarry->name(), QStringLiteral("Quarry"));
+        QCOMPARE(quarry->restriction(), GeoZone::Prohibited);
+        QVERIFY(quarry->identifier().startsWith(QStringLiteral("MY-")));
+        QVERIFY(!quarry->contains(GeoZone::Position{ center, 700, 500 }));
+        QVERIFY(quarry->contains(GeoZone::Position{ center, 600, 500 }));
+
+        // The mission check reports a mission through it
+        PlanMasterController masterController;
+        masterController.setFlyView(false);
+        masterController.start();
+        MissionController *const missionController = masterController.missionController();
+        GeoZoneMissionCheck check(&manager);
+        check.setUpdateDelay(0);
+        check.setMissionController(missionController);
+        (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 270), 1);
+        (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 90), 2);
+        QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
+        QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed)[0]->name(), QStringLiteral("Quarry"));
+
+        // Editing it updates the source, keeping its identifier
+        zones->startEdit(0);
+        QCOMPARE(zones->editIndex(), 0);
+        QCOMPARE(zones->polygon()->count(), 4);
+        properties = zones->editProperties();
+        QCOMPARE(properties.value(QStringLiteral("name")).toString(), QStringLiteral("Quarry"));
+        QCOMPARE(properties.value(QStringLiteral("upper")).toDouble(), 120.0);
+        QCOMPARE(properties.value(QStringLiteral("upperReference")).toString(), QStringLiteral("AGL"));
+        properties.insert(QStringLiteral("restriction"), static_cast<int>(GeoZone::NoRestriction));
+        const QString identifier = quarry->identifier();
+        QVERIFY(zones->saveEdit(properties));
+        QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Permitted).count(), 1);
+        QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
+        QCOMPARE(manager.catalog().zones().constFirst()->identifier(), identifier);
+
+        // A circle, which a shape without area can't replace
+        zones->startCircle(QGeoRectangle(center.atDistanceAndAzimuth(20000, 0), 0.02, 0.02));
+        QVERIFY(zones->editCircle());
+        QVERIFY(zones->saveEdit(zones->editProperties()));
+        QCOMPARE(zones->zones().count(), 2);
+        QCOMPARE(manager.zoneCount(), 2);
+        zones->startEdit(1);
+        zones->circle()->radius()->setRawValue(0);
+        QSignalSpy failedSpy(zones, &GeoZoneOperatorZones::failed);
+        QVERIFY(!zones->saveEdit(zones->editProperties()));
+        QCOMPARE(failedSpy.count(), 1);
+        QVERIFY(zones->editing());
+        zones->cancelEdit();
+        QCOMPARE(manager.zoneCount(), 2);
+    }
+
+    // The zones are kept with the source for the next start, and removing the last removes the source
+    GeoZoneManager restarted(storage);
+    restarted.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+    GeoZoneOperatorZones *const zones = restarted.operatorZones();
+    QCOMPARE(zones->zones().count(), 2);
+    QCOMPARE(restarted.zoneCount(), 2);
+    QVERIFY(zones->removeZone(0));
+    QCOMPARE(restarted.zoneCount(), 1);
+    QCOMPARE(zones->zones().first().toMap().value(QStringLiteral("circle")).toBool(), true);
+    QVERIFY(zones->removeZone(0));
+    QVERIFY(!restarted.repository()->hasSource(zones->fileName()));
+    QVERIFY(!QFile::exists(zones->fileName()));
+    QCOMPARE(restarted.zoneCount(), 0);
+
+    // Removing the source in the settings removes the zones
+    zones->startCircle(view);
+    QVERIFY(zones->saveEdit(zones->editProperties()));
+    QVERIFY(restarted.repository()->hasSource(zones->fileName()));
+    restarted.repository()->clear();
+    QVERIFY(zones->zones().isEmpty());
+    QVERIFY(!QFile::exists(zones->fileName()));
 }
 
 void GeoZonePlanningTest::_testGeoFenceSelection()

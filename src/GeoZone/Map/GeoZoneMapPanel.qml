@@ -26,9 +26,11 @@ ColumnLayout {
     property int    hiddenZoneCount:    0       ///< Smallest zones in the map view left out to limit the number of map items
     property var    map:                null    ///< Map whose visible area can be downloaded from providers serving zones by area
     property bool   showCrossedZones:   false   ///< See GeoZoneLegend
+    property bool   drawingEnabled:     false   ///< Offers to draw zones of the operator, see GeoZoneOperatorZonesSection
 
     signal manageRequested  ///< The sources row was clicked, to open the Geozones settings
     signal zoneSelected     ///< A zone picked in the search is shown on the map
+    signal drawingStarted   ///< A zone of the operator is drawn on the map
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 46
@@ -229,5 +231,12 @@ ColumnLayout {
                                     (!areaProviderCombo.currentEnabled ? qsTr("The zones of the map area are downloaded already. Move the map or zoom out to download more.") :
                                                                          qsTr("Downloaded areas are kept for offline use and refreshed like feeds."))
         }
+    }
+
+    GeoZoneOperatorZonesSection {
+        Layout.preferredWidth:  root._textWidth
+        map:                    root.map
+        visible:                root.drawingEnabled && root.map !== null
+        onDrawingStarted:       root.drawingStarted()
     }
 }

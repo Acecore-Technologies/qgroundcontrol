@@ -310,6 +310,15 @@ When the plan is opened again, and whenever the sources reload while it is open,
 
 **Details** lists the changes and **Acknowledge** hides the warning, and the confirmation it asks for on upload, until the data changes again. Saving the plan records the current data, so the warning disappears. Plans saved without this record, like older plans, open without warning.
 
+### My Zones {#my-zones}
+
+Operators can draw zones of their own in the Plan View, like a quarry during blasting, an event or a customer's site, which are then shown, checked by the mission check, alerted in flight, offered by **From Geozones...** and exported in packs like the zones of any source.
+In the **Geozones** panel, **My zones** lists them with their restriction color: **Draw Polygon** or **Draw Circle** starts a zone in the middle of the map, **Edit** changes one and **Remove** deletes it.
+
+While a zone is drawn, the map shows its shape with the polygon and circle editing of the GeoFence (drag the corners, the **+** between them to add one, the center, or the circle's edge; the polygon's menu also traces or loads KML), and a form at the bottom left asks for its **Name**, **Restriction** (**Prohibited**, **Authorisation required**, **Conditional** or **No restriction**), **Floor** and **Ceiling** in meters above the ground (`AGL`) or sea level (`AMSL`), empty for the ground and no ceiling, and an optional **Message**. **Save** keeps the zone, **Cancel** drops the changes. A zone has no schedule: it is always active.
+
+The zones are kept in the source **My zones**, an ED-318 file (`operator/my-zones.json` in the geozone storage folder) whose zones have the reason `OTHER` ("Drawn by the operator") and the authority "Operator". Removing the last zone, or the source in _Application Settings > Geozones_, deletes the file. Turning the source off hides the zones without deleting them.
+
 ### Add Geozones to the GeoFence {#add-geozones-to-the-geofence}
 
 If the vehicle supports GeoFences, loaded zones can be converted into exclusion fences which fit into the vehicle's fence storage. Press **From Geozones...** below **Polygon Fence** and **Circular Fence** in the [GeoFence](../plan_view/plan_geofence.md) panel, then in the dialog:

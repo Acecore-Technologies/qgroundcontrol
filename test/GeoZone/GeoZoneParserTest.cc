@@ -9,6 +9,7 @@
 
 #include "GeoZoneParserTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneEd318Writer.h"
 #include "GeoZoneFormat.h"
 #include "GeoZoneText.h"
 #include "GeoZoneZip.h"
@@ -740,6 +741,86 @@ void GeoZoneParserTest::_testParseOpenAip()
     QCOMPARE(api.format, GeoZoneParser::Format::OpenAip);
     QCOMPARE(api.zones.count(), 6);
     QCOMPARE(api.zones[0].volumes[0].rings, result.zones[0].volumes[0].rings);
+}
+
+void GeoZoneParserTest::_testEd318Writer()
+{
+    // Zones like the operator draws them are written as ED-318 and read back identical
+    GeoZone::Data polygon;
+    polygon.identifier = QStringLiteral("MY-1");
+    polygon.name = QStringLiteral("Quarry");
+    polygon.restriction = GeoZone::Prohibited;
+    polygon.restrictionCode = QStringLiteral("PROHIBITED");
+    polygon.reasons = { QStringLiteral("OTHER") };
+    polygon.otherReasonInfo = QStringLiteral("Drawn by the operator");
+    polygon.message = QStringLiteral("Blasting");
+    polygon.authorities = { QStringLiteral("Operator") };
+    GeoZone::Volume square;
+    square.rings.append(GeoZone::Ring{ QPointF(8.0, 47.0), QPointF(8.01, 47.0), QPointF(8.01, 47.01), QPointF(8.0, 47.01) });
+    square.rings.append(GeoZone::Ring{ QPointF(8.004, 47.004), QPointF(8.004, 47.006), QPointF(8.006, 47.006), QPointF(8.006, 47.004) });
+    square.lowerLimit = 0;
+    square.upperLimit = 120;
+    square.setReferences(QStringLiteral("AGL"), QStringLiteral("AGL"));
+    polygon.volumes.append(square);
+
+    GeoZone::Data circle;
+    circle.identifier = QStringLiteral("MY-2");
+    circle.name = QStringLiteral("Event");
+    circle.restriction = GeoZone::ReqAuthorisation;
+    circle.restrictionCode = GeoZoneEd318Writer::restrictionCode(GeoZone::ReqAuthorisation);
+    GeoZone::Volume disc;
+    disc.isCircle = true;
+    disc.center = QGeoCoordinate(47.1, 8.1);
+    disc.radius = 250;
+    disc.feet = true;
+    disc.lowerLimit = 1500;
+    disc.setReferences(QStringLiteral("AMSL"), QStringLiteral("AMSL"));
+    circle.volumes.append(disc);
+
+    // Without limits, at all altitudes, in two volumes
+    GeoZone::Data unlimited;
+    unlimited.identifier = QStringLiteral("MY-3");
+    unlimited.name = QStringLiteral("Two parts");
+    unlimited.restriction = GeoZone::Conditional;
+    unlimited.restrictionCode = QStringLiteral("CONDITIONAL");
+    GeoZone::Volume part;
+    part.rings.append(GeoZone::Ring{ QPointF(9.0, 46.0), QPointF(9.01, 46.0), QPointF(9.0, 46.01) });
+    unlimited.volumes.append(part);
+    part.rings[0] = GeoZone::Ring{ QPointF(9.1, 46.0), QPointF(9.11, 46.0), QPointF(9.1, 46.01) };
+    unlimited.volumes.append(part);
+
+    const QDateTime issued = _utc(QDate(2026, 11, 2), QTime(12, 0));
+    const QByteArray document = GeoZoneEd318Writer::document({ polygon, circle, unlimited }, QStringLiteral("My zones"), QStringLiteral("Operator"), issued);
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(document, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::ED318);
+    QCOMPARE(result.title, QStringLiteral("My zones"));
+    QCOMPARE(result.provider, QStringLiteral("Operator"));
+    QCOMPARE(result.issued, issued);
+    QCOMPARE(result.zones.count(), 3);
+    for (const GeoZone::Data &zone : std::as_const(result.zones)) {
+        QVERIFY2(zone.issues.isEmpty(), qPrintable(zone.issues.join(QLatin1Char('\n'))));
+    }
+    GeoZoneParser::Result parsed = result;
+    parsed.contentHash.clear();
+    for (GeoZone::Data &zone : parsed.zones) {
+        zone.contentHash.clear();
+    }
+    GeoZoneParser::Result expected = parsed;
+    expected.zones = { polygon, circle, unlimited };
+    QVERIFY2(_resultDifference(parsed, expected).isEmpty(), qPrintable(_resultDifference(parsed, expected)));
+    QCOMPARE(result.zones[1].restrictionCode, QStringLiteral("REQ_AUTHORIZATION"));
+    QCOMPARE(result.zones[1].restriction, GeoZone::ReqAuthorisation);
+
+    // Clockwise rings are written counterclockwise, as GeoJSON wants them
+    GeoZone::Data clockwise = polygon;
+    clockwise.volumes[0].rings = { GeoZone::Ring{ QPointF(8.0, 47.0), QPointF(8.0, 47.01), QPointF(8.01, 47.01), QPointF(8.01, 47.0) } };
+    const QJsonArray ring = GeoZoneEd318Writer::feature(clockwise).value(QStringLiteral("geometry")).toObject().value(QStringLiteral("coordinates")).toArray().first().toArray();
+    QCOMPARE(ring.count(), 5);
+    QCOMPARE(ring[0].toArray(), (QJsonArray{ 8.01, 47.0 }));
+    QCOMPARE(ring[1].toArray(), (QJsonArray{ 8.01, 47.01 }));
+    QCOMPARE(ring[4].toArray(), ring[0].toArray());
 }
 
 void GeoZoneParserTest::_testParseFaaTfr()

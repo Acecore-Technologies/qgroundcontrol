@@ -41,6 +41,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Planning/GeoZoneMissionWorker.h
         Planning/GeoZoneOperationalIntentExport.cc
         Planning/GeoZoneOperationalIntentExport.h
+        Planning/GeoZoneOperatorZones.cc
+        Planning/GeoZoneOperatorZones.h
         Planning/GeoZonePlanData.cc
         Planning/GeoZonePlanData.h
         Planning/GeoZonePlanning.cc
@@ -112,6 +114,8 @@ qt_add_qml_module(GeoZoneModule
         Planning/GeoZoneFenceGroup.qml
         Planning/GeoZoneFenceImportDialog.qml
         Planning/GeoZoneMissionBanner.qml
+        Planning/GeoZoneOperatorZoneEditor.qml
+        Planning/GeoZoneOperatorZonesSection.qml
         Planning/GeoZonePlanViewOverlay.qml
         Planning/GeoZoneProfileOverlay.qml
         Planning/GeoZoneRouteDialog.qml

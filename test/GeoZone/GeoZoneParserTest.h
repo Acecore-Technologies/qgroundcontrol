@@ -26,6 +26,7 @@ private slots:
     void _testParseNationalFormats();
     void _testParseFaaAirspace();
     void _testParseOpenAip();
+    void _testEd318Writer();
 #ifndef GEOZONE_CORE_TEST
     void _testLiveNationalFeeds();
 #endif

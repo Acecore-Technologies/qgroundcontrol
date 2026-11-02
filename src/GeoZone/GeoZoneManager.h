@@ -27,6 +27,7 @@
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneManagerLog)
 
 class GeoZoneDisplay;
+class GeoZoneOperatorZones;
 class GeoZonePlanning;
 class GeoZoneShape;
 class GeoZoneSource;
@@ -43,11 +44,13 @@ class GeoZoneManager : public QObject
     Q_MOC_INCLUDE("GeoZoneSource.h")
     Q_MOC_INCLUDE("GeoZoneDisplay.h")
     Q_MOC_INCLUDE("GeoZonePlanning.h")
+    Q_MOC_INCLUDE("GeoZoneOperatorZones.h")
 
     Q_PROPERTY(int                  zoneCount           READ zoneCount          NOTIFY zoneCountChanged FINAL)            ///< Zones of all sources, those several publish alike once
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
     Q_PROPERTY(GeoZoneDisplay*      display             READ display            CONSTANT FINAL)                           ///< Which zones the maps draw
     Q_PROPERTY(GeoZonePlanning*     planning            READ planning           CONSTANT FINAL)                           ///< Planned flight start and authorisations for mission checks
+    Q_PROPERTY(GeoZoneOperatorZones* operatorZones      READ operatorZones      CONSTANT FINAL)                           ///< The zones the operator draws in the Plan view
     Q_PROPERTY(GeoZoneSettings*     settings            READ settings           CONSTANT FINAL)
     Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
     Q_PROPERTY(int                  disabledSourceCount READ disabledSourceCount NOTIFY zoneCountChanged FINAL)           ///< Sources whose zones are left out
@@ -151,6 +154,7 @@ public:
     GeoZoneSourceRepository *repository() const { return _repository; }
     GeoZoneDisplay *display() const { return _display; }
     GeoZonePlanning *planning() const { return _planning; }
+    GeoZoneOperatorZones *operatorZones() const { return _operatorZones; }
     static GeoZoneSettings *settings() { return GeoZoneSettings::instance(); }
     /// Polygons and circles of all zones for map display
     const QList<GeoZoneShape*> &shapes() const { return _catalog.shapes(); }
@@ -219,6 +223,7 @@ private:
     GeoZoneSourceRepository *_repository = nullptr;
     GeoZoneDisplay *_display = nullptr;
     GeoZonePlanning *_planning = nullptr;
+    GeoZoneOperatorZones *_operatorZones = nullptr;
     GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
     QTimer *_mapViewTimer = nullptr;

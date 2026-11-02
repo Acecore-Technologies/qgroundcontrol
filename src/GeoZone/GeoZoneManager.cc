@@ -10,6 +10,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneDisplay.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneOperatorZones.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneSettings.h"
@@ -82,6 +83,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     , _repository(new GeoZoneSourceRepository(storageDir.isEmpty() ? defaultStorageDir() : storageDir, this))
     , _display(new GeoZoneDisplay(this))
     , _planning(new GeoZonePlanning(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
+    , _operatorZones(new GeoZoneOperatorZones(_repository, this))
     , _activeTimer(new QTimer(this))
     , _mapViewTimer(new QTimer(this))
 {

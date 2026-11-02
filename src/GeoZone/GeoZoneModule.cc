@@ -25,6 +25,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneOperationalIntentExport.h"
+#include "GeoZoneOperatorZones.h"
 #include "GeoZoneParser.h"
 #include "GeoZonePreflightCheck.h"
 #include "GeoZoneProfile.h"
@@ -111,6 +112,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneVehicleMonitor>(kUri, 1, 0, "GeoZoneVehicleMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneOperatorZones>(kUri, 1, 0, "GeoZoneOperatorZones", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneSettings>(kUri, 1, 0, "GeoZoneSettings", "Reference only");
     (void) qmlRegisterType<GeoZoneMapModel>(kUri, 1, 0, "GeoZoneMapModel");
     (void) qmlRegisterType<GeoZoneSearchModel>(kUri, 1, 0, "GeoZoneSearchModel");
