@@ -181,7 +181,7 @@ constexpr int _fieldCount()
 }
 
 /// GeoZoneParser::version the hashes of the fixtures' results in _testParseFixtures_data were recorded for
-constexpr quint16 kResultHashVersion = 10;
+constexpr quint16 kResultHashVersion = 11;
 
 /// @return Hash of a serialized result, with the vertices rounded to 1e-7 degrees, which the differences of the math
 ///         libraries computing arcs and geodesics don't change
@@ -297,10 +297,10 @@ void GeoZoneParserTest::_testParseFixtures_data()
     row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "e2d4b0d264592f37");
     row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "3c0d3f716763a061");
     row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "bb11ebfc2907b643");
-    row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 1, 0, "72b6048c5599c493");
+    row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 1, 0, "60bb56a4e18bf1b8");
     row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
     row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
-    row("openaip_test.json", Format::Unknown, Format::OpenAip, 6, 2, 0, "eead3aceba3c7a5f");
+    row("openaip_test.json", Format::Unknown, Format::OpenAip, 6, 2, 0, "7c019bd11e66e495");
     row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "1cc47a3d61d437ed");
 }
 
