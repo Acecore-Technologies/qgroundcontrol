@@ -10,6 +10,7 @@
 #include "GeoZoneGeometryTest.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneFences.h"
+#include "GeoZoneText.h"
 #include "GeoZoneVertical.h"
 
 using namespace GeoZoneTestHelpers;
@@ -42,7 +43,7 @@ void GeoZoneGeometryTest::_testIsActiveAt()
     QVERIFY(!daylight.isActiveAt(_utc(QDate(2027, 1, 2), QTime(12, 0))));
     QVERIFY(daylight.isActiveDuring(_utc(QDate(2026, 6, 1), QTime(22, 0)), _utc(QDate(2026, 6, 2), QTime(3, 0))));
     QVERIFY(!daylight.isActiveDuring(_utc(QDate(2026, 12, 1), QTime(16, 0)), _utc(QDate(2026, 12, 2), QTime(6, 0))));
-    QCOMPARE(daylight.applicabilityText(), QStringLiteral("From 2026-01-01 00:00 UTC to 2026-12-31 23:59 UTC\n  Every day sunrise-sunset"));
+    QCOMPARE(GeoZoneSchedule::text(daylight.data().applicability), QStringLiteral("From 2026-01-01 00:00 UTC to 2026-12-31 23:59 UTC\n  Every day sunrise-sunset"));
 
     // Schedules wrapping past midnight continue into the morning after the listed day
     GeoZoneParser::Result result;
@@ -70,7 +71,7 @@ void GeoZoneGeometryTest::_testIsActiveAt()
     QVERIFY(offset.isActiveAt(_utc(monday, QTime(0, 30))));
     QVERIFY(!offset.isActiveAt(_utc(monday, QTime(1, 30))));
     QVERIFY(!offset.isActiveAt(_utc(monday, QTime(23, 30))));
-    QCOMPARE(offset.applicabilityText(), QStringLiteral("  MON 01:00-03:00 UTC+02:00"));
+    QCOMPARE(GeoZoneSchedule::text(offset.data().applicability), QStringLiteral("  MON 01:00-03:00 UTC+02:00"));
 }
 
 void GeoZoneGeometryTest::_testDaylightEvents()
@@ -132,7 +133,7 @@ void GeoZoneGeometryTest::_testDaylightEvents()
     QVERIFY(mixed.isActiveAt(_utc(midsummer, QTime(6, 30))));
     QVERIFY(mixed.isActiveAt(_utc(midsummer, QTime(19, 0))));
     QVERIFY(!mixed.isActiveAt(_utc(midsummer, QTime(20, 0))));
-    QCOMPARE(mixed.applicabilityText(), QStringLiteral("  Every day 08:00-sunset UTC+02:00"));
+    QCOMPARE(GeoZoneSchedule::text(mixed.data().applicability), QStringLiteral("  Every day 08:00-sunset UTC+02:00"));
 }
 
 void GeoZoneGeometryTest::_testIsActiveDuring()
@@ -286,7 +287,7 @@ void GeoZoneGeometryTest::_testScheduleTimeZones()
     const GeoZone zone(result.zones[0]);
     QCOMPARE(end.isValid() ? zone.isActiveDuring(time, end) : zone.isActiveAt(time), active);
     if (!timeZone.isEmpty()) {
-        QVERIFY2(zone.applicabilityText().endsWith(QStringLiteral("%1 (time zone assumed)").arg(QString::fromLatin1(timeZone))), qPrintable(zone.applicabilityText()));
+        QVERIFY2(GeoZoneSchedule::text(zone.data().applicability).endsWith(QStringLiteral("%1 (time zone assumed)").arg(QString::fromLatin1(timeZone))), qPrintable(GeoZoneSchedule::text(zone.data().applicability)));
     }
 
     // Restored from the parse cache like when parsed
@@ -935,7 +936,7 @@ void GeoZoneGeometryTest::_testAltitudeLimits()
     surface.setReferences(QStringLiteral(" sfc"), QStringLiteral("msl "));
     GeoZone::Data surfaceData;
     surfaceData.volumes.append(surface);
-    QVERIFY(GeoZone(surfaceData).verticalLimitsText().startsWith(QStringLiteral("GND - ")));
+    QVERIFY(GeoZoneText::verticalLimits(surfaceData).startsWith(QStringLiteral("GND - ")));
     QCOMPARE(GeoZone::verticalReferenceFromString(QStringLiteral("FL")), GeoZone::VerticalReference::Unknown);
 
     GeoZone::Data data;
@@ -1034,7 +1035,7 @@ void GeoZoneGeometryTest::_testVerticalOverlap()
     volume.lowerLimit = lowerLimit;
     volume.upperLimit = upperLimit;
     volume.setReferences(lowerReference, upperReference);
-    QCOMPARE(GeoZone::verticalOverlap(volume, GeoZone::Position{ coordinate, fromAltitude, terrain }, GeoZone::Position{ coordinate, toAltitude, terrain }, margin),
+    QCOMPARE(GeoZoneVertical::overlap(volume, GeoZone::Position{ coordinate, fromAltitude, terrain }, GeoZone::Position{ coordinate, toAltitude, terrain }, margin),
              overlap);
 }
 
@@ -1080,19 +1081,19 @@ void GeoZoneGeometryTest::_testFlightLevels()
     const auto at = [&center](double altitude) { return GeoZone::Position{ center, altitude }; };
     const double floor = floorAMSL * (1 - GeoZoneVertical::flightLevelMargin);
     const double ceiling = ceilingAMSL * (1 + GeoZoneVertical::flightLevelMargin);
-    QVERIFY(qAbs(GeoZone::limitAMSL(volume, false, at(qQNaN())) - floor) < 0.01);
-    QVERIFY(qAbs(GeoZone::limitAMSL(volume, true, at(qQNaN())) - ceiling) < 0.01);
-    QCOMPARE(GeoZone::verticalPosition(volume, at(floor - 1)), GeoZone::VerticalPosition::Below);
-    QCOMPARE(GeoZone::verticalPosition(volume, at(floor + 1)), GeoZone::VerticalPosition::Inside);
-    QCOMPARE(GeoZone::verticalPosition(volume, at(ceiling + 1)), GeoZone::VerticalPosition::Above);
-    const std::optional<std::pair<double, double>> interval = GeoZone::verticalInterval(volume, at(floor - 100), at(floor + 100));
+    QVERIFY(qAbs(GeoZoneVertical::limitAMSL(volume, false, at(qQNaN())) - floor) < 0.01);
+    QVERIFY(qAbs(GeoZoneVertical::limitAMSL(volume, true, at(qQNaN())) - ceiling) < 0.01);
+    QCOMPARE(GeoZoneVertical::position(volume, at(floor - 1)), GeoZone::VerticalPosition::Below);
+    QCOMPARE(GeoZoneVertical::position(volume, at(floor + 1)), GeoZone::VerticalPosition::Inside);
+    QCOMPARE(GeoZoneVertical::position(volume, at(ceiling + 1)), GeoZone::VerticalPosition::Above);
+    const std::optional<std::pair<double, double>> interval = GeoZoneVertical::interval(volume, at(floor - 100), at(floor + 100));
     QVERIFY(interval && (qAbs(interval->first - 0.5) < 1e-4) && (interval->second == 1));
 
     GeoZone::Data data;
     data.volumes.append(volume);
     const GeoZone zone(data);
     QVERIFY(zone.approximateLimits());
-    QCOMPARE(zone.verticalLimitsText(), text);
+    QCOMPARE(GeoZoneText::verticalLimits(zone.data()), text);
 
     // Implausible values from the application are replaced by the standard pressure
     environment.setQnh(0);

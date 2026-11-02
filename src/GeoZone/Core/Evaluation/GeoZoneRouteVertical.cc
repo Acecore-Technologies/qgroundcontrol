@@ -10,6 +10,7 @@
 #include "GeoZoneRouteVertical.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneVector.h"
+#include "GeoZoneVertical.h"
 
 #include <algorithm>
 #include <cmath>
@@ -94,7 +95,7 @@ GeoZoneRouteSearch::Route GeoZoneRouteVertical::route(GeoZoneRouteSearch::Kind k
                     positions.append(samples[i]);
                 }
                 for (const GeoZone::Position &position : std::as_const(positions)) {
-                    const double limit = GeoZone::limitAMSL(volume, climb, position);
+                    const double limit = GeoZoneVertical::limitAMSL(volume, climb, position);
                     if (!qIsNaN(limit)) {
                         target = climb ? (std::max)(target, limit + _settings.verticalMargin) : (std::min)(target, limit - _settings.verticalMargin);
                         continue;

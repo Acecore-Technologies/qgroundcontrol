@@ -11,6 +11,7 @@
 #include "GeoZoneRouteDetour.h"
 #include "GeoZoneRouteObstacles.h"
 #include "GeoZoneRouteVertical.h"
+#include "GeoZoneVertical.h"
 
 #include <algorithm>
 #include <cmath>
@@ -211,7 +212,7 @@ GeoZoneRouteSearch::Route GeoZoneRouteSearch::_detour(const Leg &leg, const QLis
         for (const GeoZone *zone : _catalog.zonesInArea(search.reachBox(), policy)) {
             const QList<GeoZone::Volume> &volumes = zone->data().volumes;
             for (int volume = 0; volume < volumes.count(); volume++) {
-                if (GeoZone::verticalOverlap(volumes[volume], low, high)) {
+                if (GeoZoneVertical::overlap(volumes[volume], low, high)) {
                     search.addObstacle(zone, volume);
                 }
             }

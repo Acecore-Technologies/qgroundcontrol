@@ -325,26 +325,6 @@ QList<GeoZoneGeometry::Interval> GeoZone::_straightIntervals(qsizetype volumeInd
     return intervals;
 }
 
-bool GeoZone::verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin)
-{
-    return GeoZoneVertical::overlap(volume, from, to, margin);
-}
-
-std::optional<std::pair<double, double>> GeoZone::verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin)
-{
-    return GeoZoneVertical::interval(volume, from, to, margin);
-}
-
-GeoZone::VerticalPosition GeoZone::verticalPosition(const Volume &volume, const Position &position)
-{
-    return GeoZoneVertical::position(volume, position);
-}
-
-double GeoZone::limitAMSL(const Volume &volume, bool upper, const Position &position)
-{
-    return GeoZoneVertical::limitAMSL(volume, upper, position);
-}
-
 bool GeoZone::contains(const Position &position) const
 {
     if (!position.coordinate.isValid() || !_box.contains(position.coordinate)) {
@@ -522,11 +502,6 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
         return result;
     }
     return std::nullopt;
-}
-
-QString GeoZone::applicabilityText() const
-{
-    return GeoZoneSchedule::text(_data.applicability);
 }
 
 bool GeoZone::approximateLimits() const

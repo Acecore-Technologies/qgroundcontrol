@@ -14,6 +14,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneText.h"
+#include "GeoZoneVertical.h"
 
 #include <algorithm>
 #include <cmath>
@@ -176,7 +177,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         result.restrictionCode = zone->data().restrictionCode;
         result.reasons = GeoZoneText::reasons(zone->data());
         result.verticalLimits = GeoZoneText::verticalLimits(zone->data());
-        result.schedule = zone->data().applicability.isEmpty() ? QString() : zone->applicabilityText();
+        result.schedule = zone->data().applicability.isEmpty() ? QString() : GeoZoneSchedule::text(zone->data().applicability);
         result.activePeriods = activePeriods(zone, windowStart, windowEnd);
         result.activeDuringFlight = start.isValid() ? !result.activePeriods.isEmpty() : zone->active();
         result.authorities = zone->data().authorities;
@@ -270,8 +271,8 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
                 if ((volume < 0) || (volume >= zoneVolumes.count())) {
                     continue;
                 }
-                const double floor = GeoZone::limitAMSL(zoneVolumes[volume], false, crossing.entry.position);
-                const double ceiling = GeoZone::limitAMSL(zoneVolumes[volume], true, crossing.entry.position);
+                const double floor = GeoZoneVertical::limitAMSL(zoneVolumes[volume], false, crossing.entry.position);
+                const double ceiling = GeoZoneVertical::limitAMSL(zoneVolumes[volume], true, crossing.entry.position);
                 floorKnown = floorKnown && !qIsNaN(floor);
                 ceilingKnown = ceilingKnown && !qIsNaN(ceiling);
                 briefed.zoneFloor = qIsNaN(briefed.zoneFloor) ? floor : (std::min)(briefed.zoneFloor, floor);

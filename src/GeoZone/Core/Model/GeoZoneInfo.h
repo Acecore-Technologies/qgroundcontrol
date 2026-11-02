@@ -69,7 +69,7 @@ public:
     QString regulationExemptionText() const { return _zone ? GeoZoneText::regulationExemption(_zone->data()) : QString(); }
     QString extendedPropertiesText() const { return _zone ? _zone->extendedPropertiesText() : QString(); }
     QString issuesText() const { return _zone ? _zone->issuesText() : QString(); }
-    QString applicabilityText() const { return _zone ? _zone->applicabilityText() : QString(); }
+    QString applicabilityText() const { return _zone ? GeoZoneSchedule::text(_zone->data().applicability) : QString(); }
     QString verticalLimitsText() const { return _zone ? GeoZoneText::verticalLimits(_zone->data()) : QString(); }
     bool approximateLimits() const { return _zone && _zone->approximateLimits(); }
     QGeoCoordinate center() const { return _zone ? _zone->center() : QGeoCoordinate(); }

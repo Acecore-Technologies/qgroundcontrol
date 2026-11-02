@@ -13,6 +13,7 @@
 #include "GeoZoneMonitor.h"
 #include "GeoZoneNearbyModel.h"
 #include "GeoZoneTerrain.h"
+#include "GeoZoneText.h"
 #include "Vehicle.h"
 #include "VehicleLinkManager.h"
 
@@ -253,7 +254,7 @@ QVariantList GeoZoneVehicleMonitor::verticalBands() const
         bands.append(QVariantMap{
             { QStringLiteral("restriction"), static_cast<int>(band.zone->restriction()) },
             { QStringLiteral("name"), band.zone->displayName() },
-            { QStringLiteral("limitsText"), band.zone->verticalLimitsText() },
+            { QStringLiteral("limitsText"), GeoZoneText::verticalLimits(band.zone->data()) },
             { QStringLiteral("floor"), band.floor },
             { QStringLiteral("ceiling"), band.ceiling },
         });

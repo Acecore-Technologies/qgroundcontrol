@@ -16,6 +16,7 @@
 #include "GeoZoneReturnModel.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneText.h"
 #include "MissionController.h"
 #include "MissionSettingsItem.h"
 #include "MultiVehicleManager.h"
@@ -98,7 +99,7 @@ const GeoZone *findZone(const GeoZoneManager &manager, const QString &identifier
 QString alertText(const GeoZoneManager &manager, const QString &event, const QString &identifier)
 {
     const GeoZone *const zone = findZone(manager, identifier);
-    return zone ? QStringLiteral("%1 geozone %2 (%3)").arg(event, zone->name(), zone->restrictionText()) : identifier;
+    return zone ? QStringLiteral("%1 geozone %2 (%3)").arg(event, zone->name(), GeoZoneText::restriction(zone->restriction())) : identifier;
 }
 
 QStringList identifiers(const QList<const GeoZone*> &zones)

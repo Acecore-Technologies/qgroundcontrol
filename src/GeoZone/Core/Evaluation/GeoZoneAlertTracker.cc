@@ -11,6 +11,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneTerrain.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QSet>
 #include <QtCore/QtMath>
@@ -184,7 +185,7 @@ QList<GeoZoneVerticalBand> GeoZoneVerticalBand::at(const GeoZoneCatalog &catalog
         for (qsizetype i = 0; i < volumes.count(); i++) {
             const GeoZone::Volume &volume = volumes[i];
             if (zone->volumeContains(i, position.coordinate)) {
-                bands.append(GeoZoneVerticalBand{ zone, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) });
+                bands.append(GeoZoneVerticalBand{ zone, GeoZoneVertical::limitAMSL(volume, false, position), GeoZoneVertical::limitAMSL(volume, true, position) });
             }
         }
     }

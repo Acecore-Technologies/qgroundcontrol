@@ -129,25 +129,3 @@ QString GeoZoneText::limit(double limit, GeoZone::VerticalReference reference, c
     const double converted = GeoZoneEnvironment::metersToVerticalDistanceUnits(meters);
     return QStringLiteral("%1 %2 %3 (%4 %5)").arg(qRound(converted)).arg(userUnits, referenceCode).arg(limit).arg(publishedUnits);
 }
-
-// The text accessors of the zones, so that the model doesn't depend on translations and units
-
-QString GeoZone::restrictionToString(Restriction restriction)
-{
-    return GeoZoneText::restriction(restriction);
-}
-
-QString GeoZone::reasonText() const
-{
-    return GeoZoneText::reasons(_data);
-}
-
-QString GeoZone::regulationExemptionText() const
-{
-    return GeoZoneText::regulationExemption(_data);
-}
-
-QString GeoZone::verticalLimitsText() const
-{
-    return GeoZoneText::verticalLimits(_data);
-}

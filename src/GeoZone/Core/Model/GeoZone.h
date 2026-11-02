@@ -145,14 +145,6 @@ public:
     QString uSpaceClass() const { return _data.uSpaceClass; }
     QString extendedPropertiesText() const { return _data.extendedProperties.join(QStringLiteral("\n")); }
     QString issuesText() const { return _data.issues.join(QStringLiteral("\n")); }
-    QString applicabilityText() const;
-
-    /// Translated texts in the units of the application, made by GeoZoneText
-    QString restrictionText() const { return restrictionToString(_data.restriction); }
-    QString reasonText() const;
-    QString regulationExemptionText() const;
-    QString verticalLimitsText() const;
-    static QString restrictionToString(Restriction restriction);
 
     /// @return true if the heights of some limits are approximate, see Volume::approximateLimits
     bool approximateLimits() const;
@@ -235,12 +227,6 @@ public:
     /// @return true if the area overlaps a volume horizontally and vertically
     bool intersectsArea(const Area &area) const;
 
-    /// Comparisons with the vertical limits of a volume, see GeoZoneVertical for the datums and the policy for unknown
-    /// altitudes, limits, references and terrain, which don't bound the volume
-    static bool verticalOverlap(const Volume &volume, const Position &from, const Position &to, double margin = 0);
-    static std::optional<std::pair<double, double>> verticalInterval(const Volume &volume, const Position &from, const Position &to, double margin = 0);
-    static VerticalPosition verticalPosition(const Volume &volume, const Position &position);
-
     /// @return true if the coordinate is inside the horizontal projection of the volume at the index
     bool volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordinate) const;
 
@@ -251,10 +237,6 @@ public:
     ///         circle, see GeoZoneGeometry::greatCircleFractions. The segment takes the shorter way, which may cross the
     ///         antimeridian.
     QList<GeoZoneGeometry::Interval> horizontalIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const;
-
-    /// @return Lower or upper limit of the volume in meters above mean sea level at the position, see
-    ///         GeoZoneVertical::limitAMSL
-    static double limitAMSL(const Volume &volume, bool upper, const Position &position);
 
     static VerticalReference verticalReferenceFromString(const QString &reference);
     static Restriction restrictionFromString(const QString &restriction);

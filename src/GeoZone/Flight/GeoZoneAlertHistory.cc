@@ -13,6 +13,7 @@
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneText.h"
 #include "SettingsManager.h"
 
 #include <QtCore/QDir>
@@ -367,7 +368,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
 
     // The messages of the monitor
     const QString name = event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName;
-    event.message = GeoZoneMonitor::alertMessage(event, name, GeoZone::restrictionToString(event.restriction));
+    event.message = GeoZoneMonitor::alertMessage(event, name, GeoZoneText::restriction(event.restriction));
     return event;
 }
 

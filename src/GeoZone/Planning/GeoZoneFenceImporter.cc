@@ -16,6 +16,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZoneMissionWorker.h"
+#include "GeoZoneText.h"
 #include "MissionController.h"
 #include "ParameterManager.h"
 #include "PlanMasterController.h"
@@ -468,7 +469,7 @@ GeoZoneFenceChoiceModel::Row GeoZoneFenceImporter::_row(const GeoZoneFences::Cho
     row.key = zone->key();
     row.name = zone->displayName();
     row.restriction = static_cast<int>(zone->restriction());
-    row.restrictionText = zone->restrictionText();
+    row.restrictionText = GeoZoneText::restriction(zone->restriction());
     row.proximityText = proximity;
     row.points = choice.usage.items;
     row.simplifyTolerance = choice.simplifyTolerance;

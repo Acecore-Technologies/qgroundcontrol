@@ -12,6 +12,7 @@
 #include "GeoZoneInputFiles.h"
 #include "GeoZoneLoader.h"
 #include "GeoZoneParser.h"
+#include "GeoZoneText.h"
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QCoreApplication>
@@ -223,8 +224,8 @@ void printZones(const QList<GeoZone::Data> &zones)
     for (const GeoZone::Data &data : zones) {
         const GeoZone zone(data);
         out() << "    " << zone.identifier() << ((zone.name().isEmpty() || (zone.name() == zone.identifier())) ? QString() : QStringLiteral(" (%1)").arg(zone.name()))
-              << ": " << zone.restrictionText();
-        for (const QString &text : { zone.verticalLimitsText(), zone.applicabilityText() }) {
+              << ": " << GeoZoneText::restriction(zone.restriction());
+        for (const QString &text : { GeoZoneText::verticalLimits(zone.data()), GeoZoneSchedule::text(zone.data().applicability) }) {
             if (!oneLine(text).isEmpty()) {
                 out() << ", " << oneLine(text);
             }
@@ -280,7 +281,7 @@ bool validate(const QString &fileName, const Options &options, Findings &finding
     }
     QList<std::pair<qsizetype, QString>> restrictionCounts;
     for (auto it = restrictions.cbegin(); it != restrictions.cend(); ++it) {
-        restrictionCounts.append({ it.value(), GeoZone::restrictionToString(it.key()) });
+        restrictionCounts.append({ it.value(), GeoZoneText::restriction(it.key()) });
     }
     out() << "  Restrictions: " << counts(restrictionCounts) << Qt::endl;
     printGeometry(result.zones);

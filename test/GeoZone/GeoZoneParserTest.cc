@@ -10,6 +10,7 @@
 #include "GeoZoneParserTest.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneFormat.h"
+#include "GeoZoneText.h"
 #include "GeoZoneZip.h"
 
 #include <zlib.h>
@@ -492,8 +493,7 @@ void GeoZoneParserTest::_testParseED269()
     QCOMPARE(result.issues.value(QStringLiteral("Times of day without UTC offset are taken as UTC, the zone has no country")), 1);
     QVERIFY(!classified.applicability[0].schedule[0].timeZone.isValid());
     QCOMPARE(classified.applicability[0].schedule[0].utcOffsetSecs, 0);
-    ZoneOwner owner;
-    QCOMPARE(owner.add(classified)->regulationExemptionText(), QStringLiteral("Exemptions possible"));
+    QCOMPARE(GeoZoneText::regulationExemption(classified), QStringLiteral("Exemptions possible"));
     ScopedEnvironment environment;
     environment.setNow(_utc(QDate(2026, 11, 1), QTime(12, 0)));
     GeoZoneSource source(QStringLiteral("zones.json"), QString());
@@ -1302,8 +1302,8 @@ void GeoZoneParserTest::_testParserFuzz()
                 }
                 (void) zone.exclusionCircles();
                 (void) zone.isActiveDuring(reference, reference.addDays(2));
-                (void) zone.verticalLimitsText();
-                (void) zone.applicabilityText();
+                (void) GeoZoneText::verticalLimits(zone.data());
+                (void) GeoZoneSchedule::text(zone.data().applicability);
             }
         }
     }
@@ -1355,14 +1355,14 @@ void GeoZoneParserTest::_testDisplayText()
     // Each volume on a line, see _testLimitTexts for the units
     const auto meters = _setVerticalUnits(false);
     const GeoZone prohibited(ed269.zones[0]);
-    QCOMPARE(prohibited.verticalLimitsText(), QStringLiteral("GND - 120 m AGL\n120 m AGL - Unlimited"));
-    QCOMPARE(prohibited.applicabilityText(), QStringLiteral("Permanent"));
-    QCOMPARE(prohibited.reasonText(), QStringLiteral("Air traffic, Sensitive area"));
-    QCOMPARE(GeoZone(ed269.zones[1]).verticalLimitsText(), QStringLiteral("GND - 122 m AGL (400 ft)"));
+    QCOMPARE(GeoZoneText::verticalLimits(prohibited.data()), QStringLiteral("GND - 120 m AGL\n120 m AGL - Unlimited"));
+    QCOMPARE(GeoZoneSchedule::text(prohibited.data().applicability), QStringLiteral("Permanent"));
+    QCOMPARE(GeoZoneText::reasons(prohibited.data()), QStringLiteral("Air traffic, Sensitive area"));
+    QCOMPARE(GeoZoneText::verticalLimits(ed269.zones[1]), QStringLiteral("GND - 122 m AGL (400 ft)"));
 
     const GeoZone scheduled(ed269.zones[2]);
-    QCOMPARE(scheduled.verticalLimitsText(), QStringLiteral("Not specified"));
-    QCOMPARE(scheduled.applicabilityText(), QStringLiteral("From 2026-03-29 01:00 UTC to 2026-10-25 00:59 UTC\n  MON, TUE 05:00-18:00 UTC"));
+    QCOMPARE(GeoZoneText::verticalLimits(scheduled.data()), QStringLiteral("Not specified"));
+    QCOMPARE(GeoZoneSchedule::text(scheduled.data().applicability), QStringLiteral("From 2026-03-29 01:00 UTC to 2026-10-25 00:59 UTC\n  MON, TUE 05:00-18:00 UTC"));
 }
 
 void GeoZoneParserTest::_testLimitTexts_data()
@@ -1416,7 +1416,7 @@ void GeoZoneParserTest::_testLimitTexts()
     GeoZone::Data data;
     data.volumes.append(volume);
     const auto units = _setVerticalUnits(shownInFeet);
-    QCOMPARE(GeoZone(data).verticalLimitsText(), text);
+    QCOMPARE(GeoZoneText::verticalLimits(data), text);
 }
 
 void GeoZoneParserTest::_testFlightLevelQnh()
@@ -1464,10 +1464,10 @@ void GeoZoneParserTest::_testFlightLevelQnh()
     const GeoZone::Position position{ QGeoCoordinate(47, 8), 2800 };
     environment.setQnh(1003);
     QVERIFY(zone.contains(position));
-    QCOMPARE(zone.verticalLimitsText(), QStringLiteral("FL 95 ≈ 2810 m AMSL - Unlimited (QNH 1003 hPa)"));
+    QCOMPARE(GeoZoneText::verticalLimits(zone.data()), QStringLiteral("FL 95 ≈ 2810 m AMSL - Unlimited (QNH 1003 hPa)"));
     environment.setQnh(1030);
     QVERIFY(!zone.contains(position));
-    QCOMPARE(zone.verticalLimitsText(), QStringLiteral("FL 95 ≈ 3034 m AMSL - Unlimited (QNH 1030 hPa)"));
+    QCOMPARE(GeoZoneText::verticalLimits(zone.data()), QStringLiteral("FL 95 ≈ 3034 m AMSL - Unlimited (QNH 1030 hPa)"));
 }
 
 void GeoZoneParserTest::_testProviders()
@@ -1669,8 +1669,8 @@ void GeoZoneParserTest::_testParseCacheRoundTrip()
     for (qsizetype i = 0; i < result.zones.count(); i++) {
         const GeoZone zone(result.zones[i]);
         const GeoZone readZone(readBack.zones[i]);
-        QCOMPARE(readZone.applicabilityText(), zone.applicabilityText());
-        QCOMPARE(readZone.verticalLimitsText(), zone.verticalLimitsText());
+        QCOMPARE(GeoZoneSchedule::text(readZone.data().applicability), GeoZoneSchedule::text(zone.data().applicability));
+        QCOMPARE(GeoZoneText::verticalLimits(readZone.data()), GeoZoneText::verticalLimits(zone.data()));
         QCOMPARE(readZone.box().toRectangle(), zone.box().toRectangle());
     }
 

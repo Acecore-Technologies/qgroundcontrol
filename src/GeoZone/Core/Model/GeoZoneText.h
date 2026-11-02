@@ -15,8 +15,7 @@
 #include "GeoZone.h"
 
 /// Translated display texts of geozones, with altitudes in the vertical distance units of the application, see
-/// GeoZoneEnvironment. The zone model has no translated texts or units of its own, its text accessors, like
-/// GeoZone::reasonText, are made here.
+/// GeoZoneEnvironment. The zone model has no translated texts or units of its own.
 class GeoZoneText
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneText)

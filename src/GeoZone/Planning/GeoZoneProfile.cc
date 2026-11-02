@@ -14,6 +14,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePathEvaluator.h"
+#include "GeoZoneVertical.h"
 #include "MissionController.h"
 
 #include <algorithm>
@@ -163,7 +164,7 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<GeoZoneMiss
 
             const GeoZone::Volume &volume = zoneResult.zone->data().volumes[stretch.volume];
             const auto bandPoint = [&volume](double distance, const GeoZone::Position &position) {
-                return BandPoint{ distance, GeoZone::limitAMSL(volume, false, position), GeoZone::limitAMSL(volume, true, position) };
+                return BandPoint{ distance, GeoZoneVertical::limitAMSL(volume, false, position), GeoZoneVertical::limitAMSL(volume, true, position) };
             };
             Band band{ zoneResult.zone->restriction(), zoneResult.zone->displayName(), { bandPoint(entryDistance, stretch.entry.position) } };
             // Limits above ground follow the terrain, which is linear between the positions

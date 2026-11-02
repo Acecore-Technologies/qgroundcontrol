@@ -10,6 +10,7 @@
 #include "GeoZoneRouteObstacles.h"
 #include "GeoZoneBox.h"
 #include "GeoZoneVector.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QtMath>
 
@@ -322,7 +323,7 @@ double GeoZoneRouteObstacles::_endpointMargin(const Obstacle &obstacle, const QP
         }
     }
     if (distance <= 0) {
-        inside = GeoZone::verticalPosition(obstacle.zone->data().volumes[obstacle.volume], position) == GeoZone::VerticalPosition::Inside;
+        inside = GeoZoneVertical::position(obstacle.zone->data().volumes[obstacle.volume], position) == GeoZone::VerticalPosition::Inside;
         return 0;
     }
     return (distance < _margin) ? (distance * kEndpointRelaxation) : _margin;

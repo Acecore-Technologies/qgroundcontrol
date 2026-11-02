@@ -21,6 +21,8 @@
 #include "GeoZoneSettings.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneTerrain.h"
+#include "GeoZoneText.h"
+#include "GeoZoneVertical.h"
 #include "MultiVehicleManager.h"
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
@@ -524,7 +526,7 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &e
     announced.breach = (event.kind == AlertEvent::Entry) && (event.restriction == GeoZone::Prohibited);
     announced.message = event.message;
     if (announced.breach) {
-        announced.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zone->displayName(), zone->restrictionText()));
+        announced.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())));
     }
     _arbiter.submit(announced);
 }
@@ -653,7 +655,7 @@ double GeoZoneMonitor::_climbHeight(const GeoZoneVehicleMonitor *monitor, const 
     }
     double ceiling = qQNaN();
     for (const qsizetype i : std::as_const(indexes)) {
-        const double upper = GeoZone::limitAMSL(volumes[i], true, position);
+        const double upper = GeoZoneVertical::limitAMSL(volumes[i], true, position);
         if (std::isnan(upper)) {
             return qQNaN();
         }
@@ -750,7 +752,7 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZone *zone, Aler
     event.zoneKey = zone->key();
     event.timeToEntry = timeToEntry;
     event.traffic = traffic;
-    event.message = _labelled(vehicleId, alertMessage(event, zone->displayName(), zone->restrictionText()));
+    event.message = _labelled(vehicleId, alertMessage(event, zone->displayName(), GeoZoneText::restriction(zone->restriction())));
     qCDebug(GeoZoneMonitorLog) << event.message << "distance" << distance << "time to entry" << timeToEntry;
     return event;
 }
