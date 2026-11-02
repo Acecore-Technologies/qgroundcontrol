@@ -31,12 +31,12 @@ Item {
     property bool showIndicator: GeoZoneManager.zoneCount > 0
 
     readonly property var _monitor:         GeoZoneMonitor
-    readonly property var _active:          GeoZoneMonitor.activeVehicle
+    readonly property var _active:          GeoZoneMonitor.activeVehicle     ///< GeoZoneVehicleMonitor, null without
     readonly property var _traffic:         GeoZoneMonitor.traffic
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
-    readonly property bool _stale:          _monitor.monitoring && _active.positionUnavailable
+    readonly property bool _stale:          _monitor.monitoring && _active?.positionUnavailable === true
     // Long zone names, alerts and descriptions wrap within the page rather than widening it off the window
     readonly property real _pageWidth:      ScreenTools.defaultFontPixelWidth * 60
 
@@ -64,8 +64,8 @@ Item {
         source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
-        color:              control._active.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._active.alertRestriction : -1)
-        opacity:            (control._monitor.monitoring && !control._active.positionUnavailable) ? 1 : 0.5
+        color:              control._active?.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._active?.alertRestriction ?? -1 : -1)
+        opacity:            (control._monitor.monitoring && control._active?.positionUnavailable !== true) ? 1 : 0.5
     }
 
     // The nearby zones are those of the last known position
@@ -129,7 +129,7 @@ Item {
                         QGCLabel {
                             text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
                                       (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
-                            visible: (!control._monitor.monitoring || control._active.nearbyModel.count === 0) && !_pausedLabel.visible
+                            visible: (!control._monitor.monitoring || !control._active?.nearbyModel.count) && !_pausedLabel.visible
                         }
 
                         QGCLabel {
@@ -137,8 +137,8 @@ Item {
                             wrapMode:           Text.WordWrap
                             color:              qgcPal.colorRed
                             font.bold:          true
-                            text:               qsTr("Vehicle: %1").arg(control._active.fenceBreachText)
-                            visible:            control._active.fenceBreached
+                            text:               qsTr("Vehicle: %1").arg(control._active?.fenceBreachText ?? "")
+                            visible:            control._active?.fenceBreached === true
                         }
 
                         RowLayout {
@@ -177,7 +177,7 @@ Item {
                             wrapMode:           Text.WordWrap
                             color:              qgcPal.warningText
                             text:               qsTr("The vehicle sends no height above terrain: its height above ground is estimated from terrain data, so limits above ground are less accurate.")
-                            visible:            control._monitor.monitoring && control._active.altitudeDegraded && !control._stale
+                            visible:            control._monitor.monitoring && control._active?.altitudeDegraded === true && !control._stale
                         }
 
                         RowLayout {
@@ -199,7 +199,7 @@ Item {
                         }
 
                         Repeater {
-                            model: control._monitor.monitoring ? control._active.nearbyModel : null
+                            model: control._monitor.monitoring ? control._active?.nearbyModel ?? null : null
 
                             RowLayout {
                                 id:                 nearbyRow

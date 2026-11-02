@@ -12,7 +12,6 @@
 #include "ADSBVehicleManager.h"
 #include "AudioOutput.h"
 #include "GeoZone.h"
-#include "GeoZoneActiveVehicleView.h"
 #include "GeoZoneAlertHistory.h"
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneEnvironment.h"
@@ -81,7 +80,6 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
-    , _activeView(new GeoZoneActiveVehicleView(this))
     , _traffic(new GeoZoneTrafficMonitor(this))
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
@@ -97,7 +95,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(_alertHistory, &GeoZoneAlertHistory::allAcknowledged, this, [this]() { _arbiter.acknowledgeAll(); });
 
     // Zones are muted for the active vehicle
-    (void) connect(_activeView, &GeoZoneActiveVehicleView::activeMonitorChanged, this, &GeoZoneMonitor::zoneMutesChanged);
+    (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::zoneMutesChanged);
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
@@ -269,7 +267,7 @@ void GeoZoneMonitor::setActiveVehicle(Vehicle *vehicle)
     }
     _activeVehicle = vehicle;
     _activeVehicleId = vehicle ? vehicle->id() : noVehicle;
-    _activeView->setMonitor(vehicleMonitor(vehicle));
+    _resolveActive();
 }
 
 void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
@@ -279,12 +277,16 @@ void GeoZoneMonitor::setActiveVehicleId(int vehicleId)
     }
     _activeVehicle = nullptr;
     _activeVehicleId = vehicleId;
-    _activeView->setMonitor(positionMonitor(vehicleId));
+    _resolveActive();
 }
 
 void GeoZoneMonitor::_resolveActive()
 {
-    _activeView->setMonitor(_activeVehicle ? vehicleMonitor(_activeVehicle) : positionMonitor(_activeVehicleId));
+    GeoZoneVehicleMonitor *const monitor = _activeVehicle ? vehicleMonitor(_activeVehicle) : positionMonitor(_activeVehicleId);
+    if (monitor != _activeMonitor) {
+        _activeMonitor = monitor;
+        emit activeMonitorChanged();
+    }
 }
 
 void GeoZoneMonitor::_updateTrafficTimer()
@@ -324,7 +326,7 @@ void GeoZoneMonitor::_evaluateADSBTraffic()
 void GeoZoneMonitor::evaluateTraffic(const QList<GeoZoneTrafficMonitor::Aircraft> &aircraft)
 {
     // The traffic around the active vehicle, where it is now
-    const GeoZoneVehicleMonitor *const active = _activeView->monitor();
+    const GeoZoneVehicleMonitor *const active = _activeMonitor;
     if (!active || active->positionUnavailable() || !active->position().coordinate.isValid()) {
         _traffic->clear();
         return;
@@ -528,7 +530,7 @@ QVariantMap GeoZoneMonitor::alertActions(int alertId) const
     return QVariantMap{
         { QStringLiteral("vehicleId"), monitor->vehicleId() },
         { QStringLiteral("zoneKey"), subject->zoneKey },
-        { QStringLiteral("activeVehicle"), monitor == _activeView->monitor() },
+        { QStringLiteral("activeVehicle"), monitor == _activeMonitor },
         { QStringLiteral("inside"), known && zone->inside },
         { QStringLiteral("zoneMuted"), _arbiter.zoneMuted(subject->vehicleKey, subject->zoneKey) },
         { QStringLiteral("climbHeight"), known ? _climbHeight(monitor, zone->zone) : qQNaN() },
@@ -548,7 +550,7 @@ void GeoZoneMonitor::muteZone(int alertId)
 
 QStringList GeoZoneMonitor::mutedZoneKeys() const
 {
-    const GeoZoneVehicleMonitor *const monitor = _activeView->monitor();
+    const GeoZoneVehicleMonitor *const monitor = _activeMonitor;
     return monitor ? QStringList(_arbiter.mutedZones(monitor->key()).values()) : QStringList();
 }
 

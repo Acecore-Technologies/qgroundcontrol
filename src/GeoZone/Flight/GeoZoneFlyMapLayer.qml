@@ -21,7 +21,7 @@ GeoZoneMapVisuals {
     showPrediction:     showZones
     vehicleAltitudes:   true
     // The map filters don't hide the zones the flight alerts report
-    keptZones:          GeoZoneMonitor.activeVehicle.nearbyZones.map(nearby => nearby.zone).concat([ GeoZoneMonitor.activeVehicle.predictedEntryZone ])
+    keptZones:          GeoZoneMonitor.activeVehicle?.keptZones ?? []
 
     /// @return true if a go to location would enter geozones, so it is confirmed even where QGroundControl wouldn't
     function gotoEntersZones(coordinate) {

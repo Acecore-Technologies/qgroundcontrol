@@ -130,12 +130,12 @@ Popup {
         // Fences stop or return the vehicle, shown above geozone alerts
         function onFenceBreach(message)                         { control.show(message, -1, 0) }
         function onZoneMutesChanged()                           { control._revision++ }
+        function onActiveMonitorChanged()                       { control._revision++ }
     }
 
     Connections {
         target:                                 GeoZoneMonitor.activeVehicle
-        function onActiveMonitorChanged()       { control._revision++ }
-        function onNearbyZonesChanged()         { control._revision++ }
+        function onNearbyChanged()              { control._revision++ }
         function onVerticalBandsChanged()       { control._revision++ }
         function onPositionUnavailableChanged() { control._revision++ }
     }

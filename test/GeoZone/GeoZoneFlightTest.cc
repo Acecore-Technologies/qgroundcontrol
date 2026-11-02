@@ -9,7 +9,6 @@
 
 #include "GeoZoneFlightTest.h"
 #include "GeoZone.h"
-#include "GeoZoneActiveVehicleView.h"
 #include "GeoZoneAlertLog.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
@@ -116,8 +115,10 @@ QStringList identifiers(const QList<const GeoZone*> &zones)
 QStringList nearbyIdentifiers(const GeoZoneMonitor &monitor)
 {
     QList<const GeoZone*> zones;
-    for (const QVariant &nearby : monitor.activeView()->nearbyZones()) {
-        zones.append(GeoZoneInfo::fromVariant(nearby.toMap().value(QStringLiteral("zone"))));
+    if (const GeoZoneVehicleMonitor *const active = monitor.activeMonitor()) {
+        for (const GeoZoneAlertTracker::Nearby &nearby : active->nearby()) {
+            zones.append(nearby.zone);
+        }
     }
     return identifiers(zones);
 }
@@ -181,7 +182,7 @@ void GeoZoneFlightTest::_testFlightAlertSequence()
     // out of the CTR there. Each zone alerts once on approach and once on entry.
     fly(monitor, kStart, kPrison);
     QCOMPARE(nearbyIdentifiers(monitor), QStringList{ QStringLiteral("GZW0001") });
-    QVERIFY(monitor.activeView()->inside());
+    QVERIFY(monitor.activeMonitor()->inside());
     fly(monitor, kPrison, { kPrison.east, kPrison.north, kCruiseHeight });
     QCOMPARE(nearbyIdentifiers(monitor), QStringList{ QStringLiteral("CTR0015") });
     fly(monitor, { kPrison.east, kPrison.north, kCruiseHeight }, { kAirport.east, kAirport.north, kCruiseHeight });
@@ -197,7 +198,7 @@ void GeoZoneFlightTest::_testFlightAlertSequence()
     };
     QCOMPARE(spiedAlerts(alertSpy), expected);
     QCOMPARE(nearbyIdentifiers(monitor), QStringList{ QStringLiteral("LSZH001") });
-    QVERIFY(monitor.activeView()->inside());
+    QVERIFY(monitor.activeMonitor()->inside());
 
     // Without terrain data the height above ground is unknown, so the CTRs above count as entered
     alertSpy.clear();
@@ -276,15 +277,15 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     // A parked vehicle is on the ground below the CTRs, even before terrain data is received
     QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
     QVERIFY(!vehicle->armed());
-    QTRY_VERIFY(!std::isnan(monitor.activeView()->altitudeAMSL()));
-    QVERIFY(!monitor.activeView()->inside());
+    QTRY_VERIFY(monitor.activeMonitor() && !std::isnan(monitor.activeMonitor()->altitudeAMSL()));
+    QVERIFY(!monitor.activeMonitor()->inside());
     QVERIFY(spiedAlerts(alertSpy).filter(QStringLiteral("Entered")).isEmpty());
 
     // Climbing 300 m enters the CTRs, MockLink reports the arming with its next heartbeat
     vehicle->sendMavCommand(vehicle->defaultComponentId(), MAV_CMD_NAV_TAKEOFF, false /* showError */, 0, 0, 0, 0, 0, 0, 300);
     QTRY_COMPARE_WITH_TIMEOUT(vehicle->altitudeRelative()->rawValue().toInt(), 300, 30000);
     const QStringList ctrs = { QStringLiteral("CTR0004"), QStringLiteral("CTR0015") };
-    QTRY_VERIFY_WITH_TIMEOUT(monitor.activeView()->inside(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(monitor.activeMonitor()->inside(), 5000);
     QCOMPARE(nearbyIdentifiers(monitor), ctrs);
 
     // Guided commands name the zones they would enter, not those the vehicle is in
@@ -315,32 +316,31 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     // Alerts pause while the link is lost, since the last position isn't where the vehicle is, which is alerted once
     // with the zone it was last seen in
     _mockLink->setCommLost(true);
-    QTRY_VERIFY_WITH_TIMEOUT(monitor.activeView()->positionUnavailable(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(monitor.activeMonitor()->positionUnavailable(), 10000);
     const QStringList lost = spiedAlerts(alertSpy).filter(QStringLiteral("Position lost inside geozone"));
     QCOMPARE(lost.count(), 1);
     QVERIFY2((lost.first() == alertText(*manager, QStringLiteral("Position lost inside"), ctrs[0])) ||
              (lost.first() == alertText(*manager, QStringLiteral("Position lost inside"), ctrs[1])), qPrintable(lost.first()));
     _mockLink->setCommLost(false);
-    QTRY_VERIFY_WITH_TIMEOUT(!monitor.activeView()->positionUnavailable(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!monitor.activeMonitor()->positionUnavailable(), 10000);
     QCOMPARE(spiedAlerts(alertSpy).filter(QStringLiteral("Position lost")).count(), 1);
 
     // Alerts can be turned off in flight
     settings->alertsEnabled()->setRawValue(false);
     QVERIFY(!monitor.monitoring());
-    QVERIFY(monitor.activeView()->nearbyZones().isEmpty());
+    QVERIFY(monitor.activeMonitor()->nearby().isEmpty());
     // Not even after the vehicle is evaluated again
     QVERIFY(!alertSpy.wait(GeoZoneMonitor::evaluateIntervalMSecs + 200));
-    QVERIFY(monitor.activeView()->nearbyZones().isEmpty());
+    QVERIFY(monitor.activeMonitor()->nearby().isEmpty());
 
     // Disconnecting the vehicle while monitoring clears its state
     settings->alertsEnabled()->setRawValue(true);
     QVERIFY(monitor.monitoring());
     QTRY_COMPARE_WITH_TIMEOUT(nearbyIdentifiers(monitor), ctrs, 5000);
-    QVERIFY(monitor.activeView()->inside());
+    QVERIFY(monitor.activeMonitor()->inside());
     _disconnectMockLink();
     QTRY_VERIFY(!monitor.monitoring());
-    QVERIFY(monitor.activeView()->nearbyZones().isEmpty());
-    QVERIFY(!monitor.activeView()->inside());
+    QVERIFY(!monitor.activeMonitor());
 }
 
 void GeoZoneFlightTest::_testReturnParameterChanges()

@@ -10,7 +10,6 @@
 #include "GeoZoneModule.h"
 #include "FactMetaData.h"
 #include "GeoZone.h"
-#include "GeoZoneActiveVehicleView.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneEnvironment.h"
@@ -104,7 +103,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneFenceUpload>(kUri, 1, 0, "GeoZoneFenceUpload", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneFenceChoiceModel>(kUri, 1, 0, "GeoZoneFenceChoiceModel", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
-    (void) qmlRegisterUncreatableType<GeoZoneActiveVehicleView>(kUri, 1, 0, "GeoZoneActiveVehicleView", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneVehicleMonitor>(kUri, 1, 0, "GeoZoneVehicleMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneTrafficMonitor>(kUri, 1, 0, "GeoZoneTrafficMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneSettings>(kUri, 1, 0, "GeoZoneSettings", "Reference only");

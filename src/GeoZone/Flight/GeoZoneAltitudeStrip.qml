@@ -28,12 +28,12 @@ Rectangle {
     visible:    _monitor.monitoring && _bands.length > 0 && !isNaN(_altitude)
 
     readonly property var   _monitor:       GeoZoneMonitor
-    readonly property var   _active:        GeoZoneMonitor.activeVehicle
-    readonly property var   _bands:         _active.verticalBands
-    readonly property real  _altitude:      _active.altitudeAMSL
-    readonly property real  _terrain:       _active.terrainAMSL
-    readonly property bool  _stale:         _active.positionUnavailable
-    readonly property bool  _degraded:      _active.altitudeDegraded && !_stale
+    readonly property var   _active:        GeoZoneMonitor.activeVehicle    ///< GeoZoneVehicleMonitor, null without
+    readonly property var   _bands:         _active?.verticalBands ?? []
+    readonly property real  _altitude:      _active?.altitudeAMSL ?? NaN
+    readonly property real  _terrain:       _active?.terrainAMSL ?? NaN
+    readonly property bool  _stale:         _active?.positionUnavailable === true
+    readonly property bool  _degraded:      _active?.altitudeDegraded === true && !_stale
     readonly property real  _margin:        ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _barX:          _margin
     readonly property real  _barWidth:      ScreenTools.defaultFontPixelWidth * 2.5

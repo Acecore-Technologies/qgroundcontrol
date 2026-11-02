@@ -151,8 +151,8 @@ Item {
         function onVisibleRegionChanged()   { _root._scheduleViewUpdate() }
     }
 
-    readonly property bool _predictionShown: showPrediction && map.visible && GeoZoneMonitor.activeVehicle.predictedEntryTime >= 0
-    readonly property color _predictionColor: _predictionShown ? GeoZoneStyle.restrictionColor(GeoZoneMonitor.activeVehicle.predictedEntryZone.restriction) : "transparent"
+    readonly property bool _predictionShown: showPrediction && map.visible && (GeoZoneMonitor.activeVehicle?.predictedEntryTime ?? -1) >= 0
+    readonly property color _predictionColor: _predictionShown ? GeoZoneStyle.restrictionColor(GeoZoneMonitor.activeVehicle?.predictedEntryZone?.restriction) : "transparent"
 
     Component.onCompleted: {
         _scheduleViewUpdate()
@@ -164,7 +164,7 @@ Item {
     // Path of the active vehicle to the zone it enters at its velocity
     MapPolyline {
         id:             _predictedPathItem
-        path:           _root._predictionShown ? GeoZoneMonitor.activeVehicle.predictedPath : []
+        path:           _root._predictionShown ? GeoZoneMonitor.activeVehicle?.predictedPath ?? [] : []
         line.width:     ScreenTools.defaultFontPixelHeight / 5
         line.color:     _root._predictionColor
         visible:        _root._predictionShown
@@ -174,7 +174,7 @@ Item {
     // Entry point with the seconds left
     MapQuickItem {
         id:             _predictedEntryItem
-        coordinate:     GeoZoneMonitor.activeVehicle.predictedEntry
+        coordinate:     GeoZoneMonitor.activeVehicle?.predictedEntry ?? QtPositioning.coordinate()
         visible:        _root._predictionShown
         anchorPoint.x:  entryDot.width / 2
         anchorPoint.y:  entryDot.height / 2
@@ -211,7 +211,7 @@ Item {
                     font.pointSize:     ScreenTools.smallFontPointSize
                     textFormat:         Text.PlainText
                     text:               _root._predictionShown ?
-                                            qsTr("%1 in %2 s").arg(GeoZoneMonitor.activeVehicle.predictedEntryZone.displayName).arg(GeoZoneMonitor.activeVehicle.predictedEntryTime) : ""
+                                            qsTr("%1 in %2 s").arg(GeoZoneMonitor.activeVehicle?.predictedEntryZone?.displayName).arg(GeoZoneMonitor.activeVehicle?.predictedEntryTime) : ""
                 }
             }
         }

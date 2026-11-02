@@ -9,10 +9,14 @@
 
 #include "GeoZoneVehicleMonitor.h"
 #include "GeoZoneCatalog.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZoneNearbyModel.h"
 #include "GeoZoneTerrain.h"
 #include "Vehicle.h"
 #include "VehicleLinkManager.h"
+
+#include <QtCore/QVariantMap>
 
 #include <algorithm>
 #include <cmath>
@@ -24,7 +28,11 @@ GeoZoneVehicleMonitor::GeoZoneVehicleMonitor(Vehicle *vehicle, int vehicleId, in
     , _vehicleId(vehicleId)
     , _key(key)
     , _clock(clock)
+    , _nearbyModel(new GeoZoneNearbyModel(this))
 {
+    (void) connect(this, &GeoZoneVehicleMonitor::nearbyChanged, this, [this]() { _nearbyModel->setItems(_nearby); });
+    (void) connect(this, &GeoZoneVehicleMonitor::nearbyChanged, this, &GeoZoneVehicleMonitor::keptZonesChanged);
+    (void) connect(this, &GeoZoneVehicleMonitor::predictionChanged, this, &GeoZoneVehicleMonitor::keptZonesChanged);
     if (vehicle) {
         (void) connect(vehicle, &Vehicle::mavlinkMessageReceived, this, [this](const mavlink_message_t &message) {
             handleMessage(message, _clock());
@@ -196,7 +204,6 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::evaluate(const GeoZone:
     }
     const bool hadEntry = _entry.has_value();
     _entry = update.firstEntry;
-    _entryFrom = position.coordinate;
     if (hadEntry || _entry) {
         emit predictionChanged();
     }
@@ -220,6 +227,62 @@ QSet<QString> GeoZoneVehicleMonitor::insideZoneKeys() const
         }
     }
     return keys;
+}
+
+bool GeoZoneVehicleMonitor::inside() const
+{
+    return std::any_of(_nearby.cbegin(), _nearby.cend(), [](const Nearby &zone) { return zone.inside; });
+}
+
+QVariantList GeoZoneVehicleMonitor::keptZones() const
+{
+    QVariantList zones;
+    for (const Nearby &nearby : _nearby) {
+        zones.append(QVariant::fromValue(GeoZoneInfo(nearby.zone)));
+    }
+    if (const std::optional<Entry> predicted = entry()) {
+        zones.append(QVariant::fromValue(GeoZoneInfo(predicted->zone)));
+    }
+    return zones;
+}
+
+QVariantList GeoZoneVehicleMonitor::verticalBands() const
+{
+    QVariantList bands;
+    for (const GeoZoneVerticalBand &band : _bands) {
+        bands.append(QVariantMap{
+            { QStringLiteral("restriction"), static_cast<int>(band.zone->restriction()) },
+            { QStringLiteral("name"), band.zone->displayName() },
+            { QStringLiteral("limitsText"), band.zone->verticalLimitsText() },
+            { QStringLiteral("floor"), band.floor },
+            { QStringLiteral("ceiling"), band.ceiling },
+        });
+    }
+    return bands;
+}
+
+QVariantList GeoZoneVehicleMonitor::predictedPath() const
+{
+    const std::optional<Entry> predicted = entry();
+    return predicted ? QVariantList{ QVariant::fromValue(_position.coordinate), QVariant::fromValue(predicted->position.coordinate) } : QVariantList();
+}
+
+QGeoCoordinate GeoZoneVehicleMonitor::predictedEntry() const
+{
+    const std::optional<Entry> predicted = entry();
+    return predicted ? predicted->position.coordinate : QGeoCoordinate();
+}
+
+int GeoZoneVehicleMonitor::predictedEntryTime() const
+{
+    const std::optional<Entry> predicted = entry();
+    return predicted ? static_cast<int>(std::lround(predicted->time)) : -1;
+}
+
+QVariant GeoZoneVehicleMonitor::predictedEntryZone() const
+{
+    const std::optional<Entry> predicted = entry();
+    return predicted ? QVariant::fromValue(GeoZoneInfo(predicted->zone)) : QVariant();
 }
 
 void GeoZoneVehicleMonitor::reset()

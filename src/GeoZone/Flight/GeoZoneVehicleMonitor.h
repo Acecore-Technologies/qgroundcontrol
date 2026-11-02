@@ -13,6 +13,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
+#include <QtCore/QVariantList>
 #include <QtPositioning/QGeoCoordinate>
 
 #include "GeoZone.h"
@@ -23,16 +24,46 @@
 #include <functional>
 #include <optional>
 
+Q_MOC_INCLUDE("GeoZoneNearbyModel.h")
+
 class GeoZoneCatalog;
+class GeoZoneNearbyModel;
 class Vehicle;
 
 /// Monitors one vehicle against the zones for GeoZoneMonitor: the messages of the vehicle giving its position, velocity
 /// and fence status, the approach and entry states of the zones around it (GeoZoneAlertTracker), where it would enter
 /// a zone at its velocity and the zones above and below it. A vehicle which reconnects gets a new monitor, so it
-/// starts clean even with the same system id.
+/// starts clean even with the same system id. QML shows the monitor of the active vehicle, GeoZoneMonitor.activeVehicle.
 class GeoZoneVehicleMonitor : public QObject
 {
     Q_OBJECT
+
+    Q_PROPERTY(int          vehicleId           READ vehicleId          CONSTANT FINAL)
+    Q_PROPERTY(GeoZoneNearbyModel *nearbyModel  READ nearbyModel        CONSTANT FINAL)                       ///< nearby() as a list model
+    Q_PROPERTY(int          alertRestriction    READ alertRestriction   NOTIFY nearbyChanged FINAL)           ///< Most restrictive GeoZone::Restriction nearby, -1 without
+    Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyChanged FINAL)           ///< The vehicle is inside one of the nearby zones
+    /// GeoZoneInfo of the nearby zones and of the predicted entry, which the map filters don't hide
+    Q_PROPERTY(QVariantList keptZones           READ keptZones          NOTIFY keptZonesChanged FINAL)
+    /// Volumes of the active zones above and below the vehicle, as maps with restriction, name, limitsText, floor and
+    /// ceiling (meters AMSL, NaN when the zone extends to the ground or has no ceiling, or the limit is unknown)
+    Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
+    Q_PROPERTY(double       altitudeAMSL        READ altitudeAMSL       NOTIFY verticalBandsChanged FINAL)    ///< Of the bands, NaN when unknown
+    Q_PROPERTY(double       terrainAMSL         READ terrainAMSL        NOTIFY verticalBandsChanged FINAL)    ///< Below the vehicle, NaN when unknown
+    /// The vehicle has no current position: its alerts are paused and the nearby zones and bands are those of its last
+    /// position, so they are stale
+    Q_PROPERTY(bool         positionUnavailable READ positionUnavailable NOTIFY positionUnavailableChanged FINAL)
+    Q_PROPERTY(bool         altitudeDegraded    READ altitudeDegraded   NOTIFY terrainSourceChanged FINAL)
+    /// Where the vehicle enters a nearby zone first at its current velocity within the approach time: the path from the
+    /// vehicle to the entry, the entry position, the seconds until then and the zone (GeoZoneInfo). Empty, invalid and
+    /// -1 without such an entry.
+    Q_PROPERTY(QVariantList     predictedPath       READ predictedPath      NOTIFY predictionChanged FINAL)
+    Q_PROPERTY(QGeoCoordinate   predictedEntry      READ predictedEntry     NOTIFY predictionChanged FINAL)
+    Q_PROPERTY(int              predictedEntryTime  READ predictedEntryTime NOTIFY predictionChanged FINAL)
+    Q_PROPERTY(QVariant         predictedEntryZone  READ predictedEntryZone NOTIFY predictionChanged FINAL)
+    /// The vehicle reports a breach of its own fence (FENCE_STATUS), with the kind of breach and their count
+    Q_PROPERTY(bool             fenceBreached       READ fenceBreached      NOTIFY fenceStatusChanged FINAL)
+    Q_PROPERTY(QString          fenceBreachText     READ fenceBreachText    NOTIFY fenceStatusChanged FINAL)
+    Q_PROPERTY(bool             fenceStatusKnown    READ fenceStatusKnown   NOTIFY fenceStatusChanged FINAL)     ///< The vehicle sends FENCE_STATUS
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -94,24 +125,31 @@ public:
 
     /// Zones near or around the vehicle, the most restrictive first
     const QList<Nearby> &nearby() const { return _nearby; }
+    GeoZoneNearbyModel *nearbyModel() const { return _nearbyModel; }
+    int alertRestriction() const { return _nearby.isEmpty() ? -1 : static_cast<int>(_nearby.first().zone->restriction()); }
+    bool inside() const;
     /// Keys of the nearby zones the vehicle is inside, see GeoZone::key
     QSet<QString> insideZoneKeys() const;
+    QVariantList keptZones() const;
 
-    /// Volumes of the zones above and below the vehicle
-    const QList<GeoZoneVerticalBand> &verticalBands() const { return _bands; }
-    /// Position the vertical bands were last updated for
-    const GeoZone::Position &bandsPosition() const { return _bandsPosition; }
+    QVariantList verticalBands() const;
+    /// Of the position the vertical bands were last updated for
+    double altitudeAMSL() const { return _bandsPosition.altitudeAMSL; }
+    double terrainAMSL() const { return _bandsPosition.terrainAMSL; }
     /// Last evaluated position
     const GeoZone::Position &position() const { return _position; }
     /// Of the last position of the vehicle, Unknown for positions passed to evaluate()
     TerrainSource terrainSource() const { return _terrainSource; }
-    /// The height above ground of the vehicle comes from the terrain data of QGroundControl rather than the vehicle
+    /// The height above ground of the vehicle, which limits above ground are compared with, comes from the terrain
+    /// data of QGroundControl because the vehicle doesn't send its own, so it is less accurate
     bool altitudeDegraded() const { return _terrainSource == TerrainSource::Database; }
 
     /// First predicted entry from the last evaluated position, nothing while the position is unavailable
     std::optional<Entry> entry() const { return _unavailable ? std::nullopt : _entry; }
-    /// Position the entry is predicted from
-    QGeoCoordinate entryFrom() const { return _entryFrom; }
+    QVariantList predictedPath() const;
+    QGeoCoordinate predictedEntry() const;
+    int predictedEntryTime() const;
+    QVariant predictedEntryZone() const;
 
     bool positionUnavailable() const { return _unavailable; }
     void setPositionUnavailable(bool unavailable);
@@ -141,6 +179,7 @@ public:
 
 signals:
     void nearbyChanged();
+    void keptZonesChanged();
     void verticalBandsChanged();
     void predictionChanged();
     void positionUnavailableChanged();
@@ -160,11 +199,11 @@ private:
 
     GeoZoneAlertTracker _alerts;
     QList<Nearby> _nearby;
+    GeoZoneNearbyModel *_nearbyModel = nullptr;
     QList<GeoZoneVerticalBand> _bands;
     GeoZone::Position _position;
     GeoZone::Position _bandsPosition;
     std::optional<Entry> _entry;
-    QGeoCoordinate _entryFrom;
 
     qint64 _positionMSecs = -1;             ///< Last position message, -1 without
     qint64 _positionIntervalMSecs = 0;      ///< Between the last two position messages
