@@ -187,7 +187,7 @@ signals:
     void sourceAdded(GeoZoneSource *source);    ///< A source added by addFile or addUrl was loaded, not emitted when feeds are refreshed
     void loadFailed(const QString &key, const QString &message);   ///< Loading or downloading a source requested by the user failed
     void storageFailed(const QString &message); ///< Stored copies can't be read or written, emitted once per session
-    void outdatedDataFound(const QString &message); ///< Some sources have outdated data after the startup refresh
+    void outdatedDataFound(const QString &message); ///< Some sources have outdated data after the startup refresh, which the indicator shows from GeoZoneSourceRepository::validityWarning
     void fileOperationFinished(bool success, const QString &message);  ///< An export or import the user asked for finished
     void packSigningChanged();
     void trustedPublishersChanged();

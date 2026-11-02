@@ -57,7 +57,11 @@ Rectangle {
     function confirmUpload(uploadFunction) {
         // The banner updates after changes settle, so check the current plan
         check.update()
-        const reasons = check.uploadReasons()
+        const reasons = Array.from(check.uploadReasons())
+        // Outdated data can miss zones
+        if (_outdatedText !== "") {
+            reasons.push(_outdatedText)
+        }
         if (reasons.length === 0) {
             uploadFunction()
             return

@@ -19,20 +19,21 @@ import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
 /// Toolbar icon showing whether the active vehicle is in or near restricted geozones, colored by the most restrictive
-/// zone, with badges counting the unacknowledged alerts and marking the nearby zones stale while the vehicle's position
-/// is lost. Clicking it opens GeoZoneIndicatorPage.
+/// zone, with badges counting the unacknowledged alerts, marking the nearby zones stale while the vehicle's position
+/// is lost and warning that some geozone data may be outdated. Clicking it opens GeoZoneIndicatorPage.
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
     anchors.top:    parent.top
     anchors.bottom: parent.bottom
 
-    property bool showIndicator: GeoZoneManager.zoneCount > 0
+    property bool showIndicator: GeoZoneManager.zoneCount > 0 || _outdated
 
     readonly property var _monitor:         GeoZoneMonitor
     readonly property var _active:          GeoZoneMonitor.activeVehicle     ///< GeoZoneVehicleMonitor, null without
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property bool _stale:          _monitor.monitoring && _active?.positionUnavailable === true
+    readonly property bool _outdated:       GeoZoneManager.repository.validityWarning !== ""
 
     function _restrictionColor(restriction) {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
@@ -65,6 +66,25 @@ Item {
         QGCLabel {
             anchors.centerIn:   parent
             text:               "?"
+            color:              "black"
+            font.bold:          true
+            font.pointSize:     ScreenTools.smallFontPointSize
+        }
+    }
+
+    // Some data may be outdated, which the page details
+    Rectangle {
+        anchors.bottom: parent.bottom
+        anchors.left:   geoZoneIcon.left
+        height:         ScreenTools.defaultFontPixelHeight * 0.9
+        width:          height
+        radius:         height / 2
+        color:          qgcPal.colorYellow
+        visible:        control._outdated
+
+        QGCLabel {
+            anchors.centerIn:   parent
+            text:               "!"
             color:              "black"
             font.bold:          true
             font.pointSize:     ScreenTools.smallFontPointSize

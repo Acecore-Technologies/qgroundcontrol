@@ -19,8 +19,8 @@ import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
-/// Drop-down page of GeoZoneIndicator: the zones in or near which the active vehicle is, with a badge marking them
-/// stale while the vehicle's position is lost, the ADS-B and Remote ID traffic in or near zones when it is checked,
+/// Drop-down page of GeoZoneIndicator: whether some geozone data may be outdated, the zones in or near which the active
+/// vehicle is, with a badge marking them stale while the vehicle's position is lost, the ADS-B and Remote ID traffic in or near zones when it is checked,
 /// the recent alerts, the map legend and the geozone options.
 ToolIndicatorPage {
     id:         control
@@ -54,6 +54,30 @@ ToolIndicatorPage {
     contentComponent: Component {
         ColumnLayout {
             spacing: ScreenTools.defaultFontPixelHeight / 2
+
+            // Rather than a message at startup
+            SettingsGroupLayout {
+                Layout.preferredWidth:  control._pageWidth
+                heading:                qsTr("Outdated Data")
+                headingDescription:     qsTr("Some geozone data may be outdated. Load current data in Application Settings > Geozones.")
+                visible:                GeoZoneManager.repository.validityWarning !== ""
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    wrapMode:           Text.WordWrap
+                    color:              qgcPal.warningText
+                    textFormat:         Text.PlainText
+                    text:               GeoZoneManager.repository.validityWarning
+                }
+
+                QGCButton {
+                    text: qsTr("Manage Geozones...")
+                    onClicked: {
+                        mainWindow.closeIndicatorDrawer()
+                        mainWindow.showSettingsTool(qsTr("Geozones"))
+                    }
+                }
+            }
 
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth
