@@ -149,7 +149,15 @@ QGCPopupDialog {
                 Layout.fillWidth:   true
                 spacing:            0
 
+                // The whole texts of elided rows
+                ToolTip.visible:    rowHover.hovered && (nameLabel.truncated || detailLabel.truncated)
+                ToolTip.text:       nameLabel.text + "\n" + detailLabel.text
+                ToolTip.delay:      Qt.styleHints.mousePressAndHoldInterval
+
+                HoverHandler { id: rowHover }
+
                 QGCLabel {
+                    id:                 nameLabel
                     Layout.fillWidth:   true
                     text:               choiceRow.name
                     textFormat:         Text.PlainText
@@ -157,6 +165,7 @@ QGCPopupDialog {
                 }
 
                 QGCLabel {
+                    id:                 detailLabel
                     Layout.fillWidth:   true
                     text:               control._choiceDetail(choiceRow)
                     textFormat:         Text.PlainText
@@ -183,8 +192,14 @@ QGCPopupDialog {
             columnSpacing:          _margin
             rowSpacing:             _margin / 2
 
-            QGCLabel { text: qsTr("Zone types") }
-            RowLayout {
+            QGCLabel {
+                Layout.alignment:       Qt.AlignTop
+                Layout.preferredHeight: prohibitedCheck.height
+                verticalAlignment:      Text.AlignVCenter
+                text:                   qsTr("Zone types")
+            }
+            // Wraps when the types don't fit next to each other
+            Flow {
                 Layout.fillWidth:   true
                 spacing:            _margin
 
@@ -254,6 +269,7 @@ QGCPopupDialog {
 
             QGCLabel {
                 Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
                 text:               _capacity.text ?? ""
                 font.bold:          true
             }
@@ -289,6 +305,7 @@ QGCPopupDialog {
             QGCLabel {
                 Layout.fillWidth:   true
                 text:               importer.selectedCount > 0 ? qsTr("Selected zones (%1)").arg(importer.selectedCount) : qsTr("No zones selected")
+                elide:              Text.ElideRight
                 font.bold:          true
             }
 
