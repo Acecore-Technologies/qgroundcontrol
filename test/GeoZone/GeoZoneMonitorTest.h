@@ -23,6 +23,7 @@ private slots:
     void _testVehicleTelemetry();
     void _testMonitorMultipleVehicles();
     void _testAlertLog();
+    void _testPilotEventLog();
     void _testAlertHistory();
     void _testFenceStatus();
     void _testVehicleMonitors();

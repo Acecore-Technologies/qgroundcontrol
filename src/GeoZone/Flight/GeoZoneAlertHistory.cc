@@ -33,7 +33,8 @@ constexpr QLatin1StringView formulaStarts("=+-@\t\r");
 /// Event column of the log by GeoZoneMonitor::AlertEvent::Kind
 const QStringList &eventNames()
 {
-    static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered") };
+    static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered"),
+                                       QStringLiteral("notified"), QStringLiteral("approved"), QStringLiteral("dismissed"), QStringLiteral("muted") };
     return names;
 }
 
@@ -184,7 +185,16 @@ void GeoZoneAlertHistory::append(const GeoZoneMonitor::AlertEvent &event)
     endInsertRows();
     emit countChanged();
     emit unacknowledgedCountChanged();
+    _log(event);
+}
 
+void GeoZoneAlertHistory::logPilotEvent(const GeoZoneMonitor::AlertEvent &event)
+{
+    _log(event);
+}
+
+void GeoZoneAlertHistory::_log(const GeoZoneMonitor::AlertEvent &event)
+{
     if (!_logging || !GeoZoneSettings::instance()->logAlerts()->rawValue().toBool()) {
         return;
     }
@@ -224,7 +234,7 @@ QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
 
 QString GeoZoneAlertHistory::logHeader()
 {
-    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic");
+    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic,alert_id,detail");
 }
 
 QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
@@ -245,6 +255,8 @@ QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
         csvField(event.sourceText),
         numberText(event.timeToEntry, 0),
         csvField(event.traffic),
+        (event.id > 0) ? QString::number(event.id) : QString(),
+        csvField(event.detail),
     }.join(QLatin1Char(','));
 }
 
@@ -318,7 +330,8 @@ void GeoZoneAlertHistory::_loadLog(const QString &filePath)
     QList<Entry> earlier;
     QTextStream stream(&file);
     while (!stream.atEnd()) {
-        if (const std::optional<GeoZoneMonitor::AlertEvent> event = parseLogLine(stream.readLine())) {
+        const std::optional<GeoZoneMonitor::AlertEvent> event = parseLogLine(stream.readLine());
+        if (event && !event->pilotEvent()) {
             earlier.prepend(Entry{ *event, true, true });
         }
     }
@@ -365,6 +378,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.sourceText = fields[11];
     event.timeToEntry = (fields.count() > 12) ? numberValue(fields[12]) : qQNaN();
     event.traffic = (fields.count() > 13) ? fields[13] : QString();
+    event.detail = (fields.count() > 15) ? fields[15] : QString();
 
     // The messages of the monitor
     const QString name = event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName;

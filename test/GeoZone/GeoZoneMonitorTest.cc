@@ -509,7 +509,8 @@ void GeoZoneMonitorTest::_testAlertLog()
     QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
     const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     file.close();
-    QCOMPARE(lines.count(), 3);
+    // Each alert is followed by the popup showing it
+    QCOMPARE(lines.count(), 5);
     QCOMPARE(lines[0], GeoZoneAlertHistory::logHeader());
     QStringList fields = lines[1].split(QLatin1Char(','));
     QCOMPARE(fields[1], QStringLiteral("3"));
@@ -521,7 +522,8 @@ void GeoZoneMonitorTest::_testAlertLog()
     // Quoted name with a comma and quotes, then the restriction and source
     QVERIFY(lines[1].contains(QStringLiteral(",\"Prison \"\"West\"\", Zurich\",Prohibited,")));
     QVERIFY(lines[1].contains(QStringLiteral("zones.json")));
-    fields = lines[2].split(QLatin1Char(','));
+    QCOMPARE(lines[2].section(QLatin1Char(','), 6, 6), QStringLiteral("notified"));
+    fields = lines[3].split(QLatin1Char(','));
     QCOMPARE(fields[4], QString());
     QCOMPARE(fields[6], QStringLiteral("entered"));
     QCOMPARE(fields[7], QStringLiteral("0"));
@@ -532,7 +534,7 @@ void GeoZoneMonitorTest::_testAlertLog()
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
     log.flushLog();
     QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
-    QCOMPARE(QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 3);
+    QCOMPARE(QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 5);
     file.close();
 
     // The files of the days past the retention are deleted when a file is started, others are kept
@@ -566,6 +568,97 @@ void GeoZoneMonitorTest::_testAlertLog()
     event.zoneName = QStringLiteral("=1+1");
     event.zoneIdentifier = QStringLiteral("@A1");
     QVERIFY(GeoZoneAlertHistory::logLine(event).contains(QStringLiteral(",'@A1,'=1+1,")));
+}
+
+void GeoZoneMonitorTest::_testPilotEventLog()
+{
+    ScopedEnvironment environment;
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
+    settings->logAlerts()->setRawValue(true);
+
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate uSpaceCenter = center.atDistanceAndAzimuth(5000, 90);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P1"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("U1"), QStringLiteral("USPACE"), uSpaceCenter, 300),
+    }), errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    GeoZoneAlertHistory &log = *monitor.alertHistory();
+    log.startLog(dir.filePath(QStringLiteral("logs")));
+
+    // Approaching the prohibited zone asks for the permission, which the pilot confirms: the entry is logged only
+    monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 520, 400 }, 3);
+    QCOMPARE(monitor.alertModel()->count(), 1);
+    const int approachId = monitor.alertModel()->alerts().first().alertId;
+    environment.addSecs(4);
+    const GeoZone::Position inside{ center.atDistanceAndAzimuth(250, 0), 530, 400 };
+    monitor.evaluate({ center.atDistanceAndAzimuth(330, 0), 525, 400 }, 3);
+    monitor.approveAlert(approachId);
+    monitor.evaluate(inside, 3);
+
+    // U-space airspace is dismissed, shown again and muted, then closed
+    monitor.evaluate({ uSpaceCenter, 450, 400 }, 3);
+    const int uSpaceId = monitor.alertModel()->alerts().first().alertId;
+    monitor.dismissAlert(uSpaceId);
+    monitor.evaluate({ uSpaceCenter.atDistanceAndAzimuth(2000, 0), 450, 400 }, 3);
+    monitor.evaluate({ uSpaceCenter, 450, 400 }, 3);
+    const int uSpaceAgainId = monitor.alertModel()->alerts().first().alertId;
+    monitor.muteAlerts(120);
+    monitor.closeAlerts();
+    log.flushLog();
+
+    QFile file(log.logFilePath(environment.now().date()));
+    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
+    const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    file.close();
+    QCOMPARE(lines.first(), GeoZoneAlertHistory::logHeader());
+    QStringList sequence;
+    for (const QString &line : lines.mid(1)) {
+        const QStringList fields = line.split(QLatin1Char(','));
+        QCOMPARE(fields.count(), 16);
+        sequence.append(QStringList{ fields[6], fields[8], fields[14], fields[15] }.join(QLatin1Char(' ')).trimmed());
+    }
+    const QString approach = QString::number(approachId);
+    const QString question = QString::fromLatin1(GeoZoneMonitor::permissionQuestion);
+    const QString entry = QString::number(approachId + 1);
+    const QString uSpace = QString::number(uSpaceId);
+    const QString uSpaceAgain = QString::number(uSpaceAgainId);
+    QCOMPARE(sequence, (QStringList{
+        QStringLiteral("approaching P1 %1").arg(approach),
+        QStringLiteral("notified P1 %1 %2").arg(approach, question),
+        QStringLiteral("approved P1 %1 I do").arg(approach),
+        QStringLiteral("entered P1 %1").arg(entry),
+        QStringLiteral("entered U1 %1").arg(uSpace),
+        QStringLiteral("notified U1 %1").arg(uSpace),
+        QStringLiteral("dismissed U1 %1 Dismiss").arg(uSpace),
+        QStringLiteral("entered U1 %1").arg(uSpaceAgain),
+        QStringLiteral("notified U1 %1").arg(uSpaceAgain),
+        QStringLiteral("muted U1 %1 Mute alerts for 120 s").arg(uSpaceAgain),
+        QStringLiteral("dismissed U1 %1 Close").arg(uSpaceAgain),
+    }));
+
+    // The answer is logged with the time, vehicle and position when the pilot gave it
+    const QStringList approved = lines[3].split(QLatin1Char(','));
+    QCOMPARE(QDateTime::fromString(approved[0], Qt::ISODateWithMs), environment.now());
+    QCOMPARE(approved[1], QStringLiteral("3"));
+    QCOMPARE(approved[4], QStringLiteral("525.0"));
+    QCOMPARE(approved[7], QStringLiteral("30"));
+    QCOMPARE(approved[10], QStringLiteral("Prohibited"));
+
+    // Only the alerts are listed, also when read back
+    QCOMPARE(log.count(), 4);
+    GeoZoneAlertHistory later(&manager);
+    later.startLog(dir.filePath(QStringLiteral("logs")));
+    QCOMPARE(later.count(), 4);
+    const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(lines[3]);
+    QVERIFY(read && read->pilotEvent());
+    QCOMPARE(read->detail, QStringLiteral("I do"));
 }
 
 void GeoZoneMonitorTest::_testAlertHistory()

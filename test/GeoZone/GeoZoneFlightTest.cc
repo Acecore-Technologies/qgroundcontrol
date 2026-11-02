@@ -304,13 +304,14 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     entered.sort();
     QCOMPARE(entered, QStringList({ alertText(*manager, QStringLiteral("Entered"), ctrs[0]), alertText(*manager, QStringLiteral("Entered"), ctrs[1]) }));
 
-    // The alerts are logged with the vehicle, in a file per day
+    // The alerts are logged with the vehicle, in a file per day, each followed by the popup showing it
     monitor.alertHistory()->flushLog();
     QFile log(monitor.alertHistory()->logFilePath(environment.now().date()));
     QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
     QStringList logLines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     (void) logLines.removeAll(GeoZoneAlertHistory::logHeader());
-    QCOMPARE(logLines.count(), alertSpy.count());
+    QCOMPARE(logLines.filter(QStringLiteral(",notified,")).count(), alertSpy.count());
+    QCOMPARE(logLines.count(), alertSpy.count() * 2);
     QCOMPARE(logLines.filter(QStringLiteral(",entered,")).count(), 2);
     QVERIFY(logLines.last().section(QLatin1Char(','), 1, 1) == QString::number(vehicle->id()));
 

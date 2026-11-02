@@ -92,20 +92,29 @@ public:
     static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
     static constexpr int maxMuteSecs = 24 * 60 * 60;        ///< Longest mute, see muteAlerts()
     static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
+    static constexpr const char *permissionQuestion = "Do you have legal permission to fly here?";    ///< As logged, see approveAlert()
     static constexpr int maxTrafficAircraft = 100;          ///< Checked at a time, the closest to the active vehicle
     /// Meters around the active vehicle within which the traffic is checked
     static constexpr double trafficRadius() { return 10000; }
 
-    /// An alert of a vehicle about a zone
+    /// An alert of a vehicle about a zone, or what the pilot was shown and answered about an alert
     struct AlertEvent {
         enum Kind {
             Approach,               ///< The vehicle came near the zone
             Entry,                  ///< The vehicle entered the zone
             PositionLost,           ///< The vehicle lost its position near or inside the zone
             Traffic,                ///< An aircraft of the traffic entered the zone
+            // What the pilot was shown and answered, only logged
+            Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
+            Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
+            Dismissed,              ///< The pilot dismissed the alert, or closed the popup
+            Muted,                  ///< The pilot muted the alerts while the alert was shown
         };
 
-        int id = 0;                 ///< Unique for the session, 0 for alerts read from a log
+        /// @return true for what the pilot was shown and answered
+        bool pilotEvent() const { return kind >= Notified; }
+
+        int id = 0;                 ///< Unique for the session, that of the alert for pilot events, 0 when read from a log
         QDateTime time;             ///< UTC
         int vehicleId = noVehicle;
         GeoZone::Position position; ///< The last known position for PositionLost
@@ -120,6 +129,7 @@ public:
         QString zoneKey;            ///< See GeoZone::key, empty for alerts read from a log
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
         QString traffic;            ///< Callsign or ICAO address of the aircraft of a Traffic alert
+        QString detail;             ///< Of pilot events: the question asked, or the button pressed
     };
 
     /// Speaks the announcements of the alerts, like AudioOutput
@@ -296,8 +306,12 @@ private:
     void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
-    /// Adds an alert to the shown alerts
+    /// Adds an alert to the shown alerts, logging that the pilot was notified
     void _show(int alertId, const QString &message, int severity);
+    /// Logs what the pilot was shown or answered about a geozone alert, with where its vehicle is now
+    void _logPilotEvent(int alertId, AlertEvent::Kind kind, const QString &detail);
+    /// Acknowledges an alert and removes it from the shown alerts
+    void _dismiss(int alertId);
     /// Sets the actions of a shown alert from the state of its vehicle
     void _setAlertActions(GeoZoneAlertModel::Alert &alert) const;
     void _updateAlertActions();

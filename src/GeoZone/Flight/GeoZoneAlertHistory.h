@@ -24,9 +24,10 @@ class GeoZoneManager;
 
 /// Geozone alerts of this session, newest first, with those logged earlier today, for reviewing and acknowledging
 /// them after a flight or while the alert popups are gone. Once started, the log appends the alerts to a CSV file per
-/// UTC day, buffered and written to the open file every logFlushIntervalMSecs rather than opening and flushing the file
-/// for each alert. The files of days older than logRetentionDays are deleted when a new file is started. Logging is
-/// turned on and off in GeoZoneSettings.
+/// UTC day, with what the pilot was shown and answered about them (GeoZoneMonitor::AlertEvent::pilotEvent()),
+/// buffered and written to the open file every logFlushIntervalMSecs rather than opening and flushing the file for
+/// each alert. The files of days older than logRetentionDays are deleted when a new file is started. Logging is turned
+/// on and off in GeoZoneSettings.
 class GeoZoneAlertHistory : public QAbstractListModel
 {
     Q_OBJECT
@@ -93,6 +94,8 @@ public:
 public slots:
     /// Adds the alert, and logs it within logFlushIntervalMSecs once the log is started
     void append(const GeoZoneMonitor::AlertEvent &event);
+    /// Logs what the pilot was shown or answered about an alert, which isn't added to the alerts
+    void logPilotEvent(const GeoZoneMonitor::AlertEvent &event);
 
 signals:
     void countChanged();
@@ -110,6 +113,8 @@ private:
     };
 
     void _loadLog(const QString &filePath);
+    /// Logs the event within logFlushIntervalMSecs once the log is started
+    void _log(const GeoZoneMonitor::AlertEvent &event);
     /// Opens the log file the buffer belongs to, starting it with the header
     bool _openLog();
 

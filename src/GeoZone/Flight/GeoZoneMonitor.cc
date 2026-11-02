@@ -588,7 +588,34 @@ void GeoZoneMonitor::_show(int alertId, const QString &message, int severity)
         alert.zoneKey = subject->event.zoneKey;
     }
     _setAlertActions(alert);
-    (void) _alertModel->show(alert);
+    if (_alertModel->show(alert)) {
+        _logPilotEvent(alertId, AlertEvent::Notified, alert.question ? QString::fromLatin1(permissionQuestion) : QString());
+    }
+}
+
+void GeoZoneMonitor::_logPilotEvent(int alertId, AlertEvent::Kind kind, const QString &detail)
+{
+    // Fence breaches aren't geozone alerts
+    const auto subject = _alertSubjects.constFind(alertId);
+    if (subject == _alertSubjects.cend()) {
+        return;
+    }
+    AlertEvent event = subject->event;
+    event.time = GeoZoneEnvironment::currentDateTimeUtc();
+    event.kind = kind;
+    event.detail = detail;
+    event.timeToEntry = qQNaN();
+    if (const GeoZoneVehicleMonitor *const monitor = (subject->vehicleKey > 0) ? _monitorByKey(subject->vehicleKey) : nullptr) {
+        event.position = monitor->position();
+        const QList<GeoZoneAlertTracker::Nearby> &nearby = monitor->nearby();
+        const auto zone = std::find_if(nearby.cbegin(), nearby.cend(), [&event](const GeoZoneAlertTracker::Nearby &candidate) {
+            return candidate.zone->key() == event.zoneKey;
+        });
+        event.inside = (zone != nearby.cend()) && zone->inside;
+        event.distance = (zone != nearby.cend()) ? zone->distance : qQNaN();
+    }
+    event.message = alertMessage(event, event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName, GeoZoneText::restriction(event.restriction));
+    _alertHistory->logPilotEvent(event);
 }
 
 void GeoZoneMonitor::_setAlertActions(GeoZoneAlertModel::Alert &alert) const
@@ -630,6 +657,9 @@ void GeoZoneMonitor::muteAlerts(int seconds)
 {
     // Clamped so that the timer's milliseconds fit an int
     const int msecs = (seconds > 0) ? ((std::min)(seconds, maxMuteSecs) * 1000) : GeoZoneAlertArbiter::defaultMuteMSecs;
+    for (const GeoZoneAlertModel::Alert &alert : _alertModel->alerts()) {
+        _logPilotEvent(alert.alertId, AlertEvent::Muted, QStringLiteral("Mute alerts for %1 s").arg(msecs / 1000));
+    }
     _arbiter.mute(msecs);
     // Notified after the arbiter's clock passed the end
     _muteTimer.start(msecs + 100);
@@ -650,9 +680,10 @@ bool GeoZoneMonitor::asksPermission(GeoZone::Restriction restriction)
 
 void GeoZoneMonitor::approveAlert(int alertId)
 {
+    _logPilotEvent(alertId, AlertEvent::Approved, QStringLiteral("I do"));
     const auto subject = _alertSubjects.constFind(alertId);
     if ((subject == _alertSubjects.cend()) || (subject->vehicleKey <= 0) || subject->event.zoneKey.isEmpty() || !_monitorByKey(subject->vehicleKey)) {
-        dismissAlert(alertId);
+        _dismiss(alertId);
         return;
     }
     const int vehicleKey = subject->vehicleKey;
@@ -675,12 +706,21 @@ void GeoZoneMonitor::approveAlert(int alertId)
 
 void GeoZoneMonitor::dismissAlert(int alertId)
 {
+    _logPilotEvent(alertId, AlertEvent::Dismissed, QStringLiteral("Dismiss"));
+    _dismiss(alertId);
+}
+
+void GeoZoneMonitor::_dismiss(int alertId)
+{
     acknowledgeAlert(alertId);
     _alertModel->removeIf([alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
 }
 
 void GeoZoneMonitor::closeAlerts()
 {
+    for (const GeoZoneAlertModel::Alert &alert : _alertModel->alerts()) {
+        _logPilotEvent(alert.alertId, AlertEvent::Dismissed, QStringLiteral("Close"));
+    }
     _alertModel->clear();
 }
 
@@ -795,6 +835,14 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
                               tr("Position lost near geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Traffic:
         return tr("Traffic %1 entered geozone %2 (%3)").arg(event.traffic, zoneName, restrictionText);
+    case AlertEvent::Notified:
+        return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::Approved:
+        return tr("Pilot confirmed the permission to fly in geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::Dismissed:
+        return tr("Pilot dismissed the alert about geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::Muted:
+        return tr("Pilot muted the alerts about geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approach:
         break;
     }
