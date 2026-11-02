@@ -9,15 +9,19 @@
 
 #pragma once
 
+#include <QtCore/QByteArray>
+#include <QtCore/QDateTime>
+#include <QtCore/QJsonObject>
 #include <QtCore/QObject>
 #include <QtCore/QString>
 
 class GeoFenceController;
-class QJsonObject;
+class GeoZone;
 
 /// Name and origin of a polygon or circle of a GeoFenceController, kept by GeoZone rather than in QGCFencePolygon and
 /// QGCFenceCircle: a child object of the fence, so it goes with the fence. Copies of the fence which QGroundControl
 /// makes, like those of the vehicle's GeoFenceManager, don't have it, like fences read back from a vehicle.
+/// Fences added from a zone keep its key, content hash and validity end, to tell when the zone changed since.
 class GeoZoneFenceTag : public QObject
 {
     Q_OBJECT
@@ -40,19 +44,35 @@ public:
     bool geoZone() const { return _geoZone; }
     void setGeoZone(bool geoZone);
 
+    /// Marks the fence as added from the zone, with its name, key, content hash and validity end
+    void setZone(const GeoZone *zone);
+    QString zoneKey() const { return _zoneKey; }        ///< See GeoZone::key, empty when unknown
+    QByteArray contentHash() const { return _contentHash; }
+    QDateTime validTo() const { return _validTo; }      ///< When the zone stops applying, invalid without end
+
+    /// @return The end of the last period the zone applies in, invalid when it applies without end
+    static QDateTime validityEnd(const GeoZone *zone);
+
 signals:
     void nameChanged();
     void geoZoneChanged();
 
 private:
+    friend class GeoZoneFenceTags;     // Loads the zone of fences from plans
+
     explicit GeoZoneFenceTag(QObject *fence);
 
     QString _name;
     bool _geoZone = false;
+    QString _zoneKey;
+    QByteArray _contentHash;
+    QDateTime _validTo;
 };
 
 /// The fence tags for QML, as the GeoZoneFenceTags singleton, and in plan files. A plan file keeps the tag of a fence
-/// as the optional "name" and "geoZone" keys of the fence's entry, which other ground stations ignore.
+/// as the optional "name", "geoZone", "zoneKey", "contentHash" and "validTo" keys of the fence's entry, and the
+/// settings the fences from geozones were selected with as "geoZoneImport" of the GeoFence, which other ground stations
+/// ignore.
 class GeoZoneFenceTags : public QObject
 {
     Q_OBJECT
@@ -73,4 +93,31 @@ public:
 
     /// Sets the tags of the fences of a plan loaded from its JSON
     static void load(GeoFenceController *geoFenceController, const QJsonObject &planJson);
+
+    /// Zone of fences from geozones which no longer matches them
+    struct StaleZone {
+        enum class Reason {
+            Changed,    ///< Its data changed since the fences were added
+            Removed,    ///< No longer loaded
+            Expired,    ///< Its last period ended
+        };
+        QString name;
+        Reason reason = Reason::Changed;
+
+        friend bool operator==(const StaleZone &, const StaleZone &) = default;
+    };
+
+    /// @return The zones of the fences from geozones which changed since the fences were added, are no longer among the
+    ///         zones or expired by now, once each. Fences of plans saved without the zone keys aren't checked.
+    static QList<StaleZone> staleZones(GeoFenceController *geoFenceController, const QList<GeoZone*> &zones, const QDateTime &now);
+    static constexpr int maxListedStaleZones = 5;
+
+    /// @return Why the geozone fences are outdated, like "The zones of geozone fences changed: A (changed), B
+    ///         (removed). Rebuild the geozone fences.", empty without stale zones
+    static QString staleText(const QList<StaleZone> &staleZones);
+
+    /// @return The settings the fences from geozones of the controller were last selected with, see
+    ///         GeoZoneFenceImporter::rebuild, empty without
+    static QJsonObject importSettings(const GeoFenceController *geoFenceController);
+    static void setImportSettings(GeoFenceController *geoFenceController, const QJsonObject &settings);
 };

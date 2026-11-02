@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QHash>
+#include <QtCore/QJsonObject>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QStringList>
@@ -51,6 +52,7 @@ class GeoZoneFenceImporter : public QObject
     Q_PROPERTY(int                      leftOutCount    READ leftOutCount       NOTIFY selectionChanged FINAL)  ///< All zones left out, also those not listed
     Q_PROPERTY(bool                     busy            READ busy               NOTIFY busyChanged FINAL)       ///< While zones are prepared for updateSelection
     Q_PROPERTY(GeoZoneFenceUpload*      upload          READ upload             CONSTANT FINAL)                 ///< Of the plan's fence to its vehicle
+    Q_PROPERTY(QString                  staleText       READ staleText          NOTIFY staleChanged FINAL)      ///< Why the plan's fences from geozones are outdated, empty when they aren't, see GeoZoneFenceTags::staleZones
 
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);
@@ -101,6 +103,15 @@ public:
     /// @return Number of fence polygons and circles added
     Q_INVOKABLE int applySelection();
 
+    /// Replaces the fences from geozones in the plan with a selection made with the settings they were last selected
+    /// with, see GeoZoneFenceTags::importSettings, or, for fences without them, of their zones still loaded,
+    /// simplified up to rebuildSimplifyTolerance
+    /// @return Number of fence polygons and circles added
+    Q_INVOKABLE int rebuild();
+    static constexpr double rebuildSimplifyTolerance = 50;  ///< Meters
+
+    QString staleText() const { return _staleText; }
+
     /// Applies the selection and uploads the plan's fence to the vehicle, see GeoZoneFenceUpload
     Q_INVOKABLE void uploadToVehicle();
     GeoZoneFenceUpload *upload() const { return _upload; }
@@ -114,14 +125,15 @@ signals:
     void geoFenceControllerChanged();
     void selectionChanged();
     void busyChanged();
+    void staleChanged();
 
 private:
-    /// Fences for the zones which don't already exist in the fence, with the names of their zones
+    /// Fences for the zones which don't already exist in the fence, with their zones
     struct Fences {
         QList<QList<QGeoCoordinate>> polygons;
-        QStringList polygonNames;
+        QList<const GeoZone*> polygonZones;
         QList<QGeoCircle> circles;
-        QStringList circleNames;
+        QList<const GeoZone*> circleZones;
     };
 
     /// Zones of the catalog in an area, for updateSelection
@@ -167,6 +179,8 @@ private:
     QString _parameterWarning() const;
     Vehicle *_vehicle() const;
     void _connectVehicle();
+    /// Checks the fences from geozones against the zones, see GeoZoneFenceTags::staleZones
+    void _updateStale();
 
     QPointer<GeoFenceController> _geoFenceController;
     std::optional<AreaQuery> _query;                    ///< Of the last updateSelection
@@ -179,6 +193,9 @@ private:
     int _selectedCount = 0;
     bool _busy = false;
     QObject *_vehicleConnections = nullptr;
+    QObject *_fenceConnections = nullptr;
+    QJsonObject _settings;                              ///< Of the last updateSelection, see GeoZoneFenceTags::importSettings
+    QString _staleText;
     GeoZoneMissionWorker *const _worker = nullptr;
     GeoZoneFenceChoiceModel *const _choices = nullptr;
     GeoZoneFenceUpload *const _upload = nullptr;

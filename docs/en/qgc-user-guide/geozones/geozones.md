@@ -317,6 +317,8 @@ The upload is aborted when the plan's fence is edited or another plan is opened 
 
 Fences added from geozones are named after their zones and listed separately in the GeoFence panel, where **Delete Geozone Fences** deletes them (see [Edit/Delete a GeoFence](../plan_view/plan_geofence.md#edit-delete-a-geofence)).
 
+Each fence from a geozone also keeps the zone's key, the content hash of its data and the end of its last active period, and the plan keeps the settings of the dialog the fences were selected with (zone types, area, active time, simplification and the zones you checked or unchecked), in keys other ground stations ignore. When the zone of a fence changed since, is no longer loaded or its last period ended, the GeoFence panel warns, like "Geozone fences are outdated: A (changed), TMP (expired).", and uploading the plan asks for confirmation. **Rebuild Geozone Fences** replaces the fences from geozones with a selection made again with the same settings (for plans saved without them, the zones of the fences still loaded, simplified up to 50 m). Fences of plans saved before these keys existed aren't checked.
+
 ::: warning
 GeoFences have no altitude limits, so a zone's vertical limits are not transferred and the whole zone is excluded at all altitudes.
 Holes in zone polygons are also dropped. The ArduPilot fence storage is estimated, so verify the upload.

@@ -80,6 +80,27 @@ Column {
         visible:        _pointCount > 0
     }
 
+    // Fences from zones which changed, are no longer loaded or expired since they were added
+    GeoZoneFenceImporter {
+        id:                 staleImporter
+        geoFenceController: control.geoFenceController
+    }
+
+    QGCLabel {
+        width:      parent.width
+        wrapMode:   Text.WordWrap
+        color:      qgcPal.warningText
+        text:       staleImporter.staleText
+        textFormat: Text.PlainText
+        visible:    text !== ""
+    }
+
+    QGCButton {
+        text:       qsTr("Rebuild Geozone Fences")
+        visible:    staleImporter.staleText !== ""
+        onClicked:  staleImporter.rebuild()
+    }
+
     SectionHeader {
         id:             geoZoneSection
         anchors.left:   parent.left

@@ -9,12 +9,18 @@
 
 #include "GeoZoneFenceTags.h"
 #include "GeoFenceController.h"
+#include "GeoZone.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
+
+#include <QtCore/QHash>
+#include <QtCore/QSet>
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtQml/QQmlEngine>
+
+#include <algorithm>
 
 namespace {
 
@@ -25,6 +31,24 @@ constexpr const char *circlesKey = "circles";
 // Keys of a fence's entry
 constexpr const char *nameKey = "name";
 constexpr const char *geoZoneKey = "geoZone";
+constexpr const char *zoneKeyKey = "zoneKey";
+constexpr const char *contentHashKey = "contentHash";
+constexpr const char *validToKey = "validTo";
+
+// Key of the GeoFence's import settings, and the controller property keeping them
+constexpr const char *importKey = "geoZoneImport";
+constexpr const char *importProperty = "_geoZoneFenceImport";
+
+/// Calls the function with each fence of the controller
+template <typename Function>
+void forEachFence(GeoFenceController *geoFenceController, Function function)
+{
+    for (QmlObjectListModel *fences : { geoFenceController->polygons(), geoFenceController->circles() }) {
+        for (int i = 0; i < fences->count(); i++) {
+            function(fences->get(i));
+        }
+    }
+}
 
 } // namespace
 
@@ -69,6 +93,27 @@ void GeoZoneFenceTag::setGeoZone(bool geoZone)
         _geoZone = geoZone;
         emit geoZoneChanged();
     }
+}
+
+void GeoZoneFenceTag::setZone(const GeoZone *zone)
+{
+    setName(zone->displayName());
+    setGeoZone(true);
+    _zoneKey = zone->key();
+    _contentHash = zone->data().contentHash;
+    _validTo = validityEnd(zone);
+}
+
+QDateTime GeoZoneFenceTag::validityEnd(const GeoZone *zone)
+{
+    QDateTime end;
+    for (const GeoZone::TimePeriod &period : zone->data().applicability) {
+        if (period.permanent || !period.end.isValid()) {
+            return QDateTime();
+        }
+        end = end.isValid() ? (std::max)(end, period.end) : period.end;
+    }
+    return end;
 }
 
 GeoZoneFenceTags::GeoZoneFenceTags(QObject *parent)
@@ -135,6 +180,13 @@ void GeoZoneFenceTags::save(GeoFenceController *geoFenceController, QJsonObject 
             if (tag->geoZone()) {
                 entry[geoZoneKey] = true;
             }
+            if (!tag->zoneKey().isEmpty()) {
+                entry[zoneKeyKey] = tag->zoneKey();
+                entry[contentHashKey] = QString::fromLatin1(tag->contentHash().toHex());
+                if (tag->validTo().isValid()) {
+                    entry[validToKey] = tag->validTo().toUTC().toString(Qt::ISODate);
+                }
+            }
             entries[i] = entry;
             tagged = true;
         }
@@ -142,6 +194,10 @@ void GeoZoneFenceTags::save(GeoFenceController *geoFenceController, QJsonObject 
     };
     saveTo(polygonsKey, geoFenceController->polygons());
     saveTo(circlesKey, geoFenceController->circles());
+    const QJsonObject settings = importSettings(geoFenceController);
+    if (tagged && !settings.isEmpty()) {
+        fenceJson[importKey] = settings;
+    }
     if (tagged) {
         planJson[PlanMasterController::kJsonGeoFenceObjectKey] = fenceJson;
     }
@@ -169,8 +225,81 @@ void GeoZoneFenceTags::load(GeoFenceController *geoFenceController, const QJsonO
             GeoZoneFenceTag *const tag = GeoZoneFenceTag::of(fences->get(i));
             tag->setName(name);
             tag->setGeoZone(geoZone);
+            tag->_zoneKey = entry.value(zoneKeyKey).toString();
+            tag->_contentHash = QByteArray::fromHex(entry.value(contentHashKey).toString().toLatin1());
+            tag->_validTo = QDateTime::fromString(entry.value(validToKey).toString(), Qt::ISODate).toUTC();
         }
     };
     loadFrom(polygonsKey, geoFenceController->polygons());
     loadFrom(circlesKey, geoFenceController->circles());
+    setImportSettings(geoFenceController, fenceJson.value(importKey).toObject());
+}
+
+QList<GeoZoneFenceTags::StaleZone> GeoZoneFenceTags::staleZones(GeoFenceController *geoFenceController, const QList<GeoZone*> &zones, const QDateTime &now)
+{
+    QList<StaleZone> stale;
+    if (!geoFenceController) {
+        return stale;
+    }
+    QHash<QString, const GeoZone*> zonesByKey;
+    QSet<QString> checked;
+    forEachFence(geoFenceController, [&](const QObject *fence) {
+        const GeoZoneFenceTag *const tag = GeoZoneFenceTag::find(fence);
+        if (!tag || !tag->geoZone() || tag->zoneKey().isEmpty() || checked.contains(tag->zoneKey())) {
+            return;
+        }
+        checked.insert(tag->zoneKey());
+        if (zonesByKey.isEmpty()) {
+            for (const GeoZone *zone : zones) {
+                zonesByKey.insert(zone->key(), zone);
+            }
+        }
+        const GeoZone *const zone = zonesByKey.value(tag->zoneKey());
+        if (!zone) {
+            stale.append(StaleZone{ tag->name(), StaleZone::Reason::Removed });
+        } else if (zone->data().contentHash != tag->contentHash()) {
+            stale.append(StaleZone{ tag->name(), StaleZone::Reason::Changed });
+        } else if (tag->validTo().isValid() && (tag->validTo() <= now)) {
+            stale.append(StaleZone{ tag->name(), StaleZone::Reason::Expired });
+        }
+    });
+    return stale;
+}
+
+QString GeoZoneFenceTags::staleText(const QList<StaleZone> &staleZones)
+{
+    if (staleZones.isEmpty()) {
+        return QString();
+    }
+    QStringList names;
+    for (const StaleZone &zone : staleZones) {
+        if (names.count() == GeoZoneFenceTags::maxListedStaleZones) {
+            names.append(tr("%n more", nullptr, static_cast<int>(staleZones.count() - names.count())));
+            break;
+        }
+        switch (zone.reason) {
+        case StaleZone::Reason::Changed:
+            names.append(tr("%1 (changed)").arg(zone.name));
+            break;
+        case StaleZone::Reason::Removed:
+            names.append(tr("%1 (no longer loaded)").arg(zone.name));
+            break;
+        case StaleZone::Reason::Expired:
+            names.append(tr("%1 (expired)").arg(zone.name));
+            break;
+        }
+    }
+    return tr("Geozone fences are outdated: %1. Rebuild the geozone fences.").arg(names.join(QStringLiteral(", ")));
+}
+
+QJsonObject GeoZoneFenceTags::importSettings(const GeoFenceController *geoFenceController)
+{
+    return geoFenceController ? geoFenceController->property(importProperty).toJsonObject() : QJsonObject();
+}
+
+void GeoZoneFenceTags::setImportSettings(GeoFenceController *geoFenceController, const QJsonObject &settings)
+{
+    if (geoFenceController) {
+        (void) geoFenceController->setProperty(importProperty, settings);
+    }
 }

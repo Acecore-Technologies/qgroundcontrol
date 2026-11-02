@@ -2458,6 +2458,79 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     QCOMPARE(importer.leftOutCount(), 1);
 }
 
+void GeoZonePlanningTest::_testGeoFenceStale()
+{
+    // A permanent zone and one ending in an hour, selected from the zones of the manager
+    ScopedEnvironment environment;
+    const QDateTime now = _utc(QDate(2026, 6, 15), QTime(12, 0));
+    environment.setNow(now);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    const auto clearZones = qScopeGuard([manager]() { manager->repository()->clear(); });
+    QJsonObject temporary = _circleFeature(QStringLiteral("TMP"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8.1), 300);
+    temporary[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { QStringLiteral("startDateTime"), now.addDays(-1).toString(Qt::ISODate) },
+                                                                          { QStringLiteral("endDateTime"), now.addSecs(3600).toString(Qt::ISODate) } } };
+    const auto load = [&](const QJsonArray &features) {
+        QString errorString;
+        return manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString);
+    };
+    QVERIFY(load({ _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 300), temporary }));
+    QTRY_COMPARE(manager->zoneCount(), 2);
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(geoFenceController);
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), -1, 25);
+    QCOMPARE(importer.applySelection(), 2);
+    const int temporaryIndex = (GeoZoneFenceTag::find(geoFenceController->polygons()->get(0))->name() == QStringLiteral("TMP")) ? 0 : 1;
+    const GeoZoneFenceTag *const tag = GeoZoneFenceTag::find(geoFenceController->polygons()->get(temporaryIndex));
+    const GeoZone *const temporaryZone = manager->zoneList()[(manager->zoneList()[0]->identifier() == QStringLiteral("TMP")) ? 0 : 1];
+    QCOMPARE(tag->name(), QStringLiteral("TMP"));
+    QCOMPARE(tag->zoneKey(), temporaryZone->key());
+    QCOMPARE(tag->contentHash(), temporaryZone->data().contentHash);
+    QCOMPARE(tag->validTo(), now.addSecs(3600));
+    QVERIFY(importer.staleText().isEmpty());
+
+    // Plans keep the zones of the fences and the settings they were selected with
+    const QJsonObject fenceJson = masterController.saveToJson().object()[PlanMasterController::kJsonGeoFenceObjectKey].toObject();
+    const QJsonObject polygonJson = fenceJson[QStringLiteral("polygons")].toArray()[temporaryIndex].toObject();
+    QCOMPARE(polygonJson[QStringLiteral("zoneKey")].toString(), tag->zoneKey());
+    QCOMPARE(polygonJson[QStringLiteral("validTo")].toString(), now.addSecs(3600).toString(Qt::ISODate));
+    QCOMPARE(fenceJson[QStringLiteral("geoZoneImport")].toObject()[QStringLiteral("maxSimplifyTolerance")].toDouble(), 25.0);
+
+    // A zone changing or no longer loaded makes the fences outdated, also for the upload, until they are rebuilt
+    QVERIFY(load({ _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 350) }));
+    QTRY_VERIFY2(importer.staleText().contains(QStringLiteral("A (changed)")) && importer.staleText().contains(QStringLiteral("TMP (no longer loaded)")),
+                 qPrintable(importer.staleText()));
+    QVERIFY(importer.staleText().startsWith(QStringLiteral("Geozone fences are outdated: ")));
+    GeoZoneMissionCheck check(manager);
+    check.setGeoFenceController(geoFenceController);
+    QVERIFY(check.uploadReasons().contains(importer.staleText()));
+    QCOMPARE(importer.rebuild(), 1);
+    QVERIFY(importer.staleText().isEmpty());
+    QVERIFY(check.uploadReasons().isEmpty());
+
+    // Fences of zones whose last period ended are outdated, while new zones don't make them so
+    QVERIFY(load({ _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 350), temporary }));
+    QTRY_COMPARE(manager->zoneCount(), 2);
+    QVERIFY(importer.staleText().isEmpty());
+    QCOMPARE(importer.rebuild(), 2);
+    QVERIFY(GeoZoneFenceTags::staleZones(geoFenceController, manager->catalog().zones(), now.addSecs(1800)).isEmpty());
+    QCOMPARE(GeoZoneFenceTags::staleZones(geoFenceController, manager->catalog().zones(), now.addSecs(3600)),
+             (QList<GeoZoneFenceTags::StaleZone>{ { QStringLiteral("TMP"), GeoZoneFenceTags::StaleZone::Reason::Expired } }));
+
+    // Fences of plans saved without the settings are rebuilt from their zones still loaded
+    GeoZoneFenceTags::setImportSettings(geoFenceController, QJsonObject());
+    QVERIFY(load({ _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 400) }));
+    QTRY_VERIFY(!importer.staleText().isEmpty());
+    QCOMPARE(importer.rebuild(), 1);
+    QVERIFY(importer.staleText().isEmpty());
+}
+
 void GeoZonePlanningTest::_testGeoFenceUpload()
 {
     ZoneOwner zoneParent;

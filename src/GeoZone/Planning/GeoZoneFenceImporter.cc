@@ -16,6 +16,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZoneMissionWorker.h"
+#include "GeoZoneSourceRepository.h"
 #include "GeoZoneText.h"
 #include "MissionController.h"
 #include "ParameterManager.h"
@@ -24,6 +25,9 @@
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
+
+#include <QtCore/QJsonArray>
+#include <QtCore/QSet>
 
 
 #include <algorithm>
@@ -45,6 +49,13 @@ GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
         _selectedCount = 0;
         _choices->setRows({});
         emit selectionChanged();
+        _updateStale();
+    });
+    // Sources still loading would make the fences of their zones look removed
+    (void) connect(GeoZoneManager::instance()->repository(), &GeoZoneSourceRepository::busyChanged, this, [this](bool busy) {
+        if (!busy) {
+            _updateStale();
+        }
     });
 }
 
@@ -54,6 +65,15 @@ void GeoZoneFenceImporter::setGeoFenceController(GeoFenceController *geoFenceCon
         _geoFenceController = geoFenceController;
         _upload->setGeoFenceController(geoFenceController);
         _connectVehicle();
+        delete _fenceConnections;
+        _fenceConnections = new QObject(this);
+        if (_geoFenceController) {
+            // Plans set the tags of their fences after loading them
+            for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
+                (void) connect(fences, &QmlObjectListModel::countChanged, _fenceConnections, [this]() { _updateStale(); }, Qt::QueuedConnection);
+            }
+        }
+        _updateStale();
         // The proximity of the zones depends on the plan's mission
         if (_query || !_zones.isEmpty()) {
             _prepareSelection(!_query);
@@ -155,6 +175,14 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
     }
 
     _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo) };
+    _settings = QJsonObject{
+        { QStringLiteral("restrictions"), QJsonArray::fromVariantList(restrictions) },
+        { QStringLiteral("activeWithinHours"), activeWithinHours },
+        { QStringLiteral("maxSimplifyTolerance"), maxSimplifyTolerance },
+    };
+    if (area.isValid()) {
+        _settings.insert(QStringLiteral("area"), QJsonArray{ area.topLeft().latitude(), area.topLeft().longitude(), area.bottomRight().latitude(), area.bottomRight().longitude() });
+    }
     _zones.clear();
     _setSimplifyTolerances(maxSimplifyTolerance);
     _prepareSelection(false);
@@ -163,6 +191,7 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
 void GeoZoneFenceImporter::select(const QList<const GeoZone*> &zones, double maxSimplifyTolerance)
 {
     _query.reset();
+    _settings = QJsonObject();
     _zones = zones;
     _setSimplifyTolerances(maxSimplifyTolerance);
     _prepareSelection(true);
@@ -343,19 +372,83 @@ int GeoZoneFenceImporter::applySelection()
         if (choice.status != GeoZoneFences::Status::Selected) {
             continue;
         }
-        const QString name = choice.candidate.zone->displayName();
         for (const QList<QGeoCoordinate> &polygon : choice.fences.polygons) {
             fences.polygons.append(polygon);
-            fences.polygonNames.append(name);
+            fences.polygonZones.append(choice.candidate.zone);
         }
         for (const QGeoCircle &circle : choice.fences.circles) {
             fences.circles.append(circle);
-            fences.circleNames.append(name);
+            fences.circleZones.append(choice.candidate.zone);
         }
     }
     const int added = _addFences(fences);
     qCDebug(GeoZoneManagerLog) << "applySelection fences" << added;
+
+    // Kept with the plan to select the fences again when their zones change
+    QJsonObject settings = _settings;
+    if (!settings.isEmpty()) {
+        QJsonObject included;
+        for (auto it = _included.cbegin(); it != _included.cend(); ++it) {
+            included.insert(it.key(), it.value());
+        }
+        settings.insert(QStringLiteral("included"), included);
+    }
+    GeoZoneFenceTags::setImportSettings(_geoFenceController, settings);
+    _updateStale();
     return added;
+}
+
+int GeoZoneFenceImporter::rebuild()
+{
+    if (!_geoFenceController) {
+        return 0;
+    }
+    const QJsonObject settings = GeoZoneFenceTags::importSettings(_geoFenceController);
+    _included.clear();
+    if (settings.isEmpty()) {
+        // Plans saved before the settings were kept: the zones of their fences still loaded
+        QSet<QString> keys;
+        for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
+            for (int i = 0; i < fences->count(); i++) {
+                const GeoZoneFenceTag *const tag = GeoZoneFenceTag::find(fences->get(i));
+                if (tag && tag->geoZone()) {
+                    keys.insert(tag->zoneKey());
+                }
+            }
+        }
+        QList<const GeoZone*> zones;
+        for (const GeoZone *zone : GeoZoneManager::instance()->catalog().zones()) {
+            if (keys.contains(zone->key())) {
+                zones.append(zone);
+            }
+        }
+        select(zones, rebuildSimplifyTolerance);
+    } else {
+        const QJsonArray bounds = settings.value(QStringLiteral("area")).toArray();
+        const QGeoRectangle area = (bounds.count() == 4) ? QGeoRectangle(QGeoCoordinate(bounds[0].toDouble(), bounds[1].toDouble()),
+                                                                         QGeoCoordinate(bounds[2].toDouble(), bounds[3].toDouble())) : QGeoRectangle();
+        const QJsonObject included = settings.value(QStringLiteral("included")).toObject();
+        for (auto it = included.constBegin(); it != included.constEnd(); ++it) {
+            _included.insert(it.key(), it.value().toBool());
+        }
+        updateSelection(settings.value(QStringLiteral("restrictions")).toArray().toVariantList(), area,
+                        settings.value(QStringLiteral("activeWithinHours")).toInt(-1), settings.value(QStringLiteral("maxSimplifyTolerance")).toDouble());
+    }
+    return applySelection();
+}
+
+void GeoZoneFenceImporter::_updateStale()
+{
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    if (manager->repository()->busy()) {
+        return;
+    }
+    const QString text = GeoZoneFenceTags::staleText(GeoZoneFenceTags::staleZones(_geoFenceController, manager->catalog().zones(),
+                                                                                  GeoZoneEnvironment::currentDateTimeUtc()));
+    if (text != _staleText) {
+        _staleText = text;
+        emit staleChanged();
+    }
 }
 
 QString GeoZoneFenceImporter::_capacityNote() const
@@ -537,18 +630,17 @@ GeoZoneFenceImporter::Fences GeoZoneFenceImporter::_newFences(const QList<const 
 
     Fences fences;
     for (const GeoZone *zone : zones) {
-        const QString name = zone->displayName();
         const GeoZoneFences::ZoneFences zoneShapes = GeoZoneFences::zoneFences(zone, simplifyTolerance);
         for (const QList<QGeoCoordinate> &vertices : zoneShapes.polygons) {
             if (polygonSet.insert(vertices)) {
                 fences.polygons.append(vertices);
-                fences.polygonNames.append(name);
+                fences.polygonZones.append(zone);
             }
         }
         for (const QGeoCircle &geoCircle : zoneShapes.circles) {
             if (circleSet.insert(geoCircle)) {
                 fences.circles.append(geoCircle);
-                fences.circleNames.append(name);
+                fences.circleZones.append(zone);
             }
         }
     }
@@ -595,17 +687,13 @@ int GeoZoneFenceImporter::_addFences(const Fences &fences)
     for (qsizetype i = 0; i < fences.polygons.count(); i++) {
         QGCFencePolygon *const polygon = new QGCFencePolygon(false /* inclusion */, _geoFenceController);
         polygon->appendVertices(fences.polygons[i]);
-        GeoZoneFenceTag *const tag = GeoZoneFenceTag::of(polygon);
-        tag->setName(fences.polygonNames[i]);
-        tag->setGeoZone(true);
+        GeoZoneFenceTag::of(polygon)->setZone(fences.polygonZones[i]);
         newPolygons.append(polygon);
     }
     QList<QObject*> newCircles;
     for (qsizetype i = 0; i < fences.circles.count(); i++) {
         QGCFenceCircle *const circle = new QGCFenceCircle(fences.circles[i].center(), fences.circles[i].radius(), false /* inclusion */, _geoFenceController);
-        GeoZoneFenceTag *const tag = GeoZoneFenceTag::of(circle);
-        tag->setName(fences.circleNames[i]);
-        tag->setGeoZone(true);
+        GeoZoneFenceTag::of(circle)->setZone(fences.circleZones[i]);
         newCircles.append(circle);
     }
     if (!newPolygons.isEmpty()) {

@@ -14,6 +14,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
+#include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePathEvaluator.h"
@@ -703,6 +704,14 @@ QStringList GeoZoneMissionCheck::uploadReasons() const
     if (_manager->repository()->dataInvalid() && missionController() && missionController()->containsItems()) {
         reasons.append(tr("The geozone data is outdated and treated as invalid, zones may be missing or have changed:\n%1")
                            .arg(_manager->repository()->validityWarning()));
+    }
+    // Fences from zones which changed since, which the vehicle would enforce as they were
+    if (_geoFenceController && !_manager->repository()->busy()) {
+        const QString stale = GeoZoneFenceTags::staleText(GeoZoneFenceTags::staleZones(_geoFenceController, _manager->catalog().zones(),
+                                                                                       GeoZoneEnvironment::currentDateTimeUtc()));
+        if (!stale.isEmpty()) {
+            reasons.append(stale);
+        }
     }
     if (!_auditText.isEmpty()) {
         QStringList lines = { _auditText };
