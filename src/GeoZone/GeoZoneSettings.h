@@ -36,6 +36,7 @@ public:
     DEFINE_SETTINGFACT(feedRefreshHours)
     DEFINE_SETTINGFACT(liveFeedRefreshMinutes)
     DEFINE_SETTINGFACT(staleDays)
+    DEFINE_SETTINGFACT(outdatedInvalid)
     DEFINE_SETTINGFACT(followAreaOfInterest)
     DEFINE_SETTINGFACT(packSigningKeyFile)
     DEFINE_SETTINGFACT(packPublisherName)

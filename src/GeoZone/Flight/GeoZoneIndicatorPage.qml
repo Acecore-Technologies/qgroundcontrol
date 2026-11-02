@@ -55,11 +55,15 @@ ToolIndicatorPage {
         ColumnLayout {
             spacing: ScreenTools.defaultFontPixelHeight / 2
 
-            // When the data was last pulled
+            // When the data was last pulled, and whether it expired
             QGCLabel {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
-                text:               GeoZoneManager.repository.lastPulledText
+                color:              GeoZoneManager.repository.dataInvalid ? qgcPal.colorRed : qgcPal.text
+                font.bold:          GeoZoneManager.repository.dataInvalid
+                text:               GeoZoneManager.repository.dataInvalid ?
+                                        qsTr("Expired geozone data, its zones still apply. %1").arg(GeoZoneManager.repository.lastPulledText) :
+                                        GeoZoneManager.repository.lastPulledText
                 visible:            text !== ""
             }
 

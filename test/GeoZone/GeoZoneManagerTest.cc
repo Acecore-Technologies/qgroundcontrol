@@ -1076,11 +1076,13 @@ void GeoZoneManagerTest::_testSourceValidity()
     result.format = GeoZoneParser::Format::ED269;
     const QDateTime now = environment.now();
 
-    // Without an issue date the file date counts, outdated after 7 days by default
+    // Without an issue date the file date counts, outdated after 7 days by default and then invalid
     source.setResult(result, now, now.addDays(-5));
     QVERIFY(source.validityText().isEmpty());
+    QVERIFY(!source.invalid());
     source.setResult(result, now, now.addDays(-30));
     QCOMPARE(source.validityText(), QStringLiteral("Data is 30 days old"));
+    QVERIFY(source.invalid());
     // The file's own date is a date, when it was loaded a time
     QVERIFY2(source.detailsText().contains(QStringLiteral("file from %1").arg(now.addDays(-30).toString(QStringLiteral("yyyy-MM-dd")))), qPrintable(source.detailsText()));
     QVERIFY2(source.detailsText().contains(QStringLiteral("loaded %1").arg(QLocale().toString(now.toLocalTime(), QLocale::ShortFormat))), qPrintable(source.detailsText()));
@@ -1121,6 +1123,7 @@ void GeoZoneManagerTest::_testSourceValidity()
     QString errorString;
     QVERIFY2(manager.repository()->loadFile(QStringLiteral(":/unittest/ed318_test.json"), errorString), qPrintable(errorString));
     QVERIFY(manager.repository()->validityWarning().startsWith(QStringLiteral("Test GeoZones: Data is")));
+    QVERIFY(manager.repository()->dataInvalid());
     // with the time the data was last pulled
     QCOMPARE(manager.repository()->lastPulledAt(), now);
     QCOMPARE(manager.repository()->lastPulledText(), QStringLiteral("Data pulled %1 today").arg(QLocale().toString(now.toLocalTime().time(), QLocale::ShortFormat)));
@@ -2664,7 +2667,7 @@ void GeoZoneManagerTest::_testSettings()
     QCOMPARE(GeoZoneEnvironment::qnhHPa(), GeoZoneEnvironment::kStandardPressureHPa);
 
     const ScopedEnvironment environment;
-    const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(),
+    const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(), settings->outdatedInvalid(),
                                  settings->feedRefreshHours(), settings->liveFeedRefreshMinutes(), settings->qnhHPa() };
     const auto restoreDefaults = qScopeGuard([&facts]() {
         for (Fact *fact : facts) {
@@ -2702,10 +2705,20 @@ void GeoZoneManagerTest::_testSettings()
     manager.display()->setVisible(true);
     QVERIFY(settings->showZones()->rawValue().toBool());
 
-    // Outdated data is reported at the configured age, 7 days by default
+    // Outdated data is reported at the configured age, 7 days by default, as invalid unless turned off
     QVERIFY(manager.repository()->validityWarning().isEmpty());
+    QVERIFY(!manager.repository()->dataInvalid());
     settings->staleDays()->setRawValue(3);
     QCOMPARE(manager.repository()->validityWarning(), QStringLiteral("zones.json: Data is 5 days old"));
+    QVERIFY(manager.repository()->dataInvalid());
+    settings->outdatedInvalid()->setRawValue(false);
+    QVERIFY(!manager.repository()->dataInvalid());
+    QVERIFY(!manager.repository()->sources().constFirst()->invalid());
+    QCOMPARE(manager.repository()->validityWarning(), QStringLiteral("zones.json: Data is 5 days old"));
+    // The zones of invalid data still apply
+    settings->outdatedInvalid()->setRawValue(true);
+    QVERIFY(manager.repository()->dataInvalid());
+    QCOMPARE(manager.zoneCount(), 1);
 
     // Feeds are refreshed at the configured intervals
     GeoZoneSource feed(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));

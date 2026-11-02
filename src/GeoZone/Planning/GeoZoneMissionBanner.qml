@@ -22,7 +22,7 @@ import QGroundControl.ScreenTools
 
 /// Plan View banner summarising in one line how the mission meets the geozones, centered between leftLimit and
 /// rightLimit: the restricted zones it enters by restriction, the zones the returns from along it enter, and whether
-/// the geozone data changed since the plan was saved or may be outdated. Below are the primary actions and a Details
+/// the geozone data changed since the plan was saved, may be outdated or expired. Below are the primary actions and a Details
 /// toggle listing the zones of the mission check by category with the other information. Shown while the mission has
 /// items and zones are loaded, or when the data or the plan's authorisations need attention. Exports the geozone
 /// briefing of the mission, see exportBriefing(), and its operational intent for a flight authorisation request, see
@@ -34,7 +34,7 @@ Rectangle {
     height:         column.height + (_margin * 2)
     radius:         ScreenTools.defaultFontPixelWidth / 2
     color:          qgcPal.window
-    border.color:   _attention ? qgcPal.warningText : qgcPal.text
+    border.color:   _dataInvalid ? qgcPal.colorRed : (_attention ? qgcPal.warningText : qgcPal.text)
     z:              QGroundControl.zOrderWidgets
     visible:        _checkedMission || check.zones.length > 0 || _outdatedText !== "" || _pendingAuthorisations.length > 0 || check.auditText !== ""
 
@@ -52,9 +52,12 @@ Rectangle {
         return check.zones.filter(entry => entry.kind & kind).map(entry => entry.zone)
     }
 
-    // Outdated data, like an old list of temporary restrictions, can miss zones the mission enters
-    readonly property string _outdatedText: GeoZoneManager.repository.validityWarning !== "" ?
-                                                qsTr("Geozone data may be outdated: %1").arg(GeoZoneManager.repository.validityWarning.replace(/\n/g, "; ")) : ""
+    // Outdated data, like an old list of temporary restrictions, can miss zones the mission enters. Treated as invalid
+    // it is expired, but its zones are still checked: leaving them out would be less safe.
+    readonly property bool   _dataInvalid:  GeoZoneManager.repository.dataInvalid
+    readonly property string _outdatedText: GeoZoneManager.repository.validityWarning === "" ? "" :
+                                                (_dataInvalid ? qsTr("Expired geozone data, its zones are still checked: %1") : qsTr("Geozone data may be outdated: %1"))
+                                                    .arg(GeoZoneManager.repository.validityWarning.replace(/\n/g, "; "))
 
     readonly property var  _pendingAuthorisations: GeoZoneManager.planning.authorisations.pendingAuthorisations
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth
@@ -97,39 +100,41 @@ Rectangle {
                                qsTr("%1 (only %2)").arg(entry.zone.displayName).arg(entry.labels.join(", ")) : entry.zone.displayName).join(", ")
     }
 
-    // One line of counts, the most severe first: [ text, restriction for a dot in its color or -1 ]
+    // One line of counts, the most severe first: [ text, color of a dot before it or "" ]
     readonly property var _summaryParts: {
         const parts = []
-        const add = (count, text, restriction) => {
+        const add = (count, text, color) => {
             if (count > 0) {
-                parts.push([ text, restriction ])
+                parts.push([ text, color ])
             }
         }
+        const addRestricted = (restriction, text) => add(_restricted(restriction).length, text, GeoZoneStyle.restrictionColor(restriction))
         const count = kind => _entries(kind).length
-        add(_restricted(GeoZone.Prohibited).length, qsTr("%n prohibited", "", _restricted(GeoZone.Prohibited).length), GeoZone.Prohibited)
-        add(_restricted(GeoZone.ReqAuthorisation).length, qsTr("%n authorisation required", "", _restricted(GeoZone.ReqAuthorisation).length), GeoZone.ReqAuthorisation)
-        add(_restricted(GeoZone.Conditional).length, qsTr("%n conditional", "", _restricted(GeoZone.Conditional).length), GeoZone.Conditional)
-        add(_restricted(GeoZone.Unknown).length, qsTr("%n unknown restriction", "", _restricted(GeoZone.Unknown).length), GeoZone.Unknown)
-        add(count(GeoZoneMissionCheck.Unfenced), qsTr("%n not fenced", "", count(GeoZoneMissionCheck.Unfenced)), -1)
-        add(count(GeoZoneMissionCheck.Contingency), qsTr("returns enter %n zone(s)", "", count(GeoZoneMissionCheck.Contingency)), -1)
-        add(check.auditText !== "" ? 1 : 0, qsTr("data changed"), -1)
-        add(_outdatedText !== "" ? 1 : 0, qsTr("data may be outdated"), -1)
-        add(_pendingAuthorisations.length, qsTr("%n authorisation(s) in the plan", "", _pendingAuthorisations.length), -1)
-        add(count(GeoZoneMissionCheck.USpace), qsTr("%n U-space", "", count(GeoZoneMissionCheck.USpace)), GeoZone.USpace)
-        add(count(GeoZoneMissionCheck.Authorised), qsTr("%n authorised", "", count(GeoZoneMissionCheck.Authorised)), -1)
-        add(count(GeoZoneMissionCheck.Permitted), qsTr("%n without restriction", "", count(GeoZoneMissionCheck.Permitted)), GeoZone.NoRestriction)
-        add(count(GeoZoneMissionCheck.Inactive), qsTr("%n inactive at the flight time", "", count(GeoZoneMissionCheck.Inactive)), -1)
-        add(parts.length === 0 && _checkedMission ? 1 : 0, qsTr("No geozones on the mission path"), -1)
+        add(_dataInvalid ? 1 : 0, qsTr("expired data"), qgcPal.colorRed)
+        addRestricted(GeoZone.Prohibited, qsTr("%n prohibited", "", _restricted(GeoZone.Prohibited).length))
+        addRestricted(GeoZone.ReqAuthorisation, qsTr("%n authorisation required", "", _restricted(GeoZone.ReqAuthorisation).length))
+        addRestricted(GeoZone.Conditional, qsTr("%n conditional", "", _restricted(GeoZone.Conditional).length))
+        addRestricted(GeoZone.Unknown, qsTr("%n unknown restriction", "", _restricted(GeoZone.Unknown).length))
+        add(count(GeoZoneMissionCheck.Unfenced), qsTr("%n not fenced", "", count(GeoZoneMissionCheck.Unfenced)), "")
+        add(count(GeoZoneMissionCheck.Contingency), qsTr("returns enter %n zone(s)", "", count(GeoZoneMissionCheck.Contingency)), "")
+        add(check.auditText !== "" ? 1 : 0, qsTr("data changed"), "")
+        add(_outdatedText !== "" && !_dataInvalid ? 1 : 0, qsTr("data may be outdated"), "")
+        add(_pendingAuthorisations.length, qsTr("%n authorisation(s) in the plan", "", _pendingAuthorisations.length), "")
+        add(count(GeoZoneMissionCheck.USpace), qsTr("%n U-space", "", count(GeoZoneMissionCheck.USpace)), GeoZoneStyle.restrictionColor(GeoZone.USpace))
+        add(count(GeoZoneMissionCheck.Authorised), qsTr("%n authorised", "", count(GeoZoneMissionCheck.Authorised)), "")
+        add(count(GeoZoneMissionCheck.Permitted), qsTr("%n without restriction", "", count(GeoZoneMissionCheck.Permitted)), GeoZoneStyle.restrictionColor(GeoZone.NoRestriction))
+        add(count(GeoZoneMissionCheck.Inactive), qsTr("%n inactive at the flight time", "", count(GeoZoneMissionCheck.Inactive)), "")
+        add(parts.length === 0 && _checkedMission ? 1 : 0, qsTr("No geozones on the mission path"), "")
         return parts
     }
 
     // Counts only, no texts from the files, with a dot in the color of the restriction
-    readonly property string _summaryText: _summaryParts.map(part => part[1] < 0 ? part[0] :
-                                                                 "<font color=\"%1\">\u25CF</font>&nbsp;%2".arg(GeoZoneStyle.restrictionColor(part[1])).arg(part[0]))
+    readonly property string _summaryText: _summaryParts.map(part => part[1] === "" ? part[0] :
+                                                                 "<font color=\"%1\">\u25CF</font>&nbsp;%2".arg(part[1]).arg(part[0]))
                                                         .join(" \u00B7 ")
 
-    /// Asks for confirmation before uploading a mission which enters prohibited zones without authorisation, or whose
-    /// geozone data changed since the plan was saved, listing why, then calls uploadFunction unless cancelled
+    /// Asks for confirmation before uploading a mission which enters prohibited zones without authorisation, whose
+    /// geozone data expired or changed since the plan was saved, listing why, then calls uploadFunction unless cancelled
     function confirmUpload(uploadFunction) {
         // The banner updates after changes settle, so check the current plan
         check.update()
@@ -429,7 +434,8 @@ Rectangle {
                     width:      parent.width
                     wrapMode:   Text.WordWrap
                     textFormat: Text.PlainText
-                    color:      qgcPal.warningText
+                    color:      control._dataInvalid ? qgcPal.colorRed : qgcPal.warningText
+                    font.bold:  control._dataInvalid
                     text:       control._outdatedText
                     visible:    text !== ""
                 }

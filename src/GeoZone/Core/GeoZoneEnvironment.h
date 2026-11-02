@@ -33,6 +33,9 @@ struct SourceSettings {
     int feedRefreshHours = 24;
     int liveFeedRefreshMinutes = 15;    ///< Feeds of temporary restrictions, see GeoZoneSource::isLive
     int staleDays = 7;
+    /// Outdated data is invalid rather than possibly outdated: the pilot must confirm uploads with it. Its zones are
+    /// still shown, checked and alerted, since leaving out a restriction because its data is old is less safe.
+    bool outdatedInvalid = true;
 };
 
 struct Hooks {

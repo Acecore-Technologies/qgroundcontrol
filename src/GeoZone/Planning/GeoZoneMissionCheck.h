@@ -134,8 +134,9 @@ public:
 
     /// @return Why uploading the mission needs the pilot's confirmation, one paragraph per reason, empty when it doesn't:
     ///         the mission enters prohibited zones without an authorisation covering the flight, naming those the fence
-    ///         doesn't exclude, or the geozone data changed since the plan was saved and the changes weren't
-    ///         acknowledged, with the changes. Of the last check, see update().
+    ///         doesn't exclude, the mission has items and the data is outdated and treated as invalid (GeoZoneSourceRepository::dataInvalid),
+    ///         or the geozone data changed since the plan was saved and the changes weren't acknowledged, with the
+    ///         changes. Of the last check, see update().
     Q_INVOKABLE QStringList uploadReasons() const;
 
     static constexpr int maxListedChanges = 5;   ///< Changes of the geozone data listed by uploadReasons

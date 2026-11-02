@@ -75,6 +75,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QDateTime    checkedAt       READ checkedAt      NOTIFY changed FINAL)             ///< When the server last confirmed a feed's data current, or it was loaded
     Q_PROPERTY(QString      detailsText     READ detailsText    NOTIFY changed FINAL)
     Q_PROPERTY(QString      validityText    READ validityText   NOTIFY validityChanged FINAL)
+    Q_PROPERTY(bool         invalid         READ invalid        NOTIFY validityChanged FINAL)     ///< The data is outdated and treated as invalid, see SourceSettings::outdatedInvalid
     Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete or partly unreadable, empty when it is complete
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
@@ -117,6 +118,9 @@ public:
     QDateTime validTo() const { return _validTo; }
     QString detailsText() const;
     QString validityText() const { return _validityText; }
+    /// @return true when the data is outdated (validityText isn't empty) and outdated data is treated as invalid, see
+    ///         GeoZoneEnvironment::SourceSettings::outdatedInvalid. Its zones still apply.
+    bool invalid() const { return _invalid; }
     QString warningText() const;
     bool busy() const { return _busy; }
     QString errorString() const { return _errorString; }
@@ -238,6 +242,7 @@ private:
     QDateTime _validFrom;
     QDateTime _validTo;
     QString _validityText;
+    bool _invalid = false;
     bool _busy = false;
     GeoZoneSourceChanges _changes;
     QSet<QString> _changedZoneKeys;

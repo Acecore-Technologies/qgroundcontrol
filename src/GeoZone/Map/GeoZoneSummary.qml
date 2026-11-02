@@ -16,7 +16,7 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.GeoZone
 
-/// Number of loaded geozones, when the data was last pulled, zones left out of the map and outdated data warning
+/// Number of loaded geozones, when the data was last pulled, zones left out of the map and outdated or expired data
 ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
@@ -55,11 +55,23 @@ ColumnLayout {
         visible:            root.showPullTime && text !== ""
     }
 
+    // Expired data stays drawn and checked, see GeoZoneSourceRepository::dataInvalid. Several sources are counted, the
+    // sources list tells which.
     QGCLabel {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
-        color:              qgcPal.warningText
-        text:               _geoZoneManager.repository.validityWarning
-        visible:            text !== ""
+        textFormat:         Text.PlainText
+        color:              _geoZoneManager.repository.dataInvalid ? qgcPal.colorRed : qgcPal.warningText
+        font.bold:          _geoZoneManager.repository.dataInvalid
+        text: {
+            const warning = _geoZoneManager.repository.validityWarning
+            const count = warning === "" ? 0 : warning.split("\n").length
+            if (_geoZoneManager.repository.dataInvalid) {
+                return count === 1 ? qsTr("Expired geozone data, its zones still apply: %1").arg(warning) :
+                                     qsTr("Expired geozone data in %n source(s), their zones still apply.", "", count)
+            }
+            return count === 1 ? warning : qsTr("Outdated geozone data in %n source(s).", "", count)
+        }
+        visible:            _geoZoneManager.repository.validityWarning !== ""
     }
 }

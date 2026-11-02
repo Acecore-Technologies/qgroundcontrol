@@ -142,7 +142,7 @@ SettingsPage {
         Layout.fillWidth:       true
         Layout.preferredWidth:  _groupWidth
         heading:                qsTr("Data Updates")
-        headingDescription:     qsTr("Feeds are downloaded again periodically. Sources with older data are reported as outdated. Services taking an area download the zones around the planned mission and the active vehicle.")
+        headingDescription:     qsTr("Feeds are downloaded again periodically. Sources with older data are reported as outdated, or as expired when outdated data is treated as invalid; their zones still apply. Services taking an area download the zones around the planned mission and the active vehicle.")
 
         LabelledFactTextField {
             Layout.fillWidth:        true
@@ -166,6 +166,13 @@ SettingsPage {
             label:                   fact.shortDescription
             fact:                    _geoZoneSettings.staleDays
             visible:                 fact.visible
+        }
+
+        FactCheckBoxSlider {
+            Layout.fillWidth:   true
+            text:               fact.shortDescription
+            fact:               _geoZoneSettings.outdatedInvalid
+            visible:            fact.visible
         }
 
         FactCheckBoxSlider {

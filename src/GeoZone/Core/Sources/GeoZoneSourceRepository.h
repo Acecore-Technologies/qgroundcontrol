@@ -44,6 +44,7 @@ class GeoZoneSourceRepository : public QObject
     Q_PROPERTY(double   progress        READ progress           NOTIFY progressChanged FINAL)           ///< Fraction of the downloads received, negative when unknown
     Q_PROPERTY(QString  progressText    READ progressText       NOTIFY progressChanged FINAL)
     Q_PROPERTY(QString  validityWarning READ validityWarning    NOTIFY validityWarningChanged FINAL)    ///< Sources with outdated data, one per line
+    Q_PROPERTY(bool     dataInvalid     READ dataInvalid        NOTIFY validityWarningChanged FINAL)    ///< Sources turned on have outdated data treated as invalid
     Q_PROPERTY(QDateTime lastPulledAt   READ lastPulledAt       NOTIFY validityWarningChanged FINAL)    ///< See lastPulledAt()
     Q_PROPERTY(QString  lastPulledText  READ lastPulledText     NOTIFY validityWarningChanged FINAL)    ///< Like "Data pulled 09:41 today", empty without data
 
@@ -149,6 +150,9 @@ public:
     QString progressText() const;
     /// Sources with outdated data, one per line
     QString validityWarning() const { return _validityWarning; }
+    /// @return true when sources turned on have outdated data and outdated data is treated as invalid, see
+    ///         GeoZoneSource::invalid. Their zones still apply, uploads with them need the pilot's confirmation.
+    bool dataInvalid() const { return _dataInvalid; }
     /// @return The latest time the data of a source turned on was downloaded, confirmed current by its server or loaded
     ///         from a file, invalid without data
     QDateTime lastPulledAt() const { return _lastPulledAt; }
@@ -174,7 +178,7 @@ signals:
     void outdatedDataFound(const QString &message);
     void busyChanged(bool busy);
     void progressChanged();
-    void validityWarningChanged();  ///< Also when the last pull changed
+    void validityWarningChanged();  ///< Also when dataInvalid or the last pull changed
 
 private:
     void _prepareJob(GeoZoneLoader::Job &job) const;
@@ -225,6 +229,7 @@ private:
     GeoZoneAreaOfInterest _areaOfInterest;
     bool _storageErrorReported = false;
     QString _validityWarning;
+    bool _dataInvalid = false;
     QDateTime _lastPulledAt;
     QString _lastPulledText;
     bool _startupRefreshPending = false;

@@ -70,6 +70,23 @@ ColumnLayout {
                     textFormat:         Text.PlainText
                 }
 
+                // Outdated data treated as invalid, whose zones still apply
+                Rectangle {
+                    Layout.preferredWidth:  expiredLabel.implicitWidth + ScreenTools.defaultFontPixelWidth
+                    Layout.preferredHeight: expiredLabel.implicitHeight + (ScreenTools.defaultFontPixelHeight / 4)
+                    radius:                 height / 4
+                    color:                  qgcPal.colorRed
+                    visible:                object.invalid && object.enabled
+
+                    QGCLabel {
+                        id:                 expiredLabel
+                        anchors.centerIn:   parent
+                        text:               qsTr("Expired")
+                        color:              "white"
+                        font.bold:          true
+                    }
+                }
+
                 QGCButton {
                     id:                     menuButton
                     Layout.preferredWidth:  height
@@ -203,9 +220,11 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                color:              qgcPal.warningText
-                text:               object.validityText
-                visible:            text !== ""
+                color:              object.invalid ? qgcPal.colorRed : qgcPal.warningText
+                font.bold:          object.invalid
+                text:               object.invalid ? qsTr("%1, treated as invalid: uploads ask for confirmation, its zones still apply. Refresh or replace it.").arg(object.validityText) :
+                                                     object.validityText
+                visible:            object.validityText !== ""
             }
 
             // The zones the last reload added, changed and removed, their names on demand

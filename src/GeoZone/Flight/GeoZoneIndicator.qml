@@ -72,20 +72,21 @@ Item {
         }
     }
 
-    // Some data may be outdated, which the page details
+    // Some data may be outdated (yellow), or treated as invalid when outdated (red, its zones still apply), see
+    // GeoZoneSourceRepository::dataInvalid; the page details them
     Rectangle {
         anchors.bottom: parent.bottom
         anchors.left:   geoZoneIcon.left
         height:         ScreenTools.defaultFontPixelHeight * 0.9
         width:          height
         radius:         height / 2
-        color:          qgcPal.colorYellow
-        visible:        control._outdated
+        color:          GeoZoneManager.repository.dataInvalid ? qgcPal.colorRed : qgcPal.colorYellow
+        visible:        control._outdated || GeoZoneManager.repository.dataInvalid
 
         QGCLabel {
             anchors.centerIn:   parent
             text:               "!"
-            color:              "black"
+            color:              GeoZoneManager.repository.dataInvalid ? "white" : "black"
             font.bold:          true
             font.pointSize:     ScreenTools.smallFontPointSize
         }

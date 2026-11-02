@@ -527,8 +527,10 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
         }
     }
 
-    if (text != _validityText) {
+    const bool invalid = !text.isEmpty() && settings.outdatedInvalid;
+    if ((text != _validityText) || (invalid != _invalid)) {
         _validityText = text;
+        _invalid = invalid;
         emit validityChanged();
     }
 }

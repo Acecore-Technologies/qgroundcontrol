@@ -129,6 +129,13 @@
     "default":      7
 },
 {
+    "name":         "outdatedInvalid",
+    "shortDesc":    "Treat outdated data as invalid",
+    "longDesc":     "Outdated geozone data is shown as expired and uploading a mission asks for confirmation. Its zones are still shown, checked and alerted.",
+    "type":         "bool",
+    "default":      true
+},
+{
     "name":         "followAreaOfInterest",
     "shortDesc":    "Download services around the mission and vehicle",
     "longDesc":     "Download the zones of geozone services taking an area again when the planned mission or the active vehicle leaves the area downloaded.",

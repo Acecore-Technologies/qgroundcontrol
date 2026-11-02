@@ -631,6 +631,11 @@ QStringList GeoZoneMissionCheck::uploadReasons() const
         }
         reasons.append(reason);
     }
+    // Zones of expired data still apply, but current data may have more or other zones
+    if (_manager->repository()->dataInvalid() && missionController() && missionController()->containsItems()) {
+        reasons.append(tr("The geozone data is outdated and treated as invalid, zones may be missing or have changed:\n%1")
+                           .arg(_manager->repository()->validityWarning()));
+    }
     if (!_auditText.isEmpty()) {
         QStringList lines = { _auditText };
         lines.append(_auditDetails.first((std::min)(_auditDetails.count(), static_cast<qsizetype>(maxListedChanges))));

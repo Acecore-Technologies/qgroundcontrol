@@ -918,6 +918,7 @@ void GeoZoneSourceRepository::updateValidity()
 {
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     QStringList lines;
+    bool invalid = false;
     QDateTime lastPulledAt;
     for (GeoZoneSource *const source : std::as_const(_sources)) {
         source->updateValidity(now);
@@ -926,6 +927,7 @@ void GeoZoneSourceRepository::updateValidity()
         }
         if (!source->validityText().isEmpty()) {
             lines.append(QStringLiteral("%1: %2").arg(source->name(), source->validityText()));
+            invalid = invalid || source->invalid();
         }
         // The server confirming the data current counts as a pull
         if (source->loaded() && source->checkedAt().isValid() && (!lastPulledAt.isValid() || (source->checkedAt() > lastPulledAt))) {
@@ -935,8 +937,9 @@ void GeoZoneSourceRepository::updateValidity()
 
     const QString warning = lines.join(QStringLiteral("\n"));
     const QString lastPulledText = lastPulledAt.isValid() ? tr("Data pulled %1").arg(GeoZoneSource::timeText(lastPulledAt, now)) : QString();
-    if ((warning != _validityWarning) || (lastPulledAt != _lastPulledAt) || (lastPulledText != _lastPulledText)) {
+    if ((warning != _validityWarning) || (invalid != _dataInvalid) || (lastPulledAt != _lastPulledAt) || (lastPulledText != _lastPulledText)) {
         _validityWarning = warning;
+        _dataInvalid = invalid;
         _lastPulledAt = lastPulledAt;
         _lastPulledText = lastPulledText;
         emit validityWarningChanged();

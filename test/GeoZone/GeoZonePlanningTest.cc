@@ -1579,7 +1579,7 @@ void GeoZonePlanningTest::_testPlanSave()
 
 void GeoZonePlanningTest::_testUploadReasons()
 {
-    const ScopedEnvironment environment;
+    ScopedEnvironment environment;
     const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -1627,6 +1627,18 @@ void GeoZonePlanningTest::_testUploadReasons()
     QVERIFY2(reasons[0].contains(QStringLiteral("Modified: A (Authorisation required)")), qPrintable(reasons[0]));
     check.acknowledgeAudit();
     QTRY_VERIFY(check.uploadReasons().isEmpty());
+
+    // Outdated data treated as invalid, whose zones still apply
+    environment.addSecs(8 * 24 * 3600);
+    manager.repository()->updateValidity();
+    QVERIFY(manager.repository()->dataInvalid());
+    reasons = check.uploadReasons();
+    QCOMPARE(reasons.count(), 1);
+    QVERIFY2(reasons[0].startsWith(QStringLiteral("The geozone data is outdated and treated as invalid")), qPrintable(reasons[0]));
+    QVERIFY2(reasons[0].contains(QStringLiteral("zones.json: Data is 8 days old")), qPrintable(reasons[0]));
+    check.update();
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
     manager.repository()->clear();
 }
 
