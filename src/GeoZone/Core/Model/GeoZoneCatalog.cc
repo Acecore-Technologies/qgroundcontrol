@@ -216,8 +216,7 @@ QList<const GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults
         bool prefix;
     };
     QList<Match> matches;
-    // The same zone from overlapping sources is found once
-    QSet<QString> found;
+    // Zones overlapping sources publish alike are already one zone, see rebuild
     for (const GeoZone *zone : _data->zones) {
         const QString name = searchKey(zone->displayName());
         const QString identifier = searchKey(zone->identifier());
@@ -225,11 +224,6 @@ QList<const GeoZone*> GeoZoneCatalog::search(const QString &text, int maxResults
         if (!prefix && !name.contains(query) && !identifier.contains(query)) {
             continue;
         }
-        const QString key = identifier + QChar(0x1F) + name + QChar(0x1F) + QString::number(static_cast<int>(zone->restriction()));
-        if (found.contains(key)) {
-            continue;
-        }
-        found.insert(key);
         matches.append({ zone, prefix });
     }
     std::stable_sort(matches.begin(), matches.end(), [](const Match &a, const Match &b) {

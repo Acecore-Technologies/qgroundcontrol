@@ -2840,8 +2840,9 @@ void GeoZoneManagerTest::_testZoneSearch()
     searchModel.setMaxResults(8);
     QCOMPARE(searchModel.count(), 2);
     QVERIFY(!searchModel.hasMore());
+    // A copy of a zone in another source is one zone, found once
     QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ airport }), errorString), qPrintable(errorString));
-    QCOMPARE(manager.zoneCount(), 4);
+    QCOMPARE(manager.zoneCount(), 3);
     QCOMPARE(identifiers(manager.searchZones(QStringLiteral("zurich"))), QStringList({ QStringLiteral("LSZH"), QStringLiteral("GZW1") }));
     QCOMPARE(searchModel.count(), 2);
     manager.repository()->removeSource(1);
