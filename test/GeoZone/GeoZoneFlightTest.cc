@@ -15,6 +15,7 @@
 #include "GeoZoneMonitor.h"
 #include "GeoZoneReturnModel.h"
 #include "GeoZoneSettings.h"
+#include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneText.h"
 #include "MissionController.h"
@@ -506,3 +507,5 @@ void GeoZoneFlightTest::_testGuidedReturnLandMission()
 
     _disconnectMockLink();
 }
+
+GEOZONE_TEST(GeoZoneFlightTest)

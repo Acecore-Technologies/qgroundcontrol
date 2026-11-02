@@ -1660,3 +1660,5 @@ void GeoZoneGeometryTest::_testConcurrentQueries()
     // Each tolerance is simplified once and returned the same way afterwards
     QCOMPARE(zone->exclusionPolygons(10), zone->exclusionPolygons(10));
 }
+
+GEOZONE_TEST(GeoZoneGeometryTest)

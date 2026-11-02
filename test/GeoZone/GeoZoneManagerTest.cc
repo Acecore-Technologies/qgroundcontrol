@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneManagerTest.h"
+#include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneAirac.h"
 #include "GeoZoneCredentials.h"
@@ -3040,3 +3041,5 @@ void GeoZoneManagerTest::_testCatalogSnapshot()
     // The last copy releases the previous zones
     QVERIFY(oldZone.isNull());
 }
+
+GEOZONE_TEST(GeoZoneManagerTest)

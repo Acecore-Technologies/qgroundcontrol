@@ -654,3 +654,5 @@ void GeoZoneReturnTest::_testMissionDestinations()
     // A DO_LAND_START without a landing after it isn't a landing sequence
     QVERIFY(GeoZoneReturnDestinations::fromMission({ landStart, item(Kind::Other, 4, position(1500, 0, 40)) }).landings.isEmpty());
 }
+
+GEOZONE_TEST(GeoZoneReturnTest)

@@ -518,3 +518,5 @@ void GeoZoneIntentTest::_testExport()
     QVERIFY(!exporter.errorString().isEmpty());
 }
 #endif
+
+GEOZONE_TEST(GeoZoneIntentTest)

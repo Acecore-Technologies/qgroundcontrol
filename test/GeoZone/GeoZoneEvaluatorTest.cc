@@ -529,3 +529,4 @@ void GeoZoneEvaluatorTest::_testAntimeridianQueries()
     QVERIFY(qAbs(update.alerts[0].distance - nearEastEnd.distanceTo(QGeoCoordinate(0, -160))) < 1);
 }
 
+GEOZONE_TEST(GeoZoneEvaluatorTest)

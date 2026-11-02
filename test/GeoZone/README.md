@@ -10,13 +10,13 @@ The test classes are listed once, in `CMakeLists.txt`:
 - `GEOZONE_APP_TESTS` (GeoZoneManagerTest, GeoZonePlanningTest, GeoZoneMonitorTest, GeoZoneFlightTest) need the
   application, like its mission controller, MockLink or the map models, and only run in QGroundControl.
 
-A class `<Class>` is `<Class>.cc` and `<Class>.h`. The lists generate the headers which register the classes with
-QGroundControl's UnitTest (`GeoZoneUnitTests.cc`, not QGroundControl's `UnitTestList.cc`) and run them in
-`GeoZoneCoreTest` (`GeoZoneCoreTestMain.cc`), and a CTest test for each: the application tests are named after their
-class and labeled `geozone` and `app`, the headless ones `GeoZoneCore.<Class>` and labeled `geozone` and `core`. A new
-class only needs its files and its name in a list. Test helpers shared by the suites, like the fixtures of zones and
-the catalog `ZoneCatalog` which loads files like GeoZoneManager without the application, are in
-`GeoZoneTestHelpers.h`.
+A class `<Class>` is `<Class>.cc` and `<Class>.h`, and its source ends with `GEOZONE_TEST(<Class>)`, which registers it
+with QGroundControl's UnitTest (not in QGroundControl's `UnitTestList.cc`) or with `GeoZoneCoreTest`
+(`GeoZoneCoreTestMain.cc`), see `GeoZoneTestBase.h`. The lists build the classes and add a CTest test for each: the
+application tests are named after their class and labeled `geozone` and `app`, the headless ones `GeoZoneCore.<Class>`
+and labeled `geozone` and `core`. A new class only needs its files and its name in a list. Test helpers shared by the
+suites, like the fixtures of zones and the catalog `ZoneCatalog` which loads files like GeoZoneManager without the
+application, are declared in `GeoZoneTestHelpers.h`.
 
 QGroundControl defines its tests in the `test` directory of the build, where CTest runs:
 

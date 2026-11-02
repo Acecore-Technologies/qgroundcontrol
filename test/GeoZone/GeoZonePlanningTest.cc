@@ -15,6 +15,7 @@
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneSourceRepository.h"
+#include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoFenceManager.h"
 #include "MockLink.h"
@@ -2755,3 +2756,5 @@ void GeoZonePlanningTest::_testMapModelFilters()
     QCOMPARE(qRound(model.altitudeRange().maxAMSL - model.altitudeRange().minAMSL), 1400);
     model.setMissionController(nullptr);
 }
+
+GEOZONE_TEST(GeoZonePlanningTest)

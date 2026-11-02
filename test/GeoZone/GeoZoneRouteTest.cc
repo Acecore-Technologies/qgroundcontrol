@@ -369,3 +369,4 @@ void GeoZoneRouteTest::_testMaze()
     QVERIFY2(limited.statistics.work < (2 * (settings.maxSearchWork + 100000)), qPrintable(QString::number(limited.statistics.work)));
 }
 
+GEOZONE_TEST(GeoZoneRouteTest)

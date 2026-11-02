@@ -1862,3 +1862,5 @@ void GeoZoneParserTest::_testParseCacheValidation()
     QVERIFY(GeoZoneLoader::feedJob(QStringLiteral("https://example.com/zones.json")).storedFileName.isEmpty());
     QCOMPARE(GeoZoneStore::fileSuffix(QString()), QStringLiteral("json"));
 }
+
+GEOZONE_TEST(GeoZoneParserTest)

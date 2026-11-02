@@ -80,3 +80,5 @@ void GeoZoneBriefingTest::_testBriefing()
     QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2021, 1, 28)), QStringLiteral("2101"));
     QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2019, 12, 31)), QStringLiteral("1913"));
 }
+
+GEOZONE_TEST(GeoZoneBriefingTest)

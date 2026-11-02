@@ -9,6 +9,7 @@
 
 #include "GeoZoneMonitorTest.h"
 #include "GeoZoneNearbyModel.h"
+#include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "Vehicle.h"
 
@@ -1332,3 +1333,5 @@ void GeoZoneMonitorTest::_testTraffic()
     monitor.evaluateTraffic({ inP });
     QVERIFY(monitor.traffic().isEmpty());
 }
+
+GEOZONE_TEST(GeoZoneMonitorTest)
