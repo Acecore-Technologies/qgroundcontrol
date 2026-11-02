@@ -113,7 +113,10 @@ qt_add_qml_module(GeoZoneModule
         Flight/GeoZoneMapClickButton.qml
         Settings/GeoZoneAuthorisationsPanel.qml
         Settings/GeoZoneChoiceComboBox.qml
+        Settings/GeoZonePackSigning.qml
+        Settings/GeoZoneServiceEditor.qml
         Settings/GeoZoneSettingsPage.qml
+        Settings/GeoZoneSourceList.qml
         Settings/GeoZoneSourceSwitches.qml
         Settings/GeoZoneSourcesPanel.qml
     RESOURCES

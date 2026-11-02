@@ -12,7 +12,6 @@ import QtQuick.Layouts
 
 import QGroundControl
 import QGroundControl.Controls
-import QGroundControl.FactControls
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.GeoZone
@@ -35,201 +34,8 @@ ColumnLayout {
         visible:            _geoZoneManager.sources.count === 0
     }
 
-    Repeater {
-        model: _geoZoneManager.sources
-
-        ColumnLayout {
-            Layout.fillWidth:   true
-            spacing:            _margin / 2
-
-            RowLayout {
-                Layout.fillWidth:   true
-                spacing:            _margin
-
-                QGCCheckBox {
-                    checked:    object.enabled
-                    onClicked:  object.enabled = checked
-                }
-
-                QGCLabel {
-                    Layout.fillWidth:   true
-                    elide:              Text.ElideRight
-                    text:               object.name
-                    textFormat:         Text.PlainText
-                }
-
-                QGCButton {
-                    text:       qsTr("Remove")
-                    onClicked:  _repository.removeSource(index)
-                }
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
-                font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.detailsText !== "" ? object.detailsText : (object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
-                textFormat:         Text.PlainText
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
-                font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.provenanceText
-                textFormat:         Text.PlainText
-                visible:            text !== ""
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
-                font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.areaText
-                visible:            object.followsArea && text !== ""
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
-                font.pointSize:     ScreenTools.smallFontPointSize
-                color:              qgcPal.warningText
-                text:               qsTr("The last download did not match the SHA-256 its publisher gave and was not loaded.")
-                visible:            object.integrityFailed
-            }
-
-            // A pack signed by a publisher the user may trust
-            RowLayout {
-                Layout.fillWidth:   true
-                spacing:            _margin
-                visible:            object.untrustedPack
-
-                QGCLabel {
-                    Layout.fillWidth:   true
-                    wrapMode:           Text.WordWrap
-                    font.pointSize:     ScreenTools.smallFontPointSize
-                    color:              qgcPal.warningText
-                    text:               qsTr("The pack it was imported from is signed by a publisher who is not trusted.")
-                }
-
-                QGCButton {
-                    text:       qsTr("Trust Publisher")
-                    onClicked:  _geoZoneManager.trustSourcePublisher(object.key)
-                }
-            }
-
-            // The secret of a service, like after importing a pack on another computer
-            RowLayout {
-                Layout.fillWidth:   true
-                spacing:            _margin
-                visible:            object.needsCredentials
-
-                QGCLabel {
-                    font.pointSize: ScreenTools.smallFontPointSize
-                    color:          object.credentialsMissing ? qgcPal.warningText : qgcPal.text
-                    text:           object.credentialsMissing ? qsTr("Credentials missing") : qsTr("Credentials")
-                }
-
-                QGCTextField {
-                    id:                 sourceSecretField
-                    Layout.fillWidth:   true
-                    echoMode:           TextInput.Password
-                    placeholderText:    object.credentialsMissing ? qsTr("Enter the secret") : qsTr("Replace the secret")
-                }
-
-                QGCButton {
-                    text:       qsTr("Set")
-                    enabled:    sourceSecretField.text !== ""
-                    onClicked: {
-                        _repository.setSecret(object.key, sourceSecretField.text)
-                        sourceSecretField.text = ""
-                    }
-                }
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
-                font.pointSize:     ScreenTools.smallFontPointSize
-                font.italic:        true
-                text:               qsTr("Turned off: its zones are not shown, checked or alerted.")
-                visible:            !object.enabled
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
-                font.pointSize:     ScreenTools.smallFontPointSize
-                font.italic:        true
-                text:               qsTr("Updating...")
-                visible:            object.busy && object.detailsText !== ""
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WordWrap
-                font.pointSize:     ScreenTools.smallFontPointSize
-                color:              qgcPal.warningText
-                text:               object.validityText
-                visible:            text !== ""
-            }
-
-            // The zones the last reload added, changed and removed, their names on demand
-            RowLayout {
-                Layout.fillWidth:   true
-                spacing:            _margin
-                visible:            object.changesText !== ""
-
-                QGCLabel {
-                    Layout.fillWidth:   true
-                    wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
-                    font.pointSize:     ScreenTools.smallFontPointSize
-                    text:               object.changesText
-                    textFormat:         Text.PlainText
-                }
-
-                QGCLabel {
-                    font.pointSize:     ScreenTools.smallFontPointSize
-                    font.underline:     true
-                    color:              qgcPal.buttonHighlight
-                    text:               changesDetailsLabel.visible ? qsTr("Hide") : qsTr("Details")
-
-                    MouseArea {
-                        anchors.fill:   parent
-                        onClicked:      changesDetailsLabel.visible = !changesDetailsLabel.visible
-                    }
-                }
-            }
-
-            QGCLabel {
-                id:                 changesDetailsLabel
-                Layout.fillWidth:   true
-                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
-                font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.changesDetails
-                textFormat:         Text.PlainText
-                visible:            false
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
-                font.pointSize:     ScreenTools.smallFontPointSize
-                color:              qgcPal.warningText
-                text:               object.warningText
-                visible:            text !== ""
-            }
-
-            QGCLabel {
-                Layout.fillWidth:   true
-                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
-                font.pointSize:     ScreenTools.smallFontPointSize
-                color:              qgcPal.warningText
-                text:               qsTr("Last update failed: %1").arg(object.errorString)
-                textFormat:         Text.PlainText
-                visible:            object.errorString !== ""
-            }
-        }
+    GeoZoneSourceList {
+        Layout.fillWidth:   true
     }
 
     ColumnLayout {
@@ -282,7 +88,8 @@ ColumnLayout {
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Add File...")
-            onClicked:          fileDialog.openForLoad()
+            onClicked:          fileDialog.openFor({ title: qsTr("Select Geozone Files"), nameFilters: _geoZoneManager.fileDialogFilters,
+                                                 selectMultiple: true, accept: files => _repository.addFiles(files) })
         }
 
         QGCButton {
@@ -365,179 +172,10 @@ ColumnLayout {
     }
 
     // Services taking credentials, ED-318 queries or the area around the mission and the vehicle
-    ColumnLayout {
+    GeoZoneServiceEditor {
         id:                 serviceEntry
         Layout.fillWidth:   true
-        spacing:            _margin
         visible:            false
-
-        readonly property var   _templates: _geoZoneManager.serviceTemplates
-        readonly property var   _template:  _templates[Math.max(0, serviceTemplateCombo.currentIndex)]
-        readonly property int   _auth:      authCombo.currentIndex
-        readonly property var   _service:   _geoZoneManager.serviceFromForm(serviceTemplateCombo.currentIndex, {
-                                                method: methodCombo.currentIndex, auth: _auth, authParameter: authParameterField.text,
-                                                user: userField.text, tokenUrl: tokenUrlField.text, responseMember: responseMemberField.text,
-                                                sha256Url: sha256UrlField.text, areaOfInterest: areaCheckBox.checked })
-        readonly property var   _otherOrigins: visible ? _geoZoneManager.serviceOtherOrigins(serviceUrlField.text, _service) : []
-
-        // The fields of the form start from the template
-        function applyTemplate() {
-            const form = _template.form
-            serviceUrlField.text = _template.url
-            methodCombo.currentIndex = form.method
-            authCombo.currentIndex = form.auth
-            authParameterField.text = form.authParameter
-            userField.text = form.user
-            tokenUrlField.text = form.tokenUrl
-            responseMemberField.text = form.responseMember
-            sha256UrlField.text = form.sha256Url
-            areaCheckBox.checked = form.areaOfInterest
-            serviceSecretField.text = ""
-        }
-
-        Component.onCompleted: applyTemplate()
-
-        QGCComboBox {
-            id:                 serviceTemplateCombo
-            Layout.fillWidth:   true
-            model:              serviceEntry._templates.map(serviceTemplate => serviceTemplate.name)
-            onActivated:        serviceEntry.applyTemplate()
-        }
-
-        QGCLabel {
-            Layout.fillWidth:   true
-            wrapMode:           Text.WordWrap
-            font.pointSize:     ScreenTools.smallFontPointSize
-            text:               serviceEntry._template.note
-        }
-
-        QGCTextField {
-            id:                 serviceUrlField
-            Layout.fillWidth:   true
-            placeholderText:    "https://"
-        }
-
-        GridLayout {
-            Layout.fillWidth:   true
-            columns:            2
-            columnSpacing:      _margin
-            rowSpacing:         _margin / 2
-
-            QGCLabel { text: qsTr("Request") }
-            QGCComboBox {
-                id:                 methodCombo
-                Layout.fillWidth:   true
-                model:              [ qsTr("GET"), qsTr("ED-318 query (POST)") ]
-            }
-
-            QGCLabel { text: qsTr("Authentication") }
-            QGCComboBox {
-                id:                 authCombo
-                Layout.fillWidth:   true
-                model:              [ qsTr("None"), qsTr("API key header"), qsTr("API key query parameter"), qsTr("Bearer token"), qsTr("User and password"), qsTr("OAuth2 client credentials") ]
-            }
-
-            QGCLabel {
-                text:       serviceEntry._auth === 1 ? qsTr("Header") : qsTr("Parameter")
-                visible:    authParameterField.visible
-            }
-            QGCTextField {
-                id:                 authParameterField
-                Layout.fillWidth:   true
-                placeholderText:    serviceEntry._auth === 1 ? "X-API-Key" : "api_key"
-                visible:            serviceEntry._auth === 1 || serviceEntry._auth === 2
-            }
-
-            QGCLabel {
-                text:       serviceEntry._auth === 5 ? qsTr("Client id") : qsTr("User")
-                visible:    userField.visible
-            }
-            QGCTextField {
-                id:                 userField
-                Layout.fillWidth:   true
-                visible:            serviceEntry._auth === 4 || serviceEntry._auth === 5
-            }
-
-            QGCLabel {
-                text:       qsTr("Token URL")
-                visible:    tokenUrlField.visible
-            }
-            QGCTextField {
-                id:                 tokenUrlField
-                Layout.fillWidth:   true
-                placeholderText:    "https://"
-                visible:            serviceEntry._auth === 5
-            }
-
-            QGCLabel {
-                text:       [ "", qsTr("API key"), qsTr("API key"), qsTr("Token"), qsTr("Password"), qsTr("Client secret") ][serviceEntry._auth]
-                visible:    serviceSecretField.visible
-            }
-            QGCTextField {
-                id:                 serviceSecretField
-                Layout.fillWidth:   true
-                echoMode:           TextInput.Password
-                visible:            serviceEntry._auth > 0
-            }
-
-            QGCLabel { text: qsTr("Zones member") }
-            QGCTextField {
-                id:                 responseMemberField
-                Layout.fillWidth:   true
-                placeholderText:    qsTr("Optional, like data.geojson")
-            }
-
-            QGCLabel { text: qsTr("SHA-256 URL") }
-            QGCTextField {
-                id:                 sha256UrlField
-                Layout.fillWidth:   true
-                placeholderText:    qsTr("Optional, like {url}.sha256")
-            }
-        }
-
-        QGCLabel {
-            Layout.fillWidth:   true
-            wrapMode:           Text.WordWrap
-            font.pointSize:     ScreenTools.smallFontPointSize
-            text:               qsTr("Secrets are kept in the application settings, unencrypted, never in the list of sources, logs or exported packs.")
-            visible:            serviceEntry._auth > 0
-        }
-
-        QGCCheckBox {
-            id:     areaCheckBox
-            text:   qsTr("Download the zones around the mission and the vehicle")
-        }
-
-        // The client secret or the area of interest would go to another server than the feed's
-        QGCLabel {
-            Layout.fillWidth:   true
-            wrapMode:           Text.WordWrap
-            font.pointSize:     ScreenTools.smallFontPointSize
-            color:              qgcPal.warningText
-            text:               qsTr("The token or SHA-256 address is on another server than the feed: %1. It receives the client secret or the area of interest.")
-                                    .arg(serviceEntry._otherOrigins.join(", "))
-            textFormat:         Text.PlainText
-            visible:            serviceEntry._otherOrigins.length > 0
-        }
-
-        QGCCheckBox {
-            id:         trustOtherOriginsCheckBox
-            text:       qsTr("I trust these servers")
-            visible:    serviceEntry._otherOrigins.length > 0
-        }
-
-        QGCButton {
-            Layout.fillWidth:   true
-            text:               qsTr("Download")
-            enabled:            serviceUrlField.text.trim() !== "" && serviceEntry._template.supported &&
-                                (serviceEntry._otherOrigins.length === 0 || trustOtherOriginsCheckBox.checked)
-            onClicked: {
-                _geoZoneManager.addService(serviceUrlField.text, serviceEntry._service, serviceSecretField.text, trustOtherOriginsCheckBox.checked)
-                serviceSecretField.text = ""
-                trustOtherOriginsCheckBox.checked = false
-                serviceEntry.visible = false
-            }
-        }
     }
 
     // Offline packs
@@ -549,154 +187,22 @@ ColumnLayout {
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Import Pack...")
-            onClicked:          importPackDialog.openForLoad()
+            onClicked:          fileDialog.openFor({ title: qsTr("Import Geozone Packs"), nameFilters: [ qsTr("Geozone Packs (*.zip)") ],
+                                                 selectMultiple: true, accept: files => _geoZoneManager.importPacks(files) })
         }
 
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Export Pack...")
             enabled:            _geoZoneManager.sources.count > _geoZoneManager.disabledSourceCount
-            onClicked:          exportPackDialog.openForSave()
+            onClicked:          fileDialog.openFor({ title: qsTr("Export Geozone Pack of the Sources Turned On"), nameFilters: [ qsTr("Geozone Packs (*.zip)") ],
+                                                 defaultSuffix: "zip", save: true, accept: file => _geoZoneManager.exportPack(file) })
         }
     }
 
-    // Signatures of offline packs: the key signing the packs exported, and the publishers whose packs are trusted
-    QGCButton {
+    GeoZonePackSigning {
         Layout.fillWidth:   true
-        text:               qsTr("Pack Signatures...")
-        checkable:          true
-        checked:            packSignatures.visible
-        onClicked:          packSignatures.visible = !packSignatures.visible
-    }
-
-    ColumnLayout {
-        id:                 packSignatures
-        Layout.fillWidth:   true
-        spacing:            _margin
-        visible:            false
-
-        // Builds without OpenSSL
-        QGCLabel {
-            Layout.fillWidth:   true
-            wrapMode:           Text.WordWrap
-            font.pointSize:     ScreenTools.smallFontPointSize
-            color:              qgcPal.warningText
-            text:               qsTr("This build of QGroundControl can't sign packs or check their signatures: packs are exported unsigned, and signed packs are imported as unsigned.")
-            visible:            !_geoZoneManager.packSigningAvailable
-        }
-
-        QGCLabel {
-            Layout.fillWidth:   true
-            wrapMode:           Text.WordWrap
-            font.pointSize:     ScreenTools.smallFontPointSize
-            visible:            _geoZoneManager.packSigningAvailable
-            text:               _geoZoneManager.packPublicKey === "" ?
-                                    qsTr("Exported packs are not signed. Select or create an Ed25519 private key to sign them.") :
-                                    qsTr("Exported packs are signed with the key %1. Give its public key to those importing them:").arg(_geoZoneManager.packKeyId)
-        }
-
-        QGCTextField {
-            Layout.fillWidth:   true
-            readOnly:           true
-            text:               _geoZoneManager.packPublicKey
-            visible:            text !== ""
-        }
-
-        GridLayout {
-            Layout.fillWidth:   true
-            columns:            2
-            columnSpacing:      _margin
-            rowSpacing:         _margin / 2
-            enabled:            _geoZoneManager.packSigningAvailable
-
-            QGCLabel { text: qsTr("Signing key") }
-            RowLayout {
-                Layout.fillWidth:   true
-                spacing:            _margin
-
-                FactTextField {
-                    Layout.fillWidth:   true
-                    fact:               _geoZoneSettings.packSigningKeyFile
-                    placeholderText:    qsTr("Private key file (PEM)")
-                }
-
-                QGCButton {
-                    text:       qsTr("Browse...")
-                    onClicked:  signingKeyDialog.openForLoad()
-                }
-
-                QGCButton {
-                    text:       qsTr("New Key...")
-                    onClicked:  newSigningKeyDialog.openForSave()
-                }
-            }
-
-            QGCLabel { text: qsTr("Publisher") }
-            FactTextField {
-                Layout.fillWidth:   true
-                fact:               _geoZoneSettings.packPublisherName
-                placeholderText:    qsTr("Name given in the packs")
-            }
-        }
-
-        QGCLabel {
-            Layout.fillWidth:   true
-            wrapMode:           Text.WordWrap
-            font.pointSize:     ScreenTools.smallFontPointSize
-            visible:            _geoZoneManager.packSigningAvailable || _geoZoneManager.trustedPublishers.length > 0
-            text:               _geoZoneManager.trustedPublishers.length === 0 ?
-                                    qsTr("No trusted publishers. Imported packs are marked unsigned, or untrusted when signed.") :
-                                    qsTr("Packs signed by these publishers are marked as signed by them:")
-        }
-
-        Repeater {
-            model: _geoZoneManager.trustedPublishers
-
-            RowLayout {
-                Layout.fillWidth:   true
-                spacing:            _margin
-
-                QGCLabel {
-                    Layout.fillWidth:   true
-                    elide:              Text.ElideRight
-                    text:               qsTr("%1 (key %2)").arg(modelData.name).arg(modelData.keyId)
-                    textFormat:         Text.PlainText
-                }
-
-                QGCButton {
-                    text:       qsTr("Remove")
-                    onClicked:  _geoZoneManager.distrustPublisher(modelData.publicKey)
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth:   true
-            spacing:            _margin
-            enabled:            _geoZoneManager.packSigningAvailable
-
-            QGCTextField {
-                id:                 publisherNameField
-                placeholderText:    qsTr("Name")
-            }
-
-            QGCTextField {
-                id:                 publisherKeyField
-                Layout.fillWidth:   true
-                placeholderText:    qsTr("Public key (base64 or PEM)")
-            }
-
-            QGCButton {
-                text:       qsTr("Trust")
-                enabled:    publisherNameField.text.trim() !== "" && publisherKeyField.text.trim() !== ""
-                onClicked: {
-                    if (_geoZoneManager.trustPublisher(publisherNameField.text, publisherKeyField.text)) {
-                        publisherNameField.text = ""
-                        publisherKeyField.text = ""
-                    }
-                }
-            }
-        }
+        dialog:             fileDialog
     }
 
     RowLayout {
@@ -728,67 +234,41 @@ ColumnLayout {
         }
     }
 
-    QGCFileDialog {
-        id:             fileDialog
-        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Select Geozone Files")
-        nameFilters:    _geoZoneManager.fileDialogFilters
-        selectMultiple: true
+    // The files of the sources, packs and signing keys: a file dialog of each use, made when first used, which then
+    // keeps its own folder and file
+    Item {
+        id:         fileDialog
+        visible:    false
 
-        onAcceptedForLoadFiles: (files) => {
-            _repository.addFiles(files)
-            close()
+        property var _dialogs: ({})
+
+        /// @param mode title, nameFilters, selectMultiple, defaultSuffix, save to save a file, and accept called with
+        ///             the file or files
+        function openFor(mode) {
+            if (!_dialogs[mode.title]) {
+                _dialogs[mode.title] = fileDialogComponent.createObject(fileDialog.parent, {
+                    title: mode.title, nameFilters: mode.nameFilters, selectMultiple: !!mode.selectMultiple,
+                    defaultSuffix: mode.defaultSuffix || "", accept: mode.accept })
+            }
+            if (mode.save) {
+                _dialogs[mode.title].openForSave()
+            } else {
+                _dialogs[mode.title].openForLoad()
+            }
         }
-    }
 
-    QGCFileDialog {
-        id:             importPackDialog
-        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Import Geozone Packs")
-        nameFilters:    [ qsTr("Geozone Packs (*.zip)") ]
-        selectMultiple: true
+        Component {
+            id: fileDialogComponent
 
-        onAcceptedForLoadFiles: (files) => {
-            _geoZoneManager.importPacks(files)
-            close()
-        }
-    }
+            QGCFileDialog {
+                folder: QGroundControl.settingsManager.appSettings.missionSavePath
 
-    QGCFileDialog {
-        id:             exportPackDialog
-        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Export Geozone Pack of the Sources Turned On")
-        nameFilters:    [ qsTr("Geozone Packs (*.zip)") ]
-        defaultSuffix:  "zip"
+                property var accept
 
-        onAcceptedForSave: (file) => {
-            _geoZoneManager.exportPack(file)
-            close()
-        }
-    }
-
-    QGCFileDialog {
-        id:             signingKeyDialog
-        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Select Pack Signing Key")
-        nameFilters:    [ qsTr("PEM Files (*.pem)"), qsTr("All Files (*)") ]
-
-        onAcceptedForLoad: (file) => {
-            _geoZoneSettings.packSigningKeyFile.rawValue = file
-            close()
-        }
-    }
-
-    QGCFileDialog {
-        id:             newSigningKeyDialog
-        folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Save New Pack Signing Key")
-        nameFilters:    [ qsTr("PEM Files (*.pem)") ]
-        defaultSuffix:  "pem"
-
-        onAcceptedForSave: (file) => {
-            _geoZoneManager.createSigningKey(file)
-            close()
+                onAcceptedForLoad:      (file) => { accept(file); close() }
+                onAcceptedForLoadFiles: (files) => { accept(files); close() }
+                onAcceptedForSave:      (file) => { accept(file); close() }
+            }
         }
     }
 }
