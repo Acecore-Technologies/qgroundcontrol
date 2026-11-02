@@ -12,6 +12,8 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QList>
 
+#include <utility>
+
 #include "GeoZone.h"
 
 class GeoZoneAuthorisations;
@@ -53,12 +55,14 @@ public:
     GeoZonePolicy activeDuring(const QDateTime &start, const QDateTime &end = QDateTime()) const;
     /// @return The policy for zones whatever their schedule
     GeoZonePolicy anyTime() const;
-    /// @return The policy leaving out the zones authorised for the schedule: now, during the whole planned period, or
-    ///         at some time from now on whatever the schedule
+    /// @return The policy leaving out the zones authorised for the schedule, see authorisationPeriod
     GeoZonePolicy excludingAuthorised(const GeoZoneAuthorisations *authorisations) const;
 
     bool acceptsRestriction(GeoZone::Restriction restriction) const { return (_restrictions & _bit(restriction)) != 0; }
     bool acceptsSchedule(const GeoZone *zone) const;
+    /// @return Period an authorisation must cover for the schedule: the whole planned period, or now since a flight
+    ///         at any time may be now
+    std::pair<QDateTime, QDateTime> authorisationPeriod() const;
     /// @return true if an authorisation of the policy covers the zone for its schedule
     bool authorised(const GeoZone *zone) const;
     bool accepts(const GeoZone *zone) const { return acceptsRestriction(zone->restriction()) && acceptsSchedule(zone) && !authorised(zone); }

@@ -83,22 +83,24 @@ GeoZonePolicy GeoZonePolicy::excludingAuthorised(const GeoZoneAuthorisations *au
     return policy;
 }
 
+std::pair<QDateTime, QDateTime> GeoZonePolicy::authorisationPeriod() const
+{
+    if (_schedule == Schedule::Planned) {
+        return { _start, _end.isValid() ? _end : _start };
+    }
+    // A permit starting later doesn't cover a flight which may be now
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    return { now, now };
+}
+
 bool GeoZonePolicy::authorised(const GeoZone *zone) const
 {
     const GeoZoneAuthorisation *const authorisation = _authorisations ? _authorisations->find(zone) : nullptr;
     if (!authorisation) {
         return false;
     }
-    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
-    switch (_schedule) {
-    case Schedule::Any:
-        return !authorisation->expired(now);
-    case Schedule::Current:
-        return authorisation->covers(now, now);
-    case Schedule::Planned:
-        return authorisation->covers(_start, _end.isValid() ? _end : _start);
-    }
-    return false;
+    const auto [start, end] = authorisationPeriod();
+    return authorisation->covers(start, end);
 }
 
 bool GeoZonePolicy::acceptsSchedule(const GeoZone *zone) const

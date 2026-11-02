@@ -37,8 +37,9 @@ class Vehicle;
 /// restricted zones. With a planned start in GeoZoneManager, only zones active while the mission flies through them
 /// are reported, estimating the times from the mission duration with a tolerance, see
 /// GeoZonePathEvaluator::defaultScheduleToleranceSecs, otherwise zone schedules are not considered since
-/// the mission may be flown at any time. Zones authorised for the whole flight, or from now on without a planned
-/// start, are listed as information. See GeoZonePathEvaluator.
+/// the mission may be flown at any time. Zones authorised for the whole flight, or now without a planned start, are
+/// listed as information, those whose authorisation is for another time are warned about with a note. See
+/// GeoZonePathEvaluator.
 /// The returns the vehicle would fly from along the mission after a failsafe or a fence breach, see
 /// GeoZoneMissionPath::contingencyPaths, are checked too. Restricted zones only they enter are listed apart as
 /// contingency zones, which don't need a confirmation for the upload, with the items they would be flown from.
@@ -92,6 +93,9 @@ public:
         /// contingency paths entering it with the items they start from, like "a return to launch from items 3–7"
         QStringList labels;
         GeoZonePathEvaluator::Approximations approximations;    ///< Why the check of the zone entered is approximate
+        /// Why the operator's authorisation of a crossed zone doesn't cover the flight, like "authorised from
+        /// 2026-12-01", empty without
+        QString authorisationNote;
 
         friend bool operator==(const Entry &a, const Entry &b) = default;
     };
@@ -110,6 +114,8 @@ public:
     /// Restricted zones the mission enters, with the paths entering them and the approximations
     QString warningText() const { return warningText(_entries); }
     static QString warningText(const QList<Entry> &entries);
+    /// @return A line per entry of the kind with an authorisation note, like "CTR: authorised from 2026-12-01."
+    static QStringList authorisationNotes(const QList<Entry> &entries, Kind kind);
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;

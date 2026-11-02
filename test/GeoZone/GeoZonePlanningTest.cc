@@ -1070,6 +1070,13 @@ void GeoZonePlanningTest::_testAuthorisations()
     QVERIFY(!monitor.guidedCheck()->pathWarning(path).isEmpty());
     monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 1);
+    QVERIFY2(check.warningText().contains(QStringLiteral("CTR: authorised until %1.").arg(today.addDays(-1).toString(Qt::ISODate))), qPrintable(check.warningText()));
+
+    // A permit from tomorrow doesn't cover a mission without planned start, which may be flown now
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-124"), today.addDays(1).toString(Qt::ISODate), today.addDays(3).toString(Qt::ISODate)).isEmpty());
+    QTRY_VERIFY(check.warningText().contains(QStringLiteral("CTR: authorised from %1.").arg(today.addDays(1).toString(Qt::ISODate))));
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
+    QVERIFY(check.zones(GeoZoneMissionCheck::Authorised).isEmpty());
 
     // An authorisation from tomorrow covers a flight planned then, not one now
     QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-124"), today.addDays(1).toString(Qt::ISODate), today.addDays(3).toString(Qt::ISODate)).isEmpty());

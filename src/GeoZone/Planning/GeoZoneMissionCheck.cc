@@ -343,7 +343,19 @@ QString GeoZoneMissionCheck::warningText(const QList<Entry> &entries)
     if (approximations) {
         lines.append(tr("Approximate: %1.").arg(GeoZonePathEvaluator::approximationTexts(approximations).join(QStringLiteral("; "))));
     }
+    lines.append(authorisationNotes(entries, Crossed));
     return lines.join(QStringLiteral("\n"));
+}
+
+QStringList GeoZoneMissionCheck::authorisationNotes(const QList<Entry> &entries, Kind kind)
+{
+    QStringList notes;
+    for (const Entry &entry : entries) {
+        if (entry.kinds.testFlag(kind) && !entry.authorisationNote.isEmpty()) {
+            notes.append(tr("%1: %2.").arg(entry.zone->displayName(), entry.authorisationNote));
+        }
+    }
+    return notes;
 }
 
 QString GeoZoneMissionCheck::contingencyText() const
@@ -562,6 +574,7 @@ QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation
     QList<Entry> entries;
     for (const GeoZone *zone : evaluation.zones) {
         Kinds kinds;
+        QString authorisationNote;
         // Zones which aren't active while the mission flies through them don't apply
         if (evaluation.inactiveZones.contains(zone)) {
             kinds = Inactive;
@@ -570,10 +583,15 @@ QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation
         } else if (GeoZonePolicy::isRestricted(zone->restriction())) {
             const bool unfenced = fenced && (zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(geoFenceController, zone);
             kinds = unfenced ? (Crossed | Unfenced) : Kinds(Crossed);
+            // A permit for another time still leaves the zone to warn about
+            if (const GeoZoneAuthorisation *const authorisation = authorisations ? authorisations->find(zone) : nullptr) {
+                const auto [start, end] = policy.authorisationPeriod();
+                authorisationNote = GeoZoneAuthorisations::uncoveredText(*authorisation, start, end);
+            }
         } else {
             kinds = (zone->restriction() == GeoZone::USpace) ? USpace : Permitted;
         }
-        entries.append(Entry{ zone, kinds, evaluation.pathLabels.value(zone), evaluation.approximations.value(zone) });
+        entries.append(Entry{ zone, kinds, evaluation.pathLabels.value(zone), evaluation.approximations.value(zone), authorisationNote });
     }
 
     // Restricted zones only the returns from along the mission enter, unless authorised
@@ -628,6 +646,11 @@ QStringList GeoZoneMissionCheck::uploadReasons() const
         if (unfenced > 0) {
             reason += QStringLiteral(" ") + tr("The GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.",
                                                nullptr, static_cast<int>(unfenced));
+        }
+        for (const Entry &entry : _entries) {
+            if (prohibited.contains(entry.zone) && !entry.authorisationNote.isEmpty()) {
+                reason += QStringLiteral(" ") + tr("%1: %2.").arg(entry.zone->displayName(), entry.authorisationNote);
+            }
         }
         reasons.append(reason);
     }

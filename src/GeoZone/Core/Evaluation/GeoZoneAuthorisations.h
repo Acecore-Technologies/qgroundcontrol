@@ -99,6 +99,9 @@ public:
 
     /// @return Validity of the authorisation at the time, like "Valid until 2026-12-31"
     static QString statusText(const GeoZoneAuthorisation &authorisation, const QDateTime &now);
+    /// @return Why the authorisation doesn't cover the period from start to end, like "authorised from 2026-12-01",
+    ///         empty when it does
+    static QString uncoveredText(const GeoZoneAuthorisation &authorisation, const QDateTime &start, const QDateTime &end);
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;

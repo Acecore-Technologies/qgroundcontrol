@@ -262,6 +262,17 @@ QString GeoZoneAuthorisations::statusText(const GeoZoneAuthorisation &authorisat
     return authorisation.validTo.isValid() ? tr("Valid until %1").arg(lastDayText(authorisation.validTo)) : tr("Valid");
 }
 
+QString GeoZoneAuthorisations::uncoveredText(const GeoZoneAuthorisation &authorisation, const QDateTime &start, const QDateTime &end)
+{
+    if (authorisation.validFrom.isValid() && (start < authorisation.validFrom)) {
+        return tr("authorised from %1").arg(firstDayText(authorisation.validFrom));
+    }
+    if (authorisation.validTo.isValid() && (authorisation.validTo <= end)) {
+        return tr("authorised until %1").arg(lastDayText(authorisation.validTo));
+    }
+    return QString();
+}
+
 int GeoZoneAuthorisations::rowCount(const QModelIndex &parent) const
 {
     return parent.isValid() ? 0 : count();
