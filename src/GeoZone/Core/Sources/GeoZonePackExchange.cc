@@ -9,10 +9,11 @@
 
 #include "GeoZonePackExchange.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneHash.h"
 #include "GeoZonePack.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneZip.h"
 
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
@@ -26,7 +27,7 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
         errorString = file.errorString();
         return false;
     }
-    GeoZonePack::ZipWriter writer(&file);
+    GeoZoneZip::Writer writer(&file);
     QJsonArray manifestSources;
     for (const ExportSource &source : sources) {
         QFile stored(source.storedPath);
@@ -48,7 +49,7 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
         }
         object.insert(QStringLiteral("file"), name);
         // In the manifest the signature covers
-        object.insert(QStringLiteral("fileSha256"), QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()));
+        object.insert(QStringLiteral("fileSha256"), QString::fromLatin1(GeoZoneHash::sha256(data).toHex()));
         // The report has them as lastChanges
         (void) object.remove(QStringLiteral("changes"));
         if (source.service.isEmpty()) {

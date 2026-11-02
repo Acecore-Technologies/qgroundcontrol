@@ -1682,8 +1682,8 @@ void GeoZoneParserTest::_testParseCacheRoundTrip()
     QVERIFY(file.open(QIODevice::WriteOnly) && (file.write(bytes) == bytes.size()));
     file.close();
     const GeoZoneParseCache::Key key{ QStringLiteral("de"), static_cast<GeoZoneParser::Format>(formatHint) };
-    QVERIFY(!GeoZoneParseCache::write(filePath, bytes.size() + 1, GeoZoneParseCache::hash(bytes), key, result));
-    QVERIFY(GeoZoneParseCache::write(filePath, bytes.size(), GeoZoneParseCache::hash(bytes), key, result));
+    QVERIFY(!GeoZoneParseCache::write(filePath, bytes.size() + 1, GeoZoneHash::contentHash(bytes), key, result));
+    QVERIFY(GeoZoneParseCache::write(filePath, bytes.size(), GeoZoneHash::contentHash(bytes), key, result));
     GeoZoneParser::Result cached;
     QVERIFY(GeoZoneParseCache::read(filePath, key, cached));
     difference = _resultDifference(result, cached);

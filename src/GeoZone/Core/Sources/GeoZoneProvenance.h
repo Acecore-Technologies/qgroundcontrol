@@ -49,7 +49,7 @@ public:
     QString lastModified;
     QDateTime fetchedAt;        ///< When the data was downloaded or the file loaded
     QByteArray sha256;          ///< SHA-256 of the data received, empty for files
-    QByteArray contentHash;     ///< BLAKE2b-256 of the stored copy, see GeoZoneParseCache::hash
+    QByteArray contentHash;     ///< BLAKE2b-256 of the stored copy, see GeoZoneHash::contentHash
     qint64 size = -1;           ///< Bytes of the stored copy, negative when unknown
     QGeoRectangle area;         ///< Area of interest downloaded, invalid when the service takes none
     Integrity integrity = Integrity::Unchecked;

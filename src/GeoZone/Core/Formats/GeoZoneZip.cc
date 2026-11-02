@@ -8,8 +8,10 @@
  ****************************************************************************/
 
 #include "GeoZoneZip.h"
+#include "GeoZoneEnvironment.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QIODevice>
 #include <QtCore/QtEndian>
 
 #include <zlib.h>
@@ -115,9 +117,37 @@ QByteArray entryData(const QByteArray &archive, const Entry &entry, qint64 maxBy
     return data;
 }
 
-} // namespace
+void appendU16(QByteArray &bytes, quint16 value)
+{
+    char buffer[2];
+    qToLittleEndian(value, buffer);
+    bytes.append(buffer, 2);
+}
 
-namespace {
+void appendU32(QByteArray &bytes, quint32 value)
+{
+    char buffer[4];
+    qToLittleEndian(value, buffer);
+    bytes.append(buffer, 4);
+}
+
+/// @return The data deflated without zlib header, as zip archives store it, empty on errors
+QByteArray deflateRaw(const QByteArray &data)
+{
+    z_stream stream{};
+    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        return QByteArray();
+    }
+    QByteArray output(static_cast<qsizetype>(deflateBound(&stream, static_cast<uLong>(data.size()))), Qt::Uninitialized);
+    stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.constData()));
+    stream.avail_in = static_cast<uInt>(data.size());
+    stream.next_out = reinterpret_cast<Bytef*>(output.data());
+    stream.avail_out = static_cast<uInt>(output.size());
+    const int result = deflate(&stream, Z_FINISH);
+    output.resize(static_cast<qsizetype>(stream.total_out));
+    deflateEnd(&stream);
+    return (result == Z_STREAM_END) ? output : QByteArray();
+}
 
 /// @return The entries of the central directory with one of the suffixes, nothing when the archive is damaged
 std::optional<QList<Entry>> wantedEntries(const QByteArray &archive, const QStringList &suffixes, QString &errorString)
@@ -253,6 +283,83 @@ bool forEachFile(const QByteArray &archive, const QStringList &suffixes, qint64 
         }
     }
     return true;
+}
+
+Writer::Writer(QIODevice *device)
+    : _device(device)
+{
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    _dosTime = static_cast<quint16>((now.time().hour() << 11) | (now.time().minute() << 5) | (now.time().second() / 2));
+    _dosDate = static_cast<quint16>((((std::max)(now.date().year(), 1980) - 1980) << 9) | (now.date().month() << 5) | now.date().day());
+}
+
+bool Writer::_write(const QByteArray &bytes)
+{
+    if (_device->write(bytes) != bytes.size()) {
+        _errorString = _device->errorString();
+        return false;
+    }
+    return true;
+}
+
+bool Writer::add(const QString &name, const QByteArray &data)
+{
+    constexpr qint64 maxSize = 0xFFFFFFFFLL;
+    if ((data.size() >= maxSize) || (_device->pos() >= maxSize) || (_count >= maxEntries)) {
+        _errorString = tr("The zip archive is too large.");
+        return false;
+    }
+
+    const QByteArray utf8Name = name.toUtf8();
+    const quint32 offset = static_cast<quint32>(_device->pos());
+    QByteArray compressed = deflateRaw(data);
+    const bool deflated = !compressed.isEmpty() && (compressed.size() < data.size());
+    if (!deflated) {
+        compressed = data;
+    }
+    // From the version needed to extract to the extra field length, alike in the local header and the directory
+    QByteArray fields;
+    appendU16(fields, 20);              // Version needed to extract
+    appendU16(fields, 0x0800);          // UTF-8 names
+    appendU16(fields, deflated ? kDeflated : kStored);
+    appendU16(fields, _dosTime);
+    appendU16(fields, _dosDate);
+    appendU32(fields, static_cast<quint32>(crc32(0L, reinterpret_cast<const Bytef*>(data.constData()), static_cast<uInt>(data.size()))));
+    appendU32(fields, static_cast<quint32>(compressed.size()));
+    appendU32(fields, static_cast<quint32>(data.size()));
+    appendU16(fields, static_cast<quint16>(utf8Name.size()));
+    appendU16(fields, 0);               // Extra field length
+
+    QByteArray header;
+    appendU32(header, kLocalHeader);
+    if (!_write(header + fields + utf8Name) || !_write(compressed)) {
+        return false;
+    }
+    appendU32(_directory, kCentralDirectoryEntry);
+    appendU16(_directory, 20);          // Version made by
+    _directory += fields;
+    appendU16(_directory, 0);           // Comment length
+    appendU16(_directory, 0);           // Disk number
+    appendU16(_directory, 0);           // Internal attributes
+    appendU32(_directory, 0);           // External attributes
+    appendU32(_directory, offset);
+    _directory += utf8Name;
+    _count++;
+    return true;
+}
+
+bool Writer::finish()
+{
+    QByteArray end;
+    appendU32(end, kEndOfCentralDirectory);
+    appendU16(end, 0);                  // Disk number
+    appendU16(end, 0);                  // Disk of the directory
+    appendU16(end, static_cast<quint16>(_count));
+    appendU16(end, static_cast<quint16>(_count));
+    appendU32(end, static_cast<quint32>(_directory.size()));
+    appendU32(end, static_cast<quint32>(_device->pos()));
+    appendU16(end, 0);                  // Comment length
+    return _write(_directory) && _write(end);
 }
 
 } // namespace GeoZoneZip

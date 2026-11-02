@@ -8,8 +8,8 @@
  ****************************************************************************/
 
 #include "GeoZoneCredentials.h"
+#include "GeoZoneHash.h"
 
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QSettings>
 
 GeoZoneCredentials::GeoZoneCredentials(const QString &settingsGroup)
@@ -19,7 +19,7 @@ GeoZoneCredentials::GeoZoneCredentials(const QString &settingsGroup)
 
 QString GeoZoneCredentials::_id(const QString &sourceKey)
 {
-    return QString::fromLatin1(QCryptographicHash::hash(sourceKey.toUtf8(), QCryptographicHash::Sha256).toHex());
+    return QString::fromLatin1(GeoZoneHash::sha256(sourceKey.toUtf8()).toHex());
 }
 
 QString GeoZoneCredentials::secret(const QString &sourceKey) const

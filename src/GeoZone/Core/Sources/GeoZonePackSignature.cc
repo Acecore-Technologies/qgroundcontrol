@@ -8,9 +8,9 @@
  ****************************************************************************/
 
 #include "GeoZonePackSignature.h"
+#include "GeoZoneHash.h"
 
 #include <QtCore/QCoreApplication>
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QScopeGuard>
 
@@ -215,7 +215,7 @@ QByteArray parsePublicKey(const QString &text)
 
 QString keyId(const QByteArray &publicKey)
 {
-    const QString hex = QString::fromLatin1(QCryptographicHash::hash(publicKey, QCryptographicHash::Sha256).toHex().left(16));
+    const QString hex = QString::fromLatin1(GeoZoneHash::sha256(publicKey).toHex().left(16));
     return QStringLiteral("%1 %2 %3 %4").arg(hex.mid(0, 4), hex.mid(4, 4), hex.mid(8, 4), hex.mid(12, 4));
 }
 

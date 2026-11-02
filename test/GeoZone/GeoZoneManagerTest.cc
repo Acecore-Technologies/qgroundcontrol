@@ -120,7 +120,7 @@ bool _rewritePack(const QString &packPath, const QString &copyPath, const std::f
     if (files.isEmpty() || !copy.open(QIODevice::WriteOnly)) {
         return false;
     }
-    GeoZonePack::ZipWriter writer(&copy);
+    GeoZoneZip::Writer writer(&copy);
     for (auto it = files.cbegin(); it != files.cend(); ++it) {
         QByteArray data = it.value();
         if (it.key() == QStringLiteral("manifest.json")) {
@@ -1789,7 +1789,7 @@ void GeoZoneManagerTest::_testProvenance()
         QCOMPARE(provenance.lastModified, QStringLiteral("Sat, 31 Oct 2026 10:00:00 GMT"));
         QCOMPARE(provenance.fetchedAt, environment.now());
         QCOMPARE(provenance.sha256, QCryptographicHash::hash(server.body, QCryptographicHash::Sha256));
-        QCOMPARE(provenance.contentHash, GeoZoneParseCache::hash(server.body));
+        QCOMPARE(provenance.contentHash, GeoZoneHash::contentHash(server.body));
         QCOMPARE(provenance.size, server.body.size());
         QCOMPARE(provenance.integrity, GeoZoneProvenance::Integrity::Unchecked);
         QVERIFY(!feed->verified());
@@ -2046,7 +2046,7 @@ void GeoZoneManagerTest::_testOfflinePack()
     {
         QFile damaged(damagedPath);
         QVERIFY(damaged.open(QIODevice::WriteOnly));
-        GeoZonePack::ZipWriter writer(&damaged);
+        GeoZoneZip::Writer writer(&damaged);
         QJsonObject source = packSources.first().toObject();
         QVERIFY(writer.add(source.value("file").toString(), server.body + " "));
         QVERIFY(writer.add(QStringLiteral("manifest.json"), QJsonDocument(QJsonObject{ { "format", "qgc-geozone-pack" }, { "version", 1 }, { "sources", QJsonArray{ source } } }).toJson()));
@@ -2350,7 +2350,7 @@ void GeoZoneManagerTest::_testSignedPacks()
     {
         QFile replaced(replacedPath);
         QVERIFY(replaced.open(QIODevice::WriteOnly));
-        GeoZonePack::ZipWriter writer(&replaced);
+        GeoZoneZip::Writer writer(&replaced);
         for (auto it = files.cbegin(); it != files.cend(); ++it) {
             QVERIFY(writer.add(it.key(), it.key().startsWith(QStringLiteral("sources/")) ? (it.value() + " ") : it.value()));
         }
@@ -2424,7 +2424,7 @@ void GeoZoneManagerTest::_testPacksWithoutSigning()
     {
         QFile signedPack(signedPath);
         QVERIFY(signedPack.open(QIODevice::WriteOnly));
-        GeoZonePack::ZipWriter writer(&signedPack);
+        GeoZoneZip::Writer writer(&signedPack);
         for (auto it = files.cbegin(); it != files.cend(); ++it) {
             QVERIFY(writer.add(it.key(), it.value()));
         }
@@ -2497,7 +2497,7 @@ void GeoZoneManagerTest::_testStoredFileNames()
         QVERIFY(xmlFile.open(QIODevice::WriteOnly) && (xmlFile.write(xml) == xml.size()));
         QFile zipFile(zipPath);
         QVERIFY(zipFile.open(QIODevice::WriteOnly));
-        GeoZonePack::ZipWriter writer(&zipFile);
+        GeoZoneZip::Writer writer(&zipFile);
         QVERIFY(writer.add(QStringLiteral("zones.xml"), xml) && writer.finish());
     }
 
@@ -2545,7 +2545,7 @@ void GeoZoneManagerTest::_testStoredFileNames()
         manifest.insert(QStringLiteral("sources"), sources);
         QFile oldPack(oldPackPath);
         QVERIFY(oldPack.open(QIODevice::WriteOnly));
-        GeoZonePack::ZipWriter writer(&oldPack);
+        GeoZoneZip::Writer writer(&oldPack);
         QVERIFY(writer.add(QStringLiteral("sources/old.json"), xml));
         QVERIFY(writer.add(QStringLiteral("manifest.json"), QJsonDocument(manifest).toJson()));
         QVERIFY(writer.finish());

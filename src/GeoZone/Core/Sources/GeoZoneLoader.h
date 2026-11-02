@@ -69,7 +69,7 @@ public:
         QString storeError;
         bool cancelled = false;     ///< The job was canceled, nothing was stored
         bool fromCache = false;     ///< The result was read from the parse cache of the stored copy
-        QByteArray contentHash;     ///< GeoZoneParseCache::hash of the content parsed, empty when read from the cache
+        QByteArray contentHash;     ///< GeoZoneHash::contentHash of the content parsed, empty when read from the cache
         qint64 contentSize = -1;
     };
 

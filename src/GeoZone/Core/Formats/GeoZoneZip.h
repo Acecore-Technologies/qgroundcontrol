@@ -16,8 +16,10 @@
 
 #include <functional>
 
-/// Reads the files of a zip archive, like the dataset of a feed. Sizes are limited
-/// while inflating, whatever the archive declares, so a small archive can't expand to fill the memory.
+class QIODevice;
+
+/// Reads the files of a zip archive, like the dataset of a feed, and writes archives, like offline packs. Sizes are
+/// limited while inflating, whatever the archive declares, so a small archive can't expand to fill the memory.
 namespace GeoZoneZip {
 
 constexpr int maxEntries = 1000;
@@ -41,5 +43,27 @@ QList<File> files(const QByteArray &archive, const QStringList &suffixes, qint64
 /// @return false on errors, true when the files were read or the callback stopped
 bool forEachFile(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString,
                  const std::function<bool(const File &file)> &callback);
+
+/// Writes a zip archive, the files deflated unless that doesn't make them smaller. Sizes are limited to 4 GiB.
+class Writer
+{
+public:
+    explicit Writer(QIODevice *device);
+
+    bool add(const QString &name, const QByteArray &data);
+    /// Writes the central directory
+    bool finish();
+    QString errorString() const { return _errorString; }
+
+private:
+    bool _write(const QByteArray &bytes);
+
+    QIODevice *_device = nullptr;
+    QByteArray _directory;      ///< Central directory of the files added
+    int _count = 0;
+    quint16 _dosTime = 0;
+    quint16 _dosDate = 0;
+    QString _errorString;
+};
 
 } // namespace GeoZoneZip

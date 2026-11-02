@@ -43,13 +43,11 @@ public:
     static QString path(const QString &filePath);
     /// @return true if the file name is the name of a cache
     static bool isCacheFileName(const QString &fileName);
-    /// @return Hash of the bytes of a file, as written in its cache
-    static QByteArray hash(QByteArrayView bytes);
 
     /// Reads the cached parse result of the file, see the class description for when a cache is used
     /// @return false when there is no current cache, result is then empty
     static bool read(const QString &filePath, const Key &key, GeoZoneParser::Result &result);
-    /// Writes the cache of the file, whose bytes have the size and hash
+    /// Writes the cache of the file, whose bytes have the size and GeoZoneHash::contentHash
     /// @return false when the file has another size or the cache can't be written
     static bool write(const QString &filePath, qint64 fileSize, const QByteArray &fileHash, const Key &key, const GeoZoneParser::Result &result);
     static void remove(const QString &filePath);

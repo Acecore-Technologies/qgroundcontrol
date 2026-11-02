@@ -8,9 +8,9 @@
  ****************************************************************************/
 
 #include "GeoZoneParseCache.h"
+#include "GeoZoneHash.h"
 #include "GeoZoneSource.h"
 
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -50,9 +50,9 @@ QByteArray hashFile(const QString &filePath)
     }
     uchar *const mapped = (file.size() > 0) ? file.map(0, file.size()) : nullptr;
     if (!mapped) {
-        return GeoZoneParseCache::hash(file.readAll());
+        return GeoZoneHash::contentHash(file.readAll());
     }
-    const QByteArray hash = GeoZoneParseCache::hash(QByteArrayView(reinterpret_cast<const char*>(mapped), file.size()));
+    const QByteArray hash = GeoZoneHash::contentHash(QByteArrayView(reinterpret_cast<const char*>(mapped), file.size()));
     (void) file.unmap(mapped);
     return hash;
 }
@@ -67,12 +67,6 @@ QString GeoZoneParseCache::path(const QString &filePath)
 bool GeoZoneParseCache::isCacheFileName(const QString &fileName)
 {
     return fileName.endsWith(kSuffix);
-}
-
-QByteArray GeoZoneParseCache::hash(QByteArrayView bytes)
-{
-    // Several times faster than SHA-256
-    return QCryptographicHash::hash(bytes, QCryptographicHash::Blake2b_256);
 }
 
 bool GeoZoneParseCache::read(const QString &filePath, const Key &key, GeoZoneParser::Result &result)

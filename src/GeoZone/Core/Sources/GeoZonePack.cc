@@ -8,24 +8,17 @@
  ****************************************************************************/
 
 #include "GeoZonePack.h"
-#include "GeoZoneEnvironment.h"
-#include "GeoZoneParseCache.h"
+#include "GeoZoneHash.h"
 #include "GeoZoneZip.h"
 
 #include <QtCore/QCoreApplication>
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QHash>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QScopeGuard>
-#include <QtCore/QtEndian>
 #include <QtCore/QUuid>
-
-#include <zlib.h>
-
-#include <algorithm>
 
 namespace GeoZonePack {
 
@@ -36,134 +29,7 @@ QString tr(const char *text)
     return QCoreApplication::translate("GeoZonePack", text);
 }
 
-void appendU16(QByteArray &bytes, quint16 value)
-{
-    char buffer[2];
-    qToLittleEndian(value, buffer);
-    bytes.append(buffer, 2);
-}
-
-void appendU32(QByteArray &bytes, quint32 value)
-{
-    char buffer[4];
-    qToLittleEndian(value, buffer);
-    bytes.append(buffer, 4);
-}
-
-/// @return The data deflated without zlib header, as zip archives store it, empty on errors
-QByteArray deflateRaw(const QByteArray &data)
-{
-    z_stream stream{};
-    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
-        return QByteArray();
-    }
-    QByteArray output(static_cast<qsizetype>(deflateBound(&stream, static_cast<uLong>(data.size()))), Qt::Uninitialized);
-    stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.constData()));
-    stream.avail_in = static_cast<uInt>(data.size());
-    stream.next_out = reinterpret_cast<Bytef*>(output.data());
-    stream.avail_out = static_cast<uInt>(output.size());
-    const int result = deflate(&stream, Z_FINISH);
-    output.resize(static_cast<qsizetype>(stream.total_out));
-    deflateEnd(&stream);
-    return (result == Z_STREAM_END) ? output : QByteArray();
-}
-
 } // namespace
-
-ZipWriter::ZipWriter(QIODevice *device)
-    : _device(device)
-{
-    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
-    _dosTime = static_cast<quint16>((now.time().hour() << 11) | (now.time().minute() << 5) | (now.time().second() / 2));
-    _dosDate = static_cast<quint16>((((std::max)(now.date().year(), 1980) - 1980) << 9) | (now.date().month() << 5) | now.date().day());
-}
-
-bool ZipWriter::_write(const QByteArray &bytes)
-{
-    if (_device->write(bytes) != bytes.size()) {
-        _errorString = _device->errorString();
-        return false;
-    }
-    return true;
-}
-
-bool ZipWriter::add(const QString &name, const QByteArray &data)
-{
-    constexpr qint64 maxSize = 0xFFFFFFFFLL;
-    if ((data.size() >= maxSize) || (_device->pos() >= maxSize) || (_entries.count() >= GeoZoneZip::maxEntries)) {
-        _errorString = tr("The pack is too large.");
-        return false;
-    }
-
-    Entry entry;
-    entry.name = name.toUtf8();
-    entry.crc = static_cast<quint32>(crc32(0L, reinterpret_cast<const Bytef*>(data.constData()), static_cast<uInt>(data.size())));
-    entry.size = static_cast<quint32>(data.size());
-    entry.offset = static_cast<quint32>(_device->pos());
-    QByteArray compressed = deflateRaw(data);
-    if (!compressed.isEmpty() && (compressed.size() < data.size())) {
-        entry.method = 8;
-    } else {
-        compressed = data;
-        entry.method = 0;
-    }
-    entry.compressedSize = static_cast<quint32>(compressed.size());
-
-    QByteArray header;
-    appendU32(header, 0x04034b50);
-    appendU16(header, 20);              // Version needed to extract
-    appendU16(header, 0x0800);          // UTF-8 names
-    appendU16(header, entry.method);
-    appendU16(header, _dosTime);
-    appendU16(header, _dosDate);
-    appendU32(header, entry.crc);
-    appendU32(header, entry.compressedSize);
-    appendU32(header, entry.size);
-    appendU16(header, static_cast<quint16>(entry.name.size()));
-    appendU16(header, 0);               // Extra field length
-    header.append(entry.name);
-    if (!_write(header) || !_write(compressed)) {
-        return false;
-    }
-    _entries.append(entry);
-    return true;
-}
-
-bool ZipWriter::finish()
-{
-    const qint64 directoryOffset = _device->pos();
-    QByteArray directory;
-    for (const Entry &entry : std::as_const(_entries)) {
-        appendU32(directory, 0x02014b50);
-        appendU16(directory, 20);       // Version made by
-        appendU16(directory, 20);       // Version needed to extract
-        appendU16(directory, 0x0800);
-        appendU16(directory, entry.method);
-        appendU16(directory, _dosTime);
-        appendU16(directory, _dosDate);
-        appendU32(directory, entry.crc);
-        appendU32(directory, entry.compressedSize);
-        appendU32(directory, entry.size);
-        appendU16(directory, static_cast<quint16>(entry.name.size()));
-        appendU16(directory, 0);        // Extra field length
-        appendU16(directory, 0);        // Comment length
-        appendU16(directory, 0);        // Disk number
-        appendU16(directory, 0);        // Internal attributes
-        appendU32(directory, 0);        // External attributes
-        appendU32(directory, entry.offset);
-        directory.append(entry.name);
-    }
-    QByteArray end;
-    appendU32(end, 0x06054b50);
-    appendU16(end, 0);
-    appendU16(end, 0);
-    appendU16(end, static_cast<quint16>(_entries.count()));
-    appendU16(end, static_cast<quint16>(_entries.count()));
-    appendU32(end, static_cast<quint32>(directory.size()));
-    appendU32(end, static_cast<quint32>(directoryOffset));
-    appendU16(end, 0);                  // Comment length
-    return _write(directory) && _write(end);
-}
 
 Contents read(const QString &packPath, const QString &directory)
 {
@@ -240,8 +106,8 @@ Contents read(const QString &packPath, const QString &directory)
         QFile file(filePath);
         const QByteArray data = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
         file.close();
-        if ((!expectedHash.isEmpty() && (GeoZoneParseCache::hash(data) != expectedHash)) ||
-            (!expectedSha256.isEmpty() && (QCryptographicHash::hash(data, QCryptographicHash::Sha256) != expectedSha256))) {
+        if ((!expectedHash.isEmpty() && (GeoZoneHash::contentHash(data) != expectedHash)) ||
+            (!expectedSha256.isEmpty() && (GeoZoneHash::sha256(data) != expectedSha256))) {
             (void) QFile::remove(filePath);
             contents.errors.append(tr("%1: the data in the pack is damaged.").arg(name));
             continue;

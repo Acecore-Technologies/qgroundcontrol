@@ -15,8 +15,6 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 
-class QIODevice;
-
 /// Offline packs of geozone sources, to take their zones to a computer without network access: a zip archive with
 /// the stored copy of each source in "sources/", and "manifest.json" describing them. The manifest has the format
 /// name and version, when the pack was made, and per source GeoZoneSourceRepository::sourceReport with the file of
@@ -31,36 +29,6 @@ constexpr const char *sourcesDir = "sources/";
 constexpr const char *formatName = "qgc-geozone-pack";
 constexpr int version = 1;
 constexpr qint64 maxBytes = 1024LL * 1024 * 1024;   ///< Of the pack and of its files together
-
-/// Writes a zip archive, the files deflated unless that doesn't make them smaller. Sizes are limited to 4 GiB.
-class ZipWriter
-{
-public:
-    explicit ZipWriter(QIODevice *device);
-
-    bool add(const QString &name, const QByteArray &data);
-    /// Writes the central directory
-    bool finish();
-    QString errorString() const { return _errorString; }
-
-private:
-    struct Entry {
-        QByteArray name;
-        quint16 method = 0;
-        quint32 crc = 0;
-        quint32 compressedSize = 0;
-        quint32 size = 0;
-        quint32 offset = 0;
-    };
-
-    bool _write(const QByteArray &bytes);
-
-    QIODevice *_device = nullptr;
-    QList<Entry> _entries;
-    quint16 _dosTime = 0;
-    quint16 _dosDate = 0;
-    QString _errorString;
-};
 
 struct Source {
     QJsonObject manifest;   ///< Of the source in the manifest

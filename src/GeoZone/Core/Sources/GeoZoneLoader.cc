@@ -10,6 +10,7 @@
 #include "GeoZoneLoader.h"
 #include "GeoZoneDownloader.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneHash.h"
 #include "GeoZoneParseCache.h"
 #include "GeoZoneProviders.h"
 #include "GeoZoneService.h"
@@ -399,7 +400,7 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     const bool writeCache = parsed && (job.fromStore || !job.storedFileName.isEmpty());
     const qint64 contentSize = content.size();
     // The hash also identifies the data in its provenance
-    const QByteArray contentHash = parsed ? GeoZoneParseCache::hash(content) : QByteArray();
+    const QByteArray contentHash = parsed ? GeoZoneHash::contentHash(content) : QByteArray();
     loadResult.contentHash = contentHash;
     loadResult.contentSize = parsed ? contentSize : -1;
     content.clear();

@@ -18,6 +18,7 @@
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneFormat.h"
 #include "GeoZoneGeometry.h"
+#include "GeoZoneHash.h"
 #include "GeoZoneIndex.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneLoader.h"
