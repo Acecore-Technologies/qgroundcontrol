@@ -88,6 +88,7 @@ qt_add_qml_module(GeoZoneModule
     VERSION 1.0
     RESOURCE_PREFIX /qml
     QML_FILES
+        Map/GeoZoneBadge.qml
         Map/GeoZoneInfoDialog.qml
         Map/GeoZoneLegend.qml
         Map/GeoZoneMapPanel.qml

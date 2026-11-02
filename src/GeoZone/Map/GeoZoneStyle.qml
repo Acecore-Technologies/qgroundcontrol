@@ -11,9 +11,10 @@ pragma Singleton
 
 import QtQuick
 
+import QGroundControl
 import QGroundControl.GeoZone
 
-/// Colors of the geozones on the maps, shared by the map visuals, legend and indicator
+/// Colors of the geozones on the maps and texts of distances and heights, shared by the geozone views
 QtObject {
     readonly property color prohibitedColor:        "red"
     readonly property color reqAuthorisationColor:  "orange"
@@ -22,6 +23,8 @@ QtObject {
     readonly property color uSpaceColor:            "deepskyblue"
     readonly property color unknownColor:           "gray"
     readonly property color highlightColor:         "white"    ///< Border of zones crossed by the mission
+
+    readonly property color terrainColor:           Qt.rgba(0.45, 0.35, 0.2, 0.8)  ///< Ground below altitude scales
 
     readonly property real activeFillAlpha:     0.25
     readonly property real inactiveFillAlpha:   0.08    ///< Zones not active at the current time
@@ -40,5 +43,25 @@ QtObject {
     function fillColor(restriction, active) {
         const color = restrictionColor(restriction)
         return Qt.rgba(color.r, color.g, color.b, active ? activeFillAlpha : inactiveFillAlpha)
+    }
+
+    /// @return Horizontal distance in meters as rounded text in the distance units of the settings, like "120 m"
+    function horizontalText(meters) {
+        if (isNaN(meters)) {
+            return ""
+        }
+        return Math.round(QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)) + " " +
+               QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
+    }
+
+    /// @return Height or altitude in meters as rounded text in the height units of the settings, followed by the
+    ///         reference when given, like "120 m" or "450 m AMSL"
+    function verticalText(meters, reference) {
+        if (isNaN(meters)) {
+            return ""
+        }
+        const text = Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(meters)) + " " +
+                     QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsString
+        return reference ? text + " " + reference : text
     }
 }
