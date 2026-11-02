@@ -98,7 +98,7 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
     ed318.service.method = GeoZoneService::Method::Ed318Post;
     ed318.service.areaOfInterest = true;
     ed318.note = tr("Enter the address of the UAS zones endpoint of a service following the ED-318 retrieval interface. "
-                    "The zones around the mission and the vehicle are requested with their area and time.");
+                    "The zones around the mission, the vehicle and the map view are requested with their area and time.");
     templates.append(ed318);
 
     // The ED-318 retrieval interface of the DFS Geospatial Information Service, see its OpenAPI specification
@@ -118,7 +118,7 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
     area.service.name = tr("Zones of the area (GET)");
     area.service.areaOfInterest = true;
     area.note = tr("Enter an address with {bbox} (west,south,east,north), {west}, {south}, {east}, {north}, {lat}, {lon}, {radiusKm}, "
-                   "{start} or {end}, filled with the area around the mission and the vehicle.");
+                   "{start} or {end}, filled with the area around the mission, the vehicle and the map view.");
     templates.append(area);
 
     // The FAA NOTAM Management Service isn't offered until its NOTAM GeoJSON can be read

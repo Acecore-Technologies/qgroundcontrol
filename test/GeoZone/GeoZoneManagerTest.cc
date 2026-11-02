@@ -1693,7 +1693,7 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
         // Without a mission or a vehicle, there is no area to download
         manager.addService(url, GeoZoneService().toVariantMap(), QString());
         QTRY_COMPARE(failedSpy.count(), 1);
-        QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("Plan a mission or connect a vehicle")), qPrintable(failedSpy.last()[1].toString()));
+        QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("Plan a mission, connect a vehicle or show the area on the map")), qPrintable(failedSpy.last()[1].toString()));
         QCOMPARE(manager.sources()->count(), 0);
 
         // The zones around the vehicle, the URL template filled with the area
@@ -1802,6 +1802,98 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
     QVERIFY(crossing.topLeft().longitude() > 179.9);
     QVERIFY(crossing.bottomRight().longitude() < -179.9);
     QVERIFY(crossing.contains(QGeoCoordinate(-17.0, -179.99)));
+}
+
+void GeoZoneManagerTest::_testMapViewAreaOfInterest()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString url = server.url(QStringLiteral("/zones?bbox={bbox}"));
+    GeoZoneManager manager(storageDir.path());
+    GeoZoneSourceRepository *const repository = manager.repository();
+    repository->setFollowArea(true);
+    repository->setFollowView(true);
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+
+    // The view is taken once the map stops moving, a service is then added for it alone
+    const QGeoRectangle zurich(QGeoCoordinate(47.5, 8.4), QGeoCoordinate(47.3, 8.7));
+    manager.setMapView(QGeoRectangle(QGeoCoordinate(46.5, 7.4), QGeoCoordinate(46.3, 7.7)));
+    manager.setMapView(zurich);
+    QVERIFY(!repository->areaOfInterest().isValid());
+    QTRY_COMPARE(repository->areaOfInterest(), zurich);
+    manager.addService(url, GeoZoneService().toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!repository->busy());
+    GeoZoneSource *const feed = repository->source(url);
+    QVERIFY(feed);
+    QCOMPARE(feed->area(), GeoZoneAreaOfInterest::expanded(zurich, GeoZoneAreaOfInterest::margin));
+    const int requests = server.requestCount;
+
+    // Panning and zooming in within the area downloaded requests nothing
+    manager.setMapView(QGeoRectangle(QGeoCoordinate(47.52, 8.38), QGeoCoordinate(47.32, 8.68)));
+    manager.setMapView(QGeoRectangle(QGeoCoordinate(47.45, 8.5), QGeoCoordinate(47.4, 8.6)));
+    QTest::qWait(GeoZoneManager::mapViewDelayMSecs + 500);
+    QVERIFY(!repository->busy());
+    QCOMPARE(server.requestCount, requests);
+
+    // A pan to a new area is one request, however many moves it took
+    for (int step = 1; step <= 5; step++) {
+        manager.setMapView(QGeoRectangle(QGeoCoordinate(47.5, 8.4 + (0.2 * step)), QGeoCoordinate(47.3, 8.7 + (0.2 * step))));
+    }
+    QTRY_COMPARE(server.requestCount, requests + 1);
+    QTRY_VERIFY(!repository->busy());
+    QTest::qWait(GeoZoneManager::mapViewDelayMSecs + 500);
+    QCOMPARE(server.requestCount, requests + 1);
+    QVERIFY(feed->area().contains(QGeoRectangle(QGeoCoordinate(47.5, 9.4), QGeoCoordinate(47.3, 9.7))));
+    QVERIFY(!feed->area().contains(QGeoCoordinate(47.4, 8.5)));
+
+    // Zoomed out views count with their central 200 km
+    const QGeoRectangle europe(QGeoCoordinate(55, 0), QGeoCoordinate(40, 20));
+    manager.setMapView(europe);
+    QTRY_COMPARE(server.requestCount, requests + 2);
+    QTRY_VERIFY(!repository->busy());
+    QVERIFY(GeoZoneAreaOfInterest::spanMeters(repository->areaOfInterest()) <= GeoZoneAreaOfInterest::maxViewMeters + 1);
+    QVERIFY(repository->areaOfInterest().contains(europe.center()));
+    QVERIFY(feed->area().contains(repository->areaOfInterest()));
+
+    // The view joins the vehicle when they fit together, a view elsewhere keeps the zones around the vehicle
+    manager.setMapView(zurich);
+    QTRY_COMPARE(server.requestCount, requests + 3);
+    QTRY_VERIFY(!repository->busy());
+    repository->setVehiclePosition(QGeoCoordinate(47.4, 8.9));
+    QCOMPARE(repository->areaOfInterest(), QGeoRectangle(QGeoCoordinate(47.5, 8.4), QGeoCoordinate(47.3, 8.9)));
+    QTRY_COMPARE(server.requestCount, requests + 4);
+    QTRY_VERIFY(!repository->busy());
+    manager.setMapView(QGeoRectangle(QGeoCoordinate(39.0, -77.2), QGeoCoordinate(38.8, -76.9)));
+    QTRY_COMPARE(repository->areaOfInterest(), QGeoRectangle(QGeoCoordinate(47.4, 8.9), QGeoCoordinate(47.4, 8.9)));
+    QTest::qWait(500);
+    QVERIFY(!repository->busy());
+    QCOMPARE(server.requestCount, requests + 4);
+
+    // Without the vehicle the view is downloaded, unless the setting leaves the views out
+    repository->setFollowView(false);
+    repository->setVehiclePosition(QGeoCoordinate());
+    QVERIFY(!repository->areaOfInterest().isValid());
+    QTest::qWait(500);
+    QCOMPARE(server.requestCount, requests + 4);
+    repository->setFollowView(true);
+    QTRY_COMPARE(server.requestCount, requests + 5);
+    QTRY_VERIFY(!repository->busy());
+    QVERIFY(feed->area().contains(QGeoCoordinate(38.9, -77.0)));
+
+    // Services answering smaller areas get the center of the view
+    GeoZoneAreaOfInterest area;
+    (void) area.setViewArea(zurich);
+    const QGeoRectangle limited = area.interest(10);
+    QVERIFY(GeoZoneService::areaKm2(limited) <= 9.5 + 1e-6);
+    QVERIFY(limited.contains(zurich.center()));
+    (void) area.setVehiclePosition(QGeoCoordinate(47.4, 8.5));
+    QCOMPARE(area.interest(10), QGeoRectangle(QGeoCoordinate(47.4, 8.5), QGeoCoordinate(47.4, 8.5)));
+    QCOMPARE(area.interest(), zurich);
 }
 
 void GeoZoneManagerTest::_testProvenance()

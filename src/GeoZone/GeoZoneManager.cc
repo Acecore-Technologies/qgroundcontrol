@@ -83,6 +83,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     , _display(new GeoZoneDisplay(this))
     , _planning(new GeoZonePlanning(QDir(_repository->storageDir()).filePath(GeoZoneAuthorisations::fileName), this))
     , _activeTimer(new QTimer(this))
+    , _mapViewTimer(new QTimer(this))
 {
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAppended, _sources, [this](GeoZoneSource *source) { _sources->append(source); });
     (void) connect(_repository, &GeoZoneSourceRepository::sourceRemoved, _sources, [this](int index) { (void) _sources->removeAt(index); });
@@ -95,6 +96,11 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(settings->qnhHPa(), &Fact::rawValueChanged, this, [this]() { emit zonesChanged(nullptr); });
     _repository->setFollowArea(settings->followAreaOfInterest()->rawValue().toBool());
     (void) connect(settings->followAreaOfInterest(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowArea(value.toBool()); });
+    _repository->setFollowView(settings->followMapView()->rawValue().toBool());
+    (void) connect(settings->followMapView(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowView(value.toBool()); });
+    _mapViewTimer->setSingleShot(true);
+    _mapViewTimer->setInterval(mapViewDelayMSecs);
+    (void) connect(_mapViewTimer, &QTimer::timeout, this, [this]() { _repository->setViewArea(_mapView); });
     _updatePackSigning();
     _updateTrustedPublishers();
     (void) connect(settings->packSigningKeyFile(), &Fact::rawValueChanged, this, &GeoZoneManager::_updatePackSigning);
@@ -342,6 +348,15 @@ bool GeoZoneManager::areaDownloaded(const QString &provider, const QGeoRectangle
         }
     }
     return GeoZoneProviders::areaDownloaded(provider, feedUrls, area);
+}
+
+void GeoZoneManager::setMapView(const QGeoRectangle &view)
+{
+    if (!view.isValid()) {
+        return;
+    }
+    _mapView = view;
+    _mapViewTimer->start();
 }
 
 int GeoZoneManager::disabledSourceCount() const

@@ -131,6 +131,10 @@ Item {
 
     function _updateView() {
         _mapModel.setView(_showZones ? map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle(), map.zoomLevel, _showLabels)
+        // The geozone services download the area shown, see GeoZoneManager::setMapView
+        if (showZones && map.visible) {
+            _geoZoneManager.setMapView(map.visibleRegion.boundingGeoRectangle())
+        }
     }
 
     // Throttled so the zones follow a pan or zoom without updating on every frame

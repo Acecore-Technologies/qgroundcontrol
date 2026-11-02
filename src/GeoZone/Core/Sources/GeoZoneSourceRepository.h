@@ -90,10 +90,16 @@ public:
     void setMissionArea(const void *owner, const QGeoRectangle &area);
     /// Sets the position of the active vehicle, part of the area of interest, invalid without vehicle
     void setVehiclePosition(const QGeoCoordinate &position);
-    /// @return Bounds of the planned missions and the vehicle, invalid without either
+    /// Sets the visible region of the map shown, part of the area of interest when it fits with the missions and the
+    /// vehicle, see GeoZoneAreaOfInterest
+    /// @param area Invalid to forget it
+    void setViewArea(const QGeoRectangle &area);
+    /// @return Bounds of the planned missions, the vehicle and the map view, invalid without any
     QGeoRectangle areaOfInterest() const { return _areaOfInterest.area(); }
     /// When false, the feeds keep the area they were downloaded for
     void setFollowArea(bool follow);
+    /// When false, the map view is left out of the area of interest
+    void setFollowView(bool follow);
 
     /// @return Description of a source for offline packs: its origin, dates, service, provenance, the changes of its
     ///         last reload (lastChanges, see GeoZoneSourceChanges) and its AIRAC cycle. Holds no secrets.

@@ -39,7 +39,26 @@ bool GeoZoneAreaOfInterest::setVehiclePosition(const QGeoCoordinate &position)
     return false;
 }
 
-QGeoRectangle GeoZoneAreaOfInterest::area() const
+bool GeoZoneAreaOfInterest::setViewArea(const QGeoRectangle &area)
+{
+    const QGeoRectangle view = cropped(area, maxViewMeters);
+    if (view == _viewArea) {
+        return false;
+    }
+    _viewArea = view;
+    return true;
+}
+
+bool GeoZoneAreaOfInterest::setFollowView(bool follow)
+{
+    if (follow == _followView) {
+        return false;
+    }
+    _followView = follow;
+    return _viewArea.isValid();
+}
+
+QGeoRectangle GeoZoneAreaOfInterest::_missionsAndVehicle() const
 {
     QList<QGeoCoordinate> coordinates;
     for (const QGeoRectangle &area : _missionAreas) {
@@ -51,9 +70,25 @@ QGeoRectangle GeoZoneAreaOfInterest::area() const
     return coordinates.isEmpty() ? QGeoRectangle() : QGeoRectangle(coordinates);
 }
 
+QGeoRectangle GeoZoneAreaOfInterest::interest(double maxAreaKm2) const
+{
+    const QGeoRectangle missionsAndVehicle = _missionsAndVehicle();
+    const QGeoRectangle view = _followView ? _viewArea : QGeoRectangle();
+    if (!view.isValid()) {
+        return missionsAndVehicle;
+    }
+    const auto fits = [maxAreaKm2](const QGeoRectangle &area) { return (maxAreaKm2 <= 0) || (GeoZoneService::areaKm2(area) <= (0.95 * maxAreaKm2)); };
+    if (!missionsAndVehicle.isValid()) {
+        // Services answering smaller areas get the center of the view
+        return fits(view) ? view : cropped(view, std::sqrt(0.95 * maxAreaKm2) * 1000);
+    }
+    const QGeoRectangle combined = missionsAndVehicle.united(view);
+    return ((spanMeters(combined) <= maxViewMeters) && fits(combined)) ? combined : missionsAndVehicle;
+}
+
 QGeoRectangle GeoZoneAreaOfInterest::requestArea(const QGeoRectangle &downloaded, double maxAreaKm2) const
 {
-    const QGeoRectangle interest = area();
+    const QGeoRectangle interest = this->interest(maxAreaKm2);
     if (!interest.isValid() || (downloaded.isValid() && (!_follow || downloaded.contains(interest)))) {
         return downloaded;
     }
@@ -97,4 +132,29 @@ QGeoRectangle GeoZoneAreaOfInterest::expanded(const QGeoRectangle &area, double 
         east = (east > 180) ? (east - 360) : east;
     }
     return QGeoRectangle(QGeoCoordinate(north, west), QGeoCoordinate(south, east));
+}
+
+QGeoRectangle GeoZoneAreaOfInterest::cropped(const QGeoRectangle &area, double maxMeters)
+{
+    if (!area.isValid()) {
+        return QGeoRectangle();
+    }
+    constexpr double metersPerDegree = 111320.0;
+    const QGeoCoordinate center = area.center();
+    const double maxHeight = maxMeters / metersPerDegree;
+    const double maxWidth = maxMeters / (metersPerDegree * (std::max)(0.01, std::cos(qDegreesToRadians(center.latitude()))));
+    if ((area.height() <= maxHeight) && (area.width() <= maxWidth)) {
+        return area;
+    }
+    return QGeoRectangle(center, (std::min)(area.width(), maxWidth), (std::min)(area.height(), maxHeight));
+}
+
+double GeoZoneAreaOfInterest::spanMeters(const QGeoRectangle &area)
+{
+    if (!area.isValid()) {
+        return 0;
+    }
+    constexpr double metersPerDegree = 111320.0;
+    const double width = area.width() * metersPerDegree * (std::max)(0.01, std::cos(qDegreesToRadians(area.center().latitude())));
+    return (std::max)(area.height() * metersPerDegree, width);
 }

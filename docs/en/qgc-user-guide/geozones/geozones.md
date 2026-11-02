@@ -69,7 +69,9 @@ The token URL and the SHA-256 URL of a service are normally on the server of the
 
 ### Area of Interest {#area-of-interest}
 
-With **Download the zones around the mission and the vehicle**, a service is requested for the area of interest: the bounds of the planned mission and the position of the active vehicle, with a margin of 5 km around them. The source shows the area downloaded. When the mission or the vehicle leaves that area, the zones of the new area are downloaded, unless **Download services around the mission and vehicle** is turned off in the settings; refreshes keep the area while it still covers the mission and the vehicle. A service with an area is only added once a mission is planned or a vehicle is connected.
+With **Download the zones around the mission, the vehicle and the map view**, a service is requested for the area of interest: the bounds of the planned mission, the position of the active vehicle and the area shown on the Fly or Plan map, with a margin of 5 km around them. The source shows the area downloaded. When the mission, the vehicle or the map view leaves that area, the zones of the new area are downloaded, unless **Download services around the mission and vehicle** is turned off in the settings; refreshes keep the area while it still covers the area of interest. A service with an area is only added once a mission is planned, a vehicle is connected or a map was shown.
+
+The map view is taken a second after the map stops moving, so panning and zooming don't send a request per frame, and nothing is downloaded while the view stays inside the area downloaded. Views wider or higher than 200 km count with their central 200 km, so zooming out doesn't request a whole continent. The view only joins the mission and the vehicle when all of them fit in 200 km (and in the area the service answers, like the 100 km² of the DFS service): looking at the map far from a planned mission or a flying vehicle never replaces the zones around them. Without a mission or a vehicle, the view alone is downloaded, cut around its center for services answering smaller areas. Turn off **Download services for the map view** to only follow the mission and the vehicle.
 
 ### Integrity Checks {#integrity-checks}
 
@@ -437,6 +439,7 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 | Data Updates | **Outdated data warning** | 7 days | 1–365 days | The data age at which a source is reported as outdated. |
 | Data Updates | **Treat outdated data as invalid** | On | | Outdated data is shown as expired and uploading a mission asks for confirmation. Its zones still apply. |
 | Data Updates | **Download services around the mission and vehicle** | On | | Whether services taking an area download the zones of a new area when the mission or the vehicle leaves the one downloaded. |
+| Data Updates | **Download services for the map view** | On | | Whether the area shown on the Fly or Plan map, up to 200 km across, is part of the area downloaded from services taking an area. |
 | Sources > Pack Signatures | **Signing key** | None | | The Ed25519 private key file (PEM) signing exported packs. |
 | Sources > Pack Signatures | **Publisher** | None | | The name signed packs give for their publisher. |
 | Sources > Pack Signatures | Trusted publishers | None | | The publishers, with their public keys, whose signed packs are trusted. |

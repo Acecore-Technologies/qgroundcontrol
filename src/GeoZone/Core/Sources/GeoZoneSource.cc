@@ -136,7 +136,7 @@ QString GeoZoneSource::areaText() const
     if (!_area.isValid()) {
         return QString();
     }
-    return tr("Zones around the mission and the vehicle, downloaded for latitudes %1 to %2 and longitudes %3 to %4")
+    return tr("Zones around the mission, the vehicle and the map view, downloaded for latitudes %1 to %2 and longitudes %3 to %4")
         .arg(_area.bottomRight().latitude(), 0, 'f', 3).arg(_area.topLeft().latitude(), 0, 'f', 3)
         .arg(_area.topLeft().longitude(), 0, 'f', 3).arg(_area.bottomRight().longitude(), 0, 'f', 3);
 }

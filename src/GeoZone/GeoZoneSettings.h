@@ -40,6 +40,7 @@ public:
     DEFINE_SETTINGFACT(staleDays)
     DEFINE_SETTINGFACT(outdatedInvalid)
     DEFINE_SETTINGFACT(followAreaOfInterest)
+    DEFINE_SETTINGFACT(followMapView)
     DEFINE_SETTINGFACT(packSigningKeyFile)
     DEFINE_SETTINGFACT(packPublisherName)
     DEFINE_SETTINGFACT(trustedPackPublishers)

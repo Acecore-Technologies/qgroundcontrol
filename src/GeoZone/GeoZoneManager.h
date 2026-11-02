@@ -172,6 +172,10 @@ public:
     Q_INVOKABLE bool addArea(const QString &provider, const QGeoRectangle &area);
     /// @return true when a source downloaded the zones of the provider in the whole area, see GeoZoneProviders::areaDownloaded
     Q_INVOKABLE bool areaDownloaded(const QString &provider, const QGeoRectangle &area) const;
+    /// Takes the visible region of the map shown as part of the area of interest of the services, a second after it
+    /// stops moving, see GeoZoneSourceRepository::setViewArea. Maps call it while they are visible.
+    Q_INVOKABLE void setMapView(const QGeoRectangle &view);
+    static constexpr int mapViewDelayMSecs = 1000;
 
 signals:
     /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
@@ -217,6 +221,8 @@ private:
     GeoZonePlanning *_planning = nullptr;
     GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
+    QTimer *_mapViewTimer = nullptr;
+    QGeoRectangle _mapView;     ///< Waiting for _mapViewTimer
     QMetaObject::Connection _vehicleConnection;
     QString _sourceNote;
     QString _sourceNoteKey;     ///< Of the source sourceNote is about

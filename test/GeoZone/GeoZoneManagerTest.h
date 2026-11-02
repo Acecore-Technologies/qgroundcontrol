@@ -38,6 +38,7 @@ private slots:
     void _testServiceOAuth2();
     void _testEd318Service();
     void _testServiceAreaOfInterest();
+    void _testMapViewAreaOfInterest();
     void _testProvenance();
     void _testIntegrity();
     void _testOfflinePack();

@@ -230,6 +230,13 @@ void GeoZoneSourceRepository::setVehiclePosition(const QGeoCoordinate &position)
     }
 }
 
+void GeoZoneSourceRepository::setViewArea(const QGeoRectangle &area)
+{
+    if (_areaOfInterest.setViewArea(area) && _areaOfInterest.followView()) {
+        _checkAreas();
+    }
+}
+
 void GeoZoneSourceRepository::setFollowArea(bool follow)
 {
     if (follow != _areaOfInterest.follow()) {
@@ -238,16 +245,26 @@ void GeoZoneSourceRepository::setFollowArea(bool follow)
     }
 }
 
+void GeoZoneSourceRepository::setFollowView(bool follow)
+{
+    if (_areaOfInterest.setFollowView(follow)) {
+        _checkAreas();
+    }
+}
+
 void GeoZoneSourceRepository::_checkAreas()
 {
-    const QGeoRectangle interest = areaOfInterest();
-    if (!_areaOfInterest.follow() || !interest.isValid()) {
+    if (!_areaOfInterest.follow() || !areaOfInterest().isValid()) {
         return;
     }
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     for (GeoZoneSource *const source : std::as_const(_sources)) {
-        if (!source->isFeed() || !source->service().areaOfInterest || !source->enabled() || source->busy() || source->credentialsMissing() ||
-            (source->area().isValid() && source->area().contains(interest))) {
+        if (!source->isFeed() || !source->service().areaOfInterest || !source->enabled() || source->busy() || source->credentialsMissing()) {
+            continue;
+        }
+        // The map view is left out for services answering smaller areas, see GeoZoneAreaOfInterest
+        if (const QGeoRectangle interest = _areaOfInterest.interest(source->service().maxAreaKm2);
+            !interest.isValid() || (source->area().isValid() && source->area().contains(interest))) {
             continue;
         }
         // Services which failed aren't asked again before their retry

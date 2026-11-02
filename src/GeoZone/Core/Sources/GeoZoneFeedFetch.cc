@@ -47,7 +47,7 @@ void GeoZoneFeedFetch::start()
     _result.requestUrl = _requestUrl;
     _accessToken = _request.accessToken;
     if (service.areaOfInterest && !_request.area.isValid()) {
-        _finish(Result::Status::Failed, tr("The service downloads the zones around the mission or the vehicle. Plan a mission or connect a vehicle."));
+        _finish(Result::Status::Failed, tr("The service downloads the zones around the mission, the vehicle or the map view. Plan a mission, connect a vehicle or show the area on the map."));
         return;
     }
     if (service.areaOfInterest && !service.acceptsArea(_request.area)) {

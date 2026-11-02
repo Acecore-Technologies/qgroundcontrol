@@ -159,7 +159,7 @@ ColumnLayout {
 
     QGCCheckBox {
         id:     areaCheckBox
-        text:   qsTr("Download the zones around the mission and the vehicle")
+        text:   qsTr("Download the zones around the mission, the vehicle and the map view")
     }
 
     // The client secret or the area of interest would go to another server than the feed's

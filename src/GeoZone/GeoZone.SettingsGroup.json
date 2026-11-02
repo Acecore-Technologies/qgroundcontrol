@@ -159,6 +159,13 @@
     "default":      true
 },
 {
+    "name":         "followMapView",
+    "shortDesc":    "Download services for the map view",
+    "longDesc":     "Include the area shown on the Fly or Plan map, up to 200 km across, in the area downloaded from geozone services taking an area, a second after the map stops moving.",
+    "type":         "bool",
+    "default":      true
+},
+{
     "name":         "packSigningKeyFile",
     "shortDesc":    "Pack signing key",
     "longDesc":     "Ed25519 private key file (PEM) signing the exported offline packs. Packs are exported unsigned without one.",
