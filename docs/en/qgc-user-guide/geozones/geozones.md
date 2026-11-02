@@ -341,7 +341,7 @@ Each opens the usual guided action confirmation of the Fly View, switching to it
 
 ### Altitude Strip and Approach Path {#altitude-strip}
 
-While zones are above or below the active vehicle, a strip on the left of the Fly View shows their floors and ceilings with the vehicle's altitude, above the ground when the terrain is known. It is dimmed and marked **Stale** while the vehicle's position is lost, and marked **AGL estimated** (with ≈ next to the height) when the height above ground comes from the terrain data of _QGroundControl_ rather than the vehicle.
+While zones are above or below the active vehicle, the **Zone altitudes** strip on the left of the Fly View shows their floors and ceilings with the vehicle's altitude, above the ground when the terrain is known. Zones with the same restriction and limits, like the same zone from two sources, are drawn as one bar named after the first with the count of the others ("CTR Zurich (+1)"), and the names and limits are listed beside the bar. While no floor or ceiling is within 300 m of the vehicle, for example on the ground below a high zone, the strip shrinks to a chip naming the zone the vehicle is in; click it to expand the strip, and click the strip's title to shrink it again. It is dimmed and marked **Stale** while the vehicle's position is lost, and marked **AGL estimated** (with ≈ next to the height) when the height above ground comes from the terrain data of _QGroundControl_ rather than the vehicle.
 
 When the active vehicle would enter a zone within the approach alert time at its current velocity, the Fly View map draws its path to the entry point in the zone's color, with the zone name and the seconds left.
 
