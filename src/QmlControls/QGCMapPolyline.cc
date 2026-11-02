@@ -38,7 +38,10 @@ QGCMapPolyline::QGCMapPolyline(const QGCMapPolyline& other, QObject* parent)
 
 QGCMapPolyline::~QGCMapPolyline()
 {
-    qgcApp()->removeCompressedSignal(QMetaMethod::fromSignal(&QGCMapPolyline::pathChanged));
+    // Vehicles still connected at exit delete their fences after the application
+    if (qgcApp()) {
+        qgcApp()->removeCompressedSignal(QMetaMethod::fromSignal(&QGCMapPolyline::pathChanged));
+    }
 }
 
 const QGCMapPolyline& QGCMapPolyline::operator=(const QGCMapPolyline& other)

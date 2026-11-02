@@ -42,7 +42,10 @@ QGCMapPolygon::QGCMapPolygon(const QGCMapPolygon& other, QObject* parent)
 
 QGCMapPolygon::~QGCMapPolygon()
 {
-    qgcApp()->removeCompressedSignal(QMetaMethod::fromSignal(&QGCMapPolygon::pathChanged));
+    // Vehicles still connected at exit delete their fences after the application
+    if (qgcApp()) {
+        qgcApp()->removeCompressedSignal(QMetaMethod::fromSignal(&QGCMapPolygon::pathChanged));
+    }
 }
 
 void QGCMapPolygon::_init(void)
