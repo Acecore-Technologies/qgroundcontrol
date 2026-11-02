@@ -170,13 +170,14 @@ public:
     void setBusy(bool busy);
     void setErrorString(const QString &errorString);
 
-    /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data ages of
-    /// GeoZoneEnvironment::sourceSettings. Data without an issue date downloaded from a server is as old as the
-    /// server last confirmed it.
+    /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data age of
+    /// GeoZoneEnvironment::sourceSettings, or liveStaleHours for live data. Data without an issue date downloaded
+    /// from a server is as old as the server last confirmed it.
     void updateValidity(const QDateTime &now);
 
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
     bool isLive() const { return GeoZoneProviders::isLive(_format); }
+    static constexpr int liveStaleHours = 2;    ///< Age after which live data is outdated
 
     /// How the feed is requested from its service, empty for plain feeds and files
     const GeoZoneService &service() const { return _service; }

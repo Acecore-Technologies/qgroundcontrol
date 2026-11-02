@@ -1671,7 +1671,6 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
     {
         GeoZoneManager manager(storageDir.path());
         GeoZoneSourceRepository *const repository = manager.repository();
-        repository->setAreaMargin(1000);
         repository->setFollowArea(true);
         QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
         QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
@@ -1690,11 +1689,11 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
         GeoZoneSource *const feed = manager.source(url);
         QVERIFY(feed);
         QVERIFY(feed->followsArea());
-        const QGeoRectangle area = GeoZoneSourceRepository::expanded(QGeoRectangle(QGeoCoordinate(47.0, 8.0), QGeoCoordinate(47.0, 8.0)), 1000);
+        const QGeoRectangle area = GeoZoneSourceRepository::expanded(QGeoRectangle(QGeoCoordinate(47.0, 8.0), QGeoCoordinate(47.0, 8.0)), GeoZoneSourceRepository::areaMargin);
         QCOMPARE(feed->area(), area);
-        QVERIFY(std::abs(area.height() - (2000.0 / 111320)) < 1e-6);
+        QVERIFY(std::abs(area.height() - (10000.0 / 111320)) < 1e-6);
         QCOMPARE(requestedUrl(), GeoZoneService::resolve(url, area, QDateTime(), QDateTime()));
-        QVERIFY2(requestedUrl().contains(QStringLiteral("&lat=47.00000&radius=1.5")), qPrintable(requestedUrl()));
+        QVERIFY2(requestedUrl().contains(QStringLiteral("&lat=47.00000&radius=7.1")), qPrintable(requestedUrl()));
 
         // Moving within the area downloads nothing, leaving it downloads the new area
         const int requests = server.requestCount;
@@ -1763,7 +1762,6 @@ void GeoZoneManagerTest::_testServiceAreaOfInterest()
     // Services answering areas up to a size get a smaller margin, larger areas aren't requested
     const QTemporaryDir limitedDir;
     GeoZoneManager limitedManager(limitedDir.path());
-    limitedManager.repository()->setAreaMargin(5000);
     limitedManager.repository()->setVehiclePosition(QGeoCoordinate(47.5, 8.5));
     QSignalSpy limitedSpy(&limitedManager, &GeoZoneManager::sourceAdded);
     GeoZoneService limited;

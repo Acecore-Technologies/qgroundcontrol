@@ -168,27 +168,11 @@ SettingsPage {
             visible:                 fact.visible
         }
 
-        LabelledFactTextField {
-            Layout.fillWidth:        true
-            textFieldPreferredWidth: _fieldWidth
-            label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.liveStaleHours
-            visible:                 fact.visible
-        }
-
         FactCheckBoxSlider {
             Layout.fillWidth:   true
             text:               fact.shortDescription
             fact:               _geoZoneSettings.followAreaOfInterest
             visible:            fact.visible
-        }
-
-        LabelledFactTextField {
-            Layout.fillWidth:        true
-            textFieldPreferredWidth: _fieldWidth
-            label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.areaOfInterestMargin
-            visible:                 fact.visible
         }
     }
 }

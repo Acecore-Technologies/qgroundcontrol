@@ -1515,7 +1515,6 @@ void GeoZonePlanningTest::_testPlanSave()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     GeoZoneSourceRepository *const repository = manager.repository();
-    repository->setAreaMargin(1000);
     repository->setFollowArea(true);
 
     // A service downloading its zones for the area of interest, around the vehicle for now

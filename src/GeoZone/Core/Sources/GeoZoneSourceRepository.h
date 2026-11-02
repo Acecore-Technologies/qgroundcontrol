@@ -72,7 +72,7 @@ public:
 
     /// Sets the area of a planned mission, part of the area of interest of the services taking it, see
     /// GeoZoneService::areaOfInterest. Feeds whose downloaded area doesn't cover the area of interest are downloaded
-    /// again for it, with areaMargin() around.
+    /// again for it, with areaMargin around.
     /// @param owner Identifies the mission, like the mission check following it
     /// @param area Invalid when the mission has no flight path
     void setMissionArea(quintptr owner, const QGeoRectangle &area);
@@ -80,16 +80,13 @@ public:
     void setVehiclePosition(const QGeoCoordinate &position);
     /// @return Bounds of the planned missions and the vehicle, invalid without either
     QGeoRectangle areaOfInterest() const;
-    /// Meters downloaded around the area of interest
-    double areaMargin() const { return _areaMargin; }
-    void setAreaMargin(double meters);
     /// When false, the feeds keep the area they were downloaded for
     bool followArea() const { return _followArea; }
     void setFollowArea(bool follow);
     /// @return The area with a margin in meters around it
     static QGeoRectangle expanded(const QGeoRectangle &area, double margin);
 
-    static constexpr double defaultAreaMargin = 5000;
+    static constexpr double areaMargin = 5000;  ///< Meters downloaded around the area of interest
 
     /// @return Description of a source for briefings and offline packs: its origin, dates, service, provenance, the
     ///         changes of its last reload (lastChanges, see GeoZoneSourceChanges) and its AIRAC cycle. Holds no secrets.
@@ -216,7 +213,6 @@ private:
     GeoZoneServiceRegistry _services;   ///< Of the feeds requested from a service, with their secrets and tokens
     QHash<quintptr, QGeoRectangle> _missionAreas;
     QGeoCoordinate _vehiclePosition;
-    double _areaMargin = defaultAreaMargin;
     bool _followArea = true;
     bool _storageErrorReported = false;
     QString _validityWarning;

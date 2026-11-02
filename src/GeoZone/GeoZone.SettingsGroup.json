@@ -157,27 +157,6 @@
     "default":      true
 },
 {
-    "name":         "areaOfInterestMargin",
-    "shortDesc":    "Service download margin",
-    "longDesc":     "Distance around the planned mission and the active vehicle for which geozone services taking an area are downloaded.",
-    "type":         "double",
-    "units":        "m",
-    "min":          500,
-    "max":          50000,
-    "decimalPlaces": 0,
-    "default":      5000
-},
-{
-    "name":         "liveStaleHours",
-    "shortDesc":    "Outdated live restrictions warning",
-    "longDesc":     "Age in hours after which the data of a temporary flight restriction feed is reported as outdated.",
-    "type":         "uint32",
-    "units":        "hours",
-    "min":          1,
-    "max":          72,
-    "default":      2
-},
-{
     "name":         "packSigningKeyFile",
     "shortDesc":    "Pack signing key",
     "longDesc":     "Ed25519 private key file (PEM) signing the exported offline packs. Packs are exported unsigned without one.",

@@ -91,12 +91,9 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     // The age at which data is outdated may have changed
     (void) connect(settings->staleDays(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
-    (void) connect(settings->liveStaleHours(), &Fact::rawValueChanged, _repository, &GeoZoneSourceRepository::updateValidity);
     // Limits published as flight levels are converted with the QNH, so checks and texts using them are updated
     (void) connect(settings->qnhHPa(), &Fact::rawValueChanged, this, [this]() { emit zonesChanged(nullptr); });
-    _repository->setAreaMargin(settings->areaOfInterestMargin()->rawValue().toDouble());
     _repository->setFollowArea(settings->followAreaOfInterest()->rawValue().toBool());
-    (void) connect(settings->areaOfInterestMargin(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setAreaMargin(value.toDouble()); });
     (void) connect(settings->followAreaOfInterest(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowArea(value.toBool()); });
     _updatePackSigning();
     _updateTrustedPublishers();

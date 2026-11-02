@@ -510,7 +510,7 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
         } else if (const QDate airac = airacDate(); airac.isValid() && (GeoZoneAirac::nextCycleStart(airac) <= now.toUTC().date())) {
             text = tr("AIRAC cycle %1 ended on %2, a newer cycle is in effect")
                        .arg(GeoZoneAirac::cycleName(airac), GeoZoneAirac::nextCycleStart(airac).toString(Qt::ISODate));
-        } else if (isLive() && date.isValid() && (date.secsTo(now) > (qint64{ settings.liveStaleHours } * 3600))) {
+        } else if (isLive() && date.isValid() && (date.secsTo(now) > (qint64{ liveStaleHours } * 3600))) {
             text = tr("Data is %n hour(s) old", nullptr, static_cast<int>(date.secsTo(now) / 3600));
         } else if (!isLive() && date.isValid() && (date.daysTo(now) > settings.staleDays)) {
             text = tr("Data is %n days old", nullptr, static_cast<int>(date.daysTo(now)));

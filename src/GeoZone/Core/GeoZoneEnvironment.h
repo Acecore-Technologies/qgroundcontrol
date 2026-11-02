@@ -33,7 +33,6 @@ struct SourceSettings {
     int feedRefreshHours = 24;
     int liveFeedRefreshMinutes = 15;    ///< Feeds of temporary restrictions, see GeoZoneSource::isLive
     int staleDays = 28;
-    int liveStaleHours = 2;
 };
 
 struct Hooks {

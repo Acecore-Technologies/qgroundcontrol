@@ -64,7 +64,6 @@ void installEnvironment()
         sourceSettings.feedRefreshHours = settings->feedRefreshHours()->rawValue().toInt();
         sourceSettings.liveFeedRefreshMinutes = settings->liveFeedRefreshMinutes()->rawValue().toInt();
         sourceSettings.staleDays = settings->staleDays()->rawValue().toInt();
-        sourceSettings.liveStaleHours = settings->liveStaleHours()->rawValue().toInt();
         return sourceSettings;
     };
     hooks.verticalDistanceUnits = []() { return FactMetaData::appSettingsVerticalDistanceUnitsString(); };

@@ -28,7 +28,7 @@ The core never includes _QGroundControl_ headers. What it needs from the applica
 | Hook | Set by _QGroundControl_ to | Default without the application |
 | ---- | -------------------------- | ------------------------------- |
 | `currentDateTimeUtc` | (not set) | The system clock |
-| `sourceSettings` | The refresh and outdated data settings of `GeoZoneSettings` | 24 hours, 15 minutes, 28 days, 2 hours |
+| `sourceSettings` | The refresh and outdated data settings of `GeoZoneSettings` | 24 hours, 15 minutes, 28 days |
 | `verticalDistanceUnits`, `metersToVerticalDistanceUnits` | The vertical distance units of the application | Meters |
 | `terrainElevation` | `TerrainAtCoordinateQuery::getAltitudesForCoordinates`, NaN when the tile isn't loaded | NaN (unknown) |
 | `qnhHPa` | An atomic copy of the **QNH** setting, since it is called from worker threads | 1013.25 hPa |

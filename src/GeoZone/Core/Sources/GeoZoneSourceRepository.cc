@@ -257,11 +257,6 @@ QGeoRectangle GeoZoneSourceRepository::areaOfInterest() const
     return coordinates.isEmpty() ? QGeoRectangle() : QGeoRectangle(coordinates);
 }
 
-void GeoZoneSourceRepository::setAreaMargin(double meters)
-{
-    _areaMargin = std::clamp(meters, 0.0, 100000.0);
-}
-
 void GeoZoneSourceRepository::setFollowArea(bool follow)
 {
     if (follow != _followArea) {
@@ -304,12 +299,12 @@ QGeoRectangle GeoZoneSourceRepository::_requestArea(const QString &key) const
     }
     // Services answering areas up to a size get a smaller margin, a little under their limit
     const GeoZoneService service = _services.service(key);
-    const QGeoRectangle area = expanded(interest, _areaMargin);
+    const QGeoRectangle area = expanded(interest, areaMargin);
     if ((service.maxAreaKm2 <= 0) || (GeoZoneService::areaKm2(area) <= (0.95 * service.maxAreaKm2))) {
         return area;
     }
     double low = 0;
-    double high = _areaMargin;
+    double high = areaMargin;
     for (int i = 0; i < 20; i++) {
         const double margin = (low + high) / 2;
         if (GeoZoneService::areaKm2(expanded(interest, margin)) <= (0.95 * service.maxAreaKm2)) {
