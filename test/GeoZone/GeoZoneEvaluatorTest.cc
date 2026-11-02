@@ -9,6 +9,7 @@
 
 #include "GeoZoneEvaluatorTest.h"
 #include "GeoZoneAlertTracker.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneBriefing.h"
 #include "GeoZoneTestHelpers.h"
 
@@ -229,6 +230,88 @@ void GeoZoneEvaluatorTest::_testAltitudes()
     QVERIFY(_near(crossing.entry.fraction, 0.35, 0.001));
     QVERIFY(_near(crossing.entry.position.altitudeAMSL, 500));
     QVERIFY(_near(crossing.entry.position.terrainAMSL, 400));
+}
+
+void GeoZoneEvaluatorTest::_testAuthorisationScope()
+{
+    // A zone requiring authorisation 300 m around the center at all altitudes, authorised up to 120 m AMSL
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("CTR"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+    }), errorString), qPrintable(errorString));
+    const GeoZone *const zone = zones.zoneList().constFirst();
+    GeoZoneAuthorisations authorisations{ QString() };
+    GeoZoneAuthorisation authorisation;
+    authorisation.zoneKey = GeoZoneAuthorisations::zoneKey(zone);
+    authorisation.ceiling = 120;
+    authorisations.set(authorisation);
+    const GeoZonePolicy policy = GeoZonePolicy({ GeoZone::ReqAuthorisation }).excludingAuthorised(&authorisations);
+    QVERIFY(policy.authorisation(zone));
+    QVERIFY(!policy.authorised(zone));
+    QVERIFY(policy.accepts(zone));
+    const GeoZonePathEvaluator evaluator(zones.catalog(), policy);
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(1000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(1000, 90);
+
+    // Paths below the ceiling leave the zone out, those above it, or at unknown altitudes, don't
+    QVERIFY(evaluator.evaluate({ _evaluatorPath({ west, east }, { 100, 100 }) }).zones.isEmpty());
+    const QList<GeoZonePathEvaluator::Path> climb = { _evaluatorPath({ west, east }, { 100, 200 }) };
+    const GeoZonePathEvaluator::Result high = evaluator.evaluate(climb);
+    QCOMPARE(high.zones.count(), 1);
+    QCOMPARE(evaluator.scopeIssue(high.zones[0], authorisation, climb), QStringLiteral("authorised up to 120 m AMSL, the flight reaches 165 m AMSL"));
+    const QList<GeoZonePathEvaluator::Path> unknown = { _evaluatorPath({ west, east }) };
+    QCOMPARE(evaluator.evaluate(unknown).zones.count(), 1);
+    QCOMPARE(evaluator.scopeIssue(evaluator.evaluate(unknown).zones[0], authorisation, unknown),
+             QStringLiteral("authorised up to 120 m AMSL, the height flown is unknown"));
+    QVERIFY(policy.authorisedAt(zone, GeoZone::Position{ center, 100 }));
+    QVERIFY(!policy.authorisedAt(zone, GeoZone::Position{ center, 150 }));
+    QVERIFY(!policy.authorisedAt(zone, GeoZone::Position{ center }));
+
+    // An area over the western half of the zone: paths staying in it leave the zone out, those leaving it don't
+    authorisation.ceiling.reset();
+    authorisation.area = { QGeoCoordinate(47.01, 7.98), QGeoCoordinate(47.01, 8), QGeoCoordinate(46.99, 8), QGeoCoordinate(46.99, 7.98) };
+    authorisations.set(authorisation);
+    QVERIFY(evaluator.evaluate({ _evaluatorPath({ west, center.atDistanceAndAzimuth(50, 270) }, { 100, 100 }) }).zones.isEmpty());
+    const QList<GeoZonePathEvaluator::Path> across = { _evaluatorPath({ west, east }, { 100, 100 }) };
+    const GeoZonePathEvaluator::Result leaving = evaluator.evaluate(across);
+    QCOMPARE(leaving.zones.count(), 1);
+    QCOMPARE(evaluator.scopeIssue(leaving.zones[0], authorisation, across), QStringLiteral("the flight leaves the authorised area"));
+    QVERIFY(policy.authorisedAt(zone, GeoZone::Position{ center.atDistanceAndAzimuth(100, 270), 100 }));
+    QVERIFY(!policy.authorisedAt(zone, GeoZone::Position{ center.atDistanceAndAzimuth(100, 90), 100 }));
+    // Pattern areas must be inside it too
+    GeoZone::Area pattern;
+    pattern.polygon = { center.atDistanceAndAzimuth(200, 315), center.atDistanceAndAzimuth(200, 225), center.atDistanceAndAzimuth(50, 270) };
+    pattern.lowest.altitudeAMSL = pattern.highest.altitudeAMSL = 100;
+    QVERIFY(evaluator.evaluate({}, { pattern }).zones.isEmpty());
+    pattern.polygon.append(center.atDistanceAndAzimuth(100, 90));
+    QCOMPARE(evaluator.evaluate({}, { pattern }).zones.count(), 1);
+
+    // Daily hours in local time, also across midnight
+    const QDate day(2026, 6, 15);
+    authorisation.dailyFrom = QTime(8, 0);
+    authorisation.dailyTo = QTime(18, 0);
+    QVERIFY(authorisation.covers(QDateTime(day, QTime(8, 0)), QDateTime(day, QTime(18, 0))));
+    QVERIFY(!authorisation.covers(QDateTime(day, QTime(7, 30)), QDateTime(day, QTime(9, 0))));
+    QVERIFY(!authorisation.covers(QDateTime(day, QTime(17, 0)), QDateTime(day, QTime(18, 30))));
+    QCOMPARE(GeoZoneAuthorisations::uncoveredText(authorisation, QDateTime(day, QTime(7, 30)), QDateTime(day, QTime(9, 0))), QStringLiteral("authorised 08:00–18:00 daily"));
+    authorisation.dailyFrom = QTime(22, 0);
+    authorisation.dailyTo = QTime(6, 0);
+    QVERIFY(authorisation.covers(QDateTime(day, QTime(23, 0)), QDateTime(day.addDays(1), QTime(5, 0))));
+    QVERIFY(authorisation.covers(QDateTime(day, QTime(1, 0)), QDateTime(day, QTime(2, 0))));
+    QVERIFY(!authorisation.covers(QDateTime(day, QTime(21, 0)), QDateTime(day, QTime(23, 0))));
+
+    // Kept in files and plans, where authorisations without scope cover the whole zone
+    authorisation.ceiling = 90;
+    authorisation.ceilingAboveGround = true;
+    authorisation.aircraft = QStringLiteral("HB-ABC");
+    QCOMPARE(GeoZoneAuthorisation::fromJson(authorisation.toJson()), authorisation);
+    QCOMPARE(GeoZoneAuthorisations::scopeText(authorisation), QStringLiteral("up to 90 m AGL, 22:00–06:00 daily, within its area, aircraft HB-ABC"));
+    const std::optional<GeoZoneAuthorisation> unlimited = GeoZoneAuthorisation::fromJson(QJsonObject{ { QStringLiteral("zone"), QStringLiteral("CHE/X") } });
+    QVERIFY(unlimited && !unlimited->limitsPath() && !unlimited->hasDailyHours());
 }
 
 void GeoZoneEvaluatorTest::_testUnknownTerrain()

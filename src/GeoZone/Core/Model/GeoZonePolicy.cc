@@ -93,14 +93,26 @@ std::pair<QDateTime, QDateTime> GeoZonePolicy::authorisationPeriod() const
     return { now, now };
 }
 
-bool GeoZonePolicy::authorised(const GeoZone *zone) const
+const GeoZoneAuthorisation *GeoZonePolicy::authorisation(const GeoZone *zone) const
 {
     const GeoZoneAuthorisation *const authorisation = _authorisations ? _authorisations->find(zone) : nullptr;
     if (!authorisation) {
-        return false;
+        return nullptr;
     }
     const auto [start, end] = authorisationPeriod();
-    return authorisation->covers(start, end);
+    return authorisation->covers(start, end) ? authorisation : nullptr;
+}
+
+bool GeoZonePolicy::authorised(const GeoZone *zone) const
+{
+    const GeoZoneAuthorisation *const covering = authorisation(zone);
+    return covering && !covering->limitsPath();
+}
+
+bool GeoZonePolicy::authorisedAt(const GeoZone *zone, const GeoZone::Position &position) const
+{
+    const GeoZoneAuthorisation *const covering = authorisation(zone);
+    return covering && (!covering->limitsPath() || covering->scopeContains(zone, position));
 }
 
 bool GeoZonePolicy::acceptsSchedule(const GeoZone *zone) const

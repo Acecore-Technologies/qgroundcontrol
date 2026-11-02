@@ -11,6 +11,7 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QObject>
+#include <QtPositioning/QGeoRectangle>
 
 #include <optional>
 
@@ -27,6 +28,7 @@ class GeoZonePlanning : public QObject
 
     Q_PROPERTY(QDateTime                plannedStart    READ plannedStart   WRITE setPlannedStart   NOTIFY plannedStartChanged FINAL)  ///< Invalid to check zones whatever their schedule
     Q_PROPERTY(GeoZoneAuthorisations*   authorisations  READ authorisations                         CONSTANT FINAL)                    ///< Zones the operator is authorised to fly in
+    Q_PROPERTY(QGeoRectangle            missionArea     READ missionArea                            NOTIFY missionAreaChanged FINAL)   ///< Bounds of the mission the Plan View checks, invalid without
 
 public:
     /// @param authorisationsFile Where the authorisations are kept
@@ -38,6 +40,10 @@ public:
     Q_INVOKABLE void clearPlannedStart() { setPlannedStart(QDateTime()); }
     GeoZoneAuthorisations *authorisations() const { return _authorisations; }
 
+    QGeoRectangle missionArea() const { return _missionArea; }
+    /// Set by the mission check of the Plan View, see GeoZoneMissionCheck::missionArea
+    void setMissionArea(const QGeoRectangle &missionArea);
+
     /// Geozone data the open plan was saved with, nothing for plans without it, like new or older plans
     const std::optional<GeoZonePlanAudit::Record> &planAudit() const { return _planAudit; }
     void setPlanAudit(const std::optional<GeoZonePlanAudit::Record> &planAudit);
@@ -45,9 +51,11 @@ public:
 signals:
     void plannedStartChanged();
     void planAuditChanged();
+    void missionAreaChanged();
 
 private:
     QDateTime _plannedStart;
+    QGeoRectangle _missionArea;
     std::optional<GeoZonePlanAudit::Record> _planAudit;
     GeoZoneAuthorisations *_authorisations = nullptr;
 };

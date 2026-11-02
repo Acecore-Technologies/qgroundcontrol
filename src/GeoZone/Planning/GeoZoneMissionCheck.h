@@ -96,7 +96,6 @@ public:
         /// Why the operator's authorisation of a crossed zone doesn't cover the flight, like "authorised from
         /// 2026-12-01", empty without
         QString authorisationNote;
-
         friend bool operator==(const Entry &a, const Entry &b) = default;
     };
 
@@ -178,12 +177,16 @@ public:
         QList<const GeoZone*> relevantZones;            ///< Entered by any path whatever their schedule, see relevantZones()
         GeoZoneBox area;                                ///< Of the paths
         QHash<const GeoZone*, GeoZonePathEvaluator::Approximations> approximations;    ///< Of the zones entered whose results are approximate
+        /// Of the zones entered with an authorisation limiting the area or altitude: why the flight leaves its scope,
+        /// empty when it stays within it, see GeoZonePathEvaluator::scopeIssue
+        QHash<const GeoZone*, QString> scopeIssues;
     };
 
     /// @return Zones the path or its areas enter whatever their authorisations, for a flight from start to end or at
-    ///         any time without start. Can run on any thread with a copy of the catalog.
+    ///         any time without start, with the scope issues of the authorisations. Can run on any thread with copies
+    ///         of the catalog and the authorisations.
     static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start = QDateTime(),
-                               const QDateTime &end = QDateTime());
+                               const QDateTime &end = QDateTime(), const GeoZoneAuthorisations *authorisations = nullptr);
     /// @return The evaluation of the planned flight of the controller's mission with the manager's zones and planned
     ///         start, on the calling thread without side effects, like setting the area of interest
     static Evaluation evaluatePlan(const GeoZoneManager *manager, MissionController *missionController);

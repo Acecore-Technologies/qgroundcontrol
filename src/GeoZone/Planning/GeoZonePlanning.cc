@@ -32,3 +32,11 @@ void GeoZonePlanning::setPlanAudit(const std::optional<GeoZonePlanAudit::Record>
         emit planAuditChanged();
     }
 }
+
+void GeoZonePlanning::setMissionArea(const QGeoRectangle &missionArea)
+{
+    if (missionArea != _missionArea) {
+        _missionArea = missionArea;
+        emit missionAreaChanged();
+    }
+}

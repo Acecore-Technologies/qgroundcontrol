@@ -23,6 +23,8 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZonePolicy.h"
 
+struct GeoZoneAuthorisation;
+
 /// Evaluates flight paths against the zones of a catalog snapshot: where each path enters and leaves the zones, when,
 /// and how its altitudes compare with their vertical limits. The mission check, altitude profile, guided command
 /// checks and route planner all use it, so that they agree.
@@ -186,6 +188,14 @@ public:
     ///         is null when they don't.
     ZoneResult evaluateZone(const GeoZone *zone, const QList<Path> &paths) const;
 
+    /// @return Why the active crossings of the result of evaluate with the paths and areas, or its areas, leave the
+    ///         area of the authorisation's scope or rise above its ceiling, like "authorised up to 120 m AGL, the
+    ///         flight reaches 150 m AGL", empty when they stay within them. Unknown heights aren't below the ceiling.
+    ///         Zones with such an authorisation of the policy are left out of the results of evaluate when the paths
+    ///         stay within its scope.
+    QString scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Path> &paths,
+                       const QList<GeoZone::Area> &areas = {}) const;
+
     /// @return The path with the terrain elevation at the positions without one, and with positions added every
     ///         spacing meters between them, with interpolated altitudes. The terrain of positions where the lookup has
     ///         none is NaN, it isn't interpolated across them.
@@ -213,6 +223,8 @@ private:
     Approximations _scheduleApproximations(const GeoZone *zone, bool active) const;
     /// @return true if the policy accepts the restriction of the zone and doesn't exclude it as authorised
     bool _accepts(const GeoZone *zone) const;
+    QString _scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Prepared> &paths,
+                        const QList<GeoZone::Area> &areas) const;
 
     GeoZoneCatalog _catalog;
     GeoZonePolicy _policy;

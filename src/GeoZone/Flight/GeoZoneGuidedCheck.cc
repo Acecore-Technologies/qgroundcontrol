@@ -206,7 +206,8 @@ QString GeoZoneGuidedCheck::startWarning(MissionController *missionController) c
     GeoZoneManager *const manager = _monitor->manager();
     const QDateTime start = GeoZoneEnvironment::currentDateTimeUtc();
     const QDateTime end = start.addSecs(std::llround((std::max)(missionController->missionTime(), 0.0)));
-    const GeoZoneMissionCheck::Evaluation evaluation = GeoZoneMissionCheck::evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController), start, end);
+    const GeoZoneMissionCheck::Evaluation evaluation = GeoZoneMissionCheck::evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController), start, end,
+                                                                                                      manager->planning()->authorisations());
     PlanMasterController *const masterController = missionController->masterController();
     const QList<GeoZoneMissionCheck::Entry> entries = GeoZoneMissionCheck::classify(evaluation, manager->planning()->authorisations(),
                                                                                     masterController ? masterController->geoFenceController() : nullptr);

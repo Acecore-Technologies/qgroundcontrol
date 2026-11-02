@@ -1120,6 +1120,30 @@ void GeoZonePlanningTest::_testAuthorisations()
     QCOMPARE(restarted.planning()->authorisations()->count(), 1);
     QVERIFY(restarted.planning()->authorisations()->find(restarted.zoneList().constFirst()));
     manager.planning()->clearPlannedStart();
+
+    // Authorisations limited to a ceiling or an area cover the flight staying within them
+    QVERIFY(!authorisations->authorise(zoneInfo, QStringLiteral("P-125"), QString(), QString(), { { QStringLiteral("ceiling"), QStringLiteral("high") } }).isEmpty());
+    QVERIFY(!authorisations->authorise(zoneInfo, QStringLiteral("P-125"), QString(), QString(), { { QStringLiteral("dailyFrom"), QStringLiteral("08:00") } }).isEmpty());
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-125"), QString(), QString(), { { QStringLiteral("dailyFrom"), QStringLiteral("0000") },
+                                                                                                { QStringLiteral("dailyTo"), QStringLiteral("0:00") } }).isEmpty());
+    QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("dailyTo")].toString(), QStringLiteral("00:00"));
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-125"), QString(), QString(), { { QStringLiteral("ceiling"), QStringLiteral("1") } }).isEmpty());
+    QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("ceiling")].toString(), QStringLiteral("1"));
+    QCOMPARE(authorisations->ceilingUnits(zoneInfo), QStringLiteral("m AMSL"));
+    QTRY_VERIFY2(check.warningText().contains(QStringLiteral("CTR: authorised up to 1 m AMSL")), qPrintable(check.warningText()));
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
+    QVERIFY(manager.planning()->missionArea().isValid());
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-125"), QString(), QString(), {
+        { QStringLiteral("limitToMission"), true }, { QStringLiteral("missionArea"), QVariant::fromValue(manager.planning()->missionArea()) },
+        { QStringLiteral("aircraft"), QStringLiteral(" HB-ABC ") } }).isEmpty());
+    QVERIFY(authorisations->authorisationOf(zoneInfo)[QStringLiteral("limitToMission")].toBool());
+    QVERIFY2(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString().endsWith(QStringLiteral("Valid, within its area, aircraft HB-ABC")),
+             qPrintable(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString()));
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
+    planJson = QJsonObject();
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    QCOMPARE(planJson[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("authorisations")].toArray()[0].toObject()[QStringLiteral("area")].toArray().count(), 4);
 }
 
 void GeoZonePlanningTest::_testBriefingDocuments()

@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace {
 
@@ -75,6 +76,7 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
     // The mission no longer makes the area of interest
     (void) connect(this, &QObject::destroyed, _manager, [manager = _manager, owner = static_cast<const QObject*>(this)]() {
         manager->repository()->setMissionArea(owner, QGeoRectangle());
+        manager->planning()->setMissionArea(QGeoRectangle());
     });
 }
 
@@ -433,6 +435,7 @@ void GeoZoneMissionCheck::_clearResults()
 {
     _relevantZones.clear();
     _area = GeoZoneBox();
+    _manager->planning()->setMissionArea(QGeoRectangle());
     if (!_entries.isEmpty()) {
         _entries.clear();
         emit zonesChanged();
@@ -479,24 +482,32 @@ void GeoZoneMissionCheck::_updateConcurrently()
     // The services taking the area of interest download the zones around the mission
     _manager->repository()->setMissionArea(this, missionArea(path));
     const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
+    // A copy of the authorisations for the worker thread, since they change on the GUI thread
+    const std::shared_ptr<GeoZoneAuthorisations> authorisations(new GeoZoneAuthorisations(QString()), [](GeoZoneAuthorisations *copy) { copy->deleteLater(); });
+    authorisations->merge(_manager->planning()->authorisations()->authorisations());
     // Zones of an outdated evaluation may be gone
-    _worker->run([catalog, path, start, end]() { return evaluate(catalog, path, start, end); },
+    _worker->run([catalog, path, start, end, authorisations]() { return evaluate(catalog, path, start, end, authorisations.get()); },
                  [this](const Evaluation &evaluation) { _apply(evaluation); });
 }
 
 GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start,
-                                                              const QDateTime &end)
+                                                              const QDateTime &end, const GeoZoneAuthorisations *authorisations)
 {
     // DO_JUMP items may repeat parts of the mission past its estimated end
     const QDateTime flightEnd = path.flightEnd(start, end);
     const GeoZonePathEvaluator evaluator(catalog, GeoZonePolicy::mission(start, flightEnd), start);
+    const GeoZonePolicy authorisationPolicy = GeoZonePolicy::mission(start, flightEnd).excludingAuthorised(authorisations);
     Evaluation evaluation;
     evaluation.start = start;
     evaluation.end = flightEnd;
     evaluation.area = path.box();
-    for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate(path.evaluatorPaths(start, end), path.areas()).zones) {
+    const QList<GeoZonePathEvaluator::Path> paths = path.evaluatorPaths(start, end);
+    for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate(paths, path.areas()).zones) {
         if (!result.entered()) {
             continue;
+        }
+        if (const GeoZoneAuthorisation *const authorisation = authorisationPolicy.authorisation(result.zone); authorisation && authorisation->limitsPath()) {
+            evaluation.scopeIssues.insert(result.zone, evaluator.scopeIssue(result, *authorisation, paths, path.areas()));
         }
         evaluation.zones.append(result.zone);
         evaluation.relevantZones.append(result.zone);
@@ -532,7 +543,7 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
 GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluatePlan(const GeoZoneManager *manager, MissionController *missionController)
 {
     const auto [start, end] = plannedFlightTimes(manager, missionController);
-    return evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController, true), start, end);
+    return evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController, true), start, end, manager->planning()->authorisations());
 }
 
 QHash<const GeoZone*, QStringList> GeoZoneMissionCheck::groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result)
@@ -576,15 +587,20 @@ QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation
         Kinds kinds;
         QString authorisationNote;
         // Zones which aren't active while the mission flies through them don't apply
+        // Authorisations limiting the area or altitude cover the zone when the flight stays within them
+        const GeoZoneAuthorisation *const covering = policy.authorisation(zone);
+        const QString scopeIssue = evaluation.scopeIssues.value(zone, tr("the flight wasn't checked against the authorisation's scope yet"));
         if (evaluation.inactiveZones.contains(zone)) {
             kinds = Inactive;
-        } else if (policy.authorised(zone)) {
+        } else if (covering && (!covering->limitsPath() || scopeIssue.isEmpty())) {
             kinds = Authorised;
         } else if (GeoZonePolicy::isRestricted(zone->restriction())) {
             const bool unfenced = fenced && (zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(geoFenceController, zone);
             kinds = unfenced ? (Crossed | Unfenced) : Kinds(Crossed);
-            // A permit for another time still leaves the zone to warn about
-            if (const GeoZoneAuthorisation *const authorisation = authorisations ? authorisations->find(zone) : nullptr) {
+            // A permit for another time or another part of the zone still leaves the zone to warn about
+            if (covering) {
+                authorisationNote = scopeIssue;
+            } else if (const GeoZoneAuthorisation *const authorisation = authorisations ? authorisations->find(zone) : nullptr) {
                 const auto [start, end] = policy.authorisationPeriod();
                 authorisationNote = GeoZoneAuthorisations::uncoveredText(*authorisation, start, end);
             }
@@ -613,6 +629,8 @@ void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
     }
     _relevantZones = evaluation.relevantZones;
     _area = evaluation.area;
+    // Authorisations can be limited to the area of the mission
+    _manager->planning()->setMissionArea(_area.toRectangle());
     _updateAudit();
 }
 

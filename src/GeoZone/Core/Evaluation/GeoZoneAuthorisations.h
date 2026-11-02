@@ -14,14 +14,20 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QTime>
+#include <QtPositioning/QGeoCircle>
+#include <QtPositioning/QGeoCoordinate>
+#include <QtPositioning/QGeoRectangle>
 
+#include <memory>
 #include <optional>
+
+#include "GeoZone.h"
 
 Q_DECLARE_LOGGING_CATEGORY(GeoZoneAuthorisationsLog)
 
-class GeoZone;
-
-/// Permit to fly in a zone, as entered by the operator
+/// Permit to fly in a zone, as entered by the operator. Its scope may limit it to an altitude, an area, daily hours
+/// and an aircraft; without, it covers the whole zone.
 struct GeoZoneAuthorisation
 {
     QString zoneKey;        ///< See GeoZoneAuthorisations::zoneKey
@@ -30,9 +36,33 @@ struct GeoZoneAuthorisation
     QDateTime validFrom;    ///< UTC, invalid when valid until validTo
     QDateTime validTo;      ///< UTC and exclusive, invalid when without end
 
-    /// @return true if valid during the whole period from start to end
+    std::optional<double> ceiling;  ///< Highest altitude allowed in the zone, meters, see ceilingAboveGround
+    bool ceilingAboveGround = false;///< The ceiling is above ground level, otherwise above mean sea level
+    QList<QGeoCoordinate> area;     ///< Unclosed polygon the flight in the zone must stay in, empty without
+    QGeoCircle areaCircle;          ///< Circle the flight in the zone must stay in, invalid without
+    QTime dailyFrom;                ///< Local time of day the flight may start, invalid without daily hours
+    QTime dailyTo;                  ///< Local time of day the flight must end by, before dailyFrom across midnight
+    QString aircraft;               ///< Registration or description of the aircraft, for information
+
+    static constexpr double areaBuffer = 250;   ///< Meters around the mission area of an authorisation limited to it
+
+    /// @return true if valid during the whole period from start to end, by date and daily hours
     bool covers(const QDateTime &start, const QDateTime &end) const;
     bool expired(const QDateTime &now) const { return validTo.isValid() && (validTo <= now); }
+    bool hasDailyHours() const { return dailyFrom.isValid() && dailyTo.isValid(); }
+    /// @return true if the whole period is within the daily hours, or without daily hours
+    bool withinDailyHours(const QDateTime &start, const QDateTime &end) const;
+    bool hasArea() const { return (area.count() >= 3) || areaCircle.isValid(); }
+    /// @return true if the scope limits where the flight may go in the zone: a ceiling or an area
+    bool limitsPath() const { return ceiling.has_value() || hasArea(); }
+    /// @return The part of the zone the scope allows flying in: the area, or the zone's horizontal extent, below the
+    ///         ceiling and without floor. Null without zone.
+    std::shared_ptr<const GeoZone> scopeZone(const GeoZone *zone) const;
+    /// @return true if the position is inside the area and below the ceiling of the scope. An unknown altitude, or
+    ///         terrain for a ceiling above ground, isn't below the ceiling.
+    bool scopeContains(const GeoZone *zone, const GeoZone::Position &position) const;
+    /// @return The area around a mission's bounds, widened by areaBuffer
+    static QList<QGeoCoordinate> missionArea(const QGeoRectangle &missionBounds);
 
     QJsonObject toJson() const;
     /// @return Nothing without a zone key
@@ -42,7 +72,7 @@ struct GeoZoneAuthorisation
 };
 
 /// Zones the operator is authorised to fly in, which the checks and alerts leave out while the authorisation is
-/// valid, see GeoZonePolicy::excludingAuthorised. Kept in a file, with roles zoneKey, zoneName, permit and statusText.
+/// valid and the flight stays within its scope, see GeoZonePolicy::excludingAuthorised. Kept in a file, with roles zoneKey, zoneName, permit and statusText.
 class GeoZoneAuthorisations : public QAbstractListModel
 {
     Q_OBJECT
@@ -90,15 +120,29 @@ public:
     /// Authorises the zone from local dates, like 2026-12-31, both included
     /// @param validFrom First day, empty to start now
     /// @param validTo Last day, empty without end
+    /// @param scope Optional limits, all texts empty without: ceiling in the vertical distance units above the
+    ///              reference of ceilingUnits, dailyFrom and dailyTo as local times like 08:00, aircraft, and
+    ///              limitToMission with missionArea, the bounds of the mission, see GeoZonePlanning::missionArea.
+    ///              Without missionArea, the area of the authorisation being edited is kept.
     /// @return Error message, empty on success
-    Q_INVOKABLE QString authorise(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo);
+    Q_INVOKABLE QString authorise(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo,
+                                  const QVariantMap &scope = QVariantMap());
     Q_INVOKABLE void revoke(const QString &zoneKey);
-    /// @return Map with zoneKey, permit, validFrom and validTo (local dates, empty when open) and statusText of the
-    ///         authorisation of a GeoZoneInfo, empty without
+    /// @return Map with zoneKey, permit, validFrom and validTo (local dates, empty when open), the scope (ceiling in
+    ///         the vertical distance units, dailyFrom, dailyTo, aircraft and limitToMission when it has an area) and
+    ///         statusText of the authorisation of a GeoZoneInfo, empty without
     Q_INVOKABLE QVariantMap authorisationOf(const QVariant &zone) const;
+    /// @return Units of the ceiling of an authorisation of the GeoZoneInfo, above ground when the zone has limits
+    ///         above ground, like "m AGL"
+    Q_INVOKABLE QString ceilingUnits(const QVariant &zone) const;
 
-    /// @return Validity of the authorisation at the time, like "Valid until 2026-12-31"
+    /// @return Validity of the authorisation at the time, like "Valid until 2026-12-31", with its scope
     static QString statusText(const GeoZoneAuthorisation &authorisation, const QDateTime &now);
+    /// @return The limits of the scope, like "up to 120 m AGL, 08:00–18:00, within its area, aircraft HB-ABC", empty
+    ///         when unlimited
+    static QString scopeText(const GeoZoneAuthorisation &authorisation);
+    /// @return The ceiling in the vertical distance units with its reference, like "120 m AGL"
+    static QString heightText(double meters, bool aboveGround);
     /// @return Why the authorisation doesn't cover the period from start to end, like "authorised from 2026-12-01",
     ///         empty when it does
     static QString uncoveredText(const GeoZoneAuthorisation &authorisation, const QDateTime &start, const QDateTime &end);
@@ -114,6 +158,9 @@ signals:
     void saveFailed(const QString &message);
 
 private:
+    /// @return Validity of the authorisation at the time without its scope
+    static QString validityText(const GeoZoneAuthorisation &authorisation, const QDateTime &now);
+
     void _load();
     void _save();
     void _reset(const QList<GeoZoneAuthorisation> &authorisations);

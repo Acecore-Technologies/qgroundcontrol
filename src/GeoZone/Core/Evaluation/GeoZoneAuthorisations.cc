@@ -11,15 +11,18 @@
 #include "GeoZone.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneInfo.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QLocale>
 #include <QtCore/QSaveFile>
 
 #include <algorithm>
+#include <cmath>
 
 Q_LOGGING_CATEGORY(GeoZoneAuthorisationsLog, "qgc.geozone.geozoneauthorisations")
 
@@ -30,6 +33,13 @@ constexpr const char *zoneNameKey = "name";
 constexpr const char *permitKey = "permit";
 constexpr const char *validFromKey = "validFrom";
 constexpr const char *validToKey = "validTo";
+constexpr const char *ceilingKey = "ceiling";
+constexpr const char *ceilingReferenceKey = "ceilingReference";
+constexpr const char *areaKey = "area";
+constexpr const char *areaCircleKey = "areaCircle";
+constexpr const char *dailyFromKey = "dailyFrom";
+constexpr const char *dailyToKey = "dailyTo";
+constexpr const char *aircraftKey = "aircraft";
 constexpr const char *versionKey = "version";
 constexpr const char *authorisationsKey = "authorisations";
 constexpr int fileVersion = 1;
@@ -45,11 +55,109 @@ QString firstDayText(const QDateTime &validFrom)
     return validFrom.isValid() ? validFrom.toLocalTime().date().toString(Qt::ISODate) : QString();
 }
 
+QString timeText(const QTime &time)
+{
+    return time.toString(QStringLiteral("HH:mm"));
+}
+
+/// @return true if the zone has limits above ground, so that the ceiling of its authorisations is too
+bool aboveGround(const GeoZone *zone)
+{
+    const QList<GeoZone::Volume> &volumes = zone->data().volumes;
+    return std::any_of(volumes.cbegin(), volumes.cend(), [](const GeoZone::Volume &volume) { return GeoZoneVertical::aboveGround(volume); });
+}
+
+/// Meters per vertical distance unit
+double unitMeters()
+{
+    return 1.0 / GeoZoneEnvironment::metersToVerticalDistanceUnits(1.0);
+}
+
 } // namespace
 
 bool GeoZoneAuthorisation::covers(const QDateTime &start, const QDateTime &end) const
 {
-    return (!validFrom.isValid() || (validFrom <= start)) && (!validTo.isValid() || (end < validTo));
+    return (!validFrom.isValid() || (validFrom <= start)) && (!validTo.isValid() || (end < validTo)) && withinDailyHours(start, end);
+}
+
+bool GeoZoneAuthorisation::withinDailyHours(const QDateTime &start, const QDateTime &end) const
+{
+    if (!hasDailyHours() || (dailyFrom == dailyTo) || !start.isValid()) {
+        return true;
+    }
+    const QDateTime localStart = start.toLocalTime();
+    const QDateTime localEnd = ((end.isValid() && (end > start)) ? end : start).toLocalTime();
+    // The daily period containing the start, which may begin the day before when it spans midnight
+    const QDate day = localStart.date();
+    QDateTime periodStart(day, dailyFrom);
+    QDateTime periodEnd(day, dailyTo);
+    if (dailyTo < dailyFrom) {
+        if (localStart.time() < dailyTo) {
+            periodStart = QDateTime(day.addDays(-1), dailyFrom);
+        } else {
+            periodEnd = QDateTime(day.addDays(1), dailyTo);
+        }
+    }
+    return (periodStart <= localStart) && (localEnd <= periodEnd);
+}
+
+std::shared_ptr<const GeoZone> GeoZoneAuthorisation::scopeZone(const GeoZone *zone) const
+{
+    if (!zone) {
+        return nullptr;
+    }
+    GeoZone::Volume limits;
+    if (ceiling) {
+        limits.upperLimit = *ceiling;
+        limits.upperReference = ceilingAboveGround ? GeoZone::VerticalReference::Ground : GeoZone::VerticalReference::MeanSeaLevel;
+    }
+    QList<GeoZone::Volume> volumes;
+    if (areaCircle.isValid()) {
+        GeoZone::Volume volume = limits;
+        volume.isCircle = true;
+        volume.center = areaCircle.center();
+        volume.radius = areaCircle.radius();
+        volumes.append(volume);
+    } else if (area.count() >= 3) {
+        GeoZone::Volume volume = limits;
+        volume.rings = { GeoZone::toRing(area) };
+        volumes.append(volume);
+    } else {
+        // The zone's horizontal extent
+        for (GeoZone::Volume volume : zone->data().volumes) {
+            volume.lowerLimit = limits.lowerLimit;
+            volume.upperLimit = limits.upperLimit;
+            volume.lowerReference = limits.lowerReference;
+            volume.upperReference = limits.upperReference;
+            volume.feet = false;
+            volumes.append(volume);
+        }
+    }
+    GeoZone::Data data;
+    data.identifier = zone->identifier();
+    data.name = zone->name();
+    data.restriction = zone->restriction();
+    data.volumes = volumes;
+    return std::make_shared<const GeoZone>(data);
+}
+
+bool GeoZoneAuthorisation::scopeContains(const GeoZone *zone, const GeoZone::Position &position) const
+{
+    if (ceiling && (std::isnan(position.altitudeAMSL) || (ceilingAboveGround && std::isnan(position.terrainAMSL)))) {
+        return false;
+    }
+    const std::shared_ptr<const GeoZone> scope = scopeZone(zone);
+    return scope && scope->contains(position);
+}
+
+QList<QGeoCoordinate> GeoZoneAuthorisation::missionArea(const QGeoRectangle &missionBounds)
+{
+    if (!missionBounds.isValid()) {
+        return {};
+    }
+    const QGeoCoordinate topLeft = missionBounds.topLeft().atDistanceAndAzimuth(areaBuffer, 0).atDistanceAndAzimuth(areaBuffer, 270);
+    const QGeoCoordinate bottomRight = missionBounds.bottomRight().atDistanceAndAzimuth(areaBuffer, 180).atDistanceAndAzimuth(areaBuffer, 90);
+    return { topLeft, QGeoCoordinate(topLeft.latitude(), bottomRight.longitude()), bottomRight, QGeoCoordinate(bottomRight.latitude(), topLeft.longitude()) };
 }
 
 QJsonObject GeoZoneAuthorisation::toJson() const
@@ -63,6 +171,28 @@ QJsonObject GeoZoneAuthorisation::toJson() const
     }
     if (validTo.isValid()) {
         json.insert(validToKey, validTo.toUTC().toString(Qt::ISODate));
+    }
+    if (ceiling) {
+        json.insert(ceilingKey, *ceiling);
+        json.insert(ceilingReferenceKey, ceilingAboveGround ? QStringLiteral("AGL") : QStringLiteral("AMSL"));
+    }
+    if (area.count() >= 3) {
+        QJsonArray vertices;
+        for (const QGeoCoordinate &vertex : area) {
+            vertices.append(QJsonArray{ vertex.latitude(), vertex.longitude() });
+        }
+        json.insert(areaKey, vertices);
+    }
+    if (areaCircle.isValid()) {
+        json.insert(areaCircleKey, QJsonObject{ { QStringLiteral("lat"), areaCircle.center().latitude() }, { QStringLiteral("lon"), areaCircle.center().longitude() },
+                                                { QStringLiteral("radius"), areaCircle.radius() } });
+    }
+    if (hasDailyHours()) {
+        json.insert(dailyFromKey, timeText(dailyFrom));
+        json.insert(dailyToKey, timeText(dailyTo));
+    }
+    if (!aircraft.isEmpty()) {
+        json.insert(aircraftKey, aircraft);
     }
     return json;
 }
@@ -78,6 +208,35 @@ std::optional<GeoZoneAuthorisation> GeoZoneAuthorisation::fromJson(const QJsonOb
     authorisation.permit = json.value(permitKey).toString();
     authorisation.validFrom = QDateTime::fromString(json.value(validFromKey).toString(), Qt::ISODate).toUTC();
     authorisation.validTo = QDateTime::fromString(json.value(validToKey).toString(), Qt::ISODate).toUTC();
+
+    // Without scope, like those saved before scopes, the authorisation covers the whole zone
+    if (json.value(ceilingKey).isDouble()) {
+        authorisation.ceiling = json.value(ceilingKey).toDouble();
+        authorisation.ceilingAboveGround = (json.value(ceilingReferenceKey).toString() == QStringLiteral("AGL"));
+    }
+    for (const QJsonValue &value : json.value(areaKey).toArray()) {
+        const QJsonArray vertex = value.toArray();
+        const QGeoCoordinate coordinate(vertex.at(0).toDouble(qQNaN()), vertex.at(1).toDouble(qQNaN()));
+        if (coordinate.isValid()) {
+            authorisation.area.append(coordinate);
+        }
+    }
+    if (authorisation.area.count() < 3) {
+        authorisation.area.clear();
+    }
+    const QJsonObject circle = json.value(areaCircleKey).toObject();
+    const QGeoCircle areaCircle(QGeoCoordinate(circle.value(QStringLiteral("lat")).toDouble(qQNaN()), circle.value(QStringLiteral("lon")).toDouble(qQNaN())),
+                                circle.value(QStringLiteral("radius")).toDouble(-1));
+    if (areaCircle.isValid() && (areaCircle.radius() > 0)) {
+        authorisation.areaCircle = areaCircle;
+    }
+    const QTime dailyFrom = QTime::fromString(json.value(dailyFromKey).toString(), QStringLiteral("HH:mm"));
+    const QTime dailyTo = QTime::fromString(json.value(dailyToKey).toString(), QStringLiteral("HH:mm"));
+    if (dailyFrom.isValid() && dailyTo.isValid()) {
+        authorisation.dailyFrom = dailyFrom;
+        authorisation.dailyTo = dailyTo;
+    }
+    authorisation.aircraft = json.value(aircraftKey).toString();
     return authorisation;
 }
 
@@ -192,7 +351,7 @@ void GeoZoneAuthorisations::dismissPending()
     }
 }
 
-QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo)
+QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo, const QVariantMap &scope)
 {
     const GeoZoneInfo info = zone.value<GeoZoneInfo>();
     if (!info.valid()) {
@@ -222,6 +381,48 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
         return tr("The last day is before the first day.");
     }
 
+    // The scope
+    const QString ceiling = scope.value(QStringLiteral("ceiling")).toString().trimmed();
+    if (!ceiling.isEmpty()) {
+        bool ok = false;
+        double value = QLocale().toDouble(ceiling, &ok);
+        if (!ok) {
+            value = ceiling.toDouble(&ok);
+        }
+        if (!ok || !(value > 0)) {
+            return tr("Enter the ceiling as a height, like 120.");
+        }
+        authorisation.ceiling = value * unitMeters();
+        authorisation.ceilingAboveGround = aboveGround(info.zone());
+    }
+    const QString dailyFrom = scope.value(QStringLiteral("dailyFrom")).toString().trimmed();
+    const QString dailyTo = scope.value(QStringLiteral("dailyTo")).toString().trimmed();
+    if (!dailyFrom.isEmpty() || !dailyTo.isEmpty()) {
+        // Like 08:00, or 0800 as numeric keyboards type it
+        const auto time = [](const QString &text) {
+            const QTime colon = QTime::fromString(text, QStringLiteral("H:mm"));
+            return colon.isValid() ? colon : QTime::fromString(text, QStringLiteral("HHmm"));
+        };
+        authorisation.dailyFrom = time(dailyFrom);
+        authorisation.dailyTo = time(dailyTo);
+        if (!authorisation.hasDailyHours()) {
+            return tr("Enter both daily hours like 08:00 and 18:00.");
+        }
+    }
+    authorisation.aircraft = scope.value(QStringLiteral("aircraft")).toString().trimmed();
+    if (scope.value(QStringLiteral("limitToMission")).toBool()) {
+        const GeoZoneAuthorisation *const existing = find(info.zone());
+        const QGeoRectangle missionBounds = scope.value(QStringLiteral("missionArea")).value<QGeoRectangle>();
+        if (missionBounds.isValid()) {
+            authorisation.area = GeoZoneAuthorisation::missionArea(missionBounds);
+        } else if (existing && existing->hasArea()) {
+            authorisation.area = existing->area;
+            authorisation.areaCircle = existing->areaCircle;
+        } else {
+            return tr("Plan a mission first to limit the authorisation to its area.");
+        }
+    }
+
     set(authorisation);
     return QString();
 }
@@ -246,11 +447,52 @@ QVariantMap GeoZoneAuthorisations::authorisationOf(const QVariant &zone) const
         { QStringLiteral("permit"), authorisation->permit },
         { QStringLiteral("validFrom"), firstDayText(authorisation->validFrom) },
         { QStringLiteral("validTo"), lastDayText(authorisation->validTo) },
+        { QStringLiteral("ceiling"), authorisation->ceiling ? QString::number(qRound(*authorisation->ceiling / unitMeters())) : QString() },
+        { QStringLiteral("dailyFrom"), authorisation->hasDailyHours() ? timeText(authorisation->dailyFrom) : QString() },
+        { QStringLiteral("dailyTo"), authorisation->hasDailyHours() ? timeText(authorisation->dailyTo) : QString() },
+        { QStringLiteral("aircraft"), authorisation->aircraft },
+        { QStringLiteral("limitToMission"), authorisation->hasArea() },
         { QStringLiteral("statusText"), statusText(*authorisation, GeoZoneEnvironment::currentDateTimeUtc()) },
     };
 }
 
+QString GeoZoneAuthorisations::ceilingUnits(const QVariant &zone) const
+{
+    const GeoZone *const geoZone = zone.value<GeoZoneInfo>().zone();
+    return QStringLiteral("%1 %2").arg(GeoZoneEnvironment::verticalDistanceUnits(), (geoZone && aboveGround(geoZone)) ? QStringLiteral("AGL") : QStringLiteral("AMSL"));
+}
+
+QString GeoZoneAuthorisations::heightText(double meters, bool aboveGround)
+{
+    return QStringLiteral("%1 %2 %3").arg(qRound(GeoZoneEnvironment::metersToVerticalDistanceUnits(meters)))
+        .arg(GeoZoneEnvironment::verticalDistanceUnits(), aboveGround ? QStringLiteral("AGL") : QStringLiteral("AMSL"));
+}
+
+QString GeoZoneAuthorisations::scopeText(const GeoZoneAuthorisation &authorisation)
+{
+    QStringList limits;
+    if (authorisation.ceiling) {
+        limits.append(tr("up to %1").arg(heightText(*authorisation.ceiling, authorisation.ceilingAboveGround)));
+    }
+    if (authorisation.hasDailyHours()) {
+        limits.append(tr("%1–%2 daily").arg(timeText(authorisation.dailyFrom), timeText(authorisation.dailyTo)));
+    }
+    if (authorisation.hasArea()) {
+        limits.append(tr("within its area"));
+    }
+    if (!authorisation.aircraft.isEmpty()) {
+        limits.append(tr("aircraft %1").arg(authorisation.aircraft));
+    }
+    return limits.join(QStringLiteral(", "));
+}
+
 QString GeoZoneAuthorisations::statusText(const GeoZoneAuthorisation &authorisation, const QDateTime &now)
+{
+    const QString scope = scopeText(authorisation);
+    return scope.isEmpty() ? validityText(authorisation, now) : QStringLiteral("%1, %2").arg(validityText(authorisation, now), scope);
+}
+
+QString GeoZoneAuthorisations::validityText(const GeoZoneAuthorisation &authorisation, const QDateTime &now)
 {
     if (authorisation.expired(now)) {
         return tr("Expired after %1").arg(lastDayText(authorisation.validTo));
@@ -269,6 +511,9 @@ QString GeoZoneAuthorisations::uncoveredText(const GeoZoneAuthorisation &authori
     }
     if (authorisation.validTo.isValid() && (authorisation.validTo <= end)) {
         return tr("authorised until %1").arg(lastDayText(authorisation.validTo));
+    }
+    if (!authorisation.withinDailyHours(start, end)) {
+        return tr("authorised %1–%2 daily").arg(timeText(authorisation.dailyFrom), timeText(authorisation.dailyTo));
     }
     return QString();
 }

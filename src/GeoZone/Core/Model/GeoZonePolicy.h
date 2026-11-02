@@ -16,6 +16,7 @@
 
 #include "GeoZone.h"
 
+struct GeoZoneAuthorisation;
 class GeoZoneAuthorisations;
 
 /// Which zones a check applies to, by restriction, schedule and authorisation. The named policies keep the mission
@@ -63,8 +64,16 @@ public:
     /// @return Period an authorisation must cover for the schedule: the whole planned period, or now since a flight
     ///         at any time may be now
     std::pair<QDateTime, QDateTime> authorisationPeriod() const;
-    /// @return true if an authorisation of the policy covers the zone for its schedule
+    /// @return The authorisation of the policy covering the zone for its schedule, whatever its area and ceiling,
+    ///         null without
+    const GeoZoneAuthorisation *authorisation(const GeoZone *zone) const;
+    /// @return true if an authorisation of the policy covers the zone for its schedule without limiting the area or
+    ///         altitude, so the zone is left out. Those limiting them leave out the parts of paths within them, see
+    ///         GeoZonePathEvaluator, and the positions within them, see authorisedAt.
     bool authorised(const GeoZone *zone) const;
+    /// @return true if an authorisation of the policy covers the zone for its schedule and the position is within
+    ///         its scope
+    bool authorisedAt(const GeoZone *zone, const GeoZone::Position &position) const;
     bool accepts(const GeoZone *zone) const { return acceptsRestriction(zone->restriction()) && acceptsSchedule(zone) && !authorised(zone); }
 
     Schedule schedule() const { return _schedule; }

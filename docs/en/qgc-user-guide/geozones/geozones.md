@@ -189,6 +189,15 @@ The flight time belongs to the plan: it is saved with it, a plan opened without 
 ### Authorisations {#authorisations}
 
 If you hold a permit for a zone, press **Add Authorisation** in its details and enter the permit number and, optionally, its first and last days in the form which opens in place, then **Save**. While the authorisation is valid, the zone is listed as authorised instead of warned about by the mission check, and the flight alerts, guided command checks and **Route Around Zones...** leave it out. With **Check zones at the flight time**, the authorisation must cover the whole flight; without it, the authorisation must be valid now, so a permit starting later still warns, noting when it starts (like "CTR: authorised from 2026-12-01."). Authorisations apply to the zone in every source, are listed in the **Authorisations** section of _Application Settings > Geozones_ where they can be removed, and are kept after a restart.
+
+A permit is often limited. The optional scope fields of the form limit the authorisation to what the permit allows; left empty, it covers the whole zone at every altitude and time:
+
+- **Ceiling**: the highest altitude allowed, in the units of the application, above ground when the zone has limits above ground and above mean sea level otherwise (the label says which). The mission check warns when the flight rises above it inside the zone (like "CTR: authorised up to 120 m AGL, the flight reaches 150 m AGL."), or when the height flown there isn't known, like above ground without terrain data.
+- **Daily hours**: the local times the flight must be within, like 08:00 and 18:00 (they can span midnight). They are checked for the whole flight with **Check zones at the flight time**, otherwise now.
+- **Aircraft**: the registration or description of the aircraft, for information.
+- **Only within the mission area**: limits the authorisation to the area of the mission planned in the Plan View, its bounds widened by 250 m. The mission check warns when the flight leaves it inside the zone.
+
+Flight alerts leave the zone out while the vehicle is within the area and below the ceiling; guided command checks leave it out when the path stays within them. **Route Around Zones...** goes around zones whose authorisation has a ceiling or an area. Authorisations saved before scopes existed, and those of plans without them, cover the whole zone.
 Saved plans keep the flight time, the authorisations of the zones the mission enters and the version of the geozone data (see [Plan Data Audit](#plan-data-audit)). When a plan with authorisations you don't have is opened, the Plan View banner lists them with **Add** and **Ignore**, so permits from someone else's plan are only added when you choose to.
 
 ### Return and Contingency Paths {#return-and-contingency-paths}

@@ -199,6 +199,11 @@ QGCPopupDialog {
                         permitField.text = root._authorised ? root._authorisation.permit : ""
                         validFromField.text = root._authorised ? root._authorisation.validFrom : ""
                         validToField.text = root._authorised ? root._authorisation.validTo : ""
+                        ceilingField.text = root._authorised ? root._authorisation.ceiling : ""
+                        dailyFromField.text = root._authorised ? root._authorisation.dailyFrom : ""
+                        dailyToField.text = root._authorised ? root._authorisation.dailyTo : ""
+                        aircraftField.text = root._authorised ? root._authorisation.aircraft : ""
+                        missionAreaCheckBox.checked = root._authorised ? root._authorisation.limitToMission : false
                         authorisationError.text = ""
                         authorisationForm.visible = true
                     }
@@ -238,6 +243,46 @@ QGCPopupDialog {
                     placeholderText:        qsTr("yyyy-MM-dd, optional")
                 }
 
+                // The scope, unlimited when empty
+                QGCLabel { text: qsTr("Ceiling (%1)").arg(root.geoZone ? root._authorisations.ceilingUnits(root.geoZone) : "") }
+                QGCTextField {
+                    id:                     ceilingField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("Optional")
+                    inputMethodHints:       Qt.ImhFormattedNumbersOnly
+                }
+
+                QGCLabel { text: qsTr("Daily hours") }
+                RowLayout {
+                    spacing: ScreenTools.defaultFontPixelWidth / 2
+
+                    QGCTextField {
+                        id:                     dailyFromField
+                        Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 14
+                        placeholderText:        qsTr("08:00")
+                    }
+                    QGCLabel { text: "–" }
+                    QGCTextField {
+                        id:                     dailyToField
+                        Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 14
+                        placeholderText:        qsTr("18:00")
+                    }
+                }
+
+                QGCLabel { text: qsTr("Aircraft") }
+                QGCTextField {
+                    id:                     aircraftField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("Registration, optional")
+                }
+
+                QGCCheckBox {
+                    id:                 missionAreaCheckBox
+                    Layout.columnSpan:  2
+                    text:               qsTr("Only within the mission area")
+                    visible:            GeoZoneManager.planning.missionArea.isValid || (root._authorised && root._authorisation.limitToMission)
+                }
+
                 QGCLabel {
                     id:                     authorisationError
                     Layout.columnSpan:      2
@@ -252,7 +297,7 @@ QGCPopupDialog {
                     Layout.preferredWidth:  root._contentWidth
                     wrapMode:               Text.WordWrap
                     font.pointSize:         ScreenTools.smallFontPointSize
-                    text:                   qsTr("While the authorisation is valid, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
+                    text:                   qsTr("While the authorisation is valid and the flight stays within the ceiling, area and daily hours entered, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
                 }
 
                 RowLayout {
@@ -262,7 +307,14 @@ QGCPopupDialog {
                     QGCButton {
                         text:       qsTr("Save")
                         onClicked: {
-                            authorisationError.text = root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text)
+                            authorisationError.text = root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text, {
+                                ceiling:        ceilingField.text,
+                                dailyFrom:      dailyFromField.text,
+                                dailyTo:        dailyToField.text,
+                                aircraft:       aircraftField.text,
+                                limitToMission: missionAreaCheckBox.visible && missionAreaCheckBox.checked,
+                                missionArea:    GeoZoneManager.planning.missionArea
+                            })
                             authorisationForm.visible = authorisationError.text !== ""
                         }
                     }

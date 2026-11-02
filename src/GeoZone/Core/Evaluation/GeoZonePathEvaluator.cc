@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZonePathEvaluator.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneBox.h"
 #include "GeoZoneGeometry.h"
 #include "GeoZoneText.h"
@@ -586,6 +587,90 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::evaluateZone(const GeoZon
     return result;
 }
 
+QString GeoZonePathEvaluator::scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Path> &paths,
+                                         const QList<GeoZone::Area> &areas) const
+{
+    return result.zone ? _scopeIssue(result, authorisation, _prepare(paths), areas) : QString();
+}
+
+QString GeoZonePathEvaluator::_scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Prepared> &paths,
+                                          const QList<GeoZone::Area> &areas) const
+{
+    // The stretches of the paths inside the area, whatever their altitude
+    std::shared_ptr<const GeoZone> area;
+    QList<Crossing> inArea;
+    if (authorisation.hasArea()) {
+        GeoZoneAuthorisation areaOnly = authorisation;
+        areaOnly.ceiling.reset();
+        area = areaOnly.scopeZone(result.zone);
+        QList<std::pair<int, qsizetype>> segments;
+        for (int p = 0; p < paths.count(); p++) {
+            for (qsizetype i = 0; i < paths[p].segmentCount(); i++) {
+                segments.append({ p, i });
+            }
+        }
+        inArea = _evaluateZone(area.get(), paths, segments).crossings;
+    }
+
+    constexpr double kTolerance = 0.5;     // Meters
+    bool leavesArea = false;
+    bool unknownHeight = false;
+    double highest = -qInf();
+    const auto consider = [&authorisation, &unknownHeight, &highest](const GeoZone::Position &position) {
+        const double height = position.altitudeAMSL - (authorisation.ceilingAboveGround ? position.terrainAMSL : 0);
+        if (std::isnan(height)) {
+            unknownHeight = true;
+        } else {
+            highest = (std::max)(highest, height);
+        }
+    };
+    for (const Crossing &crossing : result.crossings) {
+        if (!crossing.active) {
+            continue;
+        }
+        if (area && std::none_of(inArea.cbegin(), inArea.cend(), [&crossing](const Crossing &inside) {
+                return (inside.entry.path == crossing.entry.path) && (inside.entry.distance <= (crossing.entry.distance + kTolerance)) &&
+                       (inside.exit.distance >= (crossing.exit.distance - kTolerance));
+            })) {
+            leavesArea = true;
+        }
+        if (authorisation.ceiling) {
+            // Heights change linearly between the positions of the path
+            consider(crossing.entry.position);
+            consider(crossing.exit.position);
+            const Prepared &path = paths[crossing.entry.path];
+            for (qsizetype i = 0; i < path.positions.count(); i++) {
+                if ((path.distances[i] > crossing.entry.distance) && (path.distances[i] < crossing.exit.distance)) {
+                    consider(path.positions[i]);
+                }
+            }
+        }
+    }
+    if (result.areasActive) {
+        for (const int index : result.areas) {
+            const GeoZone::Area &zoneArea = areas.value(index);
+            if (area && std::any_of(zoneArea.polygon.cbegin(), zoneArea.polygon.cend(), [&area](const QGeoCoordinate &vertex) { return !area->contains(vertex); })) {
+                leavesArea = true;
+            }
+            if (authorisation.ceiling) {
+                consider(zoneArea.highest);
+            }
+        }
+    }
+
+    QStringList issues;
+    if (authorisation.ceiling && (highest > (*authorisation.ceiling + kTolerance))) {
+        issues.append(tr("authorised up to %1, the flight reaches %2").arg(GeoZoneAuthorisations::heightText(*authorisation.ceiling, authorisation.ceilingAboveGround),
+                                                                           GeoZoneAuthorisations::heightText(highest, authorisation.ceilingAboveGround)));
+    } else if (authorisation.ceiling && unknownHeight) {
+        issues.append(tr("authorised up to %1, the height flown is unknown").arg(GeoZoneAuthorisations::heightText(*authorisation.ceiling, authorisation.ceilingAboveGround)));
+    }
+    if (leavesArea) {
+        issues.append(tr("the flight leaves the authorised area"));
+    }
+    return issues.join(QStringLiteral(", "));
+}
+
 GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &paths, const QList<GeoZone::Area> &areas) const
 {
     const QList<Prepared> prepared = _prepare(paths);
@@ -671,6 +756,12 @@ GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &p
             zoneResult.areas.append(a);
         }
     }
+
+    // Zones authorised within an area or below a ceiling the flight stays in
+    (void) result.zones.removeIf([this, &prepared, &areas](const ZoneResult &zoneResult) {
+        const GeoZoneAuthorisation *const authorisation = _policy.authorisation(zoneResult.zone);
+        return authorisation && authorisation->limitsPath() && _scopeIssue(zoneResult, *authorisation, prepared, areas).isEmpty();
+    });
 
     // Entered by a path first, by where the first path enters, then entered by areas, then passed above or below
     const auto orderKey = [](const ZoneResult &zoneResult) {

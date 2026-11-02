@@ -44,6 +44,10 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
 
     QSet<QString> nearbyZones;
     for (const GeoZone *zone : catalog.zonesInArea(area, policy)) {
+        // Authorised within an area or below a ceiling the vehicle is in
+        if (policy.authorisedAt(zone, position)) {
+            continue;
+        }
         const QString &key = zone->key();
         const State previous = _states.value(key, State::Away);
         const double nearLimit = distanceLimit + ((previous != State::Away) ? hysteresisDistance : 0);

@@ -21,6 +21,7 @@ private slots:
     void _testCrossings();
     void _testAltitudes();
     void _testUnknownTerrain();
+    void _testAuthorisationScope();
     void _testGreatCircles();
     void _testApproximations();
     void _testSchedules();
