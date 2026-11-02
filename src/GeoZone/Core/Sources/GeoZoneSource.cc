@@ -27,9 +27,16 @@ Q_LOGGING_CATEGORY(GeoZoneSourceLog, "qgc.geozone.geozonesource")
 
 namespace {
 
+/// Dates of the data itself, like its issue date or its validity
 QString _formatDate(const QDateTime &dateTime)
 {
     return dateTime.toUTC().toString(QStringLiteral("yyyy-MM-dd"));
+}
+
+/// Times the data was obtained, like when it was downloaded, in local time
+QString _formatDateTime(const QDateTime &dateTime)
+{
+    return QLocale().toString(dateTime.toLocalTime(), QLocale::ShortFormat);
 }
 
 size_t _footprintHash(const GeoZone::Volume &volume)
@@ -179,7 +186,10 @@ QString GeoZoneSource::detailsText() const
         parts.append(_provider);
     }
     if (_isDownloaded() && _checkedAt.isValid()) {
-        parts.append(tr("checked %1").arg(QLocale().toString(_checkedAt.toLocalTime(), QLocale::ShortFormat)));
+        parts.append(tr("checked %1").arg(_formatDateTime(_checkedAt)));
+    } else if (_loadedAt.isValid() && (!isFeed() || _issued.isValid())) {
+        // When the data was obtained, unless the date already tells
+        parts.append(tr("loaded %1").arg(_formatDateTime(_loadedAt)));
     }
     if (_skippedCount > 0) {
         parts.append(tr("unsupported features skipped: %1").arg(_skippedCount));
@@ -205,7 +215,7 @@ QString GeoZoneSource::_dateText() const
         return tr("issued %1").arg(_formatDate(_issued));
     }
     if (isFeed() && _loadedAt.isValid()) {
-        return tr("downloaded %1").arg(_formatDate(_loadedAt));
+        return tr("downloaded %1").arg(_formatDateTime(_loadedAt));
     }
     if (_fileDate.isValid()) {
         return tr("file from %1").arg(_formatDate(_fileDate));
@@ -521,4 +531,13 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
         _validityText = text;
         emit validityChanged();
     }
+}
+
+QString GeoZoneSource::timeText(const QDateTime &dateTime, const QDateTime &now)
+{
+    const QDateTime local = dateTime.toLocalTime();
+    if (local.date() == now.toLocalTime().date()) {
+        return tr("%1 today").arg(QLocale().toString(local.time(), QLocale::ShortFormat));
+    }
+    return _formatDateTime(dateTime);
 }

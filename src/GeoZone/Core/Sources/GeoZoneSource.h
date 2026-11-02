@@ -179,6 +179,10 @@ public:
     bool isLive() const { return GeoZoneProviders::isLive(_format); }
     static constexpr int liveStaleHours = 2;    ///< Age after which live data is outdated
 
+    /// @return Local date and time like "2026-11-02 09:41" in the short format of the locale, only the time with
+    ///         "today" when it is the date of now
+    static QString timeText(const QDateTime &dateTime, const QDateTime &now);
+
     /// How the feed is requested from its service, empty for plain feeds and files
     const GeoZoneService &service() const { return _service; }
     void setService(const GeoZoneService &service);

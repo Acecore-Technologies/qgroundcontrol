@@ -55,6 +55,14 @@ ToolIndicatorPage {
         ColumnLayout {
             spacing: ScreenTools.defaultFontPixelHeight / 2
 
+            // When the data was last pulled
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                text:               GeoZoneManager.repository.lastPulledText
+                visible:            text !== ""
+            }
+
             // Rather than a message at startup
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth
@@ -345,6 +353,7 @@ ToolIndicatorPage {
 
                 GeoZoneSummary {
                     Layout.fillWidth: true
+                    showPullTime:       false
                 }
             }
         }

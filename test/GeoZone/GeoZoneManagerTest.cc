@@ -16,6 +16,7 @@
 #include "GeoZoneSourceVersion.h"
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QLocale>
 
 using namespace GeoZoneTestHelpers;
 
@@ -1080,6 +1081,9 @@ void GeoZoneManagerTest::_testSourceValidity()
     QVERIFY(source.validityText().isEmpty());
     source.setResult(result, now, now.addDays(-30));
     QCOMPARE(source.validityText(), QStringLiteral("Data is 30 days old"));
+    // The file's own date is a date, when it was loaded a time
+    QVERIFY2(source.detailsText().contains(QStringLiteral("file from %1").arg(now.addDays(-30).toString(QStringLiteral("yyyy-MM-dd")))), qPrintable(source.detailsText()));
+    QVERIFY2(source.detailsText().contains(QStringLiteral("loaded %1").arg(QLocale().toString(now.toLocalTime(), QLocale::ShortFormat))), qPrintable(source.detailsText()));
 
     result.issued = now.addDays(-1);
     source.setResult(result, now, now.addDays(-30));
@@ -1102,6 +1106,10 @@ void GeoZoneManagerTest::_testSourceValidity()
     result.format = GeoZoneParser::Format::ED269;
     download.setResult(result, now.addDays(-30), now.addDays(-30));
     QCOMPARE(download.validityText(), QStringLiteral("Data is 30 days old"));
+    // Downloads tell the time
+    QVERIFY2(download.detailsText().contains(QStringLiteral("downloaded %1").arg(QLocale().toString(now.addDays(-30).toLocalTime(), QLocale::ShortFormat))),
+             qPrintable(download.detailsText()));
+    QVERIFY(!GeoZoneSource::timeText(now.addDays(-30), now).contains(QStringLiteral("today")));
     download.setCheckedAt(now.addDays(-1));
     QVERIFY(download.validityText().isEmpty());
     QCOMPARE(download.dataDate(), now.addDays(-30));
@@ -1113,6 +1121,9 @@ void GeoZoneManagerTest::_testSourceValidity()
     QString errorString;
     QVERIFY2(manager.repository()->loadFile(QStringLiteral(":/unittest/ed318_test.json"), errorString), qPrintable(errorString));
     QVERIFY(manager.repository()->validityWarning().startsWith(QStringLiteral("Test GeoZones: Data is")));
+    // with the time the data was last pulled
+    QCOMPARE(manager.repository()->lastPulledAt(), now);
+    QCOMPARE(manager.repository()->lastPulledText(), QStringLiteral("Data pulled %1 today").arg(QLocale().toString(now.toLocalTime().time(), QLocale::ShortFormat)));
 
     // Failed refreshes of a feed are retried after 5 minutes, then twice as long after each failure, within 20 %
     GeoZoneRefreshScheduler scheduler;

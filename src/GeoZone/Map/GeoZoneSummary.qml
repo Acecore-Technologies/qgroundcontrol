@@ -16,12 +16,13 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.GeoZone
 
-/// Number of loaded geozones, zones left out of the map and outdated data warning
+/// Number of loaded geozones, when the data was last pulled, zones left out of the map and outdated data warning
 ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
 
-    property int hiddenZoneCount: 0 ///< Smallest zones in the map view left out to limit the number of map items
+    property int    hiddenZoneCount:    0       ///< Smallest zones in the map view left out to limit the number of map items
+    property bool   showPullTime:       true    ///< Tells when the data was last pulled
 
     readonly property var _geoZoneManager:      GeoZoneManager
     readonly property int _activeSourceCount:   _geoZoneManager.sources.count - _geoZoneManager.disabledSourceCount
@@ -45,6 +46,13 @@ ColumnLayout {
         wrapMode:           Text.WordWrap
         text:               qsTr("Not shown: the %n smallest zone(s) in view. Zoom in to see them.", "", root.hiddenZoneCount)
         visible:            _geoZoneManager.display.visible && root.hiddenZoneCount > 0
+    }
+
+    QGCLabel {
+        Layout.fillWidth:   true
+        wrapMode:           Text.WordWrap
+        text:               _geoZoneManager.repository.lastPulledText
+        visible:            root.showPullTime && text !== ""
     }
 
     QGCLabel {
