@@ -364,6 +364,26 @@ QFont withoutLigatures(QFont font)
     return font;
 }
 
+/// Altitude the returns are modeled at, see GeoZoneReturnModel::Parameters::returnAltitude
+QString returnAltitudeText(const GeoZoneReturnModel::Parameters &parameters)
+{
+    if (!parameters.altitudeKnown()) {
+        return Text::tr("Return altitude unknown.");
+    }
+    const long altitude = std::lround(parameters.returnAltitude);
+    switch (parameters.autopilot) {
+    case GeoZoneReturnModel::Autopilot::PX4:
+        return Text::tr("Return altitude: %1 m above the destination, or the current altitude when higher.").arg(altitude);
+    case GeoZoneReturnModel::Autopilot::ArduPlane:
+        return (parameters.returnAltitude < 0) ? Text::tr("Returns at the current altitude.") : Text::tr("Return altitude: %1 m above home.").arg(altitude);
+    case GeoZoneReturnModel::Autopilot::ArduCopter:
+    case GeoZoneReturnModel::Autopilot::Unknown:
+        break;
+    }
+    return (parameters.returnAltitude <= 0) ? Text::tr("Returns at the current altitude.") :
+                                              Text::tr("Return altitude: %1 m above home, or the current altitude when higher.").arg(altitude);
+}
+
 QString returnAutopilotText(GeoZoneReturnModel::Autopilot autopilot)
 {
     switch (autopilot) {
@@ -523,9 +543,9 @@ GeoZoneBriefing GeoZoneBriefingExport::briefing() const
     }
 
     const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(vehicle);
-    mission.returnAssumptions.append(parameters.assumed ? tr("Returns are flown the way %1 does with the firmware's default parameters, the vehicle's being unknown.").arg(returnAutopilotText(parameters.autopilot)) :
-                                                          tr("Returns are flown the way %1 does with the vehicle's parameters.").arg(returnAutopilotText(parameters.autopilot)));
-    mission.returnAssumptions.append(parameters.altitudeKnown() ? tr("Return altitude parameter: %1 m.").arg(std::lround(parameters.returnAltitude)) : tr("Return altitude unknown."));
+    mission.returnAssumptions.append(parameters.assumed ? tr("Returns modeled on %1 with its default parameters, as the vehicle's are unknown.").arg(returnAutopilotText(parameters.autopilot)) :
+                                                          tr("Returns modeled on %1 with the vehicle's parameters.").arg(returnAutopilotText(parameters.autopilot)));
+    mission.returnAssumptions.append(returnAltitudeText(parameters));
     switch (parameters.breachAction) {
     case GeoZoneReturnModel::BreachAction::None:
         mission.returnAssumptions.append(tr("After a fence breach the vehicle doesn't return."));
@@ -537,7 +557,7 @@ GeoZoneBriefing GeoZoneBriefingExport::briefing() const
         mission.returnAssumptions.append(tr("After a fence breach the vehicle flies to the breach return point."));
         break;
     }
-    mission.returnAssumptions.append(tr("Returns checked from %n position(s) along the mission.", nullptr, static_cast<int>(path.contingencyStarts().count())));
+    mission.returnAssumptions.append(tr("Returns checked from positions along the mission: %1.").arg(path.contingencyStarts().count()));
 
     input.paths = path.evaluatorPaths(start, end);
     for (const GeoZoneMissionPath::Path &missionPath : path.paths()) {
@@ -709,7 +729,7 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
     vehicle.removeAll(QString());
     html += row(tr("Vehicle"), escaped(vehicle.isEmpty() ? tr("unknown") : vehicle.join(QStringLiteral(", "))));
     html += row(tr("Planned start"), escaped(mission.plannedStart.isValid() ? dateTimeText(mission.plannedStart) :
-                                                                              tr("None, the zones are checked whatever their schedule")));
+                                                                              tr("None, zones are checked regardless of their schedule")));
     if (mission.plannedStart.isValid()) {
         html += row(tr("Estimated end"), escaped(dateTimeText(mission.plannedEnd)));
     }
@@ -727,13 +747,13 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
     html += row(tr("Items"), escaped(QString::number(mission.itemCount)));
     html += row(tr("Returns"), escaped(mission.returnAssumptions.join(QChar(u'\n'))));
     QStringList summary;
-    summary.append(tr("The flight path enters %n zone(s)", nullptr, static_cast<int>(entered.count())));
+    summary.append(tr("Entered by the flight path: %1.").arg(entered.count()));
     if (restricted > 0) {
-        summary.append(tr("%n restricted while active and not authorised", nullptr, static_cast<int>(restricted)));
+        summary.append(tr("Of them restricted, active during the flight and not authorised: %1.").arg(restricted));
     }
-    summary.append(tr("returns would enter %n more", nullptr, static_cast<int>(contingency.count())));
-    summary.append(tr("%n restricted zone(s) nearby", nullptr, static_cast<int>(nearby.count())));
-    html += row(tr("Zones"), escaped(summary.join(QStringLiteral(", ")) + QChar(u'.')));
+    summary.append(tr("Entered only by returns: %1.").arg(contingency.count()));
+    summary.append(tr("Restricted within %1: %2.").arg(distanceText(briefing.nearbyDistance)).arg(nearby.count()));
+    html += row(tr("Zones"), escaped(summary.join(QChar(u'\n'))));
     if (briefing.approximations) {
         html += row(tr("Approximate"), escaped(tr("Some results are approximate, and conservative where data is missing: %1.")
                                                    .arg(GeoZonePathEvaluator::approximationTexts(briefing.approximations).join(QStringLiteral("; ")))));

@@ -1163,6 +1163,10 @@ void GeoZonePlanningTest::_testBriefingDocuments()
         QVERIFY2(html.contains(text), qPrintable(text));
     }
     QVERIFY(!html.contains(QStringLiteral("FAR")));
+    // Counts without "(s)" plurals, English has no translation choosing the forms
+    QVERIFY2(html.contains(QStringLiteral("Entered by the flight path: 2.<br>Of them restricted, active during the flight and not authorised: 1.<br>"
+                                          "Entered only by returns: 1.<br>Restricted within 500 m: 1.")), qPrintable(html));
+    QVERIFY(!html.contains(QStringLiteral("(s)")));
 
     // A4 PDF
     const QString pdfFile = dir.filePath(QStringLiteral("briefing.pdf"));
@@ -1366,7 +1370,10 @@ void GeoZonePlanningTest::_testBriefingExport()
     const QJsonObject mission = json[QStringLiteral("mission")].toObject();
     QCOMPARE(mission[QStringLiteral("itemCount")].toInt(), 2);
     QVERIFY(mission[QStringLiteral("distanceMeters")].toDouble() > 3900);
-    QVERIFY(!mission[QStringLiteral("returnAssumptions")].toArray().isEmpty());
+    const QStringList returnAssumptions = mission[QStringLiteral("returnAssumptions")].toVariant().toStringList();
+    QCOMPARE(returnAssumptions.value(0), QStringLiteral("Returns modeled on PX4 with its default parameters, as the vehicle's are unknown."));
+    QCOMPARE(returnAssumptions.value(1), QStringLiteral("Return altitude: 30 m above the destination, or the current altitude when higher."));
+    QVERIFY2(returnAssumptions.constLast().startsWith(QStringLiteral("Returns checked from positions along the mission: ")), qPrintable(returnAssumptions.constLast()));
     QVERIFY(mission[QStringLiteral("plannedStart")].isNull());
     QStringList identifiers;
     for (const QJsonValue &zone : json[QStringLiteral("zones")].toArray()) {
