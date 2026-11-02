@@ -43,6 +43,7 @@ private slots:
     void _testMissionReturnParameters();
     void _testAuthorisations();
     void _testBriefingDocuments();
+    void _testBriefingPrint();
     void _testBriefingExport();
     void _testPlanAudit();
     void _testPlanSave();

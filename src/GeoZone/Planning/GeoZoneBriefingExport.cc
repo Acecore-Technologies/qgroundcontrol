@@ -30,7 +30,9 @@
 #include <QtCore/QSaveFile>
 #include <QtGui/QAbstractTextDocumentLayout>
 #include <QtGui/QFontMetricsF>
+#include <QtGui/QPagedPaintDevice>
 #include <QtGui/QPainter>
+#include <QtGui/QPalette>
 #include <QtGui/QPdfWriter>
 #include <QtGui/QTextDocument>
 
@@ -296,35 +298,55 @@ QString zoneHtml(const Briefing::Zone &zone, const Briefing &briefing)
 
 QString style(bool forPrint)
 {
+    // Explicit colors, dark on white: the defaults follow the color theme of the desktop or the browser, which may be dark
     if (forPrint) {
         // The subset QTextDocument supports
         return QStringLiteral(
-            "body { font-size: 9pt; }"
-            "h1 { font-size: 15pt; }"
-            "h2 { font-size: 12pt; margin-top: 12px; }"
+            "body { font-size: 9pt; color: #111111; }"
+            "h1 { font-size: 15pt; color: #111111; }"
+            "h2 { font-size: 12pt; margin-top: 12px; color: #111111; }"
+            "p, li { color: #111111; }"
             "table { border-collapse: collapse; }"
-            "th { text-align: left; vertical-align: top; font-weight: bold; width: 25%; border-bottom: 1px solid #cccccc; }"
-            "td { vertical-align: top; border-bottom: 1px solid #cccccc; }"
+            "th { text-align: left; vertical-align: top; font-weight: bold; width: 25%; color: #333333; border-bottom: 1px solid #cccccc; }"
+            "td { vertical-align: top; color: #111111; border-bottom: 1px solid #cccccc; }"
             "table.zone { border: 1px solid #999999; }"
             "ul { margin-left: 0px; -qt-list-indent: 1; }"
             ".meta { color: #555555; }");
     }
     return QStringLiteral(
-        "body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;line-height:1.4;margin:0 auto;"
+        ":root{color-scheme:light}"
+        "html{background:#fff;color:#111}"
+        "body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#fff;color:#111;line-height:1.4;margin:0 auto;"
         "max-width:60em;padding:1em}"
-        "h1{font-size:1.5em;margin:0 0 .3em}"
-        "h2{font-size:1.2em;border-bottom:2px solid #333;margin-top:1.6em;padding-bottom:.1em}"
-        "table{border-collapse:collapse;width:100%;margin:.4em 0}"
-        "th,td{text-align:left;vertical-align:top;padding:.3em .5em;border-bottom:1px solid #ddd}"
+        "h1{font-size:1.5em;margin:0 0 .3em;color:#111}"
+        "h2{font-size:1.2em;border-bottom:2px solid #333;margin-top:1.6em;padding-bottom:.1em;color:#111}"
+        "table{border-collapse:collapse;width:100%;margin:.4em 0;background:#fff}"
+        "th,td{text-align:left;vertical-align:top;padding:.3em .5em;border-bottom:1px solid #ddd;color:#111}"
         "th{width:11em;color:#444}"
         "table.zone{border:1px solid #999;margin:1em 0;page-break-inside:avoid;break-inside:avoid}"
-        "td.zonetitle{padding:.4em .6em;border:none}"
+        "td.zonetitle{padding:.4em .6em;border:none;color:#fff}"
         "ul{margin:0;padding-left:1.2em}"
         ".meta{color:#555;font-size:.9em}"
-        "code{font-size:.9em;word-break:break-all}"
+        "code{font-size:.9em;word-break:break-all;color:#111}"
         "@media (max-width:40em){body{padding:.5em}th{display:block;width:auto;border:none;padding-bottom:0;font-size:.85em}"
         "td{display:block}tr{display:block;border-bottom:1px solid #ddd}td.zonetitle{display:block}}"
         "@media print{body{max-width:none;padding:0}h2{page-break-after:avoid;break-after:avoid}}");
+}
+
+/// Colors of the text of the PDF document where its style sets none: the default palette is the application's, which
+/// follows the color theme of the desktop and can have light text
+QPalette printPalette()
+{
+    QPalette palette;
+    for (const QPalette::ColorRole role : { QPalette::Text, QPalette::WindowText, QPalette::ButtonText }) {
+        palette.setColor(role, QColor(0x11, 0x11, 0x11));
+    }
+    for (const QPalette::ColorRole role : { QPalette::Base, QPalette::Window, QPalette::Button }) {
+        palette.setColor(role, Qt::white);
+    }
+    palette.setColor(QPalette::Link, QColor(0x15, 0x65, 0xc0));
+    palette.setColor(QPalette::LinkVisited, QColor(0x6a, 0x1b, 0x9a));
+    return palette;
 }
 
 QString returnAutopilotText(GeoZoneReturnModel::Autopilot autopilot)
@@ -651,7 +673,8 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
     const QString title = tr("Geozone briefing: %1").arg(mission.name);
     QString html;
     html += QStringLiteral("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n"
-                           "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
+                           "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+                           "<meta name=\"color-scheme\" content=\"light\">\n");
     html += QStringLiteral("<title>%1</title>\n<style>%2</style>\n</head><body>\n").arg(title.toHtmlEscaped(), style(forPrint));
     html += QStringLiteral("<h1>%1</h1>\n").arg(title.toHtmlEscaped());
     html += QStringLiteral("<p class=\"meta\">%1</p>\n")
@@ -745,21 +768,28 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
 
 bool GeoZoneBriefingExport::writePdf(const GeoZoneBriefing &briefing, const QString &fileName, QString &errorString)
 {
-    const QString title = tr("Geozone briefing: %1").arg(briefing.mission.name);
     QPdfWriter writer(fileName);
-    writer.setTitle(title);
+    writer.setTitle(tr("Geozone briefing: %1").arg(briefing.mission.name));
     writer.setCreator(QStringLiteral("QGroundControl"));
     writer.setResolution(300);
     writer.setPageLayout(QPageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF(15, 15, 15, 15), QPageLayout::Millimeter));
-
-    QPainter painter;
-    if (!painter.begin(&writer)) {
+    if (!paint(briefing, &writer) || (QFileInfo(fileName).size() <= 0)) {
         errorString = tr("Can't write %1").arg(fileName);
         return false;
     }
+    return true;
+}
+
+bool GeoZoneBriefingExport::paint(const GeoZoneBriefing &briefing, QPaintDevice *device)
+{
+    QPainter painter;
+    if (!device || !painter.begin(device)) {
+        return false;
+    }
+    QPagedPaintDevice *const pagedDevice = dynamic_cast<QPagedPaintDevice*>(device);
 
     QTextDocument document;
-    document.documentLayout()->setPaintDevice(&writer);
+    document.documentLayout()->setPaintDevice(device);
     QFont font = document.defaultFont();
     font.setPointSizeF(9);
     document.setDefaultFont(font);
@@ -767,19 +797,24 @@ bool GeoZoneBriefingExport::writePdf(const GeoZoneBriefing &briefing, const QStr
 
     QFont marginFont = font;
     marginFont.setPointSizeF(7.5);
-    const QFontMetricsF metrics(marginFont, &writer);
-    const QRectF page(QPointF(0, 0), QSizeF(writer.width(), writer.height()));
+    const QFontMetricsF metrics(marginFont, device);
+    const QRectF page(QPointF(0, 0), QSizeF(device->width(), device->height()));
     const double header = metrics.height() * 2;
     const double footer = metrics.height() * 2;
     const QSizeF body(page.width(), page.height() - header - footer);
     document.setPageSize(body);
     const int pageCount = document.pageCount();
+    const QString title = tr("Geozone briefing: %1").arg(briefing.mission.name);
     const QString date = dateTimeText(briefing.generatedAt);
+    QAbstractTextDocumentLayout::PaintContext context;
+    context.palette = printPalette();
 
-    for (int i = 0; i < pageCount; i++) {
-        if ((i > 0) && !writer.newPage()) {
-            errorString = tr("Can't write %1").arg(fileName);
+    for (int i = 0; i < (pagedDevice ? pageCount : 1); i++) {
+        if ((i > 0) && !pagedDevice->newPage()) {
             return false;
+        }
+        if (!pagedDevice) {
+            painter.fillRect(page, Qt::white);
         }
         painter.save();
         painter.setFont(marginFont);
@@ -794,21 +829,12 @@ bool GeoZoneBriefingExport::writePdf(const GeoZoneBriefing &briefing, const QStr
 
         painter.save();
         painter.translate(0, header - (i * body.height()));
-        QAbstractTextDocumentLayout::PaintContext context;
         context.clip = QRectF(0, i * body.height(), body.width(), body.height());
         painter.setClipRect(context.clip);
         document.documentLayout()->draw(&painter, context);
         painter.restore();
     }
-    if (!painter.end()) {
-        errorString = tr("Can't write %1").arg(fileName);
-        return false;
-    }
-    if (QFileInfo(fileName).size() <= 0) {
-        errorString = tr("Can't write %1").arg(fileName);
-        return false;
-    }
-    return true;
+    return painter.end();
 }
 
 bool GeoZoneBriefingExport::write(const GeoZoneBriefing &briefing, const QString &fileName, Format format, QString &errorString)

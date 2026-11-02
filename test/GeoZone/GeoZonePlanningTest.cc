@@ -24,6 +24,12 @@
 #include "RallyPointController.h"
 #include "Vehicle.h"
 
+#include <QtCore/QScopeGuard>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
+#include <QtGui/QPalette>
+
+#include <algorithm>
 #include <numeric>
 
 using namespace GeoZoneTestHelpers;
@@ -1162,6 +1168,54 @@ void GeoZonePlanningTest::_testBriefingDocuments()
     QVERIFY(content.startsWith("%PDF-"));
     QVERIFY(content.trimmed().endsWith("%%EOF"));
     QVERIFY(content.contains("/Type /Page"));
+}
+
+void GeoZonePlanningTest::_testBriefingPrint()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2027, 1, 1), QTime(8, 0)));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    BriefingMission mission(dir);
+    QString errorString;
+    QVERIFY2(mission.load(errorString), qPrintable(errorString));
+    const GeoZoneBriefing briefing = mission.build();
+
+    // The application palette follows the color theme of the desktop, the document stays dark on white with a dark one
+    const QPalette applicationPalette = QGuiApplication::palette();
+    const auto restorePalette = qScopeGuard([&applicationPalette]() { QGuiApplication::setPalette(applicationPalette); });
+    const auto palette = [](const QColor &text, const QColor &window) {
+        return QPalette(text, window, window.lighter(), window.darker(), window.darker(120), text, Qt::red, window, window);
+    };
+    const auto firstPage = [&briefing](const QPalette &applicationPalette) {
+        QGuiApplication::setPalette(applicationPalette);
+        // A4 at 100 dpi
+        QImage image(827, 1169, QImage::Format_RGB32);
+        image.setDotsPerMeterX(qRound(100 / 0.0254));
+        image.setDotsPerMeterY(qRound(100 / 0.0254));
+        image.fill(Qt::magenta);
+        return GeoZoneBriefingExport::paint(briefing, &image) ? image : QImage();
+    };
+    const QImage onDarkTheme = firstPage(palette(Qt::white, QColor(0x30, 0x30, 0x30)));
+    const QImage onLightTheme = firstPage(palette(Qt::black, Qt::white));
+    QVERIFY(!onDarkTheme.isNull());
+    QCOMPARE(onDarkTheme, onLightTheme);
+    QCOMPARE(onDarkTheme.pixel(0, onDarkTheme.height() - 1), qRgb(255, 255, 255));
+    // The text of the headings and tables is dark gray to black, the margins and the notes gray
+    qsizetype darkPixels = 0;
+    for (int y = 0; y < onDarkTheme.height(); y++) {
+        const QRgb *const line = reinterpret_cast<const QRgb*>(onDarkTheme.constScanLine(y));
+        for (int x = 0; x < onDarkTheme.width(); x++) {
+            const int red = qRed(line[x]);
+            const int green = qGreen(line[x]);
+            const int blue = qBlue(line[x]);
+            const bool neutral = ((std::max)({ red, green, blue }) - (std::min)({ red, green, blue })) < 16;
+            if (neutral && (qGray(line[x]) < 64)) {
+                darkPixels++;
+            }
+        }
+    }
+    QVERIFY2(darkPixels > 5000, qPrintable(QString::number(darkPixels)));
 }
 
 void GeoZonePlanningTest::_testBriefingExport()

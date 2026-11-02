@@ -20,6 +20,7 @@
 
 class GeoZoneManager;
 class MissionController;
+class QPaintDevice;
 
 /// Exports the pre-flight geozone briefing of the planned mission, see GeoZoneBriefing, as JSON for other tools, as a
 /// self-contained web page readable on phones, or as an A4 PDF document.
@@ -75,6 +76,11 @@ public:
     static QString toHtml(const GeoZoneBriefing &briefing, bool forPrint = false);
     /// Writes the briefing to an A4 PDF document, with its title, date and page numbers on each page
     static bool writePdf(const GeoZoneBriefing &briefing, const QString &fileName, QString &errorString);
+    /// Paints the pages of writePdf on the device: all of them on a QPagedPaintDevice such as a QPdfWriter, only the
+    /// first one on a white background on other devices such as images. The text is dark on white whatever the palette
+    /// of the application, which follows the color theme of the desktop.
+    /// @return false when the device can't be painted on
+    static bool paint(const GeoZoneBriefing &briefing, QPaintDevice *device);
     /// Writes the briefing in the format
     static bool write(const GeoZoneBriefing &briefing, const QString &fileName, Format format, QString &errorString);
 
