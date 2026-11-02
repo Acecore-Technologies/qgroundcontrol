@@ -217,7 +217,7 @@ The cost of a detour is the distance it adds; a climb or a descent counts 8 m of
 
 **Export Briefing...** in the Plan View **Geozones** panel or in the geozone banner above the map saves a briefing of the geozones of the planned mission. The file dialog proposes the folder and name of the open plan with `-briefing.pdf`; the extension of the file name chooses the format:
 
-- **PDF** (`.pdf`): an A4 document to print or take along, with the mission name, the date and page numbers on each page. It is printed in dark text on white whatever the color theme of the desktop.
+- **PDF** (`.pdf`): an A4 document to print or take along, with the mission name, the date and page numbers on each page. It is printed in dark text on white whatever the color theme of the desktop, and its text can be searched and copied.
 - **Web page** (`.html`): a single file without external resources, which reads well on a phone and prints cleanly, in dark text on white also in browsers with a dark theme.
 - **JSON** (`.json`): the same content for other tools, see below.
 

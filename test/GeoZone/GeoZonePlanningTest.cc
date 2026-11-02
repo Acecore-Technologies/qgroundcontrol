@@ -24,7 +24,12 @@
 #include "RallyPointController.h"
 #include "Vehicle.h"
 
+#include <QtCore/QHash>
+#include <QtCore/QProcess>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QScopeGuard>
+#include <QtCore/QStandardPaths>
+#include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 #include <QtGui/QPalette>
@@ -1170,6 +1175,85 @@ void GeoZonePlanningTest::_testBriefingDocuments()
     QVERIFY(content.contains("/Type /Page"));
 }
 
+namespace {
+
+/// Glyphs of the fonts of a PDF document written by Qt that the ToUnicode maps of the fonts don't map back to letters, so
+/// that text extraction loses them or gives ligatures like U+FB01 instead of "fi". Qt numbers the glyphs of each font in
+/// the order the document uses them, so the glyphs without characters are the gaps below the highest one mapped.
+/// @param fontCount Fonts with a ToUnicode map
+QStringList unmappedPdfGlyphs(const QByteArray &pdf, int &fontCount)
+{
+    static const QRegularExpression rangeExpression(QStringLiteral(R"(<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(\[[^\]]*\]|<[0-9A-Fa-f]+>))"));
+    static const QRegularExpression charExpression(QStringLiteral(R"(<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>)"));
+    static const QRegularExpression codeExpression(QStringLiteral(R"(<([0-9A-Fa-f]+)>)"));
+    const auto sections = [](const QString &cmap, const QString &begin, const QString &end) {
+        QStringList result;
+        qsizetype from = 0;
+        while ((from = cmap.indexOf(begin, from)) >= 0) {
+            const qsizetype to = cmap.indexOf(end, from);
+            if (to < 0) {
+                break;
+            }
+            result.append(cmap.mid(from + begin.size(), to - from - begin.size()));
+            from = to;
+        }
+        return result;
+    };
+
+    QStringList unmapped;
+    fontCount = 0;
+    qsizetype from = 0;
+    while ((from = pdf.indexOf("begincmap", from)) >= 0) {
+        const qsizetype to = pdf.indexOf("endcmap", from);
+        if (to < 0) {
+            break;
+        }
+        const QString cmap = QString::fromLatin1(pdf.mid(from, to - from));
+        from = to;
+        // Characters of the glyphs, 0 for none
+        QHash<uint, uint> characters;
+        for (const QString &section : sections(cmap, QStringLiteral("beginbfrange"), QStringLiteral("endbfrange"))) {
+            for (const QRegularExpressionMatch &match : rangeExpression.globalMatch(section)) {
+                const uint first = match.captured(1).toUInt(nullptr, 16);
+                const uint last = match.captured(2).toUInt(nullptr, 16);
+                const QString target = match.captured(3);
+                if (target.startsWith(QLatin1Char('['))) {
+                    uint code = first;
+                    for (const QRegularExpressionMatch &character : codeExpression.globalMatch(target)) {
+                        characters.insert(code++, character.captured(1).toUInt(nullptr, 16));
+                    }
+                } else {
+                    const uint character = codeExpression.match(target).captured(1).toUInt(nullptr, 16);
+                    for (uint code = first; code <= last; code++) {
+                        characters.insert(code, (character == 0) ? 0 : (character + code - first));
+                    }
+                }
+            }
+        }
+        for (const QString &section : sections(cmap, QStringLiteral("beginbfchar"), QStringLiteral("endbfchar"))) {
+            for (const QRegularExpressionMatch &match : charExpression.globalMatch(section)) {
+                characters.insert(match.captured(1).toUInt(nullptr, 16), match.captured(2).toUInt(nullptr, 16));
+            }
+        }
+        uint highest = 0;
+        for (auto it = characters.cbegin(); it != characters.cend(); ++it) {
+            highest = (it.value() != 0) ? (std::max)(highest, it.key()) : highest;
+        }
+        for (uint code = 1; code <= highest; code++) {
+            const uint character = characters.value(code);
+            // Latin ligatures of the Alphabetic Presentation Forms
+            const bool ligature = (character >= 0xFB00) && (character <= 0xFB06);
+            if ((character == 0) || ligature) {
+                unmapped.append(QStringLiteral("font %1 glyph %2 to U+%3").arg(fontCount).arg(code).arg(character, 4, 16, QLatin1Char('0')));
+            }
+        }
+        fontCount++;
+    }
+    return unmapped;
+}
+
+} // namespace
+
 void GeoZonePlanningTest::_testBriefingPrint()
 {
     ScopedEnvironment environment;
@@ -1216,6 +1300,30 @@ void GeoZonePlanningTest::_testBriefingPrint()
         }
     }
     QVERIFY2(darkPixels > 5000, qPrintable(QString::number(darkPixels)));
+
+    // The text of the PDF can be searched and copied, also in fonts with ligatures like the application's Open Sans
+    const QFont applicationFont = QGuiApplication::font();
+    const auto restoreFont = qScopeGuard([&applicationFont]() { QGuiApplication::setFont(applicationFont); });
+    QGuiApplication::setFont(QFont(QStringLiteral("Open Sans")));
+    const QString pdfFile = dir.filePath(QStringLiteral("briefing.pdf"));
+    QVERIFY2(GeoZoneBriefingExport::writePdf(briefing, pdfFile, errorString), qPrintable(errorString));
+    QFile pdf(pdfFile);
+    QVERIFY(pdf.open(QIODevice::ReadOnly));
+    int fontCount = 0;
+    const QStringList unmapped = unmappedPdfGlyphs(pdf.readAll(), fontCount);
+    QVERIFY(fontCount > 0);
+    QVERIFY2(unmapped.isEmpty(), qPrintable(unmapped.join(QStringLiteral(", "))));
+    // With the text extraction of Poppler when installed
+    const QString pdftotext = QStandardPaths::findExecutable(QStringLiteral("pdftotext"));
+    if (!pdftotext.isEmpty()) {
+        QProcess process;
+        process.start(pdftotext, { QStringLiteral("-enc"), QStringLiteral("UTF-8"), pdfFile, QStringLiteral("-") });
+        QVERIFY(process.waitForFinished(30000));
+        const QString text = QString::fromUtf8(process.readAllStandardOutput());
+        for (const QString &word : { QStringLiteral("Geozone briefing"), QStringLiteral("official"), QStringLiteral("flight path") }) {
+            QVERIFY2(text.contains(word), qPrintable(word));
+        }
+    }
 }
 
 void GeoZonePlanningTest::_testBriefingExport()

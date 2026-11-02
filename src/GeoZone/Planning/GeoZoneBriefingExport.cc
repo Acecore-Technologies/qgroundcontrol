@@ -29,6 +29,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSaveFile>
 #include <QtGui/QAbstractTextDocumentLayout>
+#include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QPagedPaintDevice>
 #include <QtGui/QPainter>
@@ -347,6 +348,20 @@ QPalette printPalette()
     palette.setColor(QPalette::Link, QColor(0x15, 0x65, 0xc0));
     palette.setColor(QPalette::LinkVisited, QColor(0x6a, 0x1b, 0x9a));
     return palette;
+}
+
+/// The font without ligatures: the text layer of Qt's PDF documents maps each glyph to one character at most, U+FB01 or
+/// nothing for a "fi" ligature, so words like "flight" couldn't be searched or copied
+QFont withoutLigatures(QFont font)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+    for (const QFont::Tag tag : { QFont::Tag("liga"), QFont::Tag("clig"), QFont::Tag("dlig") }) {
+        font.setFeature(tag, 0);
+    }
+#else
+    font.setStyleStrategy(QFont::PreferNoShaping);
+#endif
+    return font;
 }
 
 QString returnAutopilotText(GeoZoneReturnModel::Autopilot autopilot)
@@ -790,7 +805,7 @@ bool GeoZoneBriefingExport::paint(const GeoZoneBriefing &briefing, QPaintDevice 
 
     QTextDocument document;
     document.documentLayout()->setPaintDevice(device);
-    QFont font = document.defaultFont();
+    QFont font = withoutLigatures(document.defaultFont());
     font.setPointSizeF(9);
     document.setDefaultFont(font);
     document.setHtml(toHtml(briefing, true));
