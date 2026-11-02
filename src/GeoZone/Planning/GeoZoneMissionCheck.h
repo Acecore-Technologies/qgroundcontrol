@@ -63,6 +63,8 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QString              contingencyText     READ contingencyText                                NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QString              auditText           READ auditText                                      NOTIFY auditChanged FINAL)            ///< How the geozone data changed since the plan was saved, empty without changes
     Q_PROPERTY(QStringList          auditDetails        READ auditDetails                                   NOTIFY auditChanged FINAL)            ///< One line per change
+    /// Why the Remote ID isn't ready for the U-space airspace the mission enters, empty when it is or without U-space
+    Q_PROPERTY(QString              remoteIdText        READ remoteIdText                                   NOTIFY remoteIdChanged FINAL)
 
 public:
     explicit GeoZoneMissionCheck(QObject *parent = nullptr);
@@ -129,6 +131,7 @@ public:
     static QString fenceText(const QList<Entry> &entries);
     /// Which returns from which items enter the contingency zones, like "A return to launch from items 3–7 would enter X."
     QString contingencyText() const;
+    QString remoteIdText() const;
 
     /// Zones the mission and the returns from along it enter, whether or not they apply then, see GeoZonePlanAudit
     const QList<const GeoZone*> &relevantZones() const { return _relevantZones; }
@@ -209,6 +212,7 @@ signals:
     void zonesChanged();
     void geoFenceControllerChanged();
     void auditChanged();
+    void remoteIdChanged();
 
 private:
     /// @return The lines of warningText about the restricted zones entered

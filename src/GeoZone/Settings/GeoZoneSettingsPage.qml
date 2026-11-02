@@ -127,13 +127,20 @@ SettingsPage {
         Layout.fillWidth:       true
         Layout.preferredWidth:  _groupWidth
         heading:                qsTr("Records")
-        headingDescription:     qsTr("Each flight is recorded in the GeoZones folder of the telemetry folder when the vehicle disarms: its track, the zones it entered or passed near, the permits used and the alerts with your answers.")
+        headingDescription:     qsTr("Each flight is recorded in the GeoZones folder of the telemetry folder when the vehicle disarms: its track, the zones it entered or passed near, the permits used and the alerts with your answers. Records and exports can name the operator and aircraft of the Remote ID settings.")
 
         LabelledFactComboBox {
             Layout.fillWidth:   true
             label:              fact.shortDescription
             fact:               _geoZoneSettings.recordRetention
             indexModel:         false
+            visible:            fact.visible
+        }
+
+        FactCheckBoxSlider {
+            Layout.fillWidth:   true
+            text:               fact.shortDescription
+            fact:               _geoZoneSettings.includeOperatorDetails
             visible:            fact.visible
         }
     }

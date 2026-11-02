@@ -121,6 +121,7 @@ Rectangle {
         add(_outdatedText !== "" && !_dataInvalid ? 1 : 0, qsTr("data may be outdated"), "")
         add(_pendingAuthorisations.length, qsTr("%n authorisation(s) in the plan", "", _pendingAuthorisations.length), "")
         add(count(GeoZoneMissionCheck.USpace), qsTr("%n U-space", "", count(GeoZoneMissionCheck.USpace)), GeoZoneStyle.restrictionColor(GeoZone.USpace))
+        add(check.remoteIdText !== "" ? 1 : 0, qsTr("Remote ID not ready"), qgcPal.warningText)
         add(count(GeoZoneMissionCheck.Authorised), qsTr("%n authorised", "", count(GeoZoneMissionCheck.Authorised)), "")
         add(count(GeoZoneMissionCheck.Permitted), qsTr("%n without restriction", "", count(GeoZoneMissionCheck.Permitted)), GeoZoneStyle.restrictionColor(GeoZone.NoRestriction))
         add(count(GeoZoneMissionCheck.Inactive), qsTr("%n inactive at the flight time", "", count(GeoZoneMissionCheck.Inactive)), "")
@@ -437,6 +438,16 @@ Rectangle {
                     color:      control._dataInvalid ? qgcPal.colorRed : qgcPal.warningText
                     font.bold:  control._dataInvalid
                     text:       control._outdatedText
+                    visible:    text !== ""
+                }
+
+                // Shown with the U-space airspace the mission enters
+                QGCLabel {
+                    width:      parent.width
+                    wrapMode:   Text.WordWrap
+                    textFormat: Text.PlainText
+                    color:      qgcPal.warningText
+                    text:       check.remoteIdText
                     visible:    text !== ""
                 }
 

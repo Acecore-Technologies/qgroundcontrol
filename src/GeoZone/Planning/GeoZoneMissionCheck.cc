@@ -19,6 +19,7 @@
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
+#include "GeoZoneRemoteId.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneSourceVersion.h"
@@ -28,6 +29,9 @@
 #include "QmlObjectListModel.h"
 #include "RallyPoint.h"
 #include "RallyPointController.h"
+#include "RemoteIDManager.h"
+#include "RemoteIDSettings.h"
+#include "SettingsManager.h"
 #include "SimpleMissionItem.h"
 #include "Vehicle.h"
 
@@ -74,6 +78,12 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
             _worker->schedule();
         }
     });
+    // U-space airspace entered needs the Remote ID ready
+    (void) connect(this, &GeoZoneMissionCheck::zonesChanged, this, &GeoZoneMissionCheck::remoteIdChanged);
+    RemoteIDSettings *const remoteIdSettings = SettingsManager::instance()->remoteIDSettings();
+    for (Fact *const fact : { remoteIdSettings->operatorID(), remoteIdSettings->operatorIDValid(), remoteIdSettings->region() }) {
+        (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMissionCheck::remoteIdChanged);
+    }
     // The mission no longer makes the area of interest
     (void) connect(this, &QObject::destroyed, _manager, [manager = _manager, owner = static_cast<const QObject*>(this)]() {
         manager->repository()->setMissionArea(owner, QGeoRectangle());
@@ -184,8 +194,15 @@ void GeoZoneMissionCheck::_connectVehicle()
         (void) disconnect(_vehicle->parameterManager(), nullptr, _worker, nullptr);
     }
     _vehicle = vehicle;
+    emit remoteIdChanged();
     if (!_vehicle) {
         return;
+    }
+    if (RemoteIDManager *const remoteId = _vehicle->remoteIDManager()) {
+        for (const auto signal : { &RemoteIDManager::availableChanged, &RemoteIDManager::armStatusGoodChanged, &RemoteIDManager::armStatusErrorChanged,
+                                   &RemoteIDManager::commsGoodChanged, &RemoteIDManager::operatorIDGoodChanged }) {
+            (void) connect(remoteId, signal, _vehicleConnections, [this]() { emit remoteIdChanged(); });
+        }
     }
     // The defaults of the firmware and vehicle class apply until the parameters are known
     (void) connect(_vehicle, &Vehicle::firmwareTypeChanged, _vehicleConnections, [this]() { _worker->schedule(); });
@@ -389,6 +406,15 @@ QString GeoZoneMissionCheck::contingencyText() const
         lines.append(line);
     }
     return lines.join(QStringLiteral("\n"));
+}
+
+QString GeoZoneMissionCheck::remoteIdText() const
+{
+    if (zones(USpace).isEmpty()) {
+        return QString();
+    }
+    const QString problem = GeoZoneRemoteId::problem(GeoZoneRemoteId::status(_vehicle));
+    return problem.isEmpty() ? QString() : tr("The mission enters U-space airspace, which requires Remote ID. %1").arg(problem);
 }
 
 QString GeoZoneMissionCheck::infoText() const

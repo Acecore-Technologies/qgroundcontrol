@@ -13,6 +13,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZonePlanning.h"
+#include "GeoZoneRemoteId.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneText.h"
@@ -496,6 +497,7 @@ GeoZoneBriefing GeoZoneBriefingExport::briefing() const
     input.sources = GeoZoneSourceVersion::covering(sources, path.box());
 
     GeoZoneBriefing briefing = GeoZoneBriefing::build(_manager->catalog(), input);
+    briefing.operatorDetails = GeoZoneRemoteId::exportedOperatorDetails();
     // Nearby zones may be of sources just outside the paths
     for (const GeoZoneBriefing::Zone &zone : std::as_const(briefing.zones)) {
         const bool listed = std::any_of(briefing.sources.cbegin(), briefing.sources.cend(), [&zone](const GeoZoneSourceVersion &source) { return source.key == zone.sourceKey; });
@@ -620,6 +622,8 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
     json.insert(QStringLiteral("nearbyDistanceMeters"), briefing.nearbyDistance);
     json.insert(QStringLiteral("approximations"), QJsonArray::fromStringList(GeoZonePathEvaluator::approximationTexts(briefing.approximations, true)));
     json.insert(QStringLiteral("mission"), missionJson);
+    json.insert(QStringLiteral("operator"), GeoZoneOperatorDetails::operatorJson(briefing.operatorDetails));
+    json.insert(QStringLiteral("aircraft"), GeoZoneOperatorDetails::aircraftJson(briefing.operatorDetails));
     json.insert(QStringLiteral("zones"), zones);
     json.insert(QStringLiteral("sources"), sources);
     return json;
@@ -668,6 +672,17 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
                                                               altitudeText(mission.home.altitude()))));
     }
     html += row(tr("Items"), escaped(QString::number(mission.itemCount)));
+    if (const std::optional<GeoZoneOperatorDetails> &details = briefing.operatorDetails) {
+        QStringList operatorText = { details->operatorId, details->operatorIdType.isEmpty() ? QString() : tr("type %1").arg(details->operatorIdType),
+                                     details->region.isEmpty() ? QString() : tr("%1 rules").arg(details->region) };
+        operatorText.removeAll(QString());
+        html += row(tr("Operator"), escaped(operatorText.isEmpty() ? tr("not set") : operatorText.join(QStringLiteral(", "))));
+        const QString uasId = details->uasIdType.isEmpty() ? details->uasId : tr("%1 (%2)").arg(details->uasId, details->uasIdType);
+        QStringList aircraftText = { details->uasId.isEmpty() ? QString() : uasId, details->uaType,
+                                     details->category.isEmpty() ? QString() : tr("category %1").arg(details->category), details->aircraftClass };
+        aircraftText.removeAll(QString());
+        html += row(tr("Aircraft"), escaped(aircraftText.isEmpty() ? tr("not set") : aircraftText.join(QStringLiteral(", "))));
+    }
     html += row(tr("Returns"), escaped(mission.returnAssumptions.join(QChar(u'\n'))));
     QStringList summary;
     summary.append(tr("Entered by the flight path: %1.").arg(entered.count()));

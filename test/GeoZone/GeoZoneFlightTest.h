@@ -26,4 +26,5 @@ private slots:
     void _testGuidedReturnLandMission();
     void _testPreflightChecklist();
     void _testFlightRecord();
+    void _testRemoteId();
 };

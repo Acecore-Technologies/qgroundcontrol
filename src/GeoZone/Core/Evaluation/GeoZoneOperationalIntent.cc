@@ -498,6 +498,8 @@ QJsonObject GeoZoneOperationalIntent::toJson() const
     json.insert(QStringLiteral("generatedAt"), jsonTime(generatedAt));
     json.insert(QStringLiteral("generator"), QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion()).trimmed());
     json.insert(QStringLiteral("flight"), flightJson);
+    json.insert(QStringLiteral("operator"), GeoZoneOperatorDetails::operatorJson(operatorDetails));
+    json.insert(QStringLiteral("aircraft"), GeoZoneOperatorDetails::aircraftJson(operatorDetails));
     json.insert(QStringLiteral("parameters"), parametersJson);
     json.insert(QStringLiteral("uSpaceAirspaces"), airspaces);
     json.insert(QStringLiteral("authorisations"), authorisationsJson);

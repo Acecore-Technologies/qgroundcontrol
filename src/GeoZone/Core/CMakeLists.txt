@@ -103,6 +103,8 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneMissionItem.h
     Evaluation/GeoZoneOperationalIntent.cc
     Evaluation/GeoZoneOperationalIntent.h
+    Evaluation/GeoZoneOperatorDetails.cc
+    Evaluation/GeoZoneOperatorDetails.h
     Evaluation/GeoZonePathEvaluator.cc
     Evaluation/GeoZonePathEvaluator.h
     Evaluation/GeoZonePlanAudit.cc

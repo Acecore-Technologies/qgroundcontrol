@@ -14,6 +14,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZonePlanning.h"
+#include "GeoZoneRemoteId.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
 #include "Vehicle.h"
@@ -41,6 +42,7 @@ std::optional<GeoZoneOperationalIntent> GeoZoneOperationalIntentExport::intent(Q
 
     GeoZoneOperationalIntent intent;
     intent.generatedAt = GeoZoneEnvironment::currentDateTimeUtc();
+    intent.operatorDetails = GeoZoneRemoteId::exportedOperatorDetails();
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController);
     const QDateTime flightEnd = path.flightEnd(start, end);
     if (flightEnd.addSecs(intent.parameters.timeBuffer) <= intent.generatedAt) {

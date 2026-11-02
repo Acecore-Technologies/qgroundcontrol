@@ -20,6 +20,7 @@
 #include <optional>
 
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneOperatorDetails.h"
 #include "GeoZonePathEvaluator.h"
 
 /// Operational intent of a planned flight, the request for a U-space or UTM flight authorisation: 4D volumes which
@@ -101,6 +102,8 @@ public:
     QList<GeoZoneAuthorisation> authorisations;     ///< Held for zones the flight enters, their permits referencing the approvals
     QStringList notes;                              ///< Assumptions of the volumes, like the repeats of the mission
     int priority = 0;                               ///< Of the ASTM F3548-21 operational intent, as the regulator defines
+    /// Operator and aircraft of the request, set by the application when the user includes them
+    std::optional<GeoZoneOperatorDetails> operatorDetails;
     QDateTime generatedAt;                          ///< UTC
 
     /// @return The volumes containing the paths, which need times and altitudes, nothing on errors with errorString set
@@ -113,8 +116,9 @@ public:
     QDateTime timeEnd() const;
 
     /// @return The document of the export: the description of the flight with "schema" jsonSchema and "version"
-    ///         jsonVersion, and "operational_intent" with the ASTM F3548-21 "details" and the "reference" fields known
-    ///         before a USS submits it: "state", "time_start" and "time_end"
+    ///         jsonVersion, the "operator" and "aircraft" (null when not included), and "operational_intent" with the
+    ///         ASTM F3548-21 "details" and the "reference" fields known before a USS submits it: "state", "time_start"
+    ///         and "time_end"
     QJsonObject toJson() const;
     /// @return The ASTM F3548-21 OperationalIntentDetails of the volumes
     QJsonObject detailsJson() const;

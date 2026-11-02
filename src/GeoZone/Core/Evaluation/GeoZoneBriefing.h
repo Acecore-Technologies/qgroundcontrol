@@ -21,6 +21,7 @@
 #include <optional>
 
 #include "GeoZone.h"
+#include "GeoZoneOperatorDetails.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneSourceVersion.h"
 
@@ -166,6 +167,8 @@ public:
     double nearbyDistance = defaultNearbyDistance;
     /// Why the evaluation of the flight and contingency paths is approximate, see GeoZonePathEvaluator::Approximation
     GeoZonePathEvaluator::Approximations approximations;
+    /// Operator and aircraft, set by the application when the user includes them, see GeoZoneOperatorDetails
+    std::optional<GeoZoneOperatorDetails> operatorDetails;
 
     /// @return The briefing of the paths through the zones of the catalog
     static GeoZoneBriefing build(const GeoZoneCatalog &catalog, const Input &input);

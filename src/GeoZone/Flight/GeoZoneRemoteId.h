@@ -11,10 +11,15 @@
 
 #include <QtCore/QString>
 
+#include <optional>
+
+#include "GeoZoneOperatorDetails.h"
+
 class Vehicle;
 
 /// The Remote ID of QGroundControl's Remote ID settings and of the vehicle's RemoteIDManager, which flights in U-space
-/// airspace need: for the pre-flight checklist and the mission check
+/// airspace need: for the pre-flight checklist and the mission check, and the operator and aircraft details of the
+/// exports
 namespace GeoZoneRemoteId {
 
 /// Whether the Remote ID is ready for a flight, see RemoteIDManager
@@ -33,5 +38,10 @@ Status status(Vehicle *vehicle);
 /// @return Why the Remote ID isn't ready for a flight in U-space, empty when it is. Without a vehicle, only the
 ///         operator ID is checked.
 QString problem(const Status &status);
+
+/// @return The operator and aircraft of the Remote ID settings
+GeoZoneOperatorDetails operatorDetails();
+/// @return The operator details when the exports include them, see GeoZoneSettings::includeOperatorDetails
+std::optional<GeoZoneOperatorDetails> exportedOperatorDetails();
 
 } // namespace GeoZoneRemoteId

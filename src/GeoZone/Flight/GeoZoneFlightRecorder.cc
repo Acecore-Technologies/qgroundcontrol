@@ -20,6 +20,7 @@
 #include "GeoZoneMissionExport.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
+#include "GeoZoneRemoteId.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneSourceVersion.h"
@@ -399,7 +400,8 @@ QJsonObject GeoZoneFlightRecorder::record(const Flight &flight) const
     input.authorisations = _manager->planning()->authorisations();
     input.sources = GeoZoneSourceVersion::covering(_manager->repository()->sourceList(), GeoZoneBox::fromPath(coordinates));
     input.now = flight.end;
-    const GeoZoneBriefing briefing = GeoZoneBriefing::build(_manager->catalog(), input);
+    GeoZoneBriefing briefing = GeoZoneBriefing::build(_manager->catalog(), input);
+    briefing.operatorDetails = GeoZoneRemoteId::exportedOperatorDetails();
     QJsonObject json = GeoZoneBriefingExport::toJson(briefing);
     json.insert(QStringLiteral("schema"), QString::fromLatin1(jsonSchema));
     json.insert(QStringLiteral("version"), jsonVersion);

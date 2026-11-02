@@ -13,6 +13,7 @@
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneFlightRecorder.h"
+#include "GeoZoneBriefingExport.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
@@ -20,6 +21,8 @@
 #include "GeoZoneMonitor.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePreflightCheck.h"
+#include "GeoZoneOperationalIntent.h"
+#include "GeoZoneRemoteId.h"
 #include "GeoZoneReturnModel.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSourceRepository.h"
@@ -760,6 +763,98 @@ void GeoZoneFlightTest::_testFlightRecord()
     QCOMPARE(recorder.removeOldRecords(QDate(2026, 6, 15), 365), 1);
     QVERIFY(!old.exists());
     QVERIFY(QFile::exists(path));
+    manager.repository()->clear();
+}
+
+void GeoZoneFlightTest::_testRemoteId()
+{
+    ScopedEnvironment environment;
+    RemoteIDSettings *const remoteId = SettingsManager::instance()->remoteIDSettings();
+    Fact *const include = GeoZoneSettings::instance()->includeOperatorDetails();
+    const QList<Fact*> facts = { include, remoteId->operatorID(), remoteId->basicID(), remoteId->basicIDUaType(), remoteId->classificationType(),
+                                 remoteId->categoryEU(), remoteId->classEU() };
+    const auto restore = qScopeGuard([&facts]() {
+        for (Fact *const fact : facts) {
+            fact->setRawValue(fact->rawDefaultValue());
+        }
+    });
+    remoteId->operatorID()->setRawValue(QString());
+
+    // Why the Remote ID isn't ready
+    GeoZoneRemoteId::Status status;
+    QVERIFY(GeoZoneRemoteId::problem(status).contains(QStringLiteral("operator ID")));
+    status.operatorIdGood = true;
+    QVERIFY(GeoZoneRemoteId::problem(status).isEmpty());
+    status.vehicle = true;
+    QCOMPARE(GeoZoneRemoteId::problem(status), QStringLiteral("The vehicle reports no Remote ID."));
+    status.available = true;
+    status.commsGood = true;
+    status.armStatusError = QStringLiteral("No GPS");
+    QCOMPARE(GeoZoneRemoteId::problem(status), QStringLiteral("The Remote ID isn't ready to arm: No GPS."));
+    status.armStatusGood = true;
+    QVERIFY(GeoZoneRemoteId::problem(status).isEmpty());
+
+    // The mission check warns while the mission enters U-space airspace
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), center, 300),
+    }), errorString), qPrintable(errorString));
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::USpace).count(), 1);
+    QVERIFY2(check.remoteIdText().startsWith(QStringLiteral("The mission enters U-space airspace, which requires Remote ID. The operator ID isn't set")),
+             qPrintable(check.remoteIdText()));
+    QSignalSpy remoteIdSpy(&check, &GeoZoneMissionCheck::remoteIdChanged);
+    remoteId->operatorID()->setRawValue(QStringLiteral("FIN87astrdge12k8"));
+    QVERIFY(remoteIdSpy.count() > 0);
+    QVERIFY(check.remoteIdText().isEmpty());
+    missionController->removeAll();
+    remoteId->operatorID()->setRawValue(QString());
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::USpace).isEmpty());
+    QVERIFY(check.remoteIdText().isEmpty());
+
+    // The exports name the operator and aircraft only when included
+    remoteId->operatorID()->setRawValue(QStringLiteral("FIN87astrdge12k8"));
+    remoteId->basicID()->setRawValue(QStringLiteral("1581F5FJD239C00DW22E"));
+    remoteId->basicIDUaType()->setRawValue(2);
+    remoteId->classificationType()->setRawValue(1);
+    remoteId->categoryEU()->setRawValue(2);
+    remoteId->classEU()->setRawValue(3);
+    QVERIFY(!GeoZoneRemoteId::exportedOperatorDetails());
+    GeoZoneBriefing briefing;
+    briefing.operatorDetails = GeoZoneRemoteId::exportedOperatorDetails();
+    QVERIFY(GeoZoneBriefingExport::toJson(briefing)[QStringLiteral("operator")].isNull());
+    QVERIFY(!GeoZoneBriefingExport::toHtml(briefing).contains(QStringLiteral("FIN87astrdge12k8")));
+
+    include->setRawValue(true);
+    const std::optional<GeoZoneOperatorDetails> details = GeoZoneRemoteId::exportedOperatorDetails();
+    QVERIFY(details);
+    QCOMPARE(details->operatorIdType, QStringLiteral("CAA"));
+    QCOMPARE(details->uasIdType, QStringLiteral("CAA"));
+    QCOMPARE(details->uaType, QStringLiteral("Helicopter/Multirrotor"));
+    QCOMPARE(details->category, QStringLiteral("Specific"));
+    QCOMPARE(details->aircraftClass, QStringLiteral("Class 2"));
+    briefing.operatorDetails = details;
+    const QJsonObject briefingJson = GeoZoneBriefingExport::toJson(briefing);
+    QCOMPARE(briefingJson[QStringLiteral("operator")][QStringLiteral("id")].toString(), QStringLiteral("FIN87astrdge12k8"));
+    QCOMPARE(briefingJson[QStringLiteral("aircraft")][QStringLiteral("uasId")].toString(), QStringLiteral("1581F5FJD239C00DW22E"));
+    QVERIFY(GeoZoneBriefingExport::toHtml(briefing).contains(QStringLiteral("FIN87astrdge12k8, type CAA")));
+    GeoZoneOperationalIntent intent;
+    QVERIFY(intent.toJson()[QStringLiteral("aircraft")].isNull());
+    intent.operatorDetails = details;
+    QCOMPARE(intent.toJson()[QStringLiteral("aircraft")][QStringLiteral("class")].toString(), QStringLiteral("Class 2"));
+    QCOMPARE(intent.toJson()[QStringLiteral("operator")][QStringLiteral("region")].toString(), QStringLiteral("FAA"));
     manager.repository()->clear();
 }
 

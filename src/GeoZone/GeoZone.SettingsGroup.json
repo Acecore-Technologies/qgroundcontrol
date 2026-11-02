@@ -69,6 +69,13 @@
     "default":      0
 },
 {
+    "name":         "includeOperatorDetails",
+    "shortDesc":    "Include operator details in exports",
+    "longDesc":     "Add the operator ID and the aircraft's ID, type, EU category and class of the Remote ID settings to the exported briefings and operational intents and to the flight records.",
+    "type":         "bool",
+    "default":      false
+},
+{
     "name":         "approachDistance",
     "shortDesc":    "Approach alert distance",
     "longDesc":     "Horizontal distance from a geozone at which the vehicle is alerted that it approaches the zone. Vertically, it approaches a zone within 30 m below its floor or above its ceiling.",

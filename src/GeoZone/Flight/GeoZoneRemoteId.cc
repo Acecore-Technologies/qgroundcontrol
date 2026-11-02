@@ -9,6 +9,7 @@
 
 #include "GeoZoneRemoteId.h"
 #include "Fact.h"
+#include "GeoZoneSettings.h"
 #include "RemoteIDManager.h"
 #include "RemoteIDSettings.h"
 #include "SettingsManager.h"
@@ -69,6 +70,35 @@ QString problem(const Status &status)
         }
     }
     return problems.join(QLatin1Char(' '));
+}
+
+GeoZoneOperatorDetails operatorDetails()
+{
+    RemoteIDSettings *const settings = SettingsManager::instance()->remoteIDSettings();
+    const auto text = [](Fact *fact) { return fact->rawValue().toString().trimmed(); };
+    // Enumerated settings by their text, empty when undeclared
+    const auto enumText = [](Fact *fact) { return (fact->rawValue().toInt() == 0) ? QString() : fact->enumStringValue(); };
+    GeoZoneOperatorDetails details;
+    details.operatorId = text(settings->operatorID());
+    details.operatorIdType = details.operatorId.isEmpty() ? QString() : settings->operatorIDType()->enumStringValue();
+    details.region = settings->region()->enumStringValue();
+    details.uasId = text(settings->basicID());
+    details.uasIdType = details.uasId.isEmpty() ? QString() : enumText(settings->basicIDType());
+    details.uaType = enumText(settings->basicIDUaType());
+    // The category and class are declared with the EU classification only
+    if (settings->classificationType()->rawValue().toInt() != 0) {
+        details.category = enumText(settings->categoryEU());
+        details.aircraftClass = enumText(settings->classEU());
+    }
+    return details;
+}
+
+std::optional<GeoZoneOperatorDetails> exportedOperatorDetails()
+{
+    if (!GeoZoneSettings::instance()->includeOperatorDetails()->rawValue().toBool()) {
+        return std::nullopt;
+    }
+    return operatorDetails();
 }
 
 } // namespace GeoZoneRemoteId
