@@ -120,6 +120,8 @@ QVariant GeoZoneFenceChoiceModel::data(const QModelIndex &index, int role) const
         return row.restrictionText;
     case ProximityTextRole:
         return row.proximityText;
+    case EnteredRole:
+        return row.entered;
     case PointsRole:
         return row.points;
     case SimplifyToleranceRole:
@@ -145,6 +147,7 @@ QHash<int, QByteArray> GeoZoneFenceChoiceModel::roleNames() const
         { RestrictionRole,          "restriction" },
         { RestrictionTextRole,      "restrictionText" },
         { ProximityTextRole,        "proximityText" },
+        { EnteredRole,              "entered" },
         { PointsRole,               "points" },
         { SimplifyToleranceRole,    "simplifyTolerance" },
         { SelectedRole,             "selected" },

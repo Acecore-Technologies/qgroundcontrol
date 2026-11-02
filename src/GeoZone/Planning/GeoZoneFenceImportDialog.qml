@@ -20,7 +20,8 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
 /// Fits loaded geozones into the vehicle's fence as exclusion fences, the zones of the planned flight first, and
-/// uploads the fence to the vehicle and verifies it
+/// uploads the fence to the vehicle and verifies it. The explanations are behind the Help toggle, the zones left out
+/// are listed on demand.
 QGCPopupDialog {
     id:                     control
     title:                  qsTr("Fences from Geozones")
@@ -127,6 +128,7 @@ QGCPopupDialog {
             required property bool      included
             required property bool      includable
             required property string    reason
+            required property bool      entered
 
             // Include the zone if it fits. Zones without a fence of their own can't be included.
             QGCCheckBox {
@@ -173,7 +175,9 @@ QGCPopupDialog {
                     textFormat:         Text.PlainText
                     elide:              Text.ElideRight
                     font.pointSize:     ScreenTools.smallFontPointSize
-                    color:              choiceRow.selected ? qgcPal.text : qgcPal.warningText
+                    // Only prohibited zones the flight enters stand out among those left out
+                    color:              choiceRow.selected ? qgcPal.text :
+                                            ((choiceRow.entered && choiceRow.restriction === GeoZone.Prohibited) ? qgcPal.warningText : qgcPal.colorGrey)
                 }
             }
         }
@@ -182,9 +186,28 @@ QGCPopupDialog {
     ColumnLayout {
         spacing: _margin
 
+        RowLayout {
+            Layout.preferredWidth:  _contentWidth
+            spacing:                _margin
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                text:               qsTr("Exclusion fences for the zones which fit, those the flight enters or passes near first.")
+            }
+
+            QGCButton {
+                id:         helpButton
+                text:       qsTr("Help")
+                checkable:  true
+            }
+        }
+
         QGCLabel {
             Layout.preferredWidth:  _contentWidth
             wrapMode:               Text.WordWrap
+            font.pointSize:         ScreenTools.smallFontPointSize
+            visible:                helpButton.checked
             text:                   qsTr("Replaces the fences added from geozones with exclusion fences for the zones which fit into the vehicle's fence, those the flight enters or passes near first. Altitude limits and polygon holes are not transferred to the fence.")
         }
 
@@ -261,7 +284,7 @@ QGCPopupDialog {
             wrapMode:               Text.WordWrap
             font.pointSize:         ScreenTools.smallFontPointSize
             text:                   qsTr("Fences are simplified only as far as needed to fit. Simplified fences enclose the zone, extending up to twice the tolerance beyond it.")
-            visible:                simplifyCombo.currentIndex > 0
+            visible:                helpButton.checked && simplifyCombo.currentIndex > 0
         }
 
         // Capacity of the vehicle's fence
@@ -289,6 +312,7 @@ QGCPopupDialog {
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
                 text:               (_capacity.note ?? "") + ((_capacity.keptItems ?? 0) > 0 ? " " + qsTr("Drawn fences and the breach return point take %n point(s).", "", _capacity.keptItems) : "")
+                visible:            helpButton.checked && text !== ""
             }
 
             QGCLabel {
@@ -305,6 +329,7 @@ QGCPopupDialog {
             wrapMode:               Text.WordWrap
             font.pointSize:         ScreenTools.smallFontPointSize
             text:                   qsTr("Checked zones are included in priority order while they fit, unchecked zones are left out. Uncheck a zone to make room for the zones after it. Zones without a fence of their own, like those with the same area as a zone before them, follow that zone and can't be checked.")
+            visible:                helpButton.checked
         }
 
         RowLayout {
@@ -334,14 +359,26 @@ QGCPopupDialog {
             delegate:               choiceDelegate
         }
 
-        QGCLabel {
+        // Collapsed, the zones which don't fit can be many
+        RowLayout {
             Layout.preferredWidth:  _contentWidth
-            text:                   importer.leftOutCount > leftOutList.count ?
-                                        qsTr("Left out (%1, the first %2 listed)").arg(importer.leftOutCount).arg(leftOutList.count) :
-                                        qsTr("Left out (%1)").arg(importer.leftOutCount)
-            elide:                  Text.ElideRight
-            font.bold:              true
+            spacing:                _margin
             visible:                importer.leftOutCount > 0
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                text:               importer.leftOutCount > leftOutList.count ?
+                                        qsTr("%1 left out, the first %2 listed").arg(importer.leftOutCount).arg(leftOutList.count) :
+                                        qsTr("%1 left out").arg(importer.leftOutCount)
+                elide:              Text.ElideRight
+                font.bold:          true
+            }
+
+            QGCButton {
+                id:         leftOutButton
+                text:       checked ? qsTr("Hide") : qsTr("Show")
+                checkable:  true
+            }
         }
 
         QGCListView {
@@ -351,7 +388,7 @@ QGCPopupDialog {
             clip:                   true
             spacing:                ScreenTools.defaultFontPixelHeight / 4
             model:                  GeoZoneSortFilterModel { sourceModel: importer.choices; filterRole: GeoZoneFenceChoiceModel.SelectedRole; filterRegularExpression: /false/ }
-            visible:                importer.leftOutCount > 0
+            visible:                importer.leftOutCount > 0 && leftOutButton.checked
             delegate:               choiceDelegate
         }
 
@@ -376,7 +413,7 @@ QGCPopupDialog {
                 wrapMode:           Text.WordWrap
                 text:               _upload.canUpload ? qsTr("Adds the fences to the plan and uploads the plan's fence, then reads it back to verify it.") : qsTr("Connect a vehicle supporting fences to upload.")
                 font.pointSize:     ScreenTools.smallFontPointSize
-                visible:            _upload.state === GeoZoneFenceUpload.Idle
+                visible:            _upload.state === GeoZoneFenceUpload.Idle && (helpButton.checked || !_upload.canUpload)
             }
 
             QGCLabel {

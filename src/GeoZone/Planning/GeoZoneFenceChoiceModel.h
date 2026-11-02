@@ -13,7 +13,7 @@
 #include <QtCore/QString>
 
 /// Zones of a fence selection, see GeoZoneFenceImporter, with roles key, name, restriction, restrictionText,
-/// proximityText, points, simplifyTolerance, selected, included, includable and reason. Views filter the selected zones
+/// proximityText, entered, points, simplifyTolerance, selected, included, includable and reason. Views filter the selected zones
 /// and those left out by SelectedRole. Rows keep their order relative to each other from one selection to the next, so
 /// rows are inserted, removed and updated in place: views keep their delegates and their scroll position while zones
 /// move between lists.
@@ -29,6 +29,7 @@ public:
         int restriction = 0;            ///< GeoZone::Restriction
         QString restrictionText;
         QString proximityText;          ///< Like "1.2 km from the flight"
+        bool entered = false;           ///< The planned flight enters the zone
         int points = 0;                 ///< Fence items
         double simplifyTolerance = 0;   ///< Meters
         bool selected = false;
@@ -45,6 +46,7 @@ public:
         RestrictionRole,
         RestrictionTextRole,
         ProximityTextRole,
+        EnteredRole,
         PointsRole,
         SimplifyToleranceRole,
         SelectedRole,

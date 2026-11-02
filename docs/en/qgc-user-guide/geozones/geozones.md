@@ -277,7 +277,9 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
 1. Select when the zones must be **Active**: **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
 1. Select how far fences may be simplified to fit (**Simplify up to**). Fences are only simplified as far as needed, the most important zones the least. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
-1. Check the zones selected and those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
+1. Check the zones selected and, with **Show**, those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
+
+**Help** shows the explanations of the dialog. The selected zones are listed first; the zones left out are collapsed to a line like _193 left out_ and listed in gray, except prohibited zones the planned flight enters, which stay red.
 
 The dialog shows how much of the vehicle's fence the selection uses, like _Vehicle fence: 52 of 64 points_:
 

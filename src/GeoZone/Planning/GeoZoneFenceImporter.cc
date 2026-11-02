@@ -471,6 +471,7 @@ GeoZoneFenceChoiceModel::Row GeoZoneFenceImporter::_row(const GeoZoneFences::Cho
     row.restriction = static_cast<int>(zone->restriction());
     row.restrictionText = GeoZoneText::restriction(zone->restriction());
     row.proximityText = proximity;
+    row.entered = choice.candidate.proximity == GeoZoneFences::Proximity::Entered;
     row.points = choice.usage.items;
     row.simplifyTolerance = choice.simplifyTolerance;
     row.selected = choice.status == GeoZoneFences::Status::Selected;
