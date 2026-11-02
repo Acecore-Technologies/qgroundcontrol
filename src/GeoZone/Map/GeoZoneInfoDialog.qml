@@ -20,7 +20,8 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Details of a GeoZone loaded from an ED-269 / ED-318 file, with a choice of zones where several overlap.
+/// Details of a GeoZone loaded from an ED-269 / ED-318 file, with the zones to choose from as chips where several
+/// overlap, and the operator's authorisation for it, added and edited in place.
 /// Closed when the zones are reloaded or removed. Texts from the files are shown as plain text.
 QGCPopupDialog {
     id:         root
@@ -51,6 +52,8 @@ QGCPopupDialog {
         if (!geoZone) {
             close()
         }
+        // The form was for the zone shown before
+        authorisationForm.visible = false
     }
 
     Connections {
@@ -90,12 +93,63 @@ QGCPopupDialog {
     ColumnLayout {
         spacing: ScreenTools.defaultFontPixelHeight / 4
 
-        GeoZoneChoiceComboBox {
+        // The overlapping zones side by side, the one shown highlighted
+        QGCLabel {
+            text:       qsTr("%n zone(s) here", "", root.zones.length)
+            visible:    root.zones.length > 1
+        }
+
+        Flow {
             Layout.preferredWidth:  root._contentWidth
+            Layout.bottomMargin:    ScreenTools.defaultFontPixelHeight / 2
+            spacing:                ScreenTools.defaultFontPixelWidth / 2
             visible:                root.zones.length > 1
-            model:                  root.zones.map(zone => qsTr("%1 (%2)").arg(zone.displayName).arg(zone.restrictionText))
-            currentIndex:           root.zones.findIndex(zone => zone.key === root.geoZone.key)
-            onActivated:            (index) => root.geoZone = root.zones[index]
+
+            Repeater {
+                model: root.zones
+
+                Rectangle {
+                    id:             chip
+                    width:          chipRow.width + (ScreenTools.defaultFontPixelWidth * 2)
+                    height:         ScreenTools.implicitButtonHeight
+                    radius:         height / 2
+                    color:          _selected ? qgcPal.buttonHighlight : qgcPal.button
+                    border.color:   GeoZoneStyle.restrictionColor(modelData.restriction)
+                    border.width:   _selected ? 2 : 1
+
+                    required property var modelData
+
+                    readonly property bool _selected: root.geoZone && modelData.key === root.geoZone.key
+
+                    Row {
+                        id:                     chipRow
+                        anchors.centerIn:       parent
+                        spacing:                ScreenTools.defaultFontPixelWidth / 2
+
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width:                  ScreenTools.defaultFontPixelHeight * 0.6
+                            height:                 width
+                            radius:                 width / 2
+                            color:                  GeoZoneStyle.restrictionColor(chip.modelData.restriction)
+                        }
+
+                        QGCLabel {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width:                  Math.min(implicitWidth, root._contentWidth - (ScreenTools.defaultFontPixelWidth * 4) - (ScreenTools.defaultFontPixelHeight * 0.6))
+                            text:                   chip.modelData.displayName
+                            textFormat:             Text.PlainText
+                            elide:                  Text.ElideRight
+                            color:                  chip._selected ? qgcPal.buttonHighlightText : qgcPal.buttonText
+                        }
+                    }
+
+                    QGCMouseArea {
+                        anchors.fill:   parent
+                        onClicked:      root.geoZone = chip.modelData
+                    }
+                }
+            }
         }
 
         QGCLabel {
@@ -118,6 +172,107 @@ QGCPopupDialog {
             value:      root.geoZone ? (root.geoZone.active ? qsTr("Active now") : qsTr("Not active now")) : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
+        }
+
+        // The operator's authorisation stops the warnings and alerts about the zone while it is valid. Added and edited in
+        // place, near the top so that the form shows without scrolling.
+        ColumnLayout {
+            Layout.preferredWidth:  root._contentWidth
+            spacing:                ScreenTools.defaultFontPixelHeight / 4
+            visible:                root.geoZone && root.geoZone.restriction !== GeoZone.NoRestriction
+
+            InfoRow {
+                label:      qsTr("Authorisation")
+                value:      !root._authorised ? "" : (root._authorisation.permit !== "" ? qsTr("%1, permit %2").arg(root._authorisation.statusText).arg(root._authorisation.permit) :
+                                                                                         root._authorisation.statusText)
+                labelWidth: root._labelWidth
+                valueWidth: root._valueWidth
+            }
+
+            RowLayout {
+                spacing:    ScreenTools.defaultFontPixelWidth
+                visible:    !authorisationForm.visible
+
+                QGCButton {
+                    text:       root._authorised ? qsTr("Edit Authorisation") : qsTr("Add Authorisation")
+                    onClicked: {
+                        permitField.text = root._authorised ? root._authorisation.permit : ""
+                        validFromField.text = root._authorised ? root._authorisation.validFrom : ""
+                        validToField.text = root._authorised ? root._authorisation.validTo : ""
+                        authorisationError.text = ""
+                        authorisationForm.visible = true
+                    }
+                }
+
+                QGCButton {
+                    text:       qsTr("Remove Authorisation")
+                    visible:    root._authorised
+                    onClicked:  root._authorisations.revoke(root._authorisation.zoneKey)
+                }
+            }
+
+            GridLayout {
+                id:             authorisationForm
+                columns:        2
+                columnSpacing:  ScreenTools.defaultFontPixelWidth
+                visible:        false
+
+                QGCLabel { text: qsTr("Permit") }
+                QGCTextField {
+                    id:                     permitField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("Number or reference")
+                }
+
+                QGCLabel { text: qsTr("First day") }
+                QGCTextField {
+                    id:                     validFromField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("yyyy-MM-dd, optional")
+                }
+
+                QGCLabel { text: qsTr("Last day") }
+                QGCTextField {
+                    id:                     validToField
+                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
+                    placeholderText:        qsTr("yyyy-MM-dd, optional")
+                }
+
+                QGCLabel {
+                    id:                     authorisationError
+                    Layout.columnSpan:      2
+                    Layout.preferredWidth:  root._contentWidth
+                    wrapMode:               Text.WordWrap
+                    color:                  qgcPal.warningText
+                    visible:                text !== ""
+                }
+
+                QGCLabel {
+                    Layout.columnSpan:      2
+                    Layout.preferredWidth:  root._contentWidth
+                    wrapMode:               Text.WordWrap
+                    font.pointSize:         ScreenTools.smallFontPointSize
+                    text:                   qsTr("While the authorisation is valid, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
+                }
+
+                RowLayout {
+                    Layout.columnSpan:  2
+                    spacing:            ScreenTools.defaultFontPixelWidth
+
+                    QGCButton {
+                        text:       qsTr("Save")
+                        onClicked: {
+                            authorisationError.text = root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text)
+                            authorisationForm.visible = authorisationError.text !== ""
+                        }
+                    }
+
+                    QGCButton {
+                        text:       qsTr("Cancel")
+                        onClicked:  authorisationForm.visible = false
+                    }
+                }
+            }
         }
 
         InfoRow {
@@ -202,106 +357,6 @@ QGCPopupDialog {
             value:      root.geoZone ? root.geoZone.sourceText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
-        }
-
-        // The operator's authorisation stops the warnings and alerts about the zone while it is valid
-        ColumnLayout {
-            Layout.preferredWidth:  root._contentWidth
-            spacing:                ScreenTools.defaultFontPixelHeight / 4
-            visible:                root.geoZone && root.geoZone.restriction !== GeoZone.NoRestriction
-
-            InfoRow {
-                label:      qsTr("Authorisation")
-                value:      !root._authorised ? "" : (root._authorisation.permit !== "" ? qsTr("%1, permit %2").arg(root._authorisation.statusText).arg(root._authorisation.permit) :
-                                                                                         root._authorisation.statusText)
-                labelWidth: root._labelWidth
-                valueWidth: root._valueWidth
-            }
-
-            RowLayout {
-                spacing:    ScreenTools.defaultFontPixelWidth
-                visible:    !authorisationForm.visible
-
-                QGCButton {
-                    text:       root._authorised ? qsTr("Edit Authorisation...") : qsTr("Add Authorisation...")
-                    onClicked: {
-                        permitField.text = root._authorised ? root._authorisation.permit : ""
-                        validFromField.text = root._authorised ? root._authorisation.validFrom : ""
-                        validToField.text = root._authorised ? root._authorisation.validTo : ""
-                        authorisationError.text = ""
-                        authorisationForm.visible = true
-                    }
-                }
-
-                QGCButton {
-                    text:       qsTr("Remove Authorisation")
-                    visible:    root._authorised
-                    onClicked:  root._authorisations.revoke(root._authorisation.zoneKey)
-                }
-            }
-
-            GridLayout {
-                id:             authorisationForm
-                columns:        2
-                columnSpacing:  ScreenTools.defaultFontPixelWidth
-                visible:        false
-
-                QGCLabel { text: qsTr("Permit") }
-                QGCTextField {
-                    id:                     permitField
-                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
-                    placeholderText:        qsTr("Number or reference")
-                }
-
-                QGCLabel { text: qsTr("First day") }
-                QGCTextField {
-                    id:                     validFromField
-                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
-                    placeholderText:        qsTr("yyyy-MM-dd, optional")
-                }
-
-                QGCLabel { text: qsTr("Last day") }
-                QGCTextField {
-                    id:                     validToField
-                    Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
-                    placeholderText:        qsTr("yyyy-MM-dd, optional")
-                }
-
-                QGCLabel {
-                    id:                     authorisationError
-                    Layout.columnSpan:      2
-                    Layout.preferredWidth:  root._contentWidth
-                    wrapMode:               Text.WordWrap
-                    color:                  qgcPal.warningText
-                    visible:                text !== ""
-                }
-
-                QGCLabel {
-                    Layout.columnSpan:      2
-                    Layout.preferredWidth:  root._contentWidth
-                    wrapMode:               Text.WordWrap
-                    font.pointSize:         ScreenTools.smallFontPointSize
-                    text:                   qsTr("While the authorisation is valid, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
-                }
-
-                RowLayout {
-                    Layout.columnSpan:  2
-                    spacing:            ScreenTools.defaultFontPixelWidth
-
-                    QGCButton {
-                        text:       qsTr("Save")
-                        onClicked: {
-                            authorisationError.text = root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text)
-                            authorisationForm.visible = authorisationError.text !== ""
-                        }
-                    }
-
-                    QGCButton {
-                        text:       qsTr("Cancel")
-                        onClicked:  authorisationForm.visible = false
-                    }
-                }
-            }
         }
     }
 }
