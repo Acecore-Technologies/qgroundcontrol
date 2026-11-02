@@ -101,12 +101,11 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachDistance(),
-                              settings->approachVerticalDistance(), settings->approachTime(), settings->trafficEnabled(),
-                              settings->trafficRadius(), settings->trafficAlerts() }) {
+    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachDistance(), settings->approachTime(),
+                              settings->trafficEnabled() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMonitor::_applicationSettingsChanged);
     }
-    _traffic->setEnabled(this->settings().traffic.enabled);
+    _traffic->setEnabled(this->settings().trafficEnabled);
 }
 
 GeoZoneMonitor *GeoZoneMonitor::instance()
@@ -121,11 +120,9 @@ GeoZoneMonitor::Settings GeoZoneMonitor::Settings::fromApplication()
     result.alertsEnabled = settings->alertsEnabled()->rawValue().toBool();
     result.audioAlerts = settings->audioAlerts()->rawValue().toBool();
     result.limits.distance = settings->approachDistance()->rawValue().toDouble();
-    result.limits.verticalDistance = settings->approachVerticalDistance()->rawValue().toDouble();
+    result.limits.verticalDistance = approachVerticalDistance;
     result.limits.time = settings->approachTime()->rawValue().toDouble();
-    result.traffic.enabled = settings->trafficEnabled()->rawValue().toBool();
-    result.traffic.radius = settings->trafficRadius()->rawValue().toDouble();
-    result.traffic.alerts = static_cast<GeoZoneTrafficMonitor::AlertMode>(settings->trafficAlerts()->rawValue().toInt());
+    result.trafficEnabled = settings->trafficEnabled()->rawValue().toBool();
     return result;
 }
 
@@ -163,7 +160,7 @@ void GeoZoneMonitor::_settingsChanged(const Settings &previous)
         _resetMonitors();
         emit monitoringChanged();
     }
-    _traffic->setEnabled(settings().traffic.enabled);
+    _traffic->setEnabled(settings().trafficEnabled);
 }
 
 void GeoZoneMonitor::_resetMonitors()
@@ -331,32 +328,21 @@ void GeoZoneMonitor::evaluateTraffic(const QList<GeoZoneTrafficMonitor::Aircraft
         _traffic->clear();
         return;
     }
-    const QList<GeoZoneTrafficMonitor::Entry> entries = _traffic->evaluate(aircraft, active->position(), settings().traffic.radius, _context());
-    if (entries.isEmpty() || !settings().alertsEnabled || (settings().traffic.alerts == GeoZoneTrafficMonitor::NoAlerts)) {
+    const QList<GeoZoneTrafficMonitor::Entry> entries = _traffic->evaluate(aircraft, active->position(), trafficRadius(), _context());
+    if (!settings().alertsEnabled) {
         return;
     }
     for (const GeoZoneTrafficMonitor::Entry &entry : entries) {
         _raiseTraffic(entry);
     }
-    _announce();
 }
 
 void GeoZoneMonitor::_raiseTraffic(const GeoZoneTrafficMonitor::Entry &entry)
 {
+    // Not about a vehicle, so neither spoken, repeated nor muted with a zone
     const AlertEvent event = _alertEvent(entry.zone, AlertEvent::Traffic, true, 0, qQNaN(), entry.position, noVehicle, entry.aircraft.label());
-    const int severity = trafficSeverity + GeoZone::restrictionSeverity(event.restriction);
     emit alertEvent(event);
-    emit alert(event.message, severity, event.id);
-    if (settings().traffic.alerts == GeoZoneTrafficMonitor::SpeakAlerts) {
-        // Not about a vehicle, so never a breach nor muted with a zone
-        GeoZoneAlertArbiter::Alert announced;
-        announced.id = event.id;
-        announced.zoneKey = event.zoneKey;
-        announced.severity = severity;
-        announced.inside = true;
-        announced.message = event.message;
-        _arbiter.submit(announced);
-    }
+    emit alert(event.message, trafficSeverity + GeoZone::restrictionSeverity(event.restriction), event.id);
 }
 
 void GeoZoneMonitor::_updateEvaluateTimer()

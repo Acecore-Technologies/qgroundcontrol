@@ -94,25 +94,7 @@ SettingsPage {
             Layout.fillWidth:        true
             textFieldPreferredWidth: _fieldWidth
             label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.alertLogRetentionDays
-            visible:                 fact.visible
-            enabled:                 _geoZoneSettings.alertsEnabled.rawValue && _geoZoneSettings.logAlerts.rawValue
-        }
-
-        LabelledFactTextField {
-            Layout.fillWidth:        true
-            textFieldPreferredWidth: _fieldWidth
-            label:                   fact.shortDescription
             fact:                    _geoZoneSettings.approachDistance
-            visible:                 fact.visible
-            enabled:                 _geoZoneSettings.alertsEnabled.rawValue
-        }
-
-        LabelledFactTextField {
-            Layout.fillWidth:        true
-            textFieldPreferredWidth: _fieldWidth
-            label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.approachVerticalDistance
             visible:                 fact.visible
             enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
@@ -138,25 +120,6 @@ SettingsPage {
             text:               fact.shortDescription
             fact:               _geoZoneSettings.trafficEnabled
             visible:            fact.visible
-        }
-
-        LabelledFactTextField {
-            Layout.fillWidth:        true
-            textFieldPreferredWidth: _fieldWidth
-            label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.trafficRadius
-            visible:                 fact.visible
-            enabled:                 _geoZoneSettings.trafficEnabled.rawValue
-        }
-
-        LabelledFactComboBox {
-            Layout.fillWidth:        true
-            comboBoxPreferredWidth:  _fieldWidth
-            label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.trafficAlerts
-            indexModel:              false
-            visible:                 fact.visible
-            enabled:                 _geoZoneSettings.trafficEnabled.rawValue && _geoZoneSettings.alertsEnabled.rawValue
         }
     }
 

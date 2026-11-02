@@ -39,19 +39,6 @@ public:
     static constexpr int evaluateIntervalMSecs = 2000;
     static constexpr int maxAircraft = 100;     ///< Evaluated at a time, the closest to the active vehicle
 
-    /// What is done when an aircraft enters a zone
-    enum AlertMode {
-        NoAlerts,
-        ShowAlerts,     ///< Shown and logged, not spoken
-        SpeakAlerts,    ///< Also spoken
-    };
-
-    struct Settings {
-        bool enabled = false;
-        double radius = 10000;              ///< Meters around the active vehicle
-        AlertMode alerts = ShowAlerts;
-    };
-
     /// An aircraft of the traffic
     struct Aircraft {
         quint32 address = 0;                ///< ICAO address, identifies the aircraft

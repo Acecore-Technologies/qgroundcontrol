@@ -251,7 +251,7 @@ Item {
                     SettingsGroupLayout {
                         Layout.preferredWidth:  control._pageWidth
                         heading:            qsTr("Traffic in or near Geozones")
-                        headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(control._distanceText(control._geoZoneSettings.trafficRadius.rawValue))
+                        headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(control._distanceText(control._monitor.trafficRadius))
                         visible:            control._traffic.enabled
 
                         QGCLabel {
@@ -440,14 +440,6 @@ Item {
                         LabelledFactTextField {
                             Layout.fillWidth:   true
                             label:              fact.shortDescription
-                            fact:               control._geoZoneSettings.approachVerticalDistance
-                            visible:            fact.visible
-                            enabled:            control._alertsEnabled
-                        }
-
-                        LabelledFactTextField {
-                            Layout.fillWidth:   true
-                            label:              fact.shortDescription
                             fact:               control._geoZoneSettings.approachTime
                             visible:            fact.visible
                             enabled:            control._alertsEnabled
@@ -458,23 +450,6 @@ Item {
                             text:               fact.shortDescription
                             fact:               control._geoZoneSettings.trafficEnabled
                             visible:            fact.visible
-                        }
-
-                        LabelledFactTextField {
-                            Layout.fillWidth:   true
-                            label:              fact.shortDescription
-                            fact:               control._geoZoneSettings.trafficRadius
-                            visible:            fact.visible
-                            enabled:            control._traffic.enabled
-                        }
-
-                        LabelledFactComboBox {
-                            Layout.fillWidth:   true
-                            label:              fact.shortDescription
-                            fact:               control._geoZoneSettings.trafficAlerts
-                            indexModel:         false
-                            visible:            fact.visible
-                            enabled:            control._traffic.enabled && control._alertsEnabled
                         }
                     }
 

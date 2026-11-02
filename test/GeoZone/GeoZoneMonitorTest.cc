@@ -533,7 +533,6 @@ void GeoZoneMonitorTest::_testAlertLog()
         QFile touched(path);
         QVERIFY(touched.open(QIODevice::Append));
     }
-    QCOMPARE(settings->alertLogRetentionDays()->rawValue().toInt(), 30);
     settings->logAlerts()->setRawValue(true);
     environment.addSecs(24 * 60 * 60);
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
@@ -1263,7 +1262,7 @@ void GeoZoneMonitorTest::_testTraffic()
     GeoZoneMonitor::Settings settings;
     settings.limits.distance = 100;
     settings.limits.verticalDistance = 30;
-    settings.traffic.enabled = true;
+    settings.trafficEnabled = true;
     monitor.setSettings(settings);
     GeoZoneTrafficMonitor *const traffic = monitor.traffic();
     QVERIFY(traffic->enabled());
@@ -1299,7 +1298,7 @@ void GeoZoneMonitorTest::_testTraffic()
     QVERIFY(!listed[1].toMap().value(QStringLiteral("inside")).toBool());
     QCOMPARE(listed[1].toMap().value(QStringLiteral("distance")).toInt(), 60);
 
-    // The aircraft entering the zone is shown, less urgent than the vehicles, but not spoken by default
+    // The aircraft entering the zone is shown, less urgent than the vehicles, but not spoken
     QCOMPARE(alertSpy.count(), 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Traffic SWR123 entered geozone P (Prohibited)"));
     QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneMonitor::trafficSeverity + GeoZone::restrictionSeverity(GeoZone::Prohibited));
@@ -1319,23 +1318,20 @@ void GeoZoneMonitorTest::_testTraffic()
     QCOMPARE(alertSpy.count(), 1);
     QCOMPARE(traffic->count(), 1);
 
-    // Spoken when asked, an aircraft coming back enters again
-    settings.traffic.alerts = GeoZoneTrafficMonitor::SpeakAlerts;
-    monitor.setSettings(settings);
+    // An aircraft coming back enters again
     monitor.evaluateTraffic({ inP, aircraft(0x4B5678, QString(), center, 700) });
     QCOMPARE(alertSpy.count(), 2);
-    QCOMPARE(sink->spoken, QStringList{ QStringLiteral("Traffic 4B5678 entered geozone P (Prohibited)") });
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Traffic 4B5678 entered geozone P (Prohibited)"));
+    QVERIFY(sink->spoken.isEmpty());
 
     // Without terrain data below an aircraft, the ground below the vehicle is used for limits above the ground
-    settings.traffic.alerts = GeoZoneTrafficMonitor::NoAlerts;
-    monitor.setSettings(settings);
     monitor.evaluateTraffic({ aircraft(1, QStringLiteral("HIGH"), lowCenter, 600), aircraft(2, QStringLiteral("LOW"), lowCenter, 450) });
     QCOMPARE(traffic->count(), 1);
     QCOMPARE(traffic->aircraft().first().toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("LOW"));
-    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Traffic LOW entered geozone LOW (Authorisation required)"));
 
     // Turned off, the traffic is forgotten
-    settings.traffic.enabled = false;
+    settings.trafficEnabled = false;
     monitor.setSettings(settings);
     QVERIFY(!traffic->enabled());
     QCOMPARE(traffic->count(), 0);

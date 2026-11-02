@@ -162,10 +162,7 @@ bool GeoZoneAlertLog::_open()
     }
 
     // A file is started each day, a good time to delete those past the retention
-    const int retentionDays = GeoZoneSettings::instance()->alertLogRetentionDays()->rawValue().toInt();
-    if (retentionDays > 0) {
-        (void) removeOldFiles(_bufferDate, retentionDays);
-    }
+    (void) removeOldFiles(_bufferDate, retentionDays);
     return true;
 }
 

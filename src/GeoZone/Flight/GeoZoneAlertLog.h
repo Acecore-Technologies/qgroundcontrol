@@ -20,14 +20,14 @@
 
 /// Appends geozone alerts to a CSV file per UTC day, for reviewing flights. The alerts are buffered and written to the
 /// open file every flushIntervalMSecs, rather than opening and flushing the file for each alert. The files of days
-/// older than the retention of GeoZoneSettings are deleted when a new file is started. Logging is turned on and off in
-/// GeoZoneSettings.
+/// older than retentionDays are deleted when a new file is started. Logging is turned on and off in GeoZoneSettings.
 class GeoZoneAlertLog : public QObject
 {
     Q_OBJECT
 
 public:
     static constexpr int flushIntervalMSecs = 2000;
+    static constexpr int retentionDays = 30;
 
     explicit GeoZoneAlertLog(QObject *parent = nullptr);
     /// Writes the buffered alerts
