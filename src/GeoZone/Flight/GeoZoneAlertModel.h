@@ -12,6 +12,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QList>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QtNumeric>
 
 #include <functional>
@@ -36,6 +37,8 @@ public:
         int severity = 0;           ///< Lower is more severe
         int vehicleKey = 0;         ///< GeoZoneVehicleMonitor::key of the vehicle, 0 for traffic and fence breaches
         QString zoneKey;            ///< GeoZone::key, empty for fence breaches
+        QStringList zoneKeys;       ///< Zones of the vehicle's alerts the alert replaced, with zoneKey, which answering it covers
+        bool asksPermission = false;    ///< An approach or entry asking for the permission, see GeoZoneMonitor::asksPermission()
 
         // Actions, see GeoZoneMonitor
         bool question = false;      ///< Asks whether the pilot may fly in the zone, while the vehicle is in or near it
@@ -72,8 +75,10 @@ public:
     bool activeVehicleAlerts() const { return _activeVehicleAlerts; }
     double climbHeight() const { return _climbHeight; }
 
-    /// Adds the alert after those as severe, replacing a shown alert with the same id or message, and keeps the
-    /// maxAlerts most severe. Emits alertShown() when it is among them.
+    /// Adds the alert after those as severe, and keeps the maxAlerts most severe. It replaces the shown alerts with the
+    /// same id or message, like the same zone from two sources, or asking for the permission for the same vehicle and
+    /// zone, like the approach of a zone the vehicle now entered, taking over their zones. Emits alertShown() when it is
+    /// among them.
     /// @return true when the alert is shown
     bool show(const Alert &alert);
     /// Removes the alerts matching the predicate

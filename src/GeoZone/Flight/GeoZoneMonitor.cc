@@ -587,6 +587,7 @@ void GeoZoneMonitor::_show(int alertId, const QString &message, int severity)
     if (subject != _alertSubjects.cend()) {
         alert.vehicleKey = subject->vehicleKey;
         alert.zoneKey = subject->event.zoneKey;
+        alert.asksPermission = subject->asksPermission;
     }
     _setAlertActions(alert);
     if (_alertModel->show(alert)) {
@@ -688,21 +689,32 @@ void GeoZoneMonitor::approveAlert(int alertId)
         return;
     }
     const int vehicleKey = subject->vehicleKey;
-    const QString zoneKey = subject->event.zoneKey;
-    // All the shown alerts about the zone are answered
-    const auto aboutZone = [vehicleKey, &zoneKey](const GeoZoneAlertModel::Alert &alert) {
-        return (alert.vehicleKey == vehicleKey) && (alert.zoneKey == zoneKey);
-    };
-    acknowledgeAlert(alertId);
+    // The zones of the alert, with those of the alerts it replaced, like the same zone from another source
+    QStringList zoneKeys = { subject->event.zoneKey };
     for (const GeoZoneAlertModel::Alert &alert : _alertModel->alerts()) {
-        if (aboutZone(alert)) {
-            acknowledgeAlert(alert.alertId);
+        if (alert.alertId == alertId) {
+            zoneKeys = alert.zoneKeys;
+        }
+    }
+    // All the shown alerts about the zones are answered
+    const auto aboutZones = [vehicleKey, &zoneKeys](const GeoZoneAlertModel::Alert &alert) {
+        return (alert.vehicleKey == vehicleKey) && std::any_of(alert.zoneKeys.cbegin(), alert.zoneKeys.cend(), [&zoneKeys](const QString &zoneKey) {
+            return zoneKeys.contains(zoneKey);
+        });
+    };
+    // ... and so are the alerts of the vehicle about them, also those replaced
+    acknowledgeAlert(alertId);
+    for (auto it = _alertSubjects.cbegin(); it != _alertSubjects.cend(); ++it) {
+        if ((it->vehicleKey == vehicleKey) && zoneKeys.contains(it->event.zoneKey)) {
+            acknowledgeAlert(it.key());
         }
     }
     const int approvalCount = _arbiter.approvalCount();
-    _arbiter.approveZone(vehicleKey, zoneKey);
+    for (const QString &zoneKey : std::as_const(zoneKeys)) {
+        _arbiter.approveZone(vehicleKey, zoneKey);
+    }
     _approvalsChanged(approvalCount);
-    _alertModel->removeIf([alertId, &aboutZone](const GeoZoneAlertModel::Alert &alert) { return (alert.alertId == alertId) || aboutZone(alert); });
+    _alertModel->removeIf([alertId, &aboutZones](const GeoZoneAlertModel::Alert &alert) { return (alert.alertId == alertId) || aboutZones(alert); });
 }
 
 void GeoZoneMonitor::dismissAlert(int alertId)
@@ -714,6 +726,18 @@ void GeoZoneMonitor::dismissAlert(int alertId)
 void GeoZoneMonitor::_dismiss(int alertId)
 {
     acknowledgeAlert(alertId);
+    // With the alerts it replaced, like the same alert about the zone from another source
+    const auto subject = _alertSubjects.constFind(alertId);
+    const QList<GeoZoneAlertModel::Alert> &shown = _alertModel->alerts();
+    const auto row = std::find_if(shown.cbegin(), shown.cend(), [alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
+    if ((subject != _alertSubjects.cend()) && (row != shown.cend())) {
+        for (auto it = _alertSubjects.cbegin(); it != _alertSubjects.cend(); ++it) {
+            if ((it->vehicleKey == subject->vehicleKey) && row->zoneKeys.contains(it->event.zoneKey) &&
+                (it->event.kind == subject->event.kind) && (it->event.traffic == subject->event.traffic)) {
+                acknowledgeAlert(it.key());
+            }
+        }
+    }
     _alertModel->removeIf([alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
 }
 

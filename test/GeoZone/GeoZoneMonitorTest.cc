@@ -1438,6 +1438,26 @@ void GeoZoneMonitorTest::_testAlertActions()
     monitor.approveAlert(lastId);
     QVERIFY(!shownAlert(monitor, lastId));
     QVERIFY(monitor.approvedZoneKeys().isEmpty());
+
+    // The same zone from two sources is shown once, entering it replaces its approach, and confirming the permission
+    // covers both
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ prohibited }), errorString), qPrintable(errorString));
+    monitor.closeAlerts();
+    const int earlierUnacknowledged = history->unacknowledgedCount();
+    monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 450, 400 }, 9);
+    QCOMPARE(shown->count(), 1);
+    QCOMPARE(shown->alerts().first().zoneKeys.count(), 2);
+    monitor.evaluate({ center.atDistanceAndAzimuth(100, 0), 450, 400 }, 9);
+    QCOMPARE(shown->count(), 1);
+    QVERIFY(shown->alerts().first().message.startsWith(QStringLiteral("Entered geozone P")));
+    QCOMPARE(shown->alerts().first().zoneKeys.count(), 2);
+    QCOMPARE(monitor.arbiter().breachCount(), 2);
+    QCOMPARE(history->unacknowledgedCount(), earlierUnacknowledged + 4);
+    monitor.approveAlert(shown->alerts().first().alertId);
+    QCOMPARE(shown->count(), 0);
+    QCOMPARE(monitor.arbiter().approvedZones(monitor.positionMonitor(9)->key()).count(), 2);
+    QCOMPARE(monitor.arbiter().breachCount(), 0);
+    QCOMPARE(history->unacknowledgedCount(), earlierUnacknowledged);
 }
 
 void GeoZoneMonitorTest::_testTraffic()

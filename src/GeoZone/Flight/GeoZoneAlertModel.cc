@@ -80,13 +80,25 @@ QHash<int, QByteArray> GeoZoneAlertModel::roleNames() const
     };
 }
 
-bool GeoZoneAlertModel::show(const Alert &alert)
+bool GeoZoneAlertModel::show(const Alert &newAlert)
 {
     const int previousCount = count();
-    // A repeated alert replaces the shown one
+    Alert alert = newAlert;
+    if (!alert.zoneKey.isEmpty() && !alert.zoneKeys.contains(alert.zoneKey)) {
+        alert.zoneKeys.prepend(alert.zoneKey);
+    }
+    const bool permission = alert.asksPermission && (alert.vehicleKey > 0) && !alert.zoneKey.isEmpty();
     for (int row = count() - 1; row >= 0; row--) {
         const Alert &shown = _alerts[row];
-        if ((shown.message == alert.message) || ((alert.alertId > 0) && (shown.alertId == alert.alertId))) {
+        const bool sameZone = permission && shown.asksPermission && (shown.vehicleKey == alert.vehicleKey) && shown.zoneKeys.contains(alert.zoneKey);
+        if ((shown.message == alert.message) || ((alert.alertId > 0) && (shown.alertId == alert.alertId)) || sameZone) {
+            if (shown.vehicleKey == alert.vehicleKey) {
+                for (const QString &zoneKey : shown.zoneKeys) {
+                    if (!alert.zoneKeys.contains(zoneKey)) {
+                        alert.zoneKeys.append(zoneKey);
+                    }
+                }
+            }
             beginRemoveRows(QModelIndex(), row, row);
             _alerts.removeAt(row);
             endRemoveRows();

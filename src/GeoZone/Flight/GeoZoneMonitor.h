@@ -229,9 +229,10 @@ public:
 
     /// Acknowledges an alert in the history and stops repeating it
     void acknowledgeAlert(int alertId);
-    /// The pilot confirmed the permission to fly in the zone of the alert: acknowledges the alerts about the zone and
-    /// approves the zone for the vehicle, whose alerts about it are neither shown, spoken nor repeated until it leaves
-    /// the zone and its approach range. They are still logged.
+    /// The pilot confirmed the permission to fly in the zone of the alert, and of the alerts it replaced (see
+    /// GeoZoneAlertModel::show()): acknowledges the alerts about the zones and approves them for the vehicle, whose
+    /// alerts about them are neither shown, spoken nor repeated until it leaves them and their approach range. They are
+    /// still logged.
     Q_INVOKABLE void approveAlert(int alertId);
     /// The pilot dismissed a shown alert: acknowledges it and removes it from the shown alerts
     Q_INVOKABLE void dismissAlert(int alertId);
