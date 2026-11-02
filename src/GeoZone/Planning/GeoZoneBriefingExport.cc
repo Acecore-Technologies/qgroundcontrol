@@ -154,11 +154,6 @@ QString restrictionColor(GeoZone::Restriction restriction)
     return QStringLiteral("#616161");
 }
 
-QJsonArray jsonApproximations(GeoZonePathEvaluator::Approximations approximations)
-{
-    return QJsonArray::fromStringList(GeoZonePathEvaluator::approximationCodes(approximations));
-}
-
 QString row(const QString &header, const QString &html)
 {
     return html.isEmpty() ? QString() : QStringLiteral("<tr><th>%1</th><td>%2</td></tr>\n").arg(header.toHtmlEscaped(), html);
@@ -646,7 +641,6 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
             crossingJson.insert(QStringLiteral("zoneFloor"), jsonNumber(crossing.zoneFloor));
             crossingJson.insert(QStringLiteral("zoneCeiling"), jsonNumber(crossing.zoneCeiling));
             crossingJson.insert(QStringLiteral("active"), crossing.active);
-            crossingJson.insert(QStringLiteral("approximations"), jsonApproximations(crossing.approximations));
             crossings.append(crossingJson);
         }
         json.insert(QStringLiteral("crossings"), crossings);
@@ -679,7 +673,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
         json.insert(QStringLiteral("authorisation"), authorisation);
         json.insert(QStringLiteral("source"), zone.sourceKey);
         json.insert(QStringLiteral("contentHash"), QString::fromLatin1(zone.contentHash.toHex()));
-        json.insert(QStringLiteral("approximations"), jsonApproximations(zone.approximations));
+        json.insert(QStringLiteral("approximations"), QJsonArray::fromStringList(GeoZonePathEvaluator::approximationTexts(zone.approximations, true)));
         zones.append(json);
     }
 
@@ -695,7 +689,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
     json.insert(QStringLiteral("generator"), QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion()).trimmed());
     json.insert(QStringLiteral("scheduleToleranceSeconds"), briefing.scheduleTolerance);
     json.insert(QStringLiteral("nearbyDistanceMeters"), briefing.nearbyDistance);
-    json.insert(QStringLiteral("approximations"), jsonApproximations(briefing.approximations));
+    json.insert(QStringLiteral("approximations"), QJsonArray::fromStringList(GeoZonePathEvaluator::approximationTexts(briefing.approximations, true)));
     json.insert(QStringLiteral("mission"), missionJson);
     json.insert(QStringLiteral("zones"), zones);
     json.insert(QStringLiteral("sources"), sources);

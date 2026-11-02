@@ -502,7 +502,7 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
         }
         evaluation.zones.append(result.zone);
         evaluation.relevantZones.append(result.zone);
-        if (const GeoZonePathEvaluator::Approximations approximations = result.approximations()) {
+        if (const GeoZonePathEvaluator::Approximations approximations = result.approximations) {
             evaluation.approximations.insert(result.zone, approximations);
         }
         if (!result.active()) {

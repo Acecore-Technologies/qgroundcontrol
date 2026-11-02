@@ -102,7 +102,7 @@ void GeoZonePlanningTest::_testApproximationReports()
         return (it == manager.zoneList().cend()) ? nullptr : *it;
     };
 
-    // The briefing documents have them per crossing, per zone and overall, in the JSON and with a note in the web page
+    // The briefing documents have them per zone and overall, in the JSON and with a note in the web page
     const QDateTime flightStart = _utc(QDate(2027, 6, 1), QTime(10, 0));
     const QDateTime flightEnd = flightStart.addSecs(600);
     GeoZonePathEvaluator::Path path = _evaluatorPath({ start, start.atDistanceAndAzimuth(4000, 90) }, { 500, 500 });
@@ -118,7 +118,6 @@ void GeoZonePlanningTest::_testApproximationReports()
     const QJsonObject levelJson = json[QStringLiteral("zones")].toArray()[0].toObject();
     QCOMPARE(levelJson[QStringLiteral("identifier")].toString(), QStringLiteral("LEVEL"));
     QCOMPARE(levelJson[QStringLiteral("approximations")].toArray(), QJsonArray({ QStringLiteral("flight_level") }));
-    QCOMPARE(levelJson[QStringLiteral("crossings")].toArray()[0].toObject()[QStringLiteral("approximations")].toArray(), QJsonArray({ QStringLiteral("flight_level") }));
     const QString html = GeoZoneBriefingExport::toHtml(briefing);
     QVERIFY(html.contains(QStringLiteral("Some results are approximate")));
     QVERIFY(html.contains(QStringLiteral("Flight level limits converted with the QNH setting")));

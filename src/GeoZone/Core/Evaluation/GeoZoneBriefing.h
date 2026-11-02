@@ -93,7 +93,6 @@ public:
         double zoneFloor = qQNaN();         ///< Meters AMSL at the entry, NaN when the zone extends to the ground or the limit is unknown
         double zoneCeiling = qQNaN();       ///< NaN without ceiling or when unknown
         bool active = true;                 ///< See GeoZonePathEvaluator::Crossing::active
-        GeoZonePathEvaluator::Approximations approximations;    ///< Why the crossing is approximate
     };
 
     struct Authorisation {

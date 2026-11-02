@@ -117,7 +117,6 @@ public:
         PathPoint exit;
         QList<VerticalPart> parts;      ///< From the entry to the exit
         bool active = true;             ///< See Crossing::active
-        Approximations approximations;  ///< Why the stretch or its vertical parts are approximate
     };
 
     /// Stretch of a path inside the zone, horizontally and between the vertical limits of any of its volumes
@@ -128,7 +127,6 @@ public:
         /// at some time from the estimated time of the entry to that of the exit, widened by the schedule tolerance, or,
         /// without times, as the policy's schedule accepts it at the evaluation time
         bool active = true;
-        Approximations approximations;  ///< Why the crossing, or whether there is one, is approximate
     };
 
     /// How the paths and areas interact with a zone
@@ -142,6 +140,7 @@ public:
         /// like "the loiter at item 3"
         QStringList labels;
         int severity = 0;               ///< See GeoZone::restrictionSeverity
+        Approximations approximations;  ///< Why the crossings and stretches, or whether there are any, are approximate
 
         /// @return true if a path or an area enters the zone, whether or not it applies then
         bool entered() const { return !crossings.isEmpty() || !areas.isEmpty(); }
@@ -150,23 +149,18 @@ public:
         bool active() const;
         /// @return First crossing while the zone applies, or the first one, null without crossings
         const Crossing *firstCrossing() const;
-        /// @return Why the crossings or stretches are approximate
-        Approximations approximations() const;
     };
 
     struct Result {
         /// Zones a path or an area interacts with, ordered by their first crossing, then the zones only entered by
         /// areas, then the zones only passed above or below
         QList<ZoneResult> zones;
+        Approximations approximations;  ///< Of the zones and the paths, whether or not they meet zones, like GreatCircleDeviation
 
         /// @return The result of the zone, null when the paths and areas don't interact with it
         const ZoneResult *find(const GeoZone *zone) const;
         /// @return The zones entered while they apply, in the order of zones
         QList<const GeoZone*> activeEnteredZones() const;
-        Approximations pathApproximations;  ///< Of the paths, whether or not they meet zones, like GreatCircleDeviation
-
-        /// @return Why the results of the zones or the paths are approximate
-        Approximations approximations() const;
     };
 
     /// @param policy Restrictions, authorisations and schedule of the zones to evaluate. Authorisations are only
@@ -198,10 +192,9 @@ public:
     static QList<GeoZone::Position> withTerrain(const QList<GeoZone::Position> &path, const TerrainLookup &lookup, double spacing = defaultTerrainSpacing,
                                                 int maxPositions = defaultMaxTerrainPositions);
 
-    /// @return Short translated notes of the approximations, one per flag, like "Terrain unknown along part of the path"
-    static QStringList approximationTexts(Approximations approximations);
-    /// @return Stable codes of the approximations for exports, like "terrain_unknown"
-    static QStringList approximationCodes(Approximations approximations);
+    /// @return Short translated notes of the approximations, one per flag, like "Terrain unknown along part of the path",
+    ///         or their stable keys for exports, like "terrain_unknown"
+    static QStringList approximationTexts(Approximations approximations, bool keys = false);
 
     /// Sorts zones from the most restrictive, keeping the order of equally restrictive ones
     static void sortBySeverity(QList<const GeoZone*> &zones);

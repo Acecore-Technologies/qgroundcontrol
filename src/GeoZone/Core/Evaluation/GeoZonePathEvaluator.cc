@@ -310,18 +310,6 @@ const GeoZonePathEvaluator::Crossing *GeoZonePathEvaluator::ZoneResult::firstCro
     return crossings.isEmpty() ? nullptr : &crossings.constFirst();
 }
 
-GeoZonePathEvaluator::Approximations GeoZonePathEvaluator::ZoneResult::approximations() const
-{
-    Approximations result;
-    for (const Crossing &crossing : crossings) {
-        result |= crossing.approximations;
-    }
-    for (const Stretch &stretch : stretches) {
-        result |= stretch.approximations;
-    }
-    return result;
-}
-
 const GeoZonePathEvaluator::ZoneResult *GeoZonePathEvaluator::Result::find(const GeoZone *zone) const
 {
     for (const ZoneResult &result : zones) {
@@ -341,15 +329,6 @@ QList<const GeoZone*> GeoZonePathEvaluator::Result::activeEnteredZones() const
         }
     }
     return entered;
-}
-
-GeoZonePathEvaluator::Approximations GeoZonePathEvaluator::Result::approximations() const
-{
-    Approximations result = pathApproximations;
-    for (const ZoneResult &zoneResult : zones) {
-        result |= zoneResult.approximations();
-    }
-    return result;
 }
 
 GeoZonePathEvaluator::GeoZonePathEvaluator(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const QDateTime &time)
@@ -546,7 +525,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
         const Prepared &path = paths[span.path];
         Crossing crossing{ path.pointAt(span.path, span.start), path.pointAt(span.path, span.end) };
         crossing.active = _activeDuring(zone, crossing.entry.time, crossing.exit.time);
-        crossing.approximations = span.approximations | _scheduleApproximations(zone, crossing.active);
+        result.approximations |= span.approximations | _scheduleApproximations(zone, crossing.active);
         result.crossings.append(crossing);
     }
 
@@ -561,7 +540,7 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
                 stretch.parts.append(VerticalPart{ path.pointAt(stretchSpan.span.path, part.start), path.pointAt(stretchSpan.span.path, part.end), part.position });
             }
             stretch.active = _activeDuring(zone, stretch.entry.time, stretch.exit.time);
-            stretch.approximations = stretchSpan.span.approximations | _scheduleApproximations(zone, stretch.active);
+            result.approximations |= stretchSpan.span.approximations | _scheduleApproximations(zone, stretch.active);
             result.stretches.append(stretch);
         }
     }
@@ -655,13 +634,14 @@ GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &p
     Result result;
     for (const Prepared &path : prepared) {
         for (const Approximations approximations : path.approximations) {
-            result.pathApproximations |= approximations;
+            result.approximations |= approximations;
         }
     }
     QHash<const GeoZone*, qsizetype> resultIndexes;
     for (qsizetype c = 0; c < candidates.count(); c++) {
         ZoneResult zoneResult = _evaluateZone(candidates[c], prepared, candidateSegments[c]);
         if (!zoneResult.stretches.isEmpty()) {
+            result.approximations |= zoneResult.approximations;
             resultIndexes.insert(candidates[c], result.zones.count());
             result.zones.append(zoneResult);
         }
@@ -708,44 +688,24 @@ GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &p
     return result;
 }
 
-QStringList GeoZonePathEvaluator::approximationTexts(Approximations approximations)
+QStringList GeoZonePathEvaluator::approximationTexts(Approximations approximations, bool keys)
 {
-    QStringList texts;
-    if (approximations.testFlag(TerrainUnknown)) {
-        texts.append(tr("Terrain unknown along part of the path, limits above ground taken as reached"));
-    }
-    if (approximations.testFlag(TerrainCoarse)) {
-        texts.append(tr("Terrain sampled coarsely along a long path"));
-    }
-    if (approximations.testFlag(GreatCircleDeviation)) {
-        texts.append(tr("Leg too long to follow its great circle closely"));
-    }
-    if (approximations.testFlag(FlightLevel)) {
-        texts.append(tr("Flight level limits converted with the QNH setting"));
-    }
-    if (approximations.testFlag(ScheduleAssumed)) {
-        texts.append(tr("Zone schedule not fully known, taken as active"));
-    }
-    if (approximations.testFlag(AltitudeReferenceUnknown)) {
-        texts.append(tr("Altitude or its reference unknown, limits taken as reached"));
-    }
-    return texts;
-}
-
-QStringList GeoZonePathEvaluator::approximationCodes(Approximations approximations)
-{
-    static const QList<std::pair<Approximation, QString>> codes = {
-        { TerrainUnknown, QStringLiteral("terrain_unknown") },
-        { TerrainCoarse, QStringLiteral("terrain_coarse") },
-        { GreatCircleDeviation, QStringLiteral("great_circle_deviation") },
-        { FlightLevel, QStringLiteral("flight_level") },
-        { ScheduleAssumed, QStringLiteral("schedule_assumed") },
-        { AltitudeReferenceUnknown, QStringLiteral("altitude_reference_unknown") },
+    static const struct {
+        Approximation approximation;
+        const char *key;
+        const char *text;
+    } reasons[] = {
+        { TerrainUnknown, "terrain_unknown", QT_TR_NOOP("Terrain unknown along part of the path, limits above ground taken as reached") },
+        { TerrainCoarse, "terrain_coarse", QT_TR_NOOP("Terrain sampled coarsely along a long path") },
+        { GreatCircleDeviation, "great_circle_deviation", QT_TR_NOOP("Leg too long to follow its great circle closely") },
+        { FlightLevel, "flight_level", QT_TR_NOOP("Flight level limits converted with the QNH setting") },
+        { ScheduleAssumed, "schedule_assumed", QT_TR_NOOP("Zone schedule not fully known, taken as active") },
+        { AltitudeReferenceUnknown, "altitude_reference_unknown", QT_TR_NOOP("Altitude or its reference unknown, limits taken as reached") },
     };
     QStringList result;
-    for (const auto &[approximation, code] : codes) {
-        if (approximations.testFlag(approximation)) {
-            result.append(code);
+    for (const auto &reason : reasons) {
+        if (approximations.testFlag(reason.approximation)) {
+            result.append(keys ? QString::fromLatin1(reason.key) : tr(reason.text));
         }
     }
     return result;
