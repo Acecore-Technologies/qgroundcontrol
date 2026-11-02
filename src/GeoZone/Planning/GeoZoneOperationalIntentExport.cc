@@ -8,7 +8,6 @@
  ****************************************************************************/
 
 #include "GeoZoneOperationalIntentExport.h"
-#include "AppSettings.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
@@ -18,66 +17,14 @@
 #include "GeoZoneSettings.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
-#include "SettingsManager.h"
 #include "Vehicle.h"
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
-#include <QtCore/QSaveFile>
-
-GeoZoneOperationalIntentExport::GeoZoneOperationalIntentExport(QObject *parent)
-    : GeoZoneOperationalIntentExport(GeoZoneManager::instance(), parent)
-{
-}
 
 GeoZoneOperationalIntentExport::GeoZoneOperationalIntentExport(GeoZoneManager *manager, QObject *parent)
-    : QObject(parent)
-    , _manager(manager ? manager : GeoZoneManager::instance())
+    : GeoZoneMissionExport(manager, { tr("JSON data (*.json)") }, QStringLiteral("-intent.json"), QStringLiteral("operational-intent.json"), parent)
 {
-}
-
-MissionController *GeoZoneOperationalIntentExport::missionController() const
-{
-    return _missionController;
-}
-
-void GeoZoneOperationalIntentExport::setMissionController(MissionController *missionController)
-{
-    if (missionController != _missionController) {
-        _missionController = missionController;
-        emit missionControllerChanged();
-    }
-}
-
-QStringList GeoZoneOperationalIntentExport::nameFilters()
-{
-    return { tr("JSON data (*.json)") };
-}
-
-void GeoZoneOperationalIntentExport::_setErrorString(const QString &errorString)
-{
-    if (errorString != _errorString) {
-        _errorString = errorString;
-        emit errorStringChanged();
-    }
-}
-
-QString GeoZoneOperationalIntentExport::defaultFolder() const
-{
-    const PlanMasterController *const masterController = _missionController ? _missionController->masterController() : nullptr;
-    if (masterController && !masterController->currentPlanFile().isEmpty()) {
-        return QFileInfo(masterController->currentPlanFile()).absolutePath();
-    }
-    return SettingsManager::instance()->appSettings()->missionSavePath();
-}
-
-QString GeoZoneOperationalIntentExport::defaultFileName() const
-{
-    const PlanMasterController *const masterController = _missionController ? _missionController->masterController() : nullptr;
-    if (masterController && !masterController->currentPlanFile().isEmpty()) {
-        return QStringLiteral("%1-intent.json").arg(QFileInfo(masterController->currentPlanFile()).completeBaseName());
-    }
-    return QStringLiteral("operational-intent.json");
 }
 
 GeoZoneOperationalIntent::Parameters GeoZoneOperationalIntentExport::parameters()
@@ -93,7 +40,7 @@ GeoZoneOperationalIntent::Parameters GeoZoneOperationalIntentExport::parameters(
 
 std::optional<GeoZoneOperationalIntent> GeoZoneOperationalIntentExport::intent(QString &errorString) const
 {
-    MissionController *const missionController = _missionController;
+    MissionController *const missionController = this->missionController();
     if (!missionController) {
         errorString = tr("No mission to export.");
         return std::nullopt;
@@ -165,12 +112,7 @@ bool GeoZoneOperationalIntentExport::exportIntent(const QString &fileName)
         _setErrorString(errorString);
         return false;
     }
-    const QByteArray content = QJsonDocument(operationalIntent->toJson()).toJson(QJsonDocument::Indented);
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || (file.write(content) != content.size()) || !file.commit()) {
-        _setErrorString(tr("Can't write %1: %2").arg(path, file.errorString()));
-        return false;
-    }
-    _setErrorString(QString());
-    return true;
+    const bool written = writeFile(path, QJsonDocument(operationalIntent->toJson()).toJson(QJsonDocument::Indented), errorString);
+    _setErrorString(written ? QString() : errorString);
+    return written;
 }

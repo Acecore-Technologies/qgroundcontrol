@@ -33,6 +33,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Planning/GeoZoneGuidedCheck.h
         Planning/GeoZoneMissionCheck.cc
         Planning/GeoZoneMissionCheck.h
+        Planning/GeoZoneMissionExport.cc
+        Planning/GeoZoneMissionExport.h
         Planning/GeoZoneMissionJumps.cc
         Planning/GeoZoneMissionJumps.h
         Planning/GeoZoneMissionPath.cc

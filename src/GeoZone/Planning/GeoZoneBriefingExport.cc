@@ -8,7 +8,6 @@
  ****************************************************************************/
 
 #include "GeoZoneBriefingExport.h"
-#include "AppSettings.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
@@ -20,14 +19,12 @@
 #include "MissionController.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
-#include "SettingsManager.h"
 #include "Vehicle.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
-#include <QtCore/QSaveFile>
 #include <QtGui/QFont>
 #include <QtGui/QPdfWriter>
 #include <QtGui/QTextDocument>
@@ -375,59 +372,10 @@ QString returnAutopilotText(GeoZoneReturnModel::Autopilot autopilot)
 
 } // namespace
 
-GeoZoneBriefingExport::GeoZoneBriefingExport(QObject *parent)
-    : GeoZoneBriefingExport(GeoZoneManager::instance(), parent)
-{
-}
-
 GeoZoneBriefingExport::GeoZoneBriefingExport(GeoZoneManager *manager, QObject *parent)
-    : QObject(parent)
-    , _manager(manager ? manager : GeoZoneManager::instance())
+    : GeoZoneMissionExport(manager, { tr("PDF document (*.pdf)"), tr("Web page (*.html)"), tr("JSON data (*.json)") }, QStringLiteral("-briefing.pdf"),
+                           QStringLiteral("geozone-briefing.pdf"), parent)
 {
-}
-
-MissionController *GeoZoneBriefingExport::missionController() const
-{
-    return _missionController;
-}
-
-void GeoZoneBriefingExport::setMissionController(MissionController *missionController)
-{
-    if (missionController != _missionController) {
-        _missionController = missionController;
-        emit missionControllerChanged();
-    }
-}
-
-QStringList GeoZoneBriefingExport::nameFilters()
-{
-    return { tr("PDF document (*.pdf)"), tr("Web page (*.html)"), tr("JSON data (*.json)") };
-}
-
-void GeoZoneBriefingExport::_setErrorString(const QString &errorString)
-{
-    if (errorString != _errorString) {
-        _errorString = errorString;
-        emit errorStringChanged();
-    }
-}
-
-QString GeoZoneBriefingExport::defaultFolder() const
-{
-    const PlanMasterController *const masterController = _missionController ? _missionController->masterController() : nullptr;
-    if (masterController && !masterController->currentPlanFile().isEmpty()) {
-        return QFileInfo(masterController->currentPlanFile()).absolutePath();
-    }
-    return SettingsManager::instance()->appSettings()->missionSavePath();
-}
-
-QString GeoZoneBriefingExport::defaultFileName() const
-{
-    const PlanMasterController *const masterController = _missionController ? _missionController->masterController() : nullptr;
-    if (masterController && !masterController->currentPlanFile().isEmpty()) {
-        return QStringLiteral("%1-briefing.pdf").arg(QFileInfo(masterController->currentPlanFile()).completeBaseName());
-    }
-    return QStringLiteral("geozone-briefing.pdf");
 }
 
 std::optional<GeoZoneBriefingExport::Format> GeoZoneBriefingExport::formatOf(const QString &fileName)
@@ -465,7 +413,7 @@ bool GeoZoneBriefingExport::exportBriefing(const QString &fileName)
 
 GeoZoneBriefing GeoZoneBriefingExport::briefing() const
 {
-    MissionController *const missionController = _missionController;
+    MissionController *const missionController = this->missionController();
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController, true);
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, missionController);
     const QDateTime flightEnd = path.flightEnd(start, end);
@@ -801,11 +749,5 @@ bool GeoZoneBriefingExport::write(const GeoZoneBriefing &briefing, const QString
     if (format == Format::Pdf) {
         return writePdf(briefing, fileName, errorString);
     }
-    const QByteArray content = (format == Format::Json) ? QJsonDocument(toJson(briefing)).toJson(QJsonDocument::Indented) : toHtml(briefing).toUtf8();
-    QSaveFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly) || (file.write(content) != content.size()) || !file.commit()) {
-        errorString = tr("Can't write %1: %2").arg(fileName, file.errorString());
-        return false;
-    }
-    return true;
+    return writeFile(fileName, (format == Format::Json) ? QJsonDocument(toJson(briefing)).toJson(QJsonDocument::Indented) : toHtml(briefing).toUtf8(), errorString);
 }
