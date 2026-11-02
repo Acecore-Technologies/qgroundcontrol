@@ -32,6 +32,10 @@ class MissionController;
 /// GeoZoneDisplay hide zones, except the kept and highlighted zones, like those the mission check or the flight alerts
 /// report. The altitude filter compares the zones with the altitudes of the mission of missionController, or with the
 /// altitude of the active vehicle with vehicleAltitudes.
+///
+/// Labels are placed in priority order, the most restrictive and then the largest zones first, leaving out those
+/// whose estimated extent on the screen overlaps a label placed before or an item of the mission, up to
+/// GeoZoneManager::maxLabelCount. Zones without restriction are only labelled when highlighted or kept.
 class GeoZoneMapModel : public QObject
 {
     Q_OBJECT
@@ -44,6 +48,8 @@ class GeoZoneMapModel : public QObject
     Q_PROPERTY(int                  filteredZoneCount READ filteredZoneCount NOTIFY filteredZoneCountChanged FINAL)                 ///< Zones in view hidden by the filters
     Q_PROPERTY(MissionController*   missionController READ missionController WRITE setMissionController NOTIFY missionControllerChanged FINAL)  ///< Mission whose altitudes the altitude filter uses
     Q_PROPERTY(bool                 vehicleAltitudes READ vehicleAltitudes  WRITE setVehicleAltitudes NOTIFY vehicleAltitudesChanged FINAL)     ///< The altitude filter uses the altitude of the active vehicle
+    Q_PROPERTY(qreal                labelCharWidth  READ labelCharWidth     WRITE setLabelCharWidth NOTIFY labelMetricsChanged FINAL)  ///< Average width of a character of the labels, in pixels
+    Q_PROPERTY(qreal                labelHeight     READ labelHeight        WRITE setLabelHeight    NOTIFY labelMetricsChanged FINAL)  ///< Height of a label in pixels, which its restriction badge is about as wide as
 
 public:
     static constexpr int maxShapeCount = 10000;
@@ -51,6 +57,7 @@ public:
     static constexpr int vehicleAltitudeIntervalMSecs = 1000;   ///< Between reads of the altitude of the active vehicle
     static constexpr int missionAltitudeDelayMSecs = 500;       ///< Mission changes settle this long before its altitudes are read
     static constexpr double altitudeTolerance = 1;              ///< Meters the altitudes change by before the zones are filtered again
+    static constexpr int missionLabelDelayMSecs = 500;          ///< Mission changes settle this long before the labels are placed again
 
     explicit GeoZoneMapModel(QObject *parent = nullptr);
     explicit GeoZoneMapModel(GeoZoneManager *manager, QObject *parent = nullptr);
@@ -76,6 +83,10 @@ public:
     void setMissionController(MissionController *missionController);
     bool vehicleAltitudes() const { return _vehicleAltitudes; }
     void setVehicleAltitudes(bool vehicleAltitudes);
+    qreal labelCharWidth() const { return _labelCharWidth; }
+    void setLabelCharWidth(qreal labelCharWidth);
+    qreal labelHeight() const { return _labelHeight; }
+    void setLabelHeight(qreal labelHeight);
 
     /// Altitudes the altitude filter compares the zones with, from the mission or the active vehicle
     const GeoZoneAltitudeRange &altitudeRange() const { return _altitudeRange; }
@@ -100,6 +111,7 @@ signals:
     void filteredZoneCountChanged();
     void missionControllerChanged();
     void vehicleAltitudesChanged();
+    void labelMetricsChanged();
 
 private slots:
     void _clear();
@@ -117,6 +129,8 @@ private:
     void _updateTimers();
     /// @return Altitudes of the mission or the active vehicle, invalid without them
     GeoZoneAltitudeRange _readAltitudes() const;
+    /// @return Zones to label in the view among the shown zones, see the class description
+    QList<const GeoZone*> _placeLabels(const QSet<const GeoZone*> &shownZones) const;
 
     GeoZoneManager *_manager = nullptr;
     QSet<const GeoZoneShape*> _shapes;
@@ -137,6 +151,9 @@ private:
     bool _vehicleAltitudes = false;
     QTimer _altitudeTimer;                      ///< Reads the altitudes of the mission after changes settle, or of the vehicle periodically
     QTimer _scheduleTimer;                      ///< Filters zones active soon again as time passes
+    QTimer _missionLabelTimer;                  ///< Places the labels again after the mission changes, away from its items
+    qreal _labelCharWidth = 7;
+    qreal _labelHeight = 18;
 
     QGeoRectangle _visibleRegion;
     double _zoomLevel = 0;

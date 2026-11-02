@@ -2604,6 +2604,65 @@ void GeoZonePlanningTest::_testMapModelShapeLimit()
     }
 }
 
+void GeoZonePlanningTest::_testMapModelLabels()
+{
+    // Labels which would overlap are left out, those of the most restrictive and then the largest zones placed first
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(3000, 90);
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(3000, 270);
+    const QJsonArray features = {
+        _circleFeature(QStringLiteral("COND"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(30, 0), 1500),
+        _circleFeature(QStringLiteral("PROH"), QStringLiteral("PROHIBITED"), center, 200),
+        _circleFeature(QStringLiteral("SMALL"), QStringLiteral("REQ_AUTHORISATION"), east.atDistanceAndAzimuth(20, 180), 100),
+        _circleFeature(QStringLiteral("LARGE"), QStringLiteral("REQ_AUTHORISATION"), east, 400),
+        _circleFeature(QStringLiteral("FREE"), QStringLiteral("NO_RESTRICTION"), west, 300),
+    };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString), qPrintable(errorString));
+
+    GeoZoneMapModel model(&manager);
+    const auto labels = [&model]() {
+        QStringList identifiers;
+        for (const QVariant &value : model.labelZones()) {
+            identifiers.append(GeoZoneInfo::fromVariant(value)->identifier());
+        }
+        identifiers.sort();
+        return identifiers;
+    };
+    const QGeoRectangle view(center.atDistanceAndAzimuth(6000, 315), center.atDistanceAndAzimuth(6000, 135));
+    // About 13 m per pixel: the centers 30 and 20 m apart overlap, zones without restriction aren't labelled
+    model.setView(view, 13, true);
+    QCOMPARE(labels(), QStringList({ QStringLiteral("LARGE"), QStringLiteral("PROH") }));
+    // About 0.8 m per pixel
+    model.setView(view, 17, true);
+    QCOMPARE(labels(), QStringList({ QStringLiteral("COND"), QStringLiteral("LARGE"), QStringLiteral("PROH"), QStringLiteral("SMALL") }));
+    // Wider labels overlap again
+    model.setLabelCharWidth(50);
+    QVERIFY(labels().count() < 4);
+    model.setLabelCharWidth(7);
+
+    // Highlighted zones without restriction are labelled
+    const QList<const GeoZone*> freeZones = manager.catalog().zonesAt(west);
+    QCOMPARE(freeZones.count(), 1);
+    model.setHighlightedZones(GeoZoneInfo::toVariantList(freeZones));
+    QVERIFY(labels().contains(QStringLiteral("FREE")));
+    model.setHighlightedZones({});
+    QVERIFY(!labels().contains(QStringLiteral("FREE")));
+
+    // Labels keep clear of the mission items
+    model.setView(view, 13, true);
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    model.setMissionController(missionController);
+    (void) missionController->insertSimpleMissionItem(east, 1);
+    QTRY_COMPARE(labels(), QStringList({ QStringLiteral("PROH") }));
+}
+
 void GeoZonePlanningTest::_testMapModelFilters()
 {
     ScopedEnvironment environment;

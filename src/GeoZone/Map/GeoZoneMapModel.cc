@@ -18,12 +18,16 @@
 #include "GeoZoneVehicleMonitor.h"
 #include "MissionController.h"
 #include "MultiVehicleManager.h"
+#include "QmlObjectListModel.h"
 #include "Vehicle.h"
+#include "VisualMissionItem.h"
 
+#include <QtCore/QRectF>
 #include <QtCore/QSet>
 #include <QtCore/QtMath>
 
 #include <algorithm>
+#include <limits>
 
 GeoZoneMapModel::GeoZoneMapModel(QObject *parent)
     : GeoZoneMapModel(GeoZoneManager::instance(), parent)
@@ -45,6 +49,13 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     (void) connect(&_scheduleTimer, &QTimer::timeout, this, [this]() {
         _invalidateFilter();
         _refresh();
+    });
+    _missionLabelTimer.setSingleShot(true);
+    _missionLabelTimer.setInterval(missionLabelDelayMSecs);
+    (void) connect(&_missionLabelTimer, &QTimer::timeout, this, [this]() {
+        if (_showLabels) {
+            _refresh();
+        }
     });
     _updateFilter();
 }
@@ -156,15 +167,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         emit shapesChanged();
     }
 
-    QList<const GeoZone*> labelZones;
-    if (showLabels) {
-        for (const GeoZone *zone : _manager->catalog().labelZones(visibleRegion, GeoZoneManager::maxLabelCount)) {
-            if (shownZones.contains(zone)) {
-                labelZones.append(zone);
-            }
-        }
-    }
-    const QVariantList labelInfos = GeoZoneInfo::toVariantList(labelZones);
+    const QVariantList labelInfos = GeoZoneInfo::toVariantList(showLabels ? _placeLabels(shownZones) : QList<const GeoZone*>());
     if (labelInfos != _labelZones) {
         _labelZones = labelInfos;
         emit labelZonesChanged();
@@ -177,6 +180,97 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         }
     }
     _setHiddenZoneCount(hiddenZoneCount);
+}
+
+QList<const GeoZone*> GeoZoneMapModel::_placeLabels(const QSet<const GeoZone*> &shownZones) const
+{
+    // Screen positions are approximated in web mercator from the north west corner of the view, ignoring its rotation
+    const double pixels = GeoZoneShape::mercatorPixels(_zoomLevel);
+    const QPointF origin = GeoZoneShape::toMercator(_visibleRegion.topLeft());
+    const auto toScreen = [pixels, &origin](const QPointF &mercator) {
+        // East of the antimeridian when the view crosses it
+        const double x = (mercator.x() < origin.x()) ? (mercator.x() + 1) : mercator.x();
+        return QPointF((x - origin.x()) * pixels, (mercator.y() - origin.y()) * pixels);
+    };
+
+    struct Candidate {
+        const GeoZone *zone;
+        int severity;
+        double size;    ///< Pixels across the larger side of the zone's bounds
+        QRectF rect;    ///< Estimated extent of the label
+    };
+    QList<Candidate> candidates;
+    for (const GeoZone *zone : _manager->catalog().labelZones(_visibleRegion, std::numeric_limits<int>::max())) {
+        if (!shownZones.contains(zone) ||
+            ((zone->restriction() == GeoZone::NoRestriction) && !_highlightedZoneSet.contains(zone) && !_keptZoneSet.contains(zone))) {
+            continue;
+        }
+        const GeoZoneBox &box = zone->box();
+        const QPointF northWest = GeoZoneShape::toMercator(QPointF(box.west(), box.north()));
+        const QPointF southEast = GeoZoneShape::toMercator(QPointF(box.east(), box.south()));
+        const double size = (std::max)(southEast.x() - northWest.x(), southEast.y() - northWest.y()) * pixels;
+        // The name, the restriction badge and the margins
+        const double width = ((zone->displayName().length() + 1.5) * _labelCharWidth) + _labelHeight;
+        const QPointF center = toScreen(GeoZoneShape::toMercator(zone->center()));
+        candidates.append({ zone, GeoZone::restrictionSeverity(zone->restriction()), size,
+                            QRectF(center.x() - (width / 2), center.y() - (_labelHeight / 2), width, _labelHeight) });
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
+        if (a.severity != b.severity) {
+            return a.severity < b.severity;
+        }
+        if (a.size != b.size) {
+            return a.size > b.size;
+        }
+        return a.zone->key() < b.zone->key();
+    });
+
+    // Labels keep clear of the mission items, about twice their marker size
+    QList<QRectF> placed;
+    if (_missionController && _missionController->visualItems()) {
+        const QmlObjectListModel *const items = _missionController->visualItems();
+        const double itemSize = 2 * _labelHeight;
+        for (int i = 0; i < items->count(); i++) {
+            const VisualMissionItem *const item = items->value<const VisualMissionItem*>(i);
+            if (item && item->specifiesCoordinate() && item->coordinate().isValid()) {
+                const QPointF point = toScreen(GeoZoneShape::toMercator(item->coordinate()));
+                placed.append(QRectF(point.x() - (itemSize / 2), point.y() - (itemSize / 2), itemSize, itemSize));
+            }
+        }
+    }
+    const qsizetype obstacleCount = placed.count();
+
+    QList<const GeoZone*> zones;
+    const double gap = _labelCharWidth / 2;
+    for (const Candidate &candidate : std::as_const(candidates)) {
+        const QRectF spaced = candidate.rect.adjusted(-gap, -gap, gap, gap);
+        if (std::none_of(placed.cbegin(), placed.cend(), [&spaced](const QRectF &rect) { return rect.intersects(spaced); })) {
+            placed.append(candidate.rect);
+            zones.append(candidate.zone);
+            if ((placed.count() - obstacleCount) >= GeoZoneManager::maxLabelCount) {
+                break;
+            }
+        }
+    }
+    return zones;
+}
+
+void GeoZoneMapModel::setLabelCharWidth(qreal labelCharWidth)
+{
+    if (labelCharWidth != _labelCharWidth) {
+        _labelCharWidth = labelCharWidth;
+        emit labelMetricsChanged();
+        _refresh();
+    }
+}
+
+void GeoZoneMapModel::setLabelHeight(qreal labelHeight)
+{
+    if (labelHeight != _labelHeight) {
+        _labelHeight = labelHeight;
+        emit labelMetricsChanged();
+        _refresh();
+    }
 }
 
 void GeoZoneMapModel::_clear()
@@ -203,7 +297,8 @@ void GeoZoneMapModel::setHighlightedZones(const QVariantList &zones)
     _highlightedZoneSet = QSet<const GeoZone*>(highlighted.cbegin(), highlighted.cend());
     emit shapesChanged();
     emit highlightedZonesChanged();
-    if (_filter.isActive()) {
+    // Highlighted zones are shown and labelled whatever the filters
+    if (_filter.isActive() || _showLabels) {
         _refresh();
     }
 }
@@ -217,7 +312,7 @@ void GeoZoneMapModel::setKeptZones(const QVariantList &zones)
     const QList<const GeoZone*> kept = GeoZoneInfo::fromVariantList(zones);
     _keptZoneSet = QSet<const GeoZone*>(kept.cbegin(), kept.cend());
     emit keptZonesChanged();
-    if (_filter.isActive()) {
+    if (_filter.isActive() || _showLabels) {
         _refresh();
     }
 }
@@ -245,6 +340,10 @@ void GeoZoneMapModel::setMissionController(MissionController *missionController)
         (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, scheduleUpdate);
         (void) connect(_missionController, &MissionController::visualItemsChanged, this, scheduleUpdate);
         (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, scheduleUpdate);
+        // Labels move away from the items added, or where they were removed
+        const auto placeLabels = [this]() { _missionLabelTimer.start(); };
+        (void) connect(_missionController, &MissionController::visualItemsChanged, this, placeLabels);
+        (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, placeLabels);
     }
     _updateTimers();
     if (_filter.altitudes) {

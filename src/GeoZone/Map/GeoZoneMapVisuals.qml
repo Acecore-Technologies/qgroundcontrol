@@ -25,7 +25,7 @@ Item {
 
     property var    map
     property bool   showZones:          true    ///< False hides the zones on this map, like the small picture in picture map
-    property real   labelMinZoomLevel:  11      ///< Zone labels are only shown from this zoom level up
+    property real   labelMinZoomLevel:  12      ///< Zone labels are only shown from this zoom level up
     property var    highlightedZones:   []      ///< Zones drawn with a white border, which the map filters don't hide
     property var    keptZones:          []      ///< Zones the map filters don't hide, like those the flight alerts report
     property var    missionController:  null    ///< The altitude filter shows the zones near the altitudes of its mission
@@ -124,6 +124,9 @@ Item {
         keptZones:          _root.keptZones
         missionController:  _root.missionController
         vehicleAltitudes:   _root.vehicleAltitudes
+        // Estimated extents of the labels, which don't overlap
+        labelCharWidth:     ScreenTools.smallFontPixelWidth
+        labelHeight:        ScreenTools.defaultFontPixelHeight * 1.2
     }
 
     function _updateView() {
