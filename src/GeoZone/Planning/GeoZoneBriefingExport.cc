@@ -28,12 +28,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSaveFile>
-#include <QtGui/QAbstractTextDocumentLayout>
 #include <QtGui/QFont>
-#include <QtGui/QFontMetricsF>
-#include <QtGui/QPagedPaintDevice>
-#include <QtGui/QPainter>
-#include <QtGui/QPalette>
 #include <QtGui/QPdfWriter>
 #include <QtGui/QTextDocument>
 
@@ -327,22 +322,6 @@ QString style(bool forPrint)
         "@media (max-width:40em){body{padding:.5em}th{display:block;width:auto;border:none;padding-bottom:0;font-size:.85em}"
         "td{display:block}tr{display:block;border-bottom:1px solid #ddd}td.zonetitle{display:block}}"
         "@media print{body{max-width:none;padding:0}h2{page-break-after:avoid;break-after:avoid}}");
-}
-
-/// Colors of the text of the PDF document where its style sets none: the default palette is the application's, which
-/// follows the color theme of the desktop and can have light text
-QPalette printPalette()
-{
-    QPalette palette;
-    for (const QPalette::ColorRole role : { QPalette::Text, QPalette::WindowText, QPalette::ButtonText }) {
-        palette.setColor(role, QColor(0x11, 0x11, 0x11));
-    }
-    for (const QPalette::ColorRole role : { QPalette::Base, QPalette::Window, QPalette::Button }) {
-        palette.setColor(role, Qt::white);
-    }
-    palette.setColor(QPalette::Link, QColor(0x15, 0x65, 0xc0));
-    palette.setColor(QPalette::LinkVisited, QColor(0x6a, 0x1b, 0x9a));
-    return palette;
 }
 
 /// The font without ligatures: the text layer of Qt's PDF documents maps each glyph to one character at most, U+FB01 or
@@ -801,69 +780,20 @@ bool GeoZoneBriefingExport::writePdf(const GeoZoneBriefing &briefing, const QStr
     writer.setTitle(tr("Geozone briefing: %1").arg(briefing.mission.name));
     writer.setCreator(QStringLiteral("QGroundControl"));
     writer.setResolution(300);
-    writer.setPageLayout(QPageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF(15, 15, 15, 15), QPageLayout::Millimeter));
-    if (!paint(briefing, &writer) || (QFileInfo(fileName).size() <= 0)) {
-        errorString = tr("Can't write %1").arg(fileName);
-        return false;
-    }
-    return true;
-}
-
-bool GeoZoneBriefingExport::paint(const GeoZoneBriefing &briefing, QPaintDevice *device)
-{
-    QPainter painter;
-    if (!device || !painter.begin(device)) {
-        return false;
-    }
-    QPagedPaintDevice *const pagedDevice = dynamic_cast<QPagedPaintDevice*>(device);
-
+    // Without page margins QTextDocument::print() adds its own, with the page numbers in the bottom one
+    writer.setPageLayout(QPageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF()));
     QTextDocument document;
-    document.documentLayout()->setPaintDevice(device);
     QFont font = withoutLigatures(document.defaultFont());
     font.setPointSizeF(9);
     document.setDefaultFont(font);
     document.setHtml(toHtml(briefing, true));
-
-    QFont marginFont = font;
-    marginFont.setPointSizeF(7.5);
-    const QFontMetricsF metrics(marginFont, device);
-    const QRectF page(QPointF(0, 0), QSizeF(device->width(), device->height()));
-    const double header = metrics.height() * 2;
-    const double footer = metrics.height() * 2;
-    const QSizeF body(page.width(), page.height() - header - footer);
-    document.setPageSize(body);
-    const int pageCount = document.pageCount();
-    const QString title = tr("Geozone briefing: %1").arg(briefing.mission.name);
-    const QString date = dateTimeText(briefing.generatedAt);
-    QAbstractTextDocumentLayout::PaintContext context;
-    context.palette = printPalette();
-
-    for (int i = 0; i < (pagedDevice ? pageCount : 1); i++) {
-        if ((i > 0) && !pagedDevice->newPage()) {
-            return false;
-        }
-        if (!pagedDevice) {
-            painter.fillRect(page, Qt::white);
-        }
-        painter.save();
-        painter.setFont(marginFont);
-        painter.setPen(QColor(0x55, 0x55, 0x55));
-        const QRectF headerRect(0, 0, page.width(), metrics.height());
-        painter.drawText(headerRect, Qt::AlignLeft | Qt::AlignVCenter, metrics.elidedText(title, Qt::ElideRight, page.width() * 0.65));
-        painter.drawText(headerRect, Qt::AlignRight | Qt::AlignVCenter, date);
-        painter.drawLine(QPointF(0, metrics.height() * 1.3), QPointF(page.width(), metrics.height() * 1.3));
-        painter.drawText(QRectF(0, page.height() - metrics.height(), page.width(), metrics.height()), Qt::AlignHCenter | Qt::AlignVCenter,
-                         tr("Page %1 of %2").arg(i + 1).arg(pageCount));
-        painter.restore();
-
-        painter.save();
-        painter.translate(0, header - (i * body.height()));
-        context.clip = QRectF(0, i * body.height(), body.width(), body.height());
-        painter.setClipRect(context.clip);
-        document.documentLayout()->draw(&painter, context);
-        painter.restore();
+    // Prints the text in black where the style sets no color, whatever the palette of the application
+    document.print(&writer);
+    if (QFileInfo(fileName).size() <= 0) {
+        errorString = tr("Can't write %1").arg(fileName);
+        return false;
     }
-    return painter.end();
+    return true;
 }
 
 bool GeoZoneBriefingExport::write(const GeoZoneBriefing &briefing, const QString &fileName, Format format, QString &errorString)

@@ -1269,55 +1269,31 @@ void GeoZonePlanningTest::_testBriefingPrint()
     QVERIFY2(mission.load(errorString), qPrintable(errorString));
     const GeoZoneBriefing briefing = mission.build();
 
-    // The application palette follows the color theme of the desktop, the document stays dark on white with a dark one
+    // The application palette follows the color theme of the desktop, the document stays dark on white with a dark one.
+    // Its text can be searched and copied, also in fonts with ligatures like the application's Open Sans.
     const QPalette applicationPalette = QGuiApplication::palette();
-    const auto restorePalette = qScopeGuard([&applicationPalette]() { QGuiApplication::setPalette(applicationPalette); });
-    const auto palette = [](const QColor &text, const QColor &window) {
-        return QPalette(text, window, window.lighter(), window.darker(), window.darker(120), text, Qt::red, window, window);
-    };
-    const auto firstPage = [&briefing](const QPalette &applicationPalette) {
-        QGuiApplication::setPalette(applicationPalette);
-        // A4 at 100 dpi
-        QImage image(827, 1169, QImage::Format_RGB32);
-        image.setDotsPerMeterX(qRound(100 / 0.0254));
-        image.setDotsPerMeterY(qRound(100 / 0.0254));
-        image.fill(Qt::magenta);
-        return GeoZoneBriefingExport::paint(briefing, &image) ? image : QImage();
-    };
-    const QImage onDarkTheme = firstPage(palette(Qt::white, QColor(0x30, 0x30, 0x30)));
-    const QImage onLightTheme = firstPage(palette(Qt::black, Qt::white));
-    QVERIFY(!onDarkTheme.isNull());
-    QCOMPARE(onDarkTheme, onLightTheme);
-    QCOMPARE(onDarkTheme.pixel(0, onDarkTheme.height() - 1), qRgb(255, 255, 255));
-    // The text of the headings and tables is dark gray to black, the margins and the notes gray
-    qsizetype darkPixels = 0;
-    for (int y = 0; y < onDarkTheme.height(); y++) {
-        const QRgb *const line = reinterpret_cast<const QRgb*>(onDarkTheme.constScanLine(y));
-        for (int x = 0; x < onDarkTheme.width(); x++) {
-            const int red = qRed(line[x]);
-            const int green = qGreen(line[x]);
-            const int blue = qBlue(line[x]);
-            const bool neutral = ((std::max)({ red, green, blue }) - (std::min)({ red, green, blue })) < 16;
-            if (neutral && (qGray(line[x]) < 64)) {
-                darkPixels++;
-            }
-        }
-    }
-    QVERIFY2(darkPixels > 5000, qPrintable(QString::number(darkPixels)));
-
-    // The text of the PDF can be searched and copied, also in fonts with ligatures like the application's Open Sans
     const QFont applicationFont = QGuiApplication::font();
-    const auto restoreFont = qScopeGuard([&applicationFont]() { QGuiApplication::setFont(applicationFont); });
+    const auto restore = qScopeGuard([&applicationPalette, &applicationFont]() {
+        QGuiApplication::setPalette(applicationPalette);
+        QGuiApplication::setFont(applicationFont);
+    });
     QGuiApplication::setFont(QFont(QStringLiteral("Open Sans")));
-    const QString pdfFile = dir.filePath(QStringLiteral("briefing.pdf"));
-    QVERIFY2(GeoZoneBriefingExport::writePdf(briefing, pdfFile, errorString), qPrintable(errorString));
+    const auto writePdf = [&briefing, &dir](const QColor &text, const QColor &window) {
+        QGuiApplication::setPalette(QPalette(text, window, window.lighter(), window.darker(), window.darker(120), text, Qt::red, window, window));
+        const QString fileName = dir.filePath(QStringLiteral("briefing-%1.pdf").arg(text.name().mid(1)));
+        QString errorString;
+        return GeoZoneBriefingExport::writePdf(briefing, fileName, errorString) ? fileName : QString();
+    };
+    const QString pdfFile = writePdf(Qt::white, QColor(0x30, 0x30, 0x30));
+    QVERIFY(!pdfFile.isEmpty());
     QFile pdf(pdfFile);
     QVERIFY(pdf.open(QIODevice::ReadOnly));
     int fontCount = 0;
     const QStringList unmapped = unmappedPdfGlyphs(pdf.readAll(), fontCount);
     QVERIFY(fontCount > 0);
     QVERIFY2(unmapped.isEmpty(), qPrintable(unmapped.join(QStringLiteral(", "))));
-    // With the text extraction of Poppler when installed
+
+    // With the text extraction and rendering of Poppler when installed
     const QString pdftotext = QStandardPaths::findExecutable(QStringLiteral("pdftotext"));
     if (!pdftotext.isEmpty()) {
         QProcess process;
@@ -1327,6 +1303,35 @@ void GeoZonePlanningTest::_testBriefingPrint()
         for (const QString &word : { QStringLiteral("Geozone briefing"), QStringLiteral("official"), QStringLiteral("flight path") }) {
             QVERIFY2(text.contains(word), qPrintable(word));
         }
+    }
+    const QString pdftoppm = QStandardPaths::findExecutable(QStringLiteral("pdftoppm"));
+    if (!pdftoppm.isEmpty()) {
+        // The first page at 100 dpi
+        const auto firstPage = [&pdftoppm](const QString &fileName) {
+            QProcess process;
+            process.start(pdftoppm, { QStringLiteral("-r"), QStringLiteral("100"), QStringLiteral("-l"), QStringLiteral("1"), QStringLiteral("-singlefile"),
+                                      QStringLiteral("-png"), fileName, fileName });
+            return process.waitForFinished(30000) ? QImage(fileName + QStringLiteral(".png")).convertToFormat(QImage::Format_RGB32) : QImage();
+        };
+        const QImage onDarkTheme = firstPage(pdfFile);
+        QVERIFY(!onDarkTheme.isNull());
+        QCOMPARE(onDarkTheme, firstPage(writePdf(Qt::black, Qt::white)));
+        QCOMPARE(onDarkTheme.pixel(0, onDarkTheme.height() - 1), qRgb(255, 255, 255));
+        // The text of the headings and tables is dark gray to black, the notes gray
+        qsizetype darkPixels = 0;
+        for (int y = 0; y < onDarkTheme.height(); y++) {
+            const QRgb *const line = reinterpret_cast<const QRgb*>(onDarkTheme.constScanLine(y));
+            for (int x = 0; x < onDarkTheme.width(); x++) {
+                const int red = qRed(line[x]);
+                const int green = qGreen(line[x]);
+                const int blue = qBlue(line[x]);
+                const bool neutral = ((std::max)({ red, green, blue }) - (std::min)({ red, green, blue })) < 16;
+                if (neutral && (qGray(line[x]) < 64)) {
+                    darkPixels++;
+                }
+            }
+        }
+        QVERIFY2(darkPixels > 5000, qPrintable(QString::number(darkPixels)));
     }
 }
 
