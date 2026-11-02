@@ -93,6 +93,7 @@ qt_add_qml_module(GeoZoneModule
         Map/GeoZoneMapPanel.qml
         Map/GeoZoneMapVisuals.qml
         Map/GeoZoneSearch.qml
+        Map/GeoZoneSourceNote.qml
         Map/GeoZoneStyle.qml
         Map/GeoZoneSummary.qml
         Planning/GeoZoneFenceGroup.qml

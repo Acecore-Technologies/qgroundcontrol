@@ -51,4 +51,5 @@ private slots:
     void _testLabelZonesLimit();
     void _testZoneSearch();
     void _testCatalogSnapshot();
+    void _testMergedSources();
 };

@@ -14,6 +14,30 @@ GeoZoneInfo::GeoZoneInfo(const GeoZone *zone)
 {
 }
 
+QString GeoZoneInfo::sourceText() const
+{
+    if (!_zone) {
+        return QString();
+    }
+    const int count = _zone->sourceCount();
+    if (count <= 1) {
+        return _zone->sourceText();
+    }
+    return QCoreApplication::translate("GeoZoneInfo", "%1 · %n source(s)", "Source of a zone, number of sources publishing it", count).arg(_zone->sourceText());
+}
+
+QString GeoZoneInfo::sourcesText() const
+{
+    if (!_zone) {
+        return QString();
+    }
+    QStringList texts{ _zone->sourceText() };
+    for (const GeoZone::OtherSource &other : _zone->otherSources()) {
+        texts.append(other.text);
+    }
+    return texts.join(QStringLiteral("\n"));
+}
+
 const GeoZone *GeoZoneInfo::fromVariant(const QVariant &value)
 {
     return value.canConvert<GeoZoneInfo>() ? value.value<GeoZoneInfo>().zone() : nullptr;

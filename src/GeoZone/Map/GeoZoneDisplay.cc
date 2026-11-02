@@ -43,7 +43,7 @@ bool GeoZoneMapFilter::isActive() const
 
 bool GeoZoneMapFilter::accepts(const GeoZone &zone, const QDateTime &now, const GeoZoneAltitudeRange &altitudeRange) const
 {
-    if ((hiddenRestrictions & (1 << zone.restriction())) || (!source.isEmpty() && (zone.sourceKey() != source))) {
+    if ((hiddenRestrictions & (1 << zone.restriction())) || (!source.isEmpty() && !zone.fromSource(source))) {
         return false;
     }
 

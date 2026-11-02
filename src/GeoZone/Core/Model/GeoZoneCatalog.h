@@ -9,11 +9,14 @@
 
 #pragma once
 
+#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QSharedPointer>
 #include <QtCore/QString>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
+
+#include <utility>
 
 #include "GeoZone.h"
 #include "GeoZoneBox.h"
@@ -27,11 +30,27 @@ class GeoZoneSource;
 /// Rebuilt when the zones change, the zones and shapes belong to their sources. The data is immutable and shared by
 /// copies, which are cheap and keep the zones alive, so that another thread can query a copy while the sources change,
 /// but not the shapes. Queries return const zones, since only their sources and the GUI thread modify them.
+///
+/// A zone which several sources publish, like a national file and a regional extract of it, is kept once: zones of a
+/// later source with the identifier and country of a zone of an earlier source, and the same restriction, volumes and
+/// schedule (see sameContent), are left out, and the kept zone lists their sources, see GeoZone::otherSources. Zones
+/// with the same identifier and another content are all kept.
 class GeoZoneCatalog
 {
 public:
-    /// Collects the zones of the sources in their order and indexes them. Copies keep the previous zones.
+    /// Collects the zones of the sources in their order, keeping zones several sources publish once, and indexes them.
+    /// Copies keep the previous zones.
     void rebuild(const QList<const GeoZoneSource*> &sources);
+
+    /// @return true if the zones have the same identifier and country, restriction, volumes and schedule: the same
+    ///         published feature, or a copy of it which reads the same
+    static bool sameContent(const GeoZone &a, const GeoZone &b);
+
+    /// @return Number of zones left out because an earlier source publishes them, see GeoZone::otherSources
+    int mergedZoneCount() const { return static_cast<int>(_data->merged.count()); }
+
+    /// @return Numbers of zones of the source which other sources publish too, by the key of the other source
+    QHash<QString, int> sharedZoneCounts(const QString &sourceKey) const;
 
     /// Valid until the catalog is rebuilt or destroyed. Not const, so that the GUI thread can update GeoZone::active.
     const QList<GeoZone*> &zones() const { return _data->zones; }
@@ -69,6 +88,7 @@ private:
         QList<QList<const GeoZoneShape*>> zoneShapes;   ///< Shapes of each zone of zones
         GeoZoneIndex index;                             ///< Indexes into zones
         GeoZoneBox boundingBox;
+        QList<std::pair<const GeoZone*, const GeoZone*>> merged;   ///< Zones left out, with the zone kept for them
     };
 
     QSharedPointer<const Data> _data = QSharedPointer<const Data>::create();

@@ -101,7 +101,8 @@ ColumnLayout {
 
                     QGCLabel {
                         Layout.fillWidth:   true
-                        text:               resultRow.modelData.identifier + " - " + resultRow.modelData.restrictionText
+                        text:               resultRow.modelData.identifier + " - " + resultRow.modelData.restrictionText +
+                                                (resultRow.modelData.sourceCount > 1 ? " · " + qsTr("%n source(s)", "", resultRow.modelData.sourceCount) : "")
                         textFormat:         Text.PlainText
                         elide:              Text.ElideRight
                         font.pointSize:     ScreenTools.smallFontPointSize

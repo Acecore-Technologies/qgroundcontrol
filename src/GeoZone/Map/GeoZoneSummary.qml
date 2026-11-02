@@ -34,8 +34,11 @@ ColumnLayout {
         text:               _geoZoneManager.repository.busy ? _geoZoneManager.repository.progressText :
                                 qsTr("%1 from %2.", "Number of zones from number of sources").arg(qsTr("%n zone(s)", "", _geoZoneManager.zoneCount))
                                                                                                    .arg(qsTr("%n source(s)", "", _activeSourceCount)) +
+                                (_geoZoneManager.mergedZoneCount > 0 ? " " + qsTr("%n published by several sources counted once.", "", _geoZoneManager.mergedZoneCount) : "") +
                                 (_geoZoneManager.disabledSourceCount > 0 ? " " + qsTr("%n source(s) turned off.", "", _geoZoneManager.disabledSourceCount) : "")
     }
+
+    GeoZoneSourceNote { Layout.fillWidth: true }
 
     QGCLabel {
         Layout.fillWidth:   true

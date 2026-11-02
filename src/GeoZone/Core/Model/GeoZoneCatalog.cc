@@ -8,20 +8,88 @@
  ****************************************************************************/
 
 #include "GeoZoneCatalog.h"
+#include "GeoZoneDataStream.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
+
+#include <QtCore/QSet>
 
 #include <algorithm>
 #include <numeric>
 
+namespace {
+
+/// Restriction, volumes and schedule of a zone, as serialized
+QByteArray contentBytes(const GeoZone &zone)
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream << static_cast<quint8>(zone.restriction());
+    GeoZoneDataStream::writeList(stream, zone.data().volumes);
+    GeoZoneDataStream::writeList(stream, zone.data().applicability);
+    return bytes;
+}
+
+} // namespace
+
+bool GeoZoneCatalog::sameContent(const GeoZone &a, const GeoZone &b)
+{
+    if ((a.identifier() != b.identifier()) || (a.country() != b.country()) || (a.restriction() != b.restriction()) ||
+        (a.data().volumes.count() != b.data().volumes.count())) {
+        return false;
+    }
+    // The same published feature reads the same
+    const QByteArray &hashA = a.data().contentHash;
+    if (!hashA.isEmpty() && (hashA == b.data().contentHash)) {
+        return true;
+    }
+    return contentBytes(a) == contentBytes(b);
+}
+
 void GeoZoneCatalog::rebuild(const QList<const GeoZoneSource*> &sources)
 {
     const QSharedPointer<Data> data = QSharedPointer<Data>::create();
+
+    // Zones kept with an identifier, by identifier and country, to find those later sources publish again
+    QHash<QString, QList<GeoZone*>> identified;
+    QHash<GeoZone*, QList<GeoZone::OtherSource>> otherSources;
     for (const GeoZoneSource *source : sources) {
-        data->zones.append(source->zones());
+        QSet<const GeoZone*> left;
+        for (GeoZone *zone : source->zones()) {
+            zone->setOtherSources({});
+            if ((sources.count() > 1) && !zone->identifier().isEmpty()) {
+                QList<GeoZone*> &kept = identified[zone->identifier() + QChar(0x1f) + zone->country()];
+                const auto same = std::find_if(kept.cbegin(), kept.cend(), [zone](const GeoZone *keptZone) {
+                    return (keptZone->sourceKey() != zone->sourceKey()) && sameContent(*keptZone, *zone);
+                });
+                if (same != kept.cend()) {
+                    QList<GeoZone::OtherSource> &others = otherSources[*same];
+                    if (!std::any_of(others.cbegin(), others.cend(), [zone](const GeoZone::OtherSource &other) { return other.key == zone->sourceKey(); })) {
+                        others.append(GeoZone::OtherSource{ zone->sourceKey(), zone->sourceText() });
+                    }
+                    data->merged.emplace_back(zone, *same);
+                    left.insert(zone);
+                    continue;
+                }
+                kept.append(zone);
+            }
+            data->zones.append(zone);
+        }
+        // Zones left out are kept alive too, so that values referring to them stay valid
         data->sharedZones.append(source->sharedZones());
-        data->shapes.append(source->shapes());
+        if (left.isEmpty()) {
+            data->shapes.append(source->shapes());
+        } else {
+            for (GeoZoneShape *shape : source->shapes()) {
+                if (!left.contains(shape->zone())) {
+                    data->shapes.append(shape);
+                }
+            }
+        }
         data->boundingBox = data->boundingBox.united(source->box());
+    }
+    for (auto it = otherSources.cbegin(); it != otherSources.cend(); ++it) {
+        it.key()->setOtherSources(it.value());
     }
 
     QHash<const GeoZone*, qsizetype> zoneIndexes;
@@ -35,6 +103,19 @@ void GeoZoneCatalog::rebuild(const QList<const GeoZoneSource*> &sources)
     }
     data->index.build(data->zones);
     _data = data;
+}
+
+QHash<QString, int> GeoZoneCatalog::sharedZoneCounts(const QString &sourceKey) const
+{
+    QHash<QString, int> counts;
+    for (const auto &[leftZone, keptZone] : _data->merged) {
+        if (leftZone->sourceKey() == sourceKey) {
+            counts[keptZone->sourceKey()]++;
+        } else if (keptZone->sourceKey() == sourceKey) {
+            counts[leftZone->sourceKey()]++;
+        }
+    }
+    return counts;
 }
 
 QList<const GeoZoneShape*> GeoZoneCatalog::shapesInArea(double south, double west, double north, double east) const

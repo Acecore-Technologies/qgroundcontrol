@@ -106,6 +106,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAboutToChange, this, &GeoZoneManager::zonesAboutToChange);
     (void) connect(_repository, &GeoZoneSourceRepository::sourceChanged, this, &GeoZoneManager::_endZonesChange);
     (void) connect(_repository, &GeoZoneSourceRepository::userLoaded, _display, [this]() { _display->setVisible(true); });
+    (void) connect(_repository, &GeoZoneSourceRepository::sourceAdded, this, &GeoZoneManager::_noteSharedZones);
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAdded, this, &GeoZoneManager::sourceAdded);
     (void) connect(_repository, &GeoZoneSourceRepository::loadFailed, this, &GeoZoneManager::loadFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::filesAdded, this, &GeoZoneManager::_filesAdded);
@@ -362,10 +363,49 @@ void GeoZoneManager::_endZonesChange(GeoZoneSource *source)
         _activeTimer->start();
     }
 
+    // The note is about a source which was removed
+    if (!_sourceNoteKey.isEmpty() && !_repository->source(_sourceNoteKey)) {
+        clearSourceNote();
+    }
+
     emit zonesChanged(source);
     emit zoneCountChanged();
     if (_catalog.boundingBox() != previousBoundingBox) {
         emit boundingBoxChanged();
+    }
+}
+
+void GeoZoneManager::_noteSharedZones(GeoZoneSource *source)
+{
+    const int zoneCount = source->zoneCount();
+    QString otherKey;
+    int sharedCount = 0;
+    if (source->enabled() && (zoneCount > 0)) {
+        const QHash<QString, int> counts = _catalog.sharedZoneCounts(source->key());
+        for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
+            if (it.value() > sharedCount) {
+                otherKey = it.key();
+                sharedCount = (std::min)(it.value(), zoneCount);
+            }
+        }
+    }
+    if (sharedCount <= (sharedSourceFraction * zoneCount)) {
+        clearSourceNote();
+        return;
+    }
+    const GeoZoneSource *const other = _repository->source(otherKey);
+    _sourceNoteKey = source->key();
+    _sourceNote = tr("%1 of the %n zone(s) of %2 are already loaded from %3. Zones both publish alike are shown and checked once.", "", zoneCount)
+                      .arg(sharedCount).arg(source->name(), other ? other->name() : otherKey);
+    emit sourceNoteChanged();
+}
+
+void GeoZoneManager::clearSourceNote()
+{
+    _sourceNoteKey.clear();
+    if (!_sourceNote.isEmpty()) {
+        _sourceNote.clear();
+        emit sourceNoteChanged();
     }
 }
 

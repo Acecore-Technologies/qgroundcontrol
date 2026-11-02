@@ -45,7 +45,9 @@ class GeoZoneInfo
     Q_PROPERTY(QGeoRectangle    boundingBox             READ boundingBox            CONSTANT FINAL)
     Q_PROPERTY(bool             active                  READ active                 CONSTANT FINAL)   ///< When read
     Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT FINAL)   ///< Key of the GeoZoneSource
-    Q_PROPERTY(QString          sourceText              READ sourceText             CONSTANT FINAL)   ///< File or feed the zone was loaded from, with its date
+    Q_PROPERTY(QString          sourceText              READ sourceText             CONSTANT FINAL)   ///< File or feed the zone was loaded from, with its date, and the number of sources publishing it when several do
+    Q_PROPERTY(int              sourceCount             READ sourceCount            CONSTANT FINAL)   ///< Sources publishing the zone, see GeoZone::otherSources
+    Q_PROPERTY(QString          sourcesText             READ sourcesText            CONSTANT FINAL)   ///< Files or feeds publishing the zone with their dates, one per line
 
 public:
     GeoZoneInfo() = default;
@@ -76,7 +78,9 @@ public:
     QGeoRectangle boundingBox() const { return _zone ? _zone->boundingBox() : QGeoRectangle(); }
     bool active() const { return _zone && _zone->active(); }
     QString sourceKey() const { return _zone ? _zone->sourceKey() : QString(); }
-    QString sourceText() const { return _zone ? _zone->sourceText() : QString(); }
+    QString sourceText() const;
+    int sourceCount() const { return _zone ? _zone->sourceCount() : 0; }
+    QString sourcesText() const;
 
     friend bool operator==(const GeoZoneInfo &a, const GeoZoneInfo &b) { return a._zone == b._zone; }
 

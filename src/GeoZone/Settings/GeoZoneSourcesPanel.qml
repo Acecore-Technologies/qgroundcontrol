@@ -38,6 +38,8 @@ ColumnLayout {
         Layout.fillWidth:   true
     }
 
+    GeoZoneSourceNote { Layout.fillWidth: true }
+
     ColumnLayout {
         Layout.fillWidth:   true
         spacing:            _margin / 2

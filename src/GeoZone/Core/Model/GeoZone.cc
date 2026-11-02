@@ -123,6 +123,35 @@ void GeoZone::setSourceText(const QString &sourceText)
     _sourceText = sourceText;
 }
 
+QList<GeoZone::OtherSource> GeoZone::otherSources() const
+{
+    if (_otherSourceCount.load(std::memory_order_relaxed) == 0) {
+        return {};
+    }
+    const QMutexLocker locker(&_otherSourcesMutex);
+    return _otherSources;
+}
+
+void GeoZone::setOtherSources(const QList<OtherSource> &sources)
+{
+    // Most zones have none, which the catalog sets on every rebuild
+    if (sources.isEmpty() && (_otherSourceCount.load(std::memory_order_relaxed) == 0)) {
+        return;
+    }
+    const QMutexLocker locker(&_otherSourcesMutex);
+    _otherSources = sources;
+    _otherSourceCount.store(static_cast<int>(sources.count()), std::memory_order_relaxed);
+}
+
+bool GeoZone::fromSource(const QString &sourceKey) const
+{
+    if (sourceKey == _sourceKey) {
+        return true;
+    }
+    const QList<OtherSource> others = otherSources();
+    return std::any_of(others.cbegin(), others.cend(), [&sourceKey](const OtherSource &other) { return other.key == sourceKey; });
+}
+
 bool GeoZone::isActiveAt(const QDateTime &dateTime) const
 {
     return GeoZoneSchedule::isActiveAt(_data.applicability, dateTime, _box.center());

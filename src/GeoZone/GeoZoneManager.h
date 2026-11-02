@@ -44,7 +44,7 @@ class GeoZoneManager : public QObject
     Q_MOC_INCLUDE("GeoZoneDisplay.h")
     Q_MOC_INCLUDE("GeoZonePlanning.h")
 
-    Q_PROPERTY(int                  zoneCount           READ zoneCount          NOTIFY zoneCountChanged FINAL)            ///< Zones of all sources
+    Q_PROPERTY(int                  zoneCount           READ zoneCount          NOTIFY zoneCountChanged FINAL)            ///< Zones of all sources, those several publish alike once
     Q_PROPERTY(QmlObjectListModel*  sources             READ sources            CONSTANT FINAL)                           ///< GeoZoneSource objects
     Q_PROPERTY(GeoZoneDisplay*      display             READ display            CONSTANT FINAL)                           ///< Which zones the maps draw
     Q_PROPERTY(GeoZonePlanning*     planning            READ planning           CONSTANT FINAL)                           ///< Planned flight start and authorisations for mission checks
@@ -60,9 +60,12 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QString              packPublicKey       READ packPublicKey      NOTIFY packSigningChanged FINAL)   ///< Base64 public key of the pack signing key, empty without
     Q_PROPERTY(QString              packKeyId           READ packKeyId          NOTIFY packSigningChanged FINAL)   ///< See GeoZonePackSignature::keyId
     Q_PROPERTY(QVariantList         trustedPublishers   READ trustedPublishers  NOTIFY trustedPublishersChanged FINAL) ///< Maps with name, publicKey (base64) and keyId
+    Q_PROPERTY(int                  mergedZoneCount     READ mergedZoneCount    NOTIFY zoneCountChanged FINAL)        ///< Zones left out of zoneCount since an earlier source publishes them alike, see GeoZoneCatalog
+    Q_PROPERTY(QString              sourceNote          READ sourceNote         NOTIFY sourceNoteChanged FINAL)       ///< About the source the user added last, like most of its zones being loaded from another source already, empty without
 
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
+    static constexpr double sharedSourceFraction = 0.8; ///< Of the zones of an added source loaded from another source already, above which sourceNote tells
 
     /// @param storageDir Directory in which copies of the sources are kept. Empty for the default application data location.
     explicit GeoZoneManager(const QString &storageDir = QString(), QObject *parent = nullptr);
@@ -136,7 +139,11 @@ public:
     Q_INVOKABLE void showZone(const QVariant &zone);
 
     int zoneCount() const { return static_cast<int>(_catalog.zones().count()); }
-    /// Zones of all sources, in the order of the sources
+    int mergedZoneCount() const { return _catalog.mergedZoneCount(); }
+    QString sourceNote() const { return _sourceNote; }
+    /// Dismisses sourceNote
+    Q_INVOKABLE void clearSourceNote();
+    /// Zones of all sources, in the order of the sources, those several publish alike once, see GeoZoneCatalog
     const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }
     /// Zones of all sources with their spatial index
     const GeoZoneCatalog &catalog() const { return _catalog; }
@@ -184,12 +191,15 @@ signals:
     void fileOperationFinished(bool success, const QString &message);  ///< An export or import the user asked for finished
     void packSigningChanged();
     void trustedPublishersChanged();
+    void sourceNoteChanged();
 
 private slots:
     void _updateActive();
 
 private:
     void _endZonesChange(GeoZoneSource *source);
+    /// Sets sourceNote when most zones of the source the user added are loaded from another source already
+    void _noteSharedZones(GeoZoneSource *source);
     /// Applies the pack signing settings to the repository
     void _updatePackSigning();
     void _filesAdded(int addedCount, const QStringList &failures);
@@ -208,6 +218,8 @@ private:
     GeoZoneCatalog _catalog;
     QTimer *_activeTimer = nullptr;
     QMetaObject::Connection _vehicleConnection;
+    QString _sourceNote;
+    QString _sourceNoteKey;     ///< Of the source sourceNote is about
 
     static constexpr int _activeUpdateIntervalMSecs = 60 * 1000;
 };

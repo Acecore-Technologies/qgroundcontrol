@@ -1436,7 +1436,9 @@ void GeoZoneManagerTest::_testServiceApiKeys()
     restarted.repository()->refreshFeeds();
     QTRY_VERIFY(!restarted.repository()->busy());
     QCOMPARE(queryFeed->errorString(), QStringLiteral("The credentials of the service are missing."));
-    QCOMPARE(restarted.zoneCount(), 9);
+    // The zones of the three feeds are kept, the same zones counting once
+    QCOMPARE(restarted.zoneCount() + restarted.mergedZoneCount(), 9);
+    QCOMPARE(restarted.zoneCount(), 3);
     restarted.repository()->setSecret(queryUrl, QStringLiteral("new-s3cret"));
     QVERIFY(!queryFeed->credentialsMissing());
     QTRY_VERIFY(!restarted.repository()->busy());
@@ -1597,12 +1599,14 @@ void GeoZoneManagerTest::_testEd318Service()
     manager.addService(server.url(QStringLiteral("/wrapped")), service.toVariantMap(), QString());
     QVERIFY(addedSpy.wait(10000));
     QTRY_VERIFY(!manager.repository()->busy());
-    QCOMPARE(manager.zoneCount(), 6);
+    // The same zones as the other feed, counting once
+    QCOMPARE(manager.zoneCount(), 3);
+    QCOMPARE(manager.mergedZoneCount(), 3);
     service.responseMember = QStringLiteral("data.aixm");
     manager.addService(server.url(QStringLiteral("/wrapped")), service.toVariantMap(), QString());
     QVERIFY(failedSpy.wait(10000));
     QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("has no data.aixm")), qPrintable(failedSpy.last()[1].toString()));
-    QCOMPARE(manager.zoneCount(), 6);
+    QCOMPARE(manager.mergedZoneCount(), 3);
 
     // The FAA NOTAM Management Service is configured, but its NOTAMs can't be read yet
     const QList<GeoZoneProviders::ServiceTemplate> templates = GeoZoneProviders::serviceTemplates();
@@ -3040,6 +3044,88 @@ void GeoZoneManagerTest::_testCatalogSnapshot()
     }
     // The last copy releases the previous zones
     QVERIFY(oldZone.isNull());
+}
+
+void GeoZoneManagerTest::_testMergedSources()
+{
+    // A regional extract of a national file publishes some of its zones alike, which are kept once
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate other = center.atDistanceAndAzimuth(5000, 90);
+    const auto withUpperLimit = [](QJsonObject feature, double upper) {
+        QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
+        QJsonObject layer = geometry[0].toObject();
+        layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
+        layer[QStringLiteral("upperLimit")] = upper;
+        layer[QStringLiteral("upperVerticalReference")] = QStringLiteral("AGL");
+        geometry[0] = layer;
+        feature[QStringLiteral("geometry")] = geometry;
+        return feature;
+    };
+    const QJsonObject same = _circleFeature(QStringLiteral("SAME"), QStringLiteral("PROHIBITED"), center, 500);
+    const QJsonObject limited = withUpperLimit(_circleFeature(QStringLiteral("LIMITS"), QStringLiteral("CONDITIONAL"), other, 300), 120);
+    const QJsonObject only = _circleFeature(QStringLiteral("ONLY"), QStringLiteral("CONDITIONAL"), other, 800);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("national.json"), QJsonArray{ same, limited, only }), errorString), qPrintable(errorString));
+    QCOMPARE(manager.zoneCount(), 3);
+    QCOMPARE(manager.mergedZoneCount(), 0);
+    const QString nationalKey = manager.sources()->value<GeoZoneSource*>(0)->key();
+
+    // The zone with the same identifier and other limits is kept from both
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    const QString extractFile = _writeFeatures(dir, QStringLiteral("extract.json"), QJsonArray{ same, withUpperLimit(limited, 150) });
+    manager.repository()->addFile(extractFile);
+    QVERIFY(addedSpy.wait(10000));
+    const QString extractKey = GeoZoneLoader::fileKey(extractFile);
+    QCOMPARE(manager.zoneCount(), 4);
+    QCOMPARE(manager.mergedZoneCount(), 1);
+    QVERIFY(manager.catalog().sharedZoneCounts(extractKey) == (QHash<QString, int>{ { nationalKey, 1 } }));
+    // Half of the zones of the extract are loaded already, too few to note
+    QVERIFY(manager.sourceNote().isEmpty());
+
+    const QList<const GeoZone*> sameZones = manager.catalog().zonesAt(center);
+    QCOMPARE(sameZones.count(), 1);
+    const GeoZone *const sameZone = sameZones[0];
+    QCOMPARE(sameZone->sourceKey(), nationalKey);
+    QCOMPARE(sameZone->sourceCount(), 2);
+    QCOMPARE(sameZone->otherSources().count(), 1);
+    QCOMPARE(sameZone->otherSources()[0].key, extractKey);
+    QVERIFY(sameZone->fromSource(extractKey));
+    QVERIFY(GeoZoneInfo(sameZone).sourceText().endsWith(QStringLiteral(" · 2 source(s)")));
+    QCOMPARE(GeoZoneInfo(sameZone).sourcesText().split(QLatin1Char('\n')).count(), 2);
+    QCOMPARE(manager.catalog().zonesAt(other).count(), 3);
+    QCOMPARE(manager.catalog().search(QStringLiteral("SAME"), 10).count(), 1);
+    QCOMPARE(manager.catalog().search(QStringLiteral("LIMITS"), 10).count(), 2);
+    // Showing the extract only on the maps shows the zone
+    GeoZoneMapFilter filter;
+    filter.source = extractKey;
+    QVERIFY(filter.accepts(*sameZone, QDateTime::currentDateTimeUtc(), GeoZoneAltitudeRange()));
+    QVERIFY(GeoZoneCatalog::sameContent(*sameZone, *sameZone));
+
+    // A file with mostly zones loaded already is noted, until it is removed
+    addedSpy.clear();
+    manager.repository()->addFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ same, only }));
+    QVERIFY(addedSpy.wait(10000));
+    QCOMPARE(manager.zoneCount(), 4);
+    QCOMPARE(manager.mergedZoneCount(), 3);
+    QCOMPARE(manager.catalog().zonesAt(center)[0]->sourceCount(), 3);
+    QVERIFY(manager.sourceNote().contains(manager.sources()->value<GeoZoneSource*>(0)->name()));
+
+    // Without the national file the extract keeps the zone
+    manager.sources()->value<GeoZoneSource*>(0)->setEnabled(false);
+    QCOMPARE(manager.zoneCount(), 3);
+    QCOMPARE(manager.catalog().zonesAt(center).count(), 1);
+    QCOMPARE(manager.catalog().zonesAt(center)[0]->sourceKey(), extractKey);
+    QCOMPARE(manager.catalog().zonesAt(center)[0]->sourceCount(), 2);
+    manager.sources()->value<GeoZoneSource*>(0)->setEnabled(true);
+    QCOMPARE(manager.catalog().zonesAt(center)[0]->sourceKey(), nationalKey);
+
+    QVERIFY(!manager.sourceNote().isEmpty());
+    manager.repository()->removeSource(2);
+    QVERIFY(manager.sourceNote().isEmpty());
+    QCOMPARE(manager.catalog().zonesAt(center)[0]->sourceCount(), 2);
 }
 
 GEOZONE_TEST(GeoZoneManagerTest)

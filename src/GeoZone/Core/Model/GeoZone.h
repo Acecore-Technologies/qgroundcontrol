@@ -160,6 +160,21 @@ public:
     void setSourceKey(const QString &sourceKey);
     void setSourceText(const QString &sourceText);
 
+    /// Another source publishing the same zone, see otherSources
+    struct OtherSource {
+        QString key;
+        QString text;   ///< See sourceText
+        bool operator==(const OtherSource &other) const = default;
+    };
+    /// Other sources publishing the same zone with the same content, which GeoZoneCatalog keeps once from this zone's
+    /// source. Set by GeoZoneCatalog::rebuild, may be read from any thread.
+    QList<OtherSource> otherSources() const;
+    void setOtherSources(const QList<OtherSource> &sources);
+    /// @return Number of sources publishing the zone: its own and otherSources
+    int sourceCount() const { return 1 + _otherSourceCount.load(std::memory_order_relaxed); }
+    /// @return true if the zone is from the source, or one of otherSources
+    bool fromSource(const QString &sourceKey) const;
+
     /// @return Identifies the zone across reloads of its source, from the source key, identifier, name and restriction
     const QString &key() const { return _key; }
 
@@ -264,6 +279,9 @@ private:
     QString _sourceKey;
     QString _sourceText;
     QString _key;
+    mutable QMutex _otherSourcesMutex;
+    QList<OtherSource> _otherSources;               ///< Guarded by _otherSourcesMutex
+    std::atomic<int> _otherSourceCount = 0;
     mutable QMutex _simplifiedMutex;
     /// By tolerance in units of simplifiedCacheResolution, the most recently used first, guarded by _simplifiedMutex
     mutable QList<std::pair<qint64, QList<QList<QGeoCoordinate>>>> _simplifiedPolygons;
