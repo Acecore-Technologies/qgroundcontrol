@@ -46,8 +46,7 @@ class GeoZoneFenceImporter : public QObject
 
     Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)
     Q_PROPERTY(QVariantMap              capacity        READ capacityInfo       NOTIFY selectionChanged FINAL)  ///< See capacityInfo
-    Q_PROPERTY(GeoZoneFenceChoiceModel* selectedChoices READ selectedChoices    CONSTANT FINAL)                 ///< Selected zones in priority order
-    Q_PROPERTY(GeoZoneFenceChoiceModel* leftOutChoices  READ leftOutChoices     CONSTANT FINAL)                 ///< The first maxListedChoices zones left out
+    Q_PROPERTY(GeoZoneFenceChoiceModel* choices         READ choices            CONSTANT FINAL)                 ///< The selected zones and the first maxListedChoices zones left out, in priority order
     Q_PROPERTY(int                      selectedCount   READ selectedCount      NOTIFY selectionChanged FINAL)
     Q_PROPERTY(int                      leftOutCount    READ leftOutCount       NOTIFY selectionChanged FINAL)  ///< All zones left out, also those not listed
     Q_PROPERTY(bool                     busy            READ busy               NOTIFY busyChanged FINAL)       ///< While zones are prepared for updateSelection
@@ -56,7 +55,7 @@ class GeoZoneFenceImporter : public QObject
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);
 
-    static constexpr int maxListedChoices = 500;    ///< Zones left out listed by leftOutChoices
+    static constexpr int maxListedChoices = 500;    ///< Zones left out listed by choices
 
     /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
     static GeoZoneFences::ZoneFences exclusionFences(GeoFenceController *geoFenceController);
@@ -90,11 +89,10 @@ public:
     void select(const QList<const GeoZone*> &zones, double maxSimplifyTolerance = 0);
     const GeoZoneFences::Selection &selection() const { return _selection; }
     const GeoZoneFences::Capacity &capacity() const { return _capacity; }
-    int selectedCount() const { return _selectedModel->count(); }
-    int leftOutCount() const { return static_cast<int>(_selection.choices.count()) - selectedCount(); }
+    int selectedCount() const { return _selectedCount; }
+    int leftOutCount() const { return static_cast<int>(_selection.choices.count()) - _selectedCount; }
     bool busy() const { return _busy; }
-    GeoZoneFenceChoiceModel *selectedChoices() const { return _selectedModel; }
-    GeoZoneFenceChoiceModel *leftOutChoices() const { return _leftOutModel; }
+    GeoZoneFenceChoiceModel *choices() const { return _choices; }
 
     /// Includes or leaves out the zone with the key, see GeoZone::key, and selects again
     Q_INVOKABLE void setZoneIncluded(const QString &key, bool included);
@@ -111,8 +109,6 @@ public:
     ///         parameters which keep the vehicle from enforcing exclusion fences), usedItems, maxItems, usedBytes,
     ///         storageBytes, keptItems, circles, supported and estimated
     QVariantMap capacityInfo() const;
-    /// @return One map per zone listed, selected ones first, see GeoZoneFenceChoiceModel
-    QVariantList choicesInfo() const;
 
 signals:
     void geoFenceControllerChanged();
@@ -180,11 +176,11 @@ private:
     Prepared _prepared;
     GeoZoneFences::Capacity _capacity;
     GeoZoneFences::Selection _selection;
+    int _selectedCount = 0;
     bool _busy = false;
     QObject *_vehicleConnections = nullptr;
     GeoZoneMissionWorker *const _worker = nullptr;
-    GeoZoneFenceChoiceModel *const _selectedModel = nullptr;
-    GeoZoneFenceChoiceModel *const _leftOutModel = nullptr;
+    GeoZoneFenceChoiceModel *const _choices = nullptr;
     GeoZoneFenceUpload *const _upload = nullptr;
 
     static constexpr double _simplifySteps[] = { 0, 10, 25, 50, 100, 250, 500 };   ///< Meters, tried up to the maximum tolerance

@@ -2223,11 +2223,11 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     QVERIFY(capacity[QStringLiteral("estimated")].toBool());
     QVERIFY(capacity[QStringLiteral("text")].toString().startsWith(QStringLiteral("Vehicle fence: %1 of 64 points").arg(capacity[QStringLiteral("usedItems")].toInt())));
     QVERIFY(capacity[QStringLiteral("note")].toString().contains(QStringLiteral("No vehicle")));
-    QVariantList choices = importer.choicesInfo();
+    QList<GeoZoneFenceChoiceModel::Row> choices = importer.choices()->rows();
     QCOMPARE(choices.count(), 3);
-    QVERIFY(choices[0].toMap()[QStringLiteral("selected")].toBool());
-    QVERIFY(!choices[2].toMap()[QStringLiteral("selected")].toBool());
-    QCOMPARE(choices[2].toMap()[QStringLiteral("reason")].toString(), QStringLiteral("No room left in the vehicle fence"));
+    QVERIFY(choices[0].selected);
+    QVERIFY(!choices[2].selected);
+    QCOMPARE(choices[2].reason, QStringLiteral("No room left in the vehicle fence"));
 
     // Simplified, all of them fit
     importer.select(zones, 25);
@@ -2260,12 +2260,13 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     // Zones left out by the user
     importer.setZoneIncluded(zones[0]->key(), false);
     QCOMPARE(importer.selectedCount(), 2);
-    choices = importer.choicesInfo();
-    const QVariantMap leftOut = choices.last().toMap();
-    QCOMPARE(leftOut[QStringLiteral("key")].toString(), zones[0]->key());
-    QVERIFY(!leftOut[QStringLiteral("included")].toBool());
-    QCOMPARE(leftOut[QStringLiteral("reason")].toString(), QStringLiteral("Left out by you"));
-    QVERIFY(leftOut[QStringLiteral("includable")].toBool());
+    choices = importer.choices()->rows();
+    const auto leftOut = std::find_if(choices.cbegin(), choices.cend(), [&zones](const GeoZoneFenceChoiceModel::Row &row) { return row.key == zones[0]->key(); });
+    QVERIFY(leftOut != choices.cend());
+    QVERIFY(!leftOut->selected);
+    QVERIFY(!leftOut->included);
+    QCOMPARE(leftOut->reason, QStringLiteral("Left out by you"));
+    QVERIFY(leftOut->includable);
     importer.setZoneIncluded(zones[0]->key(), true);
     QCOMPARE(importer.selectedCount(), 3);
 
@@ -2286,13 +2287,14 @@ void GeoZonePlanningTest::_testGeoFenceSelection()
     QTRY_VERIFY(!importer.busy());
     QCOMPARE(importer.selectedCount(), 2);
     QCOMPARE(importer.leftOutCount(), 0);
-    QSignalSpy resetSpy(importer.selectedChoices(), &QAbstractItemModel::modelReset);
-    QSignalSpy removedSpy(importer.selectedChoices(), &QAbstractItemModel::rowsRemoved);
-    const QString first = importer.selectedChoices()->rows().constFirst().key;
+    QSignalSpy resetSpy(importer.choices(), &QAbstractItemModel::modelReset);
+    QSignalSpy changedSpy(importer.choices(), &QAbstractItemModel::dataChanged);
+    const QString first = importer.choices()->rows().constFirst().key;
     importer.setZoneIncluded(first, false);
     QCOMPARE(importer.selectedCount(), 1);
-    QCOMPARE(importer.leftOutChoices()->rows().constFirst().key, first);
-    QCOMPARE(removedSpy.count(), 1);
+    QCOMPARE(importer.choices()->rows().constFirst().key, first);
+    QVERIFY(!importer.choices()->rows().constFirst().selected);
+    QCOMPARE(changedSpy.count(), 1);
     QCOMPARE(resetSpy.count(), 0);
     // Applying while the zones are prepared applies the selection of the new zones, leaving out those left out before
     importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), -1, 25);

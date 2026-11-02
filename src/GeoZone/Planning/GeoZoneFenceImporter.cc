@@ -31,8 +31,7 @@
 GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
     : QObject(parent)
     , _worker(new GeoZoneMissionWorker(0, this))
-    , _selectedModel(new GeoZoneFenceChoiceModel(this))
-    , _leftOutModel(new GeoZoneFenceChoiceModel(this))
+    , _choices(new GeoZoneFenceChoiceModel(this))
     , _upload(new GeoZoneFenceUpload(this))
 {
     (void) connect(GeoZoneManager::instance(), &GeoZoneManager::zonesChanged, this, [this]() {
@@ -42,8 +41,8 @@ GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
         _zones.clear();
         _prepared = Prepared();
         _selection = GeoZoneFences::Selection();
-        _selectedModel->setRows({});
-        _leftOutModel->setRows({});
+        _selectedCount = 0;
+        _choices->setRows({});
         emit selectionChanged();
     });
 }
@@ -293,19 +292,22 @@ void GeoZoneFenceImporter::_select()
     _capacity = vehicleCapacity(_vehicle());
     _selection = GeoZoneFences::select(_prepared.fences, _capacity, keptUsage(_geoFenceController));
 
-    QList<GeoZoneFenceChoiceModel::Row> selectedRows;
-    QList<GeoZoneFenceChoiceModel::Row> leftOutRows;
+    QList<GeoZoneFenceChoiceModel::Row> rows;
+    _selectedCount = 0;
+    int leftOutListed = 0;
     for (const GeoZoneFences::Choice &choice : std::as_const(_selection.choices)) {
         if (choice.status == GeoZoneFences::Status::Selected) {
-            selectedRows.append(_row(choice));
-        } else if (leftOutRows.count() < maxListedChoices) {
-            leftOutRows.append(_row(choice));
-        } else {
+            _selectedCount++;
+        } else if (leftOutListed++ >= maxListedChoices) {
             break;
         }
+        rows.append(_row(choice));
     }
-    _selectedModel->setRows(selectedRows);
-    _leftOutModel->setRows(leftOutRows);
+    // In priority order rather than selected first, so that the row of a zone changing lists is updated in place
+    std::sort(rows.begin(), rows.end(), [this](const GeoZoneFenceChoiceModel::Row &a, const GeoZoneFenceChoiceModel::Row &b) {
+        return _prepared.indexes.value(a.key) < _prepared.indexes.value(b.key);
+    });
+    _choices->setRows(rows);
     emit selectionChanged();
 }
 
@@ -475,11 +477,6 @@ GeoZoneFenceChoiceModel::Row GeoZoneFenceImporter::_row(const GeoZoneFences::Cho
     row.includable = choice.includable();
     row.reason = GeoZoneFences::statusText(choice);
     return row;
-}
-
-QVariantList GeoZoneFenceImporter::choicesInfo() const
-{
-    return _selectedModel->toVariantList() + _leftOutModel->toVariantList();
 }
 
 namespace {

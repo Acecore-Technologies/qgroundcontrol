@@ -33,6 +33,7 @@
 #include "QGCLoggingCategory.h"
 #include "TerrainQuery.h"
 
+#include <QtCore/QSortFilterProxyModel>
 #include <QtQml/QQmlEngine>
 
 #include <atomic>
@@ -101,6 +102,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneFenceTag>(kUri, 1, 0, "GeoZoneFenceTag", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneFenceUpload>(kUri, 1, 0, "GeoZoneFenceUpload", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneFenceChoiceModel>(kUri, 1, 0, "GeoZoneFenceChoiceModel", "Reference only");
+    (void) qmlRegisterType<QSortFilterProxyModel>(kUri, 1, 0, "GeoZoneSortFilterModel");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneVehicleMonitor>(kUri, 1, 0, "GeoZoneVehicleMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");

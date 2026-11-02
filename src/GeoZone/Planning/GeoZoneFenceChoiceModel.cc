@@ -9,7 +9,6 @@
 
 #include "GeoZoneFenceChoiceModel.h"
 
-#include <QtCore/QHash>
 #include <QtCore/QSet>
 
 GeoZoneFenceChoiceModel::GeoZoneFenceChoiceModel(QObject *parent)
@@ -97,21 +96,6 @@ void GeoZoneFenceChoiceModel::setRows(const QList<Row> &rows)
     if (count() != previousCount) {
         emit countChanged();
     }
-}
-
-QVariantList GeoZoneFenceChoiceModel::toVariantList() const
-{
-    const QHash<int, QByteArray> roles = roleNames();
-    QVariantList list;
-    list.reserve(_rows.count());
-    for (int row = 0; row < count(); row++) {
-        QVariantMap map;
-        for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
-            map.insert(QString::fromLatin1(it.value()), data(index(row), it.key()));
-        }
-        list.append(map);
-    }
-    return list;
 }
 
 int GeoZoneFenceChoiceModel::rowCount(const QModelIndex &parent) const

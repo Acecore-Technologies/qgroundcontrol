@@ -11,12 +11,12 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QString>
-#include <QtCore/QVariantList>
 
 /// Zones of a fence selection, see GeoZoneFenceImporter, with roles key, name, restriction, restrictionText,
-/// proximityText, points, simplifyTolerance, selected, included, includable and reason.
-/// Rows keep their order relative to each other from one selection to the next, so rows are inserted, removed and
-/// updated in place: views keep their delegates and their scroll position while zones move between lists.
+/// proximityText, points, simplifyTolerance, selected, included, includable and reason. Views filter the selected zones
+/// and those left out by SelectedRole. Rows keep their order relative to each other from one selection to the next, so
+/// rows are inserted, removed and updated in place: views keep their delegates and their scroll position while zones
+/// move between lists.
 class GeoZoneFenceChoiceModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -52,6 +52,7 @@ public:
         IncludableRole,
         ReasonRole,
     };
+    Q_ENUM(Roles)
 
     explicit GeoZoneFenceChoiceModel(QObject *parent = nullptr);
 
@@ -59,9 +60,6 @@ public:
     const QList<Row> &rows() const { return _rows; }
     /// Replaces the rows, those with the same key in place
     void setRows(const QList<Row> &rows);
-
-    /// @return One map per row, with the role names as keys
-    QVariantList toVariantList() const;
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;

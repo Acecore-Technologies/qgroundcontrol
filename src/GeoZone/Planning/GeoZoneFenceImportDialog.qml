@@ -329,15 +329,15 @@ QGCPopupDialog {
             Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 12)
             clip:                   true
             spacing:                ScreenTools.defaultFontPixelHeight / 4
-            model:                  importer.selectedChoices
+            model:                  GeoZoneSortFilterModel { sourceModel: importer.choices; filterRole: GeoZoneFenceChoiceModel.SelectedRole; filterRegularExpression: /true/ }
             visible:                importer.selectedCount > 0
             delegate:               choiceDelegate
         }
 
         QGCLabel {
             Layout.preferredWidth:  _contentWidth
-            text:                   importer.leftOutCount > importer.leftOutChoices.count ?
-                                        qsTr("Left out (%1, the first %2 listed)").arg(importer.leftOutCount).arg(importer.leftOutChoices.count) :
+            text:                   importer.leftOutCount > leftOutList.count ?
+                                        qsTr("Left out (%1, the first %2 listed)").arg(importer.leftOutCount).arg(leftOutList.count) :
                                         qsTr("Left out (%1)").arg(importer.leftOutCount)
             elide:                  Text.ElideRight
             font.bold:              true
@@ -345,11 +345,12 @@ QGCPopupDialog {
         }
 
         QGCListView {
+            id:                     leftOutList
             Layout.preferredWidth:  _contentWidth
             Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 8)
             clip:                   true
             spacing:                ScreenTools.defaultFontPixelHeight / 4
-            model:                  importer.leftOutChoices
+            model:                  GeoZoneSortFilterModel { sourceModel: importer.choices; filterRole: GeoZoneFenceChoiceModel.SelectedRole; filterRegularExpression: /false/ }
             visible:                importer.leftOutCount > 0
             delegate:               choiceDelegate
         }
