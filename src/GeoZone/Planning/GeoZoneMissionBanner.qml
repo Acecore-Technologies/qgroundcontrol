@@ -45,8 +45,8 @@ Rectangle {
     }
 
     // Outdated data, like an old list of temporary restrictions, can miss zones the mission enters
-    readonly property string _outdatedText: GeoZoneManager.validityWarning !== "" ?
-                                                qsTr("Geozone data may be outdated: %1").arg(GeoZoneManager.validityWarning.replace(/\n/g, "; ")) : ""
+    readonly property string _outdatedText: GeoZoneManager.repository.validityWarning !== "" ?
+                                                qsTr("Geozone data may be outdated: %1").arg(GeoZoneManager.repository.validityWarning.replace(/\n/g, "; ")) : ""
 
     readonly property var  _pendingAuthorisations: GeoZoneManager.planning.authorisations.pendingAuthorisations
     readonly property real _margin:         ScreenTools.defaultFontPixelWidth

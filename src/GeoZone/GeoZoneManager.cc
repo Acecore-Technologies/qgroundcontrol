@@ -29,7 +29,6 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QSaveFile>
-#include <QtCore/QLocale>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
@@ -113,9 +112,6 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(_repository, &GeoZoneSourceRepository::storageFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_planning->authorisations(), &GeoZoneAuthorisations::saveFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::outdatedDataFound, this, &GeoZoneManager::outdatedDataFound);
-    (void) connect(_repository, &GeoZoneSourceRepository::busyChanged, this, &GeoZoneManager::busyChanged);
-    (void) connect(_repository, &GeoZoneSourceRepository::progressChanged, this, &GeoZoneManager::progressChanged);
-    (void) connect(_repository, &GeoZoneSourceRepository::validityWarningChanged, this, &GeoZoneManager::validityWarningChanged);
 }
 
 GeoZoneManager::~GeoZoneManager()
@@ -156,7 +152,7 @@ QStringList GeoZoneManager::fileDialogFilters() const
 
 bool GeoZoneManager::exportPack(const QString &fileName, const QStringList &keys)
 {
-    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+    const QString localFileName = toLocalFileName(fileName);
     QStringList sourceKeys = keys;
     if (sourceKeys.isEmpty()) {
         for (const GeoZoneSource *const source : _repository->sources()) {
@@ -201,7 +197,7 @@ bool GeoZoneManager::importPacks(const QStringList &fileNames)
 
 bool GeoZoneManager::_importPack(const QString &fileName, QString &message, bool &complete)
 {
-    const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
+    const QString localFileName = toLocalFileName(fileName);
     QString errorString;
     QString signatureText;
     const int count = _repository->importPack(localFileName, errorString, &signatureText);
@@ -302,7 +298,7 @@ void GeoZoneManager::distrustPublisher(const QString &publicKey)
 bool GeoZoneManager::trustSourcePublisher(const QString &sourceKey)
 {
     // Only keys whose signature was checked
-    const GeoZoneSource *const source = this->source(sourceKey);
+    const GeoZoneSource *const source = _repository->source(sourceKey);
     if (!source || !source->untrustedPack() || source->provenance().packPublicKey.isEmpty()) {
         return false;
     }
@@ -326,12 +322,12 @@ bool GeoZoneManager::createSigningKey(const QString &fileName)
 
 bool GeoZoneManager::addArea(const QString &provider, const QGeoRectangle &area)
 {
-    const QString url = areaFeedUrl(provider, area);
+    const QString url = GeoZoneProviders::areaFeedUrl(provider, area);
     if (url.isEmpty()) {
         emit loadFailed(provider, tr("Geozones can be downloaded for an area up to %1 degrees wide and high. Zoom in on the map.").arg(GeoZoneProviders::maxAreaDegrees));
         return false;
     }
-    addUrl(url);
+    _repository->addUrl(url);
     return true;
 }
 

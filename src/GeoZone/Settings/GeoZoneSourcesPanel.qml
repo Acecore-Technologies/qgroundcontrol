@@ -22,6 +22,7 @@ ColumnLayout {
     spacing:    _margin
 
     readonly property var   _geoZoneManager:    GeoZoneManager
+    readonly property var   _repository:        GeoZoneManager.repository
     readonly property var   _geoZoneSettings:   GeoZoneManager.settings
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
 
@@ -59,7 +60,7 @@ ColumnLayout {
 
                 QGCButton {
                     text:       qsTr("Remove")
-                    onClicked:  _geoZoneManager.removeSource(index)
+                    onClicked:  _repository.removeSource(index)
                 }
             }
 
@@ -140,7 +141,7 @@ ColumnLayout {
                     text:       qsTr("Set")
                     enabled:    sourceSecretField.text !== ""
                     onClicked: {
-                        _geoZoneManager.setCredentials(object.key, sourceSecretField.text)
+                        _repository.setSecret(object.key, sourceSecretField.text)
                         sourceSecretField.text = ""
                     }
                 }
@@ -234,13 +235,13 @@ ColumnLayout {
     ColumnLayout {
         Layout.fillWidth:   true
         spacing:            _margin / 2
-        visible:            _geoZoneManager.busy
+        visible:            _repository.busy
 
         QGCLabel {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
-            text:               _geoZoneManager.progressText
+            text:               _repository.progressText
         }
 
         Rectangle {
@@ -250,11 +251,11 @@ ColumnLayout {
             radius:             height / 2
             color:              qgcPal.button
 
-            readonly property bool _indeterminate: _geoZoneManager.progress < 0
+            readonly property bool _indeterminate: _repository.progress < 0
 
             Rectangle {
                 x:          parent._indeterminate ? _indeterminateX : 0
-                width:      parent._indeterminate ? parent.width / 4 : parent.width * _geoZoneManager.progress
+                width:      parent._indeterminate ? parent.width / 4 : parent.width * _repository.progress
                 height:     parent.height
                 radius:     parent.radius
                 color:      qgcPal.buttonHighlight
@@ -328,7 +329,7 @@ ColumnLayout {
             Layout.fillWidth:   true
             model:              _geoZoneManager.feedPresets.map(preset => preset.name).concat([ qsTr("Other URL") ])
             // The feeds already added are turned on or refreshed in the list of sources instead
-            choicesEnabled:     (_geoZoneManager.sources.count, _geoZoneManager.feedPresets.map(preset => !_geoZoneManager.hasSource(preset.url)))
+            choicesEnabled:     (_geoZoneManager.sources.count, _geoZoneManager.feedPresets.map(preset => !_repository.hasSource(preset.url)))
             disabledText:       qsTr("%1 (added)")
 
             readonly property bool customUrl: currentIndex === _geoZoneManager.feedPresets.length
@@ -355,11 +356,11 @@ ColumnLayout {
             text:               qsTr("Download")
             enabled:            feedPresetCombo.customUrl ? (feedUrlField.text.trim() !== "" && !_feedUrlAdded) : feedPresetCombo.currentEnabled
             onClicked: {
-                _geoZoneManager.addUrl(feedPresetCombo.customUrl ? feedUrlField.text : _geoZoneManager.feedPresets[feedPresetCombo.currentIndex].url)
+                _repository.addUrl(feedPresetCombo.customUrl ? feedUrlField.text : _geoZoneManager.feedPresets[feedPresetCombo.currentIndex].url)
                 feedEntry.visible = false
             }
 
-            readonly property bool _feedUrlAdded: (_geoZoneManager.sources.count, _geoZoneManager.hasSource(feedUrlField.text))
+            readonly property bool _feedUrlAdded: (_geoZoneManager.sources.count, _repository.hasSource(feedUrlField.text))
         }
     }
 
@@ -717,8 +718,8 @@ ColumnLayout {
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Refresh Feeds")
-            enabled:            _hasFeeds && !_geoZoneManager.busy
-            onClicked:          _geoZoneManager.refreshFeeds()
+            enabled:            _hasFeeds && !_repository.busy
+            onClicked:          _repository.refreshFeeds()
 
             readonly property bool _hasFeeds: {
                 for (var i = 0; i < _geoZoneManager.sources.count; i++) {
@@ -733,7 +734,7 @@ ColumnLayout {
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Remove All")
-            onClicked:          _geoZoneManager.clear()
+            onClicked:          _repository.clear()
         }
     }
 
@@ -745,7 +746,7 @@ ColumnLayout {
         selectMultiple: true
 
         onAcceptedForLoadFiles: (files) => {
-            _geoZoneManager.addFiles(files)
+            _repository.addFiles(files)
             close()
         }
     }

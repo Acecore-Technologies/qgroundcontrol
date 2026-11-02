@@ -54,6 +54,8 @@ qt_add_library(GeoZoneCore STATIC
     Formats/GeoZoneZip.h
     Sources/GeoZoneAirac.cc
     Sources/GeoZoneAirac.h
+    Sources/GeoZoneAreaOfInterest.cc
+    Sources/GeoZoneAreaOfInterest.h
     Sources/GeoZoneCredentials.cc
     Sources/GeoZoneCredentials.h
     Sources/GeoZoneDownloader.cc

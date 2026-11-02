@@ -448,7 +448,7 @@ void GeoZoneMapModel::_updateFilter()
 {
     GeoZoneMapFilter filter = _manager->display()->filter();
     // The key of a source which was removed doesn't hide the zones of the others
-    if (!filter.source.isEmpty() && !_manager->source(filter.source)) {
+    if (!filter.source.isEmpty() && !_manager->repository()->source(filter.source)) {
         filter.source.clear();
     }
     const bool readAltitudes = filter.altitudes && !_filter.altitudes;

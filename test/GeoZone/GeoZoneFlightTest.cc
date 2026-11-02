@@ -158,7 +158,7 @@ void restoreSettingDefaults()
 
 void GeoZoneFlightTest::cleanup()
 {
-    GeoZoneManager::instance()->clear();
+    GeoZoneManager::instance()->repository()->clear();
     restoreSettingDefaults();
     UnitTest::cleanup();
 }
@@ -171,7 +171,7 @@ void GeoZoneFlightTest::_testFlightAlertSequence()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.path());
     QString errorString;
-    QVERIFY2(manager.loadFile(kZonesFile, errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(kZonesFile, errorString), qPrintable(errorString));
     QCOMPARE(manager.zoneCount(), 8);
 
     GeoZoneMonitor monitor(&manager);
@@ -212,7 +212,7 @@ void GeoZoneFlightTest::_testMissionCrossedZones()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.path());
     QString errorString;
-    QVERIFY2(manager.loadFile(kZonesFile, errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(kZonesFile, errorString), qPrintable(errorString));
 
     PlanMasterController masterController;
     masterController.setFlyView(false);
@@ -249,7 +249,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     const ScopedEnvironment environment;
     GeoZoneManager *const manager = GeoZoneManager::instance();
     QString errorString;
-    QVERIFY2(manager->loadFile(kZonesFile, errorString), qPrintable(errorString));
+    QVERIFY2(manager->repository()->loadFile(kZonesFile, errorString), qPrintable(errorString));
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     settings->audioAlerts()->setRawValue(false);
 
@@ -387,7 +387,7 @@ void GeoZoneFlightTest::_testReturnParameterChanges()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zone }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zone }), errorString), qPrintable(errorString));
     for (const QGeoCoordinate &coordinate : { offset(2000, 0), offset(2000, 2000), offset(0, 2000) }) {
         SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
         QVERIFY(item);
@@ -434,7 +434,7 @@ void GeoZoneFlightTest::_testGuidedReturnLandMission()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         withHeightLimits(_circleFeature(QStringLiteral("UNDER"), QStringLiteral("PROHIBITED"), home, 300), 0, 150),
         withHeightLimits(_circleFeature(QStringLiteral("ABOVE"), QStringLiteral("PROHIBITED"), home, 100), 50, 1000),
         _circleFeature(QStringLiteral("EAST"), QStringLiteral("PROHIBITED"), offset(0, 2000), 300),

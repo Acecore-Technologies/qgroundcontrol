@@ -64,7 +64,7 @@ void GeoZoneMonitorTest::_testMonitorAlerts()
     });
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
@@ -108,7 +108,7 @@ void GeoZoneMonitorTest::_testMonitorAlerts()
         expired,
         _circleFeature(QStringLiteral("NEW"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(9000, 0), 300),
     });
-    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
     QVERIFY(monitor.activeMonitor()->nearby().isEmpty());
     monitor.evaluate({ center.atDistanceAndAzimuth(390, 0) });
     QCOMPARE(alertSpy.count(), 2);
@@ -128,12 +128,12 @@ void GeoZoneMonitorTest::_testMonitorAlerts()
     QCOMPARE(alertSpy.count(), 3);
 
     // Zones are forgotten before the manager deletes them
-    manager.clear();
+    manager.repository()->clear();
     monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 3);
 
     // U-space airspace alerts too, but a prohibited zone ahead decides the indicator color
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("uspace.json"),
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("uspace.json"),
         QJsonArray{ _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), center.atDistanceAndAzimuth(6000, 0), 3000),
                     _circleFeature(QStringLiteral("P2"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(6380, 0), 300) }), errorString), qPrintable(errorString));
     alertSpy.clear();
@@ -145,7 +145,7 @@ void GeoZoneMonitorTest::_testMonitorAlerts()
     QCOMPARE(alertSpy.count(), 2);
     QCOMPARE(monitor.activeMonitor()->alertRestriction(), static_cast<int>(GeoZone::Prohibited));
     QVERIFY(monitor.activeMonitor()->inside());
-    manager.clear();
+    manager.repository()->clear();
 
     // A zone from 120 m above ground: flying below it does not enter it, climbing towards it approaches it
     QJsonObject elevated = _circleFeature(QStringLiteral("H"), QStringLiteral("PROHIBITED"), center, 300);
@@ -158,7 +158,7 @@ void GeoZoneMonitorTest::_testMonitorAlerts()
     layer[QStringLiteral("uomDimensions")] = QStringLiteral("M");
     geometry[0] = layer;
     elevated[QStringLiteral("geometry")] = geometry;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("elevated.json"), QJsonArray{ elevated }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("elevated.json"), QJsonArray{ elevated }), errorString), qPrintable(errorString));
     alertSpy.clear();
     monitor.evaluate({ center, 450, 400 });
     QCOMPARE(alertSpy.count(), 0);
@@ -183,7 +183,7 @@ void GeoZoneMonitorTest::_testMonitorAlertOrder()
     });
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(fileName, errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
@@ -215,7 +215,7 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
         QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), overhead }), errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
@@ -318,7 +318,7 @@ void GeoZoneMonitorTest::_testTerrainAhead()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zone }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zone }), errorString), qPrintable(errorString));
 
     // Paths get the terrain where it is known
     const QList<GeoZone::Position> path = GeoZoneTerrain::withTerrain({ { valley, 450, 100 }, { plateauZone, 450 } });
@@ -419,7 +419,7 @@ void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
@@ -477,7 +477,7 @@ void GeoZoneMonitorTest::_testAlertLog()
     feature[QStringLiteral("name")] = QStringLiteral("Prison \"West\", Zurich");
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
     GeoZoneAlertHistory &log = *monitor.alertHistory();
@@ -570,7 +570,7 @@ void GeoZoneMonitorTest::_testAlertHistory()
     feature[QStringLiteral("name")] = QStringLiteral("Prison \"West\", Zurich");
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ feature }), errorString), qPrintable(errorString));
 
     // The alerts of the session, newest first
     GeoZoneMonitor monitor(&manager);
@@ -694,7 +694,7 @@ void GeoZoneMonitorTest::_testVehicleMonitors()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
 
     GeoZoneMonitor monitor(&manager);
     qint64 now = 0;
@@ -918,7 +918,7 @@ void GeoZoneMonitorTest::_testSpokenAlerts()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center, 500),
         _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(100, 0), 50),
         _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(100, 180), 50),
@@ -1043,7 +1043,7 @@ void GeoZoneMonitorTest::_testPositionLoss()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
         _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), center.atDistanceAndAzimuth(3000, 90), 300),
     }), errorString), qPrintable(errorString));
@@ -1158,7 +1158,7 @@ void GeoZoneMonitorTest::_testAlertActions()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         prohibited,
         _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), uSpaceCenter, 300),
     }), errorString), qPrintable(errorString));
@@ -1249,7 +1249,7 @@ void GeoZoneMonitorTest::_testTraffic()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), low,
     }), errorString), qPrintable(errorString));
 

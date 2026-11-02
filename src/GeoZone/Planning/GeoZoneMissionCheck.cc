@@ -67,14 +67,14 @@ GeoZoneMissionCheck::GeoZoneMissionCheck(GeoZoneManager *manager, QObject *paren
         _worker->schedule();
     });
     // The audit waits for the sources to load
-    (void) connect(_manager, &GeoZoneManager::busyChanged, this, [this](bool busy) {
+    (void) connect(_manager->repository(), &GeoZoneSourceRepository::busyChanged, this, [this](bool busy) {
         if (!busy) {
             _worker->schedule();
         }
     });
     // The mission no longer makes the area of interest
     (void) connect(this, &QObject::destroyed, _manager, [manager = _manager, owner = static_cast<const QObject*>(this)]() {
-        manager->setMissionArea(owner, QGeoRectangle());
+        manager->repository()->setMissionArea(owner, QGeoRectangle());
     });
 }
 
@@ -432,7 +432,7 @@ void GeoZoneMissionCheck::update()
     _worker->runNow([this]() {
         const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
         const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
-        _manager->setMissionArea(this, missionArea(path));
+        _manager->repository()->setMissionArea(this, missionArea(path));
         return evaluate(_manager->catalog(), path, start, end);
     }, [this](const Evaluation &evaluation) { _apply(evaluation); });
 }
@@ -460,7 +460,7 @@ void GeoZoneMissionCheck::_updateConcurrently()
     const GeoZoneCatalog catalog = _manager->catalog();
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
     // The services taking the area of interest download the zones around the mission
-    _manager->setMissionArea(this, missionArea(path));
+    _manager->repository()->setMissionArea(this, missionArea(path));
     const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
     // Zones of an outdated evaluation may be gone
     _worker->run([catalog, path, start, end]() { return evaluate(catalog, path, start, end); },
@@ -644,7 +644,7 @@ void GeoZoneMissionCheck::_updateAudit()
     const std::optional<GeoZonePlanAudit::Record> &record = _manager->planning()->planAudit();
     if (record) {
         // Sources still loading would look removed
-        if (_manager->busy()) {
+        if (_manager->repository()->busy()) {
             return;
         }
         const GeoZonePlanAudit::Changes changes = GeoZonePlanAudit::compare(*record, _relevantZones, _manager->catalog(),

@@ -499,7 +499,7 @@ GeoZoneBriefing GeoZoneBriefingExport::briefing() const
     for (const GeoZoneBriefing::Zone &zone : std::as_const(briefing.zones)) {
         const bool listed = std::any_of(briefing.sources.cbegin(), briefing.sources.cend(), [&zone](const GeoZoneSourceVersion &source) { return source.key == zone.sourceKey; });
         if (!listed) {
-            if (const GeoZoneSource *const source = _manager->source(zone.sourceKey)) {
+            if (const GeoZoneSource *const source = _manager->repository()->source(zone.sourceKey)) {
                 briefing.sources.append(GeoZoneSourceVersion::fromSource(source));
             }
         }

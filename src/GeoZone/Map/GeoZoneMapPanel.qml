@@ -171,7 +171,7 @@ ColumnLayout {
 
             QGCButton {
                 text:       qsTr("Download")
-                enabled:    !areaColumn._areaTooLarge && !root._geoZoneManager.busy && areaProviderCombo.currentEnabled
+                enabled:    !areaColumn._areaTooLarge && !root._geoZoneManager.repository.busy && areaProviderCombo.currentEnabled
                 onClicked:  root._geoZoneManager.addArea(areaColumn._providers[areaProviderCombo.currentIndex].id, areaColumn._mapArea)
             }
         }

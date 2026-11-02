@@ -448,7 +448,7 @@ void GeoZoneIntentTest::_testExport()
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
         _circleFeature(QStringLiteral("U1"), QStringLiteral("USPACE"), center.atDistanceAndAzimuth(1000, 90), 300),
         _circleFeature(QStringLiteral("B"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2500, 90), 200),
         _circleFeature(QStringLiteral("C"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(3000, 0), 200),

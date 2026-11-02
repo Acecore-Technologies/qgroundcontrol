@@ -31,7 +31,7 @@ ColumnLayout {
     QGCLabel {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
-        text:               _geoZoneManager.busy ? _geoZoneManager.progressText :
+        text:               _geoZoneManager.repository.busy ? _geoZoneManager.repository.progressText :
                                 qsTr("%1 from %2.", "Number of zones from number of sources").arg(qsTr("%n zone(s)", "", _geoZoneManager.zoneCount))
                                                                                                    .arg(qsTr("%n source(s)", "", _activeSourceCount)) +
                                 (_geoZoneManager.disabledSourceCount > 0 ? " " + qsTr("%n source(s) turned off.", "", _geoZoneManager.disabledSourceCount) : "")
@@ -48,7 +48,7 @@ ColumnLayout {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
         color:              qgcPal.warningText
-        text:               _geoZoneManager.validityWarning
+        text:               _geoZoneManager.repository.validityWarning
         visible:            text !== ""
     }
 }

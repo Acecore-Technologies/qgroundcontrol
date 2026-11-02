@@ -847,12 +847,12 @@ void GeoZoneParserTest::_testLiveNationalFeeds()
     for (const QVariant &preset : GeoZoneManager::feedPresets()) {
         const QString url = preset.toMap().value(QStringLiteral("url")).toString();
         if (url.contains(QStringLiteral("uas-betrieb.de")) || url.contains(QStringLiteral("ead-it.com")) || url.contains(QStringLiteral("tfr.faa.gov"))) {
-            manager.addUrl(url);
+            manager.repository()->addUrl(url);
         }
     }
     QVERIFY(manager.addArea(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(50.15, 8.55), QGeoCoordinate(50.0, 8.75))));
     QVERIFY(manager.addArea(QStringLiteral("france"), QGeoRectangle(QGeoCoordinate(48.9, 2.25), QGeoCoordinate(48.8, 2.45))));
-    QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 120000);
+    QTRY_VERIFY_WITH_TIMEOUT(!manager.repository()->busy(), 120000);
     for (const QVariantList &failure : std::as_const(failedSpy)) {
         qWarning() << failure;
     }
@@ -1550,7 +1550,7 @@ void GeoZoneParserTest::_testXmlAndPackages()
     const QTemporaryDir storageDir;
     QVERIFY(storageDir.isValid());
     GeoZoneManager manager(storageDir.path());
-    QVERIFY2(manager.loadFile(packagePath, errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(packagePath, errorString), qPrintable(errorString));
     // The fourth feature has no supported geometry, the zone in both files is loaded once
     QCOMPARE(manager.zoneCount(), 3);
     QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-269"));

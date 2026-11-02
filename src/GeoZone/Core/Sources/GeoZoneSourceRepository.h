@@ -16,6 +16,7 @@
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
+#include "GeoZoneAreaOfInterest.h"
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneCredentials.h"
 #include "GeoZoneDownloader.h"
@@ -32,10 +33,16 @@ class GeoZoneSource;
 
 /// The geozone sources: adds, loads and removes them and reports outdated data. Coordinates the downloads of the
 /// feeds (GeoZoneFeedFetch), their refreshes (GeoZoneRefreshScheduler) and the copies kept for the next start
-/// (GeoZoneStore, GeoZoneSourceIndex). GeoZoneManager publishes the zones of the loaded sources.
+/// (GeoZoneStore, GeoZoneSourceIndex). GeoZoneManager publishes the zones of the loaded sources, and the repository to
+/// QML as its repository property.
 class GeoZoneSourceRepository : public QObject
 {
     Q_OBJECT
+
+    Q_PROPERTY(bool     busy            READ busy               NOTIFY busyChanged FINAL)               ///< Sources are being loaded or downloaded
+    Q_PROPERTY(double   progress        READ progress           NOTIFY progressChanged FINAL)           ///< Fraction of the downloads received, negative when unknown
+    Q_PROPERTY(QString  progressText    READ progressText       NOTIFY progressChanged FINAL)
+    Q_PROPERTY(QString  validityWarning READ validityWarning    NOTIFY validityWarningChanged FINAL)    ///< Sources with outdated data, one per line
 
 public:
     enum class LoadMode : quint8 {
@@ -51,13 +58,15 @@ public:
     /// and refreshes feeds periodically
     void init();
 
-    /// See GeoZoneManager::addFile
+    /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from the same file.
+    /// loadFailed is emitted on errors and sourceAdded on success.
     void addFile(const QString &fileName);
     /// Loads files in the background like addFile. With several files, filesAdded tells the outcome once all are
     /// loaded instead of loadFailed for each.
-    void addFiles(const QStringList &fileNames);
-    /// See GeoZoneManager::addUrl
-    void addUrl(const QString &url);
+    Q_INVOKABLE void addFiles(const QStringList &fileNames);
+    /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the source with
+    /// the same URL. loadFailed is emitted on errors and sourceAdded on success.
+    Q_INVOKABLE void addUrl(const QString &url);
     /// Adds a feed requested from a service taking credentials, a POST query or the area of interest, replacing the
     /// source with the same URL. The URL may be a template, see GeoZoneService. The secret kept for the source is
     /// forgotten when the service sends it elsewhere than before, see GeoZoneService::sameAuthTarget.
@@ -66,27 +75,21 @@ public:
     ///                          feed, see GeoZoneService::otherOrigins. The service is refused otherwise.
     void addService(const QString &url, const GeoZoneService &service, const QString &secret, bool allowOtherOrigins = false);
     /// Replaces the secret of the service of a source and downloads it again
-    void setSecret(const QString &key, const QString &secret);
+    Q_INVOKABLE void setSecret(const QString &key, const QString &secret);
     /// Keeps the secrets of the services
     GeoZoneCredentials &credentials() { return _services.credentials(); }
 
     /// Sets the area of a planned mission, part of the area of interest of the services taking it, see
-    /// GeoZoneService::areaOfInterest. Feeds whose downloaded area doesn't cover the area of interest are downloaded
-    /// again for it, with areaMargin around.
+    /// GeoZoneAreaOfInterest. Feeds whose downloaded area doesn't cover the area of interest are downloaded again for it.
     /// @param owner Identifies the mission, like the mission check following it
     /// @param area Invalid when the mission has no flight path
-    void setMissionArea(quintptr owner, const QGeoRectangle &area);
+    void setMissionArea(const void *owner, const QGeoRectangle &area);
     /// Sets the position of the active vehicle, part of the area of interest, invalid without vehicle
     void setVehiclePosition(const QGeoCoordinate &position);
     /// @return Bounds of the planned missions and the vehicle, invalid without either
-    QGeoRectangle areaOfInterest() const;
+    QGeoRectangle areaOfInterest() const { return _areaOfInterest.area(); }
     /// When false, the feeds keep the area they were downloaded for
-    bool followArea() const { return _followArea; }
     void setFollowArea(bool follow);
-    /// @return The area with a margin in meters around it
-    static QGeoRectangle expanded(const QGeoRectangle &area, double margin);
-
-    static constexpr double areaMargin = 5000;  ///< Meters downloaded around the area of interest
 
     /// @return Description of a source for offline packs: its origin, dates, service, provenance, the changes of its
     ///         last reload (lastChanges, see GeoZoneSourceChanges) and its AIRAC cycle. Holds no secrets.
@@ -113,19 +116,23 @@ public:
     /// @param signatureText Set to a sentence telling how the pack is signed
     int importPack(const QString &packPath, QString &errorString, QString *signatureText = nullptr);
     /// Downloads all feeds again. Failures keep the previous data.
-    void refreshFeeds();
+    Q_INVOKABLE void refreshFeeds();
     /// Removes a source, its stored copy, and cancels its downloads
-    void removeSource(int index);
-    void clear();
+    Q_INVOKABLE void removeSource(int index);
+    /// Removes all sources
+    Q_INVOKABLE void clear();
     /// Synchronously loads a file, replacing the source loaded from the same file
     bool loadFile(const QString &fileName, QString &errorString);
-    /// See GeoZoneManager::loadStoredSources
+    /// Loads the sources stored by a previous session. An unreadable index is moved to a backup folder with the stored
+    /// copies, a newer one leaves the store untouched for the session; storageFailed is emitted in both cases.
     void loadStoredSources(LoadMode mode);
 
     /// The sources, in the order they were added
     const QList<GeoZoneSource*> &sources() const { return _sources; }
     QList<const GeoZoneSource*> sourceList() const;
     GeoZoneSource *source(const QString &key) const;
+    /// @return true when a source has the key, the URL of a feed or the path of a file
+    Q_INVOKABLE bool hasSource(const QString &key) const { return source(key.trimmed()) != nullptr; }
     /// @return Name of the stored copy of a source in storageDir, empty when it has none
     QString storedFileName(const QString &key) const { return _index.fileName(key); }
     QString storageDir() const { return _store.dir(); }
@@ -186,9 +193,6 @@ private:
     /// Sets the service of a source, forgetting its secret and token when the service sends them elsewhere
     void _setService(const QString &key, const GeoZoneService &service);
     void _updateCredentialsMissing(const QString &key);
-    /// @return Area to download a feed taking the area of interest for: the area it was downloaded for while it
-    ///         covers the area of interest, otherwise the area of interest with the margin
-    QGeoRectangle _requestArea(const QString &key) const;
     /// Downloads the feeds taking the area of interest again whose area doesn't cover it
     void _checkAreas();
 
@@ -209,9 +213,7 @@ private:
     quint32 _lastBatchId = 0;
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
     GeoZoneServiceRegistry _services;   ///< Of the feeds requested from a service, with their secrets and tokens
-    QHash<quintptr, QGeoRectangle> _missionAreas;
-    QGeoCoordinate _vehiclePosition;
-    bool _followArea = true;
+    GeoZoneAreaOfInterest _areaOfInterest;
     bool _storageErrorReported = false;
     QString _validityWarning;
     bool _startupRefreshPending = false;

@@ -51,10 +51,7 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(GeoZoneSettings*     settings            READ settings           CONSTANT FINAL)
     Q_PROPERTY(QGeoRectangle        boundingBox         READ boundingBox        NOTIFY boundingBoxChanged FINAL)                ///< Bounding box of all zones
     Q_PROPERTY(int                  disabledSourceCount READ disabledSourceCount NOTIFY zoneCountChanged FINAL)           ///< Sources whose zones are left out
-    Q_PROPERTY(bool                 busy                READ busy               NOTIFY busyChanged FINAL)                 ///< Sources are being loaded or downloaded
-    Q_PROPERTY(double               progress            READ progress           NOTIFY progressChanged FINAL)             ///< Fraction of the downloads received, negative when unknown
-    Q_PROPERTY(QString              progressText        READ progressText       NOTIFY progressChanged FINAL)
-    Q_PROPERTY(QString              validityWarning     READ validityWarning    NOTIFY validityWarningChanged FINAL)      ///< Sources with outdated data
+    Q_PROPERTY(GeoZoneSourceRepository* repository      READ repository         CONSTANT FINAL)                           ///< Adds, loads, refreshes and removes the sources
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
     Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
@@ -67,8 +64,6 @@ class GeoZoneManager : public QObject
 public:
     static constexpr int maxLabelCount = 200;           ///< Limits the number of label items created on a map
 
-    using LoadMode = GeoZoneSourceRepository::LoadMode;
-
     /// @param storageDir Directory in which copies of the sources are kept. Empty for the default application data location.
     explicit GeoZoneManager(const QString &storageDir = QString(), QObject *parent = nullptr);
     ~GeoZoneManager();
@@ -78,17 +73,6 @@ public:
     /// Loads the stored sources in the background, then downloads outdated feeds, warns about outdated data
     /// and refreshes feeds periodically
     void init();
-
-    /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from the same file.
-    /// loadFailed is emitted on errors and sourceAdded on success.
-    Q_INVOKABLE void addFile(const QString &fileName) { _repository->addFile(fileName); }
-    /// Loads files in the background like addFile. With several files, fileOperationFinished tells how many were
-    /// added and why the others failed once all are loaded.
-    Q_INVOKABLE void addFiles(const QStringList &fileNames) { _repository->addFiles(fileNames); }
-
-    /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the
-    /// source with the same URL. loadFailed is emitted on errors and sourceAdded on success.
-    Q_INVOKABLE void addUrl(const QString &url) { _repository->addUrl(url); }
 
     /// Downloads a feed from a service taking credentials, an ED-318 query or the area of interest, see
     /// GeoZoneSourceRepository::addService
@@ -106,12 +90,6 @@ public:
     {
         return GeoZoneService::fromVariantMap(service).otherOrigins(url.trimmed());
     }
-
-    /// Replaces the secret of the service of a source and downloads it again
-    Q_INVOKABLE void setCredentials(const QString &key, const QString &secret) { _repository->setSecret(key, secret); }
-
-    /// Downloads all feeds again. Failures keep the previous data.
-    Q_INVOKABLE void refreshFeeds() { _repository->refreshFeeds(); }
 
     /// Writes an offline pack of the sources, see GeoZonePack. fileOperationFinished tells the outcome.
     /// @param keys Of the sources, those turned on when empty
@@ -135,22 +113,6 @@ public:
     /// Writes a new Ed25519 private key to sign packs with, and selects it. fileOperationFinished tells the outcome.
     Q_INVOKABLE bool createSigningKey(const QString &fileName);
 
-    /// Removes a source, its zones and its stored copy
-    Q_INVOKABLE void removeSource(int index) { _repository->removeSource(index); }
-
-    /// Removes all sources
-    Q_INVOKABLE void clear() { _repository->clear(); }
-
-    /// Synchronously loads a file, replacing the source loaded from the same file
-    bool loadFile(const QString &fileName, QString &errorString) { return _repository->loadFile(fileName, errorString); }
-
-    /// Loads the sources stored by a previous session. An unreadable index is moved to a backup folder with the stored
-    /// copies, a newer one leaves the store untouched for the session; storageFailed is emitted in both cases.
-    void loadStoredSources(LoadMode mode) { _repository->loadStoredSources(mode); }
-
-    /// @return Name of the stored copy of a source in storageDir, empty when it has none
-    QString storedFileName(const QString &key) const { return _repository->storedFileName(key); }
-
     /// @return Zones to label in the map region: those centered in it, limited to maxLabelCount
     ///         preferring the most restrictive
     Q_INVOKABLE QVariantList labelZones(const QGeoRectangle &region) const;
@@ -172,7 +134,6 @@ public:
     /// Zones of all sources with their spatial index
     const GeoZoneCatalog &catalog() const { return _catalog; }
     QmlObjectListModel *sources() const { return _sources; }
-    GeoZoneSource *source(const QString &key) const { return _repository->source(key); }
     GeoZoneSourceRepository *repository() const { return _repository; }
     GeoZoneDisplay *display() const { return _display; }
     GeoZonePlanning *planning() const { return _planning; }
@@ -183,10 +144,6 @@ public:
     QList<const GeoZoneShape*> shapesInArea(double south, double west, double north, double east) const { return _catalog.shapesInArea(south, west, north, east); }
     QGeoRectangle boundingBox() const { return _catalog.boundingBox(); }
     int disabledSourceCount() const;
-    bool busy() const { return _repository->busy(); }
-    double progress() const { return _repository->progress(); }
-    QString progressText() const { return _repository->progressText(); }
-    QString validityWarning() const { return _repository->validityWarning(); }
     QStringList fileDialogFilters() const;
     static QVariantList feedPresets() { return GeoZoneProviders::feedPresets(); }
     /// See GeoZoneProviders::areaProviders
@@ -196,22 +153,11 @@ public:
     QString packPublicKey() const;
     QString packKeyId() const;
     QVariantList trustedPublishers() const;
-    /// See GeoZoneProviders::areaFeedUrl
-    Q_INVOKABLE QString areaFeedUrl(const QString &provider, const QGeoRectangle &area) const { return GeoZoneProviders::areaFeedUrl(provider, area); }
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for
     /// offline use and refreshed like other feeds. loadFailed is emitted when the area is too large.
     Q_INVOKABLE bool addArea(const QString &provider, const QGeoRectangle &area);
     /// @return true when a source downloaded the zones of the provider in the whole area, see GeoZoneProviders::areaDownloaded
     Q_INVOKABLE bool areaDownloaded(const QString &provider, const QGeoRectangle &area) const;
-    /// @return true when a source has the key, the URL of a feed or the path of a file
-    Q_INVOKABLE bool hasSource(const QString &key) const { return _repository->source(key.trimmed()) != nullptr; }
-
-    QString storageDir() const { return _repository->storageDir(); }
-
-    /// Sets the area of a mission, which with the active vehicle makes the area of interest of the services taking it,
-    /// see GeoZoneSourceRepository::setMissionArea
-    /// @param mission Identifies the mission, like the mission check following it
-    void setMissionArea(const QObject *mission, const QGeoRectangle &area) { _repository->setMissionArea(reinterpret_cast<quintptr>(mission), area); }
 
 signals:
     /// The zones and shapes of the source are about to be deleted, because it is reloaded or removed
@@ -224,9 +170,6 @@ signals:
     void zoneCountChanged();
     /// Zones became active or inactive with the time, see GeoZone::active
     void activeZonesChanged();
-    void busyChanged(bool busy);
-    void progressChanged();
-    void validityWarningChanged();
     void sourceAdded(GeoZoneSource *source);    ///< A source added by addFile or addUrl was loaded, not emitted when feeds are refreshed
     void loadFailed(const QString &key, const QString &message);   ///< Loading or downloading a source requested by the user failed
     void storageFailed(const QString &message); ///< Stored copies can't be read or written, emitted once per session
