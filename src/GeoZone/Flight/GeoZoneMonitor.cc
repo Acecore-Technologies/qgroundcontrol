@@ -860,6 +860,8 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
                               tr("Position lost near geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Traffic:
         return tr("Traffic %1 entered geozone %2 (%3)").arg(event.traffic, zoneName, restrictionText);
+    case AlertEvent::NonConformance:
+        return zoneName.isEmpty() ? tr("Outside planned volume") : tr("Outside planned volume: %1").arg(zoneName);
     case AlertEvent::Notified:
         return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approved:
@@ -875,6 +877,40 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         return tr("Approaching geozone %1 (%2), entry in about %3 s").arg(zoneName, restrictionText).arg(std::lround(event.timeToEntry));
     }
     return tr("Approaching geozone %1 (%2)").arg(zoneName, restrictionText);
+}
+
+GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance,
+                                                              const QString &identifier, const QString &name)
+{
+    AlertEvent event;
+    if (!settings().alertsEnabled) {
+        return event;
+    }
+    event.id = _nextAlertId++;
+    event.time = GeoZoneEnvironment::currentDateTimeUtc();
+    event.vehicleId = vehicleId;
+    event.position = position;
+    event.kind = kind;
+    event.distance = distance;
+    event.zoneIdentifier = identifier;
+    event.zoneName = name;
+    event.message = _labelled(vehicleId, alertMessage(event, name, QString()));
+    qCDebug(GeoZoneMonitorLog) << event.message;
+    const int severity = GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation);
+    emit alertEvent(event);
+    emit alert(event.message, severity, event.id);
+
+    const auto monitor = std::find_if(_monitors.cbegin(), _monitors.cend(), [vehicleId](const GeoZoneVehicleMonitor *candidate) { return candidate->vehicleId() == vehicleId; });
+    GeoZoneAlertArbiter::Alert announced;
+    announced.id = event.id;
+    announced.vehicleKey = (monitor != _monitors.cend()) ? (*monitor)->key() : 0;
+    announced.zoneKey = identifier;
+    announced.severity = severity;
+    announced.inside = true;
+    announced.message = event.message;
+    _arbiter.submit(announced);
+    _announce();
+    return event;
 }
 
 GeoZoneMonitor::AlertEvent GeoZoneMonitor::_alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId, const QString &traffic)

@@ -13,7 +13,9 @@
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneFlightRecorder.h"
+#include "GeoZoneGeoid.h"
 #include "GeoZoneBriefingExport.h"
+#include "GeoZoneConformance.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
@@ -856,6 +858,115 @@ void GeoZoneFlightTest::_testRemoteId()
     QCOMPARE(intent.toJson()[QStringLiteral("aircraft")][QStringLiteral("class")].toString(), QStringLiteral("Class 2"));
     QCOMPARE(intent.toJson()[QStringLiteral("operator")][QStringLiteral("region")].toString(), QStringLiteral("FAA"));
     manager.repository()->clear();
+}
+
+void GeoZoneFlightTest::_testConformance()
+{
+    using Conformance = GeoZoneConformance;
+    ScopedEnvironment environment;
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(environment.now().toSecsSinceEpoch() + 3600, QTimeZone::UTC);
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneMonitor monitor(&manager);
+    monitor.alertHistory()->startLog(dir.filePath(QStringLiteral("logs")));
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    Conformance conformance(&manager, &monitor);
+
+    // Off without planned start, then with the volumes of the operational intent of the mission
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 90), 2);
+    QTRY_VERIFY(GeoZoneMissionPath::fromMission(missionController).totalDistance() > 900);
+    conformance.setPlanController(&masterController);
+    conformance.updateVolumes();
+    QVERIFY(conformance.volumes().isEmpty());
+    conformance.evaluate(GeoZone::Position{ center, 500, qQNaN() }, true, 1);
+    QCOMPARE(conformance.state(), Conformance::Off);
+    QVERIFY(!conformance.active());
+    manager.planning()->setPlannedStart(start);
+    conformance.updateVolumes();
+    QVERIFY(!conformance.volumes().isEmpty());
+    QCOMPARE(conformance.volumes().constFirst().timeStart, start.addSecs(-GeoZoneOperationalIntent::defaultTimeBufferSecs));
+    QVERIFY(conformance.volumes().constFirst().contains(center.atDistanceAndAzimuth(450, 270)));
+    manager.planning()->clearPlannedStart();
+    conformance.updateVolumes();
+    QCOMPARE(conformance.state(), Conformance::Off);
+
+    // A volume 100 m around the center from 450 m to 550 m above mean sea level, for 10 minutes from the start
+    const double geoid = GeoZoneGeometry::geoidHeight(center);
+    Conformance::Volume volume;
+    volume.circleCenter = center;
+    volume.circleRadius = 100;
+    volume.altitudeLower = geoid + 450;
+    volume.altitudeUpper = geoid + 550;
+    volume.timeStart = start;
+    volume.timeEnd = start.addSecs(600);
+    const auto at = [&center](double east, double altitude) { return GeoZone::Position{ center.atDistanceAndAzimuth(east, 90), altitude, qQNaN() }; };
+    const QDateTime during = start.addSecs(60);
+    QCOMPARE(Conformance::check({ volume }, at(0, 500), start.addSecs(-1)).state, Conformance::OutsideTime);
+    QCOMPARE(Conformance::check({ volume }, at(0, 500), during).state, Conformance::Conforming);
+    QCOMPARE(Conformance::check({ volume }, at(0, qQNaN()), during).state, Conformance::Conforming);
+    Conformance::Result result = Conformance::check({ volume }, at(150, 500), during);
+    QCOMPARE(result.state, Conformance::OutsideHorizontally);
+    QVERIFY(_near(result.distance, 50));
+    result = Conformance::check({ volume }, at(0, 590), during);
+    QCOMPARE(result.state, Conformance::Above);
+    QVERIFY(_near(result.distance, 40));
+    result = Conformance::check({ volume }, at(50, 420), during);
+    QCOMPARE(result.state, Conformance::Below);
+    QVERIFY(_near(result.distance, 30));
+    Conformance::Volume square = volume;
+    square.circleCenter = QGeoCoordinate();
+    for (const double azimuth : { 45.0, 135.0, 225.0, 315.0 }) {
+        square.outline.append(center.atDistanceAndAzimuth(100 * std::sqrt(2.0), azimuth));
+    }
+    QVERIFY(_near(Conformance::horizontalDistance(square, center.atDistanceAndAzimuth(160, 90)), 60));
+    QCOMPARE(Conformance::horizontalDistance(square, center.atDistanceAndAzimuth(90, 0)), 0.0);
+
+    // In flight, the monitor alerts once when the vehicle leaves the volumes, again after it conformed
+    conformance.setVolumes({ volume });
+    environment.setNow(during);
+    conformance.evaluate(at(150, 500), false, 1);
+    QCOMPARE(conformance.state(), Conformance::Waiting);
+    QVERIFY(conformance.conforming());
+    conformance.evaluate(at(0, 500), true, 1);
+    QCOMPARE(conformance.state(), Conformance::Conforming);
+    QCOMPARE(conformance.stateText(), QStringLiteral("Inside planned volume"));
+    conformance.evaluate(at(150, 500), true, 1);
+    QCOMPARE(conformance.state(), Conformance::OutsideHorizontally);
+    QCOMPARE(spiedAlerts(alertSpy), QStringList{ QStringLiteral("Outside planned volume: 50 m beside it") });
+    conformance.evaluate(at(0, 590), true, 1);
+    QCOMPARE(conformance.stateText(), QStringLiteral("Outside planned volume: 40 m above it"));
+    QCOMPARE(alertSpy.count(), 1);
+    conformance.evaluate(at(0, 500), true, 1);
+    QVERIFY(conformance.conforming());
+    conformance.evaluate(at(0, 590), true, 1);
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Outside planned volume: 40 m above it"));
+    conformance.evaluate(at(0, 500), true, 1);
+    environment.setNow(start.addSecs(700));
+    conformance.evaluate(at(0, 500), true, 1);
+    QCOMPARE(conformance.state(), Conformance::OutsideTime);
+    QCOMPARE(alertSpy.count(), 3);
+
+    // Logged like the other alerts
+    GeoZoneAlertHistory *const history = monitor.alertHistory();
+    history->flushLog();
+    QFile log(history->logFilePath(environment.now().date()));
+    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QStringList lines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    QCOMPARE(lines.count(), 4);
+    const std::optional<GeoZoneMonitor::AlertEvent> logged = GeoZoneAlertHistory::parseLogLine(lines.last());
+    QVERIFY(logged && (logged->kind == GeoZoneMonitor::AlertEvent::NonConformance));
+    QCOMPARE(logged->zoneIdentifier, QStringLiteral("time"));
+    QCOMPARE(logged->message, QStringLiteral("Outside planned volume: outside its time window"));
+    QCOMPARE(GeoZoneMonitor::alertMessage(*GeoZoneAlertHistory::parseLogLine(lines[1]), QStringLiteral("50 m beside it"), QString()),
+             QStringLiteral("Outside planned volume: 50 m beside it"));
 }
 
 GEOZONE_TEST(GeoZoneFlightTest)

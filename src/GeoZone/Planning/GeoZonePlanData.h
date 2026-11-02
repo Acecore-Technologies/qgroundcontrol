@@ -38,7 +38,8 @@ void reset(GeoZoneManager *manager = nullptr);
 
 /// Resets the data whenever the Plan View controller replaces its mission: a new plan (PlanMasterController::removeAll),
 /// a plan downloaded from the vehicle, or a plan file loaded, whose data load then sets. Controllers of the Fly View
-/// are ignored, since the vehicle's mission isn't the plan being edited.
+/// aren't reset, since the vehicle's mission isn't the plan being edited: GeoZoneConformance checks the vehicle against
+/// the operational intent of their mission.
 /// @param manager GeoZoneManager::instance() when null
 void follow(PlanMasterController *planController, GeoZoneManager *manager = nullptr);
 

@@ -9,6 +9,7 @@
 
 #include "GeoZonePlanData.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneConformance.h"
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanAudit.h"
@@ -123,7 +124,11 @@ void reset(GeoZoneManager *manager)
 
 void follow(PlanMasterController *planController, GeoZoneManager *manager)
 {
-    if (!planController || planController->property("flyView").toBool()) {
+    if (!planController) {
+        return;
+    }
+    if (planController->property("flyView").toBool()) {
+        GeoZoneConformance::followFlyViewPlan(planController);
         return;
     }
     manager = manager ? manager : GeoZoneManager::instance();

@@ -12,6 +12,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneBriefingExport.h"
+#include "GeoZoneConformance.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneFenceTags.h"
@@ -101,6 +102,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, kUri, 1, 0, "GeoZone", "Enums only");
     (void) qmlRegisterSingletonType<GeoZoneManager>(kUri, 1, 0, "GeoZoneManager", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneManager::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneMonitor>(kUri, 1, 0, "GeoZoneMonitor", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneMonitor::instance()); });
+    (void) qmlRegisterSingletonType<GeoZoneConformance>(kUri, 1, 0, "GeoZoneConformance", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneConformance::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneFenceTags>(kUri, 1, 0, "GeoZoneFenceTags", [](QQmlEngine*, QJSEngine*) -> QObject* { return new GeoZoneFenceTags(); });
     (void) qmlRegisterUncreatableType<GeoZoneFenceTag>(kUri, 1, 0, "GeoZoneFenceTag", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneFenceUpload>(kUri, 1, 0, "GeoZoneFenceUpload", "Reference only");
@@ -132,6 +134,7 @@ void init()
     manager->init();
     (void) GeoZoneMonitor::instance();
     (void) GeoZoneFlightRecorder::instance();
+    (void) GeoZoneConformance::instance();
 }
 
 } // namespace GeoZoneModule

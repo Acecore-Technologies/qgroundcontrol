@@ -55,6 +55,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Flight/GeoZoneAlertHistory.h
         Flight/GeoZoneAlertModel.cc
         Flight/GeoZoneAlertModel.h
+        Flight/GeoZoneConformance.cc
+        Flight/GeoZoneConformance.h
         Flight/GeoZoneFlightRecorder.cc
         Flight/GeoZoneFlightRecorder.h
         Flight/GeoZoneGuidedCheck.cc
@@ -116,6 +118,7 @@ qt_add_qml_module(GeoZoneModule
         Planning/GeoZoneToolStripAction.qml
         Flight/GeoZoneAlertPopup.qml
         Flight/GeoZoneAltitudeStrip.qml
+        Flight/GeoZoneConformanceStatus.qml
         Flight/GeoZoneFlyMapLayer.qml
         Flight/GeoZoneGuidedActionWarning.qml
         Flight/GeoZoneIndicator.qml

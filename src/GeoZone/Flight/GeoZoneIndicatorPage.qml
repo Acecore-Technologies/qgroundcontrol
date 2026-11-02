@@ -111,6 +111,8 @@ ToolIndicatorPage {
                     visible:            control._active?.fenceBreached === true
                 }
 
+                GeoZoneConformanceStatus { Layout.fillWidth: true }
+
                 RowLayout {
                     id:                 _pausedLabel
                     Layout.fillWidth:   true

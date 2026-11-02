@@ -104,6 +104,8 @@ public:
             Entry,                  ///< The vehicle entered the zone
             PositionLost,           ///< The vehicle lost its position near or inside the zone
             Traffic,                ///< An aircraft of the traffic entered the zone
+            NonConformance,         ///< The vehicle left the volumes of its operational intent, see GeoZoneConformance: the zone
+                                    ///< identifier is the GeoZoneConformance::stateCode, the name tells how far
             // What the pilot was shown and answered, only logged
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
@@ -226,6 +228,14 @@ public:
     /// The settings in use, read from GeoZoneSettings again after they change
     const Settings &settings() const;
     const GeoZoneAlertArbiter &arbiter() const { return _arbiter; }
+
+    /// Shows, logs and announces an alert of a vehicle which isn't about a zone of the catalog, like the
+    /// NonConformance alerts of GeoZoneConformance, as urgent as an entry into a zone requiring an authorisation. It
+    /// isn't repeated. Nothing is raised while the alerts are off.
+    /// @param identifier,name Of the zone column of the log, the name also ends the message
+    /// @return The alert, with id 0 when not raised
+    AlertEvent raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance, const QString &identifier,
+                                 const QString &name);
 
     /// Acknowledges an alert in the history and stops repeating it
     void acknowledgeAlert(int alertId);

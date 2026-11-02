@@ -27,4 +27,5 @@ private slots:
     void _testPreflightChecklist();
     void _testFlightRecord();
     void _testRemoteId();
+    void _testConformance();
 };
