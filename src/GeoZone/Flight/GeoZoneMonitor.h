@@ -24,6 +24,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneAlertArbiter.h"
+#include "GeoZoneAlertModel.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneVehicleMonitor.h"
@@ -51,6 +52,10 @@ class Vehicle;
 /// announcements are spoken when spoken alerts are on. Alerts and the approach distances are set in GeoZoneSettings.
 /// The ADS-B and Remote ID traffic around the active vehicle is checked against the zones too, with a
 /// GeoZoneAlertTracker per aircraft, so the pilot sees which aircraft are in or near zones.
+/// The alerts shown to the pilot are kept in a GeoZoneAlertModel with what can be done about them. An alert of a
+/// vehicle approaching or entering a restricted zone asks whether the pilot has the permission to fly there: confirming
+/// it (approveAlert()) acknowledges the alert and ends the alerts and repeats about the zone until the vehicle leaves
+/// the zone and its approach range.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -61,7 +66,8 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(GeoZoneAlertHistory *alertHistory READ alertHistory      CONSTANT FINAL)                       ///< Alerts of the session and earlier today
     Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< Alerts are neither spoken nor repeated, see muteAlerts()
     Q_PROPERTY(int              defaultMuteSecs     READ defaultMuteSecs    CONSTANT FINAL)
-    Q_PROPERTY(QStringList      mutedZoneKeys       READ mutedZoneKeys      NOTIFY zoneMutesChanged FINAL)   ///< Zones muted for the active vehicle until it leaves them, see muteZone()
+    Q_PROPERTY(QStringList      approvedZoneKeys    READ approvedZoneKeys   NOTIFY approvalsChanged FINAL)   ///< Zones approved for the active vehicle until it leaves them, see approveAlert()
+    Q_PROPERTY(GeoZoneAlertModel *alerts            READ alertModel         CONSTANT FINAL)                  ///< Alerts shown by the alert popup
     /// Aircraft in or near zones while traffic is checked, the most restrictive zone and those inside first, as maps
     /// with callsign (or the ICAO address), zone (GeoZoneInfo of the most restrictive zone), inside, distance (meters to
     /// the zone) and altitude (meters AMSL, NaN when unknown)
@@ -81,7 +87,7 @@ public:
 
     static constexpr int evaluateIntervalMSecs = 1000;
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
-    static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see alertActions()
+    static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see GeoZoneAlertModel
     static constexpr double approachVerticalDistance = 30;  ///< Meters below the floor or above the ceiling of a zone within which it is near
     static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
     static constexpr int maxMuteSecs = 24 * 60 * 60;        ///< Longest mute, see muteAlerts()
@@ -212,22 +218,23 @@ public:
     const GeoZoneAlertArbiter &arbiter() const { return _arbiter; }
 
     /// Acknowledges an alert in the history and stops repeating it
-    Q_INVOKABLE void acknowledgeAlert(int alertId);
+    void acknowledgeAlert(int alertId);
+    /// The pilot confirmed the permission to fly in the zone of the alert: acknowledges the alerts about the zone and
+    /// approves the zone for the vehicle, whose alerts about it are neither shown, spoken nor repeated until it leaves
+    /// the zone and its approach range. They are still logged.
+    Q_INVOKABLE void approveAlert(int alertId);
+    /// The pilot dismissed a shown alert: acknowledges it and removes it from the shown alerts
+    Q_INVOKABLE void dismissAlert(int alertId);
+    /// The pilot closed the alert popup: removes the shown alerts, unacknowledged
+    Q_INVOKABLE void closeAlerts();
     /// Mutes the alerts for the seconds, defaultMuteSecs when 0 and at most maxMuteSecs: they are shown but neither
     /// spoken nor repeated, except new entries into prohibited zones
     Q_INVOKABLE void muteAlerts(int seconds = 0);
     Q_INVOKABLE void unmuteAlerts();
 
-    /// @return What can be done about an alert of the alert and alertRepeated signals, while its vehicle is monitored, as
-    ///         a map: vehicleId, zoneKey (GeoZone::key), activeVehicle (the alert is about the active vehicle), inside
-    ///         (the vehicle is inside the zone, by its current position), zoneMuted (see muteZone()) and climbHeight
-    ///         (meters the vehicle climbs to be climbClearance above the ceiling of the zone where it is, NaN when the
-    ///         zone has no known ceiling there or the vehicle's position or altitude are unknown). Empty for unknown
-    ///         alerts.
-    Q_INVOKABLE QVariantMap alertActions(int alertId) const;
-    /// Mutes the zone of the alert for its vehicle until the vehicle leaves the zone: the zone is neither shown, spoken
-    /// nor repeated meanwhile, the alerts are still logged
-    Q_INVOKABLE void muteZone(int alertId);
+    /// @return true when the alerts of a vehicle approaching or entering a zone of the restriction ask whether the pilot
+    ///         has the permission to fly there
+    static bool asksPermission(GeoZone::Restriction restriction);
 
     GeoZoneManager *manager() const { return _manager; }
     /// Monitor of the active vehicle, or of the positions of activeVehicleId() without, null when not monitored
@@ -236,11 +243,16 @@ public:
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
     /// Alerts of the session, which only the application monitor logs
     GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
+    /// Alerts shown to the pilot, with their actions: whether the alert asks for permission (see approveAlert()), is
+    /// about the active vehicle, whether the vehicle is still inside the zone and how far it climbs to be climbClearance
+    /// above the zone's ceiling where it is (NaN when the zone has no known ceiling there or the vehicle's position or
+    /// altitude are unknown)
+    GeoZoneAlertModel *alertModel() const { return _alertModel; }
 
     bool monitoring() const;
     bool alertsMuted() const { return _arbiter.muted(); }
     static int defaultMuteSecs() { return GeoZoneAlertArbiter::defaultMuteMSecs / 1000; }
-    QStringList mutedZoneKeys() const;
+    QStringList approvedZoneKeys() const;
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
@@ -259,7 +271,7 @@ signals:
     void fenceBreach(const QString &message);
     void alertsMutedChanged();
     void trafficChanged();
-    void zoneMutesChanged();
+    void approvalsChanged();
 
 private slots:
     void _updateEvaluateTimer();
@@ -284,6 +296,11 @@ private:
     void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
+    /// Adds an alert to the shown alerts
+    void _show(int alertId, const QString &message, int severity);
+    /// Sets the actions of a shown alert from the state of its vehicle
+    void _setAlertActions(GeoZoneAlertModel::Alert &alert) const;
+    void _updateAlertActions();
     void _settingsChanged(const Settings &previous);
     void _resetMonitors();
 
@@ -300,8 +317,8 @@ private:
     /// @return Meters to climb above the zone by climbClearance, NaN when it has no known ceiling at the vehicle
     static double _climbHeight(const GeoZoneVehicleMonitor *monitor, const GeoZone *zone);
     GeoZoneVehicleMonitor *_monitorByKey(int key) const;
-    /// Notifies zoneMutesChanged when the count changed since it was taken
-    void _zoneMutesChanged(int previousCount);
+    /// Notifies approvalsChanged when the count changed since it was taken
+    void _approvalsChanged(int previousCount);
     /// @return The message naming the vehicle while several are monitored
     QString _labelled(int vehicleId, const QString &message) const;
     qint64 _now() const { return _clock ? _clock() : _elapsed.elapsed(); }
@@ -313,8 +330,9 @@ private:
     int _nextVehicleKey = 1;
     int _nextAlertId = 1;
     struct AlertSubject {
-        int vehicleKey = 0;
-        QString zoneKey;
+        int vehicleKey = 0;         ///< 0 for traffic
+        AlertEvent event;
+        bool asksPermission = false;
     };
     QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
     QTimer _evaluateTimer;
@@ -333,4 +351,5 @@ private:
     QList<ZoneTraffic> _traffic;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;
     GeoZoneAlertHistory *_alertHistory = nullptr;
+    GeoZoneAlertModel *_alertModel = nullptr;
 };

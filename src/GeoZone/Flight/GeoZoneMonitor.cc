@@ -18,6 +18,7 @@
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
+#include "GeoZonePolicy.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneTerrain.h"
@@ -77,6 +78,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
+    , _alertModel(new GeoZoneAlertModel(this))
 {
     _elapsed.start();
     _arbiter.setClock([this]() { return _now(); });
@@ -88,8 +90,11 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(_alertHistory, &GeoZoneAlertHistory::alertAcknowledged, this, [this](int alertId) { _arbiter.acknowledge(alertId); });
     (void) connect(_alertHistory, &GeoZoneAlertHistory::allAcknowledged, this, [this]() { _arbiter.acknowledgeAll(); });
 
-    // Zones are muted for the active vehicle
-    (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::zoneMutesChanged);
+    // Zones are approved for the active vehicle, whose alerts offer its actions
+    (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::approvalsChanged);
+    (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::_updateAlertActions);
+    // Fences stop or return the vehicle, shown above the geozone alerts
+    (void) connect(this, &GeoZoneMonitor::fenceBreach, this, [this](const QString &message) { _show(_nextAlertId++, message, -1); });
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
@@ -185,6 +190,7 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
     });
     (void) connect(monitor, &GeoZoneVehicleMonitor::positionUnavailableChanged, this, [this, monitor]() {
         _positionAvailabilityChanged(monitor);
+        _updateAlertActions();
     });
     _resolveActive();
     return monitor;
@@ -196,13 +202,14 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
         return;
     }
     (void) _monitors.removeOne(monitor);
-    const int muteCount = _arbiter.zoneMuteCount();
+    const int approvalCount = _arbiter.approvalCount();
     _arbiter.removeVehicle(monitor->key());
-    _zoneMutesChanged(muteCount);
+    _approvalsChanged(approvalCount);
     (void) monitor->disconnect(this);
     // Removed while the vehicle emits a signal, or from a slot of the monitor
     monitor->deleteLater();
     _resolveActive();
+    _updateAlertActions();
     if (monitor->followsVehicle()) {
         emit monitoringChanged();
     }
@@ -385,10 +392,14 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
     });
     _setTraffic(traffic);
 
-    // Not about a vehicle, so neither spoken, repeated nor muted with a zone
+    // Not about a vehicle, so neither spoken, repeated nor approved
     for (const AlertEvent &event : std::as_const(entries)) {
+        _alertSubjects.insert(event.id, AlertSubject{ 0, event, false });
+        (void) _alertSubjects.remove(event.id - maxActionAlerts);
         emit alertEvent(event);
-        emit alert(event.message, trafficSeverity + GeoZone::restrictionSeverity(event.restriction), event.id);
+        const int severity = trafficSeverity + GeoZone::restrictionSeverity(event.restriction);
+        emit alert(event.message, severity, event.id);
+        _show(event.id, event.message, severity);
     }
 }
 
@@ -496,24 +507,28 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
         const AlertEvent::Kind kind = zoneAlert.inside ? AlertEvent::Entry : AlertEvent::Approach;
         _submit(monitor, _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId()), zoneAlert.zone);
     }
-    // Breaches and zone mutes end when the vehicle leaves the zone. Without a current position the zones it is in
-    // aren't known, the nearby zones are those of its last position.
+    // Breaches end when the vehicle leaves the zone, approvals when it leaves its approach range too. Without a
+    // current position the zones it is in aren't known, the nearby zones are those of its last position.
     if (!monitor->positionUnavailable()) {
-        const int muteCount = _arbiter.zoneMuteCount();
-        _arbiter.setInsideZones(monitor->key(), monitor->insideZoneKeys());
-        _zoneMutesChanged(muteCount);
+        const int approvalCount = _arbiter.approvalCount();
+        _arbiter.setZones(monitor->key(), monitor->insideZoneKeys(), monitor->nearbyZoneKeys());
+        _approvalsChanged(approvalCount);
     }
 }
 
 void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone)
 {
     const int severity = GeoZone::restrictionSeverity(event.restriction);
-    _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event.zoneKey });
+    const bool asks = (event.kind == AlertEvent::Approach || event.kind == AlertEvent::Entry) && asksPermission(event.restriction);
+    _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event, asks });
     (void) _alertSubjects.remove(event.id - maxActionAlerts);
     emit alertEvent(event);
-    // A zone muted until the vehicle leaves it is logged but not shown
-    if (!_arbiter.zoneMuted(monitor->key(), event.zoneKey)) {
+    // A zone approved until the vehicle leaves it is logged but not shown, the pilot answered already
+    if (_arbiter.zoneApproved(monitor->key(), event.zoneKey)) {
+        _alertHistory->acknowledgeAlert(event.id);
+    } else {
         emit alert(event.message, severity, event.id);
+        _show(event.id, event.message, severity);
     }
 
     GeoZoneAlertArbiter::Alert announced;
@@ -555,8 +570,54 @@ void GeoZoneMonitor::_announce()
     }
     for (const GeoZoneAlertArbiter::Alert &repeated : announcement.repeated) {
         emit alertRepeated(repeated.repeatMessage, repeated.severity, repeated.id);
+        _show(repeated.id, repeated.repeatMessage, repeated.severity);
     }
     _updateMuted();
+    _updateAlertActions();
+}
+
+void GeoZoneMonitor::_show(int alertId, const QString &message, int severity)
+{
+    GeoZoneAlertModel::Alert alert;
+    alert.alertId = alertId;
+    alert.message = message;
+    alert.severity = severity;
+    const auto subject = _alertSubjects.constFind(alertId);
+    if (subject != _alertSubjects.cend()) {
+        alert.vehicleKey = subject->vehicleKey;
+        alert.zoneKey = subject->event.zoneKey;
+    }
+    _setAlertActions(alert);
+    (void) _alertModel->show(alert);
+}
+
+void GeoZoneMonitor::_setAlertActions(GeoZoneAlertModel::Alert &alert) const
+{
+    const auto subject = _alertSubjects.constFind(alert.alertId);
+    const GeoZoneVehicleMonitor *const monitor = ((subject != _alertSubjects.cend()) && (subject->vehicleKey > 0)) ? _monitorByKey(subject->vehicleKey) : nullptr;
+    if (!monitor) {
+        alert.question = false;
+        alert.activeVehicle = false;
+        alert.inside = false;
+        alert.climbHeight = qQNaN();
+        return;
+    }
+    const QList<GeoZoneAlertTracker::Nearby> &nearby = monitor->nearby();
+    const auto zone = std::find_if(nearby.cbegin(), nearby.cend(), [&alert](const GeoZoneAlertTracker::Nearby &candidate) {
+        return candidate.zone->key() == alert.zoneKey;
+    });
+    const bool near = (zone != nearby.cend());
+    const bool known = near && !monitor->positionUnavailable();
+    // Once the vehicle left the zone and its approach range, the permission no longer matters
+    alert.question = subject->asksPermission && near && !_arbiter.zoneApproved(subject->vehicleKey, alert.zoneKey);
+    alert.activeVehicle = (monitor == _activeMonitor);
+    alert.inside = known && zone->inside;
+    alert.climbHeight = known ? _climbHeight(monitor, zone->zone) : qQNaN();
+}
+
+void GeoZoneMonitor::_updateAlertActions()
+{
+    _alertModel->updateActions([this](GeoZoneAlertModel::Alert &alert) { _setAlertActions(alert); });
 }
 
 void GeoZoneMonitor::acknowledgeAlert(int alertId)
@@ -582,49 +643,57 @@ void GeoZoneMonitor::unmuteAlerts()
     _updateMuted();
 }
 
-QVariantMap GeoZoneMonitor::alertActions(int alertId) const
+bool GeoZoneMonitor::asksPermission(GeoZone::Restriction restriction)
 {
-    const auto subject = _alertSubjects.constFind(alertId);
-    const GeoZoneVehicleMonitor *const monitor = (subject != _alertSubjects.cend()) ? _monitorByKey(subject->vehicleKey) : nullptr;
-    if (!monitor) {
-        return {};
-    }
-    const QList<GeoZoneAlertTracker::Nearby> &nearby = monitor->nearby();
-    const auto zone = std::find_if(nearby.cbegin(), nearby.cend(), [&subject](const GeoZoneAlertTracker::Nearby &candidate) {
-        return candidate.zone->key() == subject->zoneKey;
-    });
-    const bool known = (zone != nearby.cend()) && !monitor->positionUnavailable();
-    return QVariantMap{
-        { QStringLiteral("vehicleId"), monitor->vehicleId() },
-        { QStringLiteral("zoneKey"), subject->zoneKey },
-        { QStringLiteral("activeVehicle"), monitor == _activeMonitor },
-        { QStringLiteral("inside"), known && zone->inside },
-        { QStringLiteral("zoneMuted"), _arbiter.zoneMuted(subject->vehicleKey, subject->zoneKey) },
-        { QStringLiteral("climbHeight"), known ? _climbHeight(monitor, zone->zone) : qQNaN() },
-    };
+    return GeoZonePolicy::isRestricted(restriction);
 }
 
-void GeoZoneMonitor::muteZone(int alertId)
+void GeoZoneMonitor::approveAlert(int alertId)
 {
     const auto subject = _alertSubjects.constFind(alertId);
-    if ((subject == _alertSubjects.cend()) || !_monitorByKey(subject->vehicleKey)) {
+    if ((subject == _alertSubjects.cend()) || (subject->vehicleKey <= 0) || subject->event.zoneKey.isEmpty() || !_monitorByKey(subject->vehicleKey)) {
+        dismissAlert(alertId);
         return;
     }
-    const int muteCount = _arbiter.zoneMuteCount();
-    _arbiter.muteZone(subject->vehicleKey, subject->zoneKey);
-    _zoneMutesChanged(muteCount);
+    const int vehicleKey = subject->vehicleKey;
+    const QString zoneKey = subject->event.zoneKey;
+    // All the shown alerts about the zone are answered
+    const auto aboutZone = [vehicleKey, &zoneKey](const GeoZoneAlertModel::Alert &alert) {
+        return (alert.vehicleKey == vehicleKey) && (alert.zoneKey == zoneKey);
+    };
+    acknowledgeAlert(alertId);
+    for (const GeoZoneAlertModel::Alert &alert : _alertModel->alerts()) {
+        if (aboutZone(alert)) {
+            acknowledgeAlert(alert.alertId);
+        }
+    }
+    const int approvalCount = _arbiter.approvalCount();
+    _arbiter.approveZone(vehicleKey, zoneKey);
+    _approvalsChanged(approvalCount);
+    _alertModel->removeIf([alertId, &aboutZone](const GeoZoneAlertModel::Alert &alert) { return (alert.alertId == alertId) || aboutZone(alert); });
 }
 
-QStringList GeoZoneMonitor::mutedZoneKeys() const
+void GeoZoneMonitor::dismissAlert(int alertId)
+{
+    acknowledgeAlert(alertId);
+    _alertModel->removeIf([alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
+}
+
+void GeoZoneMonitor::closeAlerts()
+{
+    _alertModel->clear();
+}
+
+QStringList GeoZoneMonitor::approvedZoneKeys() const
 {
     const GeoZoneVehicleMonitor *const monitor = _activeMonitor;
-    return monitor ? QStringList(_arbiter.mutedZones(monitor->key()).values()) : QStringList();
+    return monitor ? QStringList(_arbiter.approvedZones(monitor->key()).values()) : QStringList();
 }
 
-void GeoZoneMonitor::_zoneMutesChanged(int previousCount)
+void GeoZoneMonitor::_approvalsChanged(int previousCount)
 {
-    if (_arbiter.zoneMuteCount() != previousCount) {
-        emit zoneMutesChanged();
+    if (_arbiter.approvalCount() != previousCount) {
+        emit approvalsChanged();
     }
 }
 

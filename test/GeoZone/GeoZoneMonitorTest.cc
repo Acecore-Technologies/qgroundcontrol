@@ -49,6 +49,17 @@ GeoZoneAlertArbiter::Alert arbiterAlert(int id, int vehicleKey, const QString &z
     return alert;
 }
 
+/// @return Alert with the id shown by the alert popup, nothing when it isn't shown
+std::optional<GeoZoneAlertModel::Alert> shownAlert(const GeoZoneMonitor &monitor, int alertId)
+{
+    for (const GeoZoneAlertModel::Alert &alert : monitor.alertModel()->alerts()) {
+        if (alert.alertId == alertId) {
+            return alert;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 void GeoZoneMonitorTest::_testMonitorAlerts()
@@ -825,7 +836,7 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     arbiter.submit(arbiterAlert(10, 1, QStringLiteral("P"), GeoZone::Prohibited, true));
     QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P"));
     QCOMPARE(arbiter.breachCount(), 1);
-    arbiter.setInsideZones(1, { QStringLiteral("P") });
+    arbiter.setZones(1, { QStringLiteral("P") }, { QStringLiteral("P") });
     now += GeoZoneAlertArbiter::repeatIntervalMSecs - 1;
     QVERIFY(arbiter.tick().text.isEmpty());
     now += 1;
@@ -844,9 +855,9 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     arbiter.submit(arbiterAlert(11, 2, QStringLiteral("P"), GeoZone::Prohibited, true));
     QCOMPARE(arbiter.tick().text, QStringLiteral("Entered P"));
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
-    arbiter.setInsideZones(2, { QStringLiteral("P"), QStringLiteral("U") });
+    arbiter.setZones(2, { QStringLiteral("P"), QStringLiteral("U") }, { QStringLiteral("P"), QStringLiteral("U") });
     QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P"));
-    arbiter.setInsideZones(2, { QStringLiteral("U") });
+    arbiter.setZones(2, { QStringLiteral("U") }, { QStringLiteral("P"), QStringLiteral("U") });
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
     QVERIFY(arbiter.tick().text.isEmpty());
     QCOMPARE(arbiter.breachCount(), 0);
@@ -864,7 +875,7 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     const GeoZoneAlertArbiter::Announcement mutedBreach = arbiter.tick();
     QCOMPARE(mutedBreach.text, QStringLiteral("Entered P3"));
     QCOMPARE(mutedBreach.alerts.count(), 1);
-    arbiter.setInsideZones(1, { QStringLiteral("P3") });
+    arbiter.setZones(1, { QStringLiteral("P3") }, { QStringLiteral("P3") });
 
     // Its repeats wait for the end of the mute, the alerts dropped meanwhile aren't announced
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
@@ -891,23 +902,25 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P4"));
     arbiter.removeVehicle(3);
 
-    // A zone muted for a vehicle drops its alerts and breach until the vehicle leaves it
+    // A zone approved for a vehicle drops its alerts and breach until the vehicle leaves the zone and its approach range
     now += GeoZoneAlertArbiter::minIntervalMSecs;
     arbiter.submit(arbiterAlert(16, 4, QStringLiteral("P5"), GeoZone::Prohibited, true));
     arbiter.submit(arbiterAlert(17, 5, QStringLiteral("P5"), GeoZone::Prohibited, true));
-    arbiter.muteZone(4, QStringLiteral("P5"));
-    QVERIFY(arbiter.zoneMuted(4, QStringLiteral("P5")));
-    QVERIFY(!arbiter.zoneMuted(5, QStringLiteral("P5")));
+    arbiter.approveZone(4, QStringLiteral("P5"));
+    QVERIFY(arbiter.zoneApproved(4, QStringLiteral("P5")));
+    QVERIFY(!arbiter.zoneApproved(5, QStringLiteral("P5")));
     QCOMPARE(arbiter.pendingCount(), 1);
     QCOMPARE(arbiter.breachCount(), 1);
     arbiter.submit(arbiterAlert(18, 4, QStringLiteral("P5"), GeoZone::Prohibited, true));
     QCOMPARE(arbiter.pendingCount(), 1);
-    arbiter.setInsideZones(4, { QStringLiteral("P5") });
-    QCOMPARE(arbiter.mutedZones(4), QSet<QString>{ QStringLiteral("P5") });
-    QCOMPARE(arbiter.zoneMuteCount(), 1);
-    arbiter.setInsideZones(4, {});
-    QVERIFY(!arbiter.zoneMuted(4, QStringLiteral("P5")));
-    QCOMPARE(arbiter.zoneMuteCount(), 0);
+    arbiter.setZones(4, { QStringLiteral("P5") }, { QStringLiteral("P5") });
+    QCOMPARE(arbiter.approvedZones(4), QSet<QString>{ QStringLiteral("P5") });
+    QCOMPARE(arbiter.approvalCount(), 1);
+    arbiter.setZones(4, {}, { QStringLiteral("P5") });
+    QVERIFY(arbiter.zoneApproved(4, QStringLiteral("P5")));
+    arbiter.setZones(4, {}, {});
+    QVERIFY(!arbiter.zoneApproved(4, QStringLiteral("P5")));
+    QCOMPARE(arbiter.approvalCount(), 0);
     arbiter.submit(arbiterAlert(19, 4, QStringLiteral("P5"), GeoZone::Prohibited, true));
     QCOMPARE(arbiter.pendingCount(), 2);
 }
@@ -1170,64 +1183,117 @@ void GeoZoneMonitorTest::_testAlertActions()
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
     QSignalSpy repeatSpy(&monitor, &GeoZoneMonitor::alertRepeated);
     QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
-    QSignalSpy mutesSpy(&monitor, &GeoZoneMonitor::zoneMutesChanged);
+    QSignalSpy approvalsSpy(&monitor, &GeoZoneMonitor::approvalsChanged);
+    GeoZoneAlertModel *const shown = monitor.alertModel();
+    GeoZoneAlertHistory *const history = monitor.alertHistory();
     Vehicle vehicle(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
     (void) monitor.addVehicle(&vehicle);
     monitor.setActiveVehicle(&vehicle);
-    QVERIFY(monitor.alertActions(1).isEmpty());
+    QCOMPARE(shown->count(), 0);
 
-    // 50 m above the ground inside the zone, the active vehicle climbs 100 m to be 30 m above its ceiling
+    // 50 m above the ground inside the restricted zone, the pilot is asked for the permission to fly there, and the
+    // active vehicle climbs 100 m to be 30 m above its ceiling
     const GeoZone::Position inside{ center.atDistanceAndAzimuth(100, 0), 450, 400 };
     monitor.evaluate(&vehicle, inside);
     QCOMPARE(alertSpy.count(), 1);
     const int entryId = alertSpy.last()[2].toInt();
-    QVariantMap actions = monitor.alertActions(entryId);
-    QCOMPARE(actions.value(QStringLiteral("vehicleId")).toInt(), vehicle.id());
-    QCOMPARE(actions.value(QStringLiteral("zoneKey")).toString(), eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().zoneKey);
-    QVERIFY(actions.value(QStringLiteral("activeVehicle")).toBool());
-    QVERIFY(actions.value(QStringLiteral("inside")).toBool());
-    QVERIFY(!actions.value(QStringLiteral("zoneMuted")).toBool());
-    QCOMPARE(actions.value(QStringLiteral("climbHeight")).toDouble(), 120 + GeoZoneMonitor::climbClearance - 50);
-    monitor.setActiveVehicle(nullptr);
-    QVERIFY(!monitor.alertActions(entryId).value(QStringLiteral("activeVehicle")).toBool());
-    monitor.setActiveVehicle(&vehicle);
+    const QString zoneKey = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().zoneKey;
+    std::optional<GeoZoneAlertModel::Alert> alert = shownAlert(monitor, entryId);
+    QVERIFY(alert);
+    QCOMPARE(alert->message, alertSpy.last()[0].toString());
+    QCOMPARE(alert->zoneKey, zoneKey);
+    QVERIFY(alert->question);
+    QVERIFY(alert->activeVehicle);
+    QVERIFY(alert->inside);
+    QCOMPARE(alert->climbHeight, 120 + GeoZoneMonitor::climbClearance - 50);
+    QCOMPARE(shown->questionCount(), 1);
+    QVERIFY(shown->activeVehicleAlerts());
+    QCOMPARE(shown->climbHeight(), alert->climbHeight);
 
-    // Muting the zone ends its repeats until the vehicle leaves it
-    mutesSpy.clear();
-    monitor.muteZone(entryId);
-    QCOMPARE(mutesSpy.count(), 1);
-    QCOMPARE(monitor.mutedZoneKeys(), QStringList{ eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().zoneKey });
-    QVERIFY(monitor.alertActions(entryId).value(QStringLiteral("zoneMuted")).toBool());
+    // The rows are notified only when their actions change
+    QSignalSpy dataSpy(shown, &QAbstractItemModel::dataChanged);
+    monitor.setActiveVehicle(nullptr);
+    QVERIFY(!shownAlert(monitor, entryId)->activeVehicle);
+    QVERIFY(!shown->activeVehicleAlerts());
+    QVERIFY(std::isnan(shown->climbHeight()));
+    monitor.setActiveVehicle(&vehicle);
+    QCOMPARE(dataSpy.count(), 2);
+    monitor.evaluate(&vehicle, inside);
+    QCOMPARE(dataSpy.count(), 2);
+
+    // Confirming the permission acknowledges the alert and ends the alerts and repeats about the zone
+    approvalsSpy.clear();
+    monitor.approveAlert(entryId);
+    QCOMPARE(approvalsSpy.count(), 1);
+    QCOMPARE(monitor.approvedZoneKeys(), QStringList{ zoneKey });
+    QCOMPARE(shown->count(), 0);
     QCOMPARE(monitor.arbiter().breachCount(), 0);
+    QCOMPARE(history->unacknowledgedCount(), 0);
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
     monitor.evaluate(&vehicle, inside);
     QCOMPARE(repeatSpy.count(), 0);
+
+    // ... until the vehicle leaves the zone and its approach range: entering again from near it is only logged
+    monitor.evaluate(&vehicle, { center.atDistanceAndAzimuth(350, 0), 450, 400 });
+    QCOMPARE(monitor.approvedZoneKeys(), QStringList{ zoneKey });
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
+    monitor.evaluate(&vehicle, inside);
+    QCOMPARE(eventSpy.count(), 2);
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(shown->count(), 0);
+    QCOMPARE(monitor.arbiter().breachCount(), 0);
+    QCOMPARE(history->unacknowledgedCount(), 0);
     monitor.evaluate(&vehicle, { center.atDistanceAndAzimuth(1000, 0), 450, 400 });
-    QVERIFY(monitor.mutedZoneKeys().isEmpty());
-    QCOMPARE(mutesSpy.count(), 2);
-    QVERIFY(!monitor.alertActions(entryId).value(QStringLiteral("inside")).toBool());
+    QVERIFY(monitor.approvedZoneKeys().isEmpty());
+    QCOMPARE(approvalsSpy.count(), 2);
     now += GeoZoneAlertArbiter::minIntervalMSecs;
     monitor.evaluate(&vehicle, inside);
     QCOMPARE(alertSpy.count(), 2);
     QCOMPARE(monitor.arbiter().breachCount(), 1);
+    const int againId = alertSpy.last()[2].toInt();
+    QVERIFY(shownAlert(monitor, againId)->question);
 
-    // Without a current position the vehicle isn't known to be inside nor able to climb out
+    // Without a current position the vehicle isn't known to be inside nor able to climb out, the question stands
     monitor.evaluateVehicles();
-    actions = monitor.alertActions(alertSpy.last()[2].toInt());
-    QVERIFY(!actions.value(QStringLiteral("inside")).toBool());
-    QVERIFY(std::isnan(actions.value(QStringLiteral("climbHeight")).toDouble()));
+    alert = shownAlert(monitor, againId);
+    QVERIFY(!alert->inside);
+    QVERIFY(std::isnan(alert->climbHeight));
+    QVERIFY(alert->question);
+    QVERIFY(!shownAlert(monitor, alertSpy.last()[2].toInt())->question);
 
-    // Nor above zones without a ceiling
+    // U-space airspace asks nothing and has no ceiling to climb above. Far from the restricted zone, its question
+    // no longer stands.
     now += GeoZoneAlertArbiter::minIntervalMSecs;
     monitor.evaluate(&vehicle, { uSpaceCenter, 450, 400 });
     QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().zoneIdentifier, QStringLiteral("U"));
-    actions = monitor.alertActions(alertSpy.last()[2].toInt());
-    QVERIFY(actions.value(QStringLiteral("inside")).toBool());
-    QVERIFY(std::isnan(actions.value(QStringLiteral("climbHeight")).toDouble()));
+    const int uSpaceId = alertSpy.last()[2].toInt();
+    alert = shownAlert(monitor, uSpaceId);
+    QVERIFY(alert->inside);
+    QVERIFY(!alert->question);
+    QVERIFY(std::isnan(alert->climbHeight));
+    QVERIFY(!shownAlert(monitor, againId)->question);
+    QCOMPARE(shown->questionCount(), 0);
 
-    // A vehicle no longer monitored has no actions
+    // An alert dismissed is acknowledged, those closed are not
+    const int unacknowledged = history->unacknowledgedCount();
+    monitor.dismissAlert(uSpaceId);
+    QVERIFY(!shownAlert(monitor, uSpaceId));
+    QCOMPARE(history->unacknowledgedCount(), unacknowledged - 1);
+    monitor.closeAlerts();
+    QCOMPARE(shown->count(), 0);
+    QCOMPARE(history->unacknowledgedCount(), unacknowledged - 1);
+
+    // The alerts of a vehicle no longer monitored have no actions, approving one only dismisses it
+    monitor.evaluate(&vehicle, inside);
+    const int lastId = alertSpy.last()[2].toInt();
+    QVERIFY(shownAlert(monitor, lastId)->question);
     monitor.removeVehicle(&vehicle);
-    QVERIFY(monitor.alertActions(entryId).isEmpty());
+    alert = shownAlert(monitor, lastId);
+    QVERIFY(!alert->question);
+    QVERIFY(!alert->activeVehicle);
+    monitor.approveAlert(lastId);
+    QVERIFY(!shownAlert(monitor, lastId));
+    QVERIFY(monitor.approvedZoneKeys().isEmpty());
 }
 
 void GeoZoneMonitorTest::_testTraffic()
@@ -1303,7 +1369,8 @@ void GeoZoneMonitorTest::_testTraffic()
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Traffic);
     QCOMPARE(event.traffic, QStringLiteral("SWR123"));
     QCOMPARE(event.vehicleId, GeoZoneMonitor::noVehicle);
-    QVERIFY(monitor.alertActions(event.id).isEmpty());
+    const std::optional<GeoZoneAlertModel::Alert> trafficAlert = shownAlert(monitor, event.id);
+    QVERIFY(trafficAlert && !trafficAlert->question && !trafficAlert->activeVehicle);
     const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(event));
     QVERIFY(read && (read->kind == GeoZoneMonitor::AlertEvent::Traffic));
     QCOMPARE(read->traffic, QStringLiteral("SWR123"));

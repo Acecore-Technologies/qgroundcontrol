@@ -230,6 +230,15 @@ QSet<QString> GeoZoneVehicleMonitor::insideZoneKeys() const
     return keys;
 }
 
+QSet<QString> GeoZoneVehicleMonitor::nearbyZoneKeys() const
+{
+    QSet<QString> keys;
+    for (const Nearby &nearby : _nearby) {
+        keys.insert(nearby.zone->key());
+    }
+    return keys;
+}
+
 bool GeoZoneVehicleMonitor::inside() const
 {
     return std::any_of(_nearby.cbegin(), _nearby.cend(), [](const Nearby &zone) { return zone.inside; });

@@ -226,10 +226,10 @@ Item {
                                 }
 
                                 QGCLabel {
-                                    text:           qsTr("Muted")
+                                    text:           qsTr("Approved")
                                     color:          qgcPal.warningText
                                     font.pointSize: ScreenTools.smallFontPointSize
-                                    visible:        control._monitor.mutedZoneKeys.indexOf(nearbyRow.zone.key) >= 0
+                                    visible:        control._monitor.approvedZoneKeys.indexOf(nearbyRow.zone.key) >= 0
                                 }
 
                                 QGCLabel {

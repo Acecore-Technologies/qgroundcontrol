@@ -38,7 +38,7 @@ void GeoZoneAlertArbiter::setClock(const Clock &clock)
 
 void GeoZoneAlertArbiter::submit(const Alert &alert)
 {
-    if (zoneMuted(alert.vehicleKey, alert.zoneKey) ||
+    if (zoneApproved(alert.vehicleKey, alert.zoneKey) ||
         std::any_of(_pending.cbegin(), _pending.cend(), [&alert](const Alert &pending) { return pending.id == alert.id; })) {
         return;
     }
@@ -51,32 +51,32 @@ void GeoZoneAlertArbiter::submit(const Alert &alert)
     }
 }
 
-void GeoZoneAlertArbiter::setInsideZones(int vehicleKey, const QSet<QString> &zoneKeys)
+void GeoZoneAlertArbiter::setZones(int vehicleKey, const QSet<QString> &insideZoneKeys, const QSet<QString> &nearbyZoneKeys)
 {
-    (void) _breaches.removeIf([vehicleKey, &zoneKeys](const Breach &breach) {
-        return (breach.alert.vehicleKey == vehicleKey) && !zoneKeys.contains(breach.alert.zoneKey);
+    (void) _breaches.removeIf([vehicleKey, &insideZoneKeys](const Breach &breach) {
+        return (breach.alert.vehicleKey == vehicleKey) && !insideZoneKeys.contains(breach.alert.zoneKey);
     });
-    const auto mutes = _zoneMutes.find(vehicleKey);
-    if (mutes != _zoneMutes.end()) {
-        mutes->intersect(zoneKeys);
-        if (mutes->isEmpty()) {
-            _zoneMutes.erase(mutes);
+    const auto approvals = _approvals.find(vehicleKey);
+    if (approvals != _approvals.end()) {
+        approvals->intersect(nearbyZoneKeys);
+        if (approvals->isEmpty()) {
+            _approvals.erase(approvals);
         }
     }
 }
 
-void GeoZoneAlertArbiter::muteZone(int vehicleKey, const QString &zoneKey)
+void GeoZoneAlertArbiter::approveZone(int vehicleKey, const QString &zoneKey)
 {
-    _zoneMutes[vehicleKey].insert(zoneKey);
+    _approvals[vehicleKey].insert(zoneKey);
     const auto matches = [vehicleKey, &zoneKey](const Alert &alert) { return (alert.vehicleKey == vehicleKey) && (alert.zoneKey == zoneKey); };
     (void) _pending.removeIf(matches);
     (void) _breaches.removeIf([&matches](const Breach &breach) { return matches(breach.alert); });
 }
 
-int GeoZoneAlertArbiter::zoneMuteCount() const
+int GeoZoneAlertArbiter::approvalCount() const
 {
     int count = 0;
-    for (const QSet<QString> &zoneKeys : _zoneMutes) {
+    for (const QSet<QString> &zoneKeys : _approvals) {
         count += static_cast<int>(zoneKeys.count());
     }
     return count;
@@ -94,7 +94,7 @@ void GeoZoneAlertArbiter::setSuspended(int vehicleKey, bool suspended)
 void GeoZoneAlertArbiter::removeVehicle(int vehicleKey)
 {
     (void) _suspended.remove(vehicleKey);
-    (void) _zoneMutes.remove(vehicleKey);
+    (void) _approvals.remove(vehicleKey);
     (void) _pending.removeIf([vehicleKey](const Alert &alert) { return alert.vehicleKey == vehicleKey; });
     (void) _breaches.removeIf([vehicleKey](const Breach &breach) { return breach.alert.vehicleKey == vehicleKey; });
 }

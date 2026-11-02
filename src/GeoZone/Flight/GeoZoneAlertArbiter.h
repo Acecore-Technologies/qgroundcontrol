@@ -33,7 +33,8 @@
 ///   it may still be inside, but not repeated.
 /// - Muting silences the alerts and repeats for a while, except the first announcement of a new breach. Alerts
 ///   raised while muted are dropped, not announced later.
-/// - Muting a zone for a vehicle drops its alerts about the zone and ends its breach until it leaves the zone.
+/// - Approving a zone for a vehicle, when the pilot confirms the permission to fly there, drops its alerts about the
+///   zone and ends its breach until the vehicle leaves the zone and its approach range.
 class GeoZoneAlertArbiter
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneAlertArbiter)
@@ -73,14 +74,15 @@ public:
     /// Adds an alert to announce at the next tick. Breaches are announced again until acknowledged or left.
     void submit(const Alert &alert);
 
-    /// Ends the breaches and zone mutes of the vehicle in zones other than those it is inside, by GeoZone::key
-    void setInsideZones(int vehicleKey, const QSet<QString> &zoneKeys);
+    /// Ends the breaches of the vehicle in zones other than those it is inside, and its approvals of zones other than
+    /// those it is in or near, by GeoZone::key
+    void setZones(int vehicleKey, const QSet<QString> &insideZoneKeys, const QSet<QString> &nearbyZoneKeys);
     /// Suspends the repeats of the breaches of a vehicle whose position is lost, or resumes them
     void setSuspended(int vehicleKey, bool suspended);
     bool suspended(int vehicleKey) const { return _suspended.contains(vehicleKey); }
-    /// Forgets the alerts, breaches, suspension and zone mutes of a vehicle no longer monitored
+    /// Forgets the alerts, breaches, suspension and approvals of a vehicle no longer monitored
     void removeVehicle(int vehicleKey);
-    /// Forgets all alerts and breaches, keeping the mutes
+    /// Forgets all alerts and breaches, keeping the mutes and approvals
     void clear();
 
     /// Stops repeating the breach of the alert, and drops the alert if it wasn't spoken yet
@@ -94,13 +96,13 @@ public:
     /// @return Milliseconds of the clock until which the alerts are muted, -1 when they aren't
     qint64 mutedUntil() const { return muted() ? _mutedUntilMSecs : -1; }
 
-    /// Mutes the alerts of the vehicle about the zone, by GeoZone::key, until setInsideZones() no longer has it: its
-    /// pending alerts and breach are dropped and its new alerts aren't announced
-    void muteZone(int vehicleKey, const QString &zoneKey);
-    bool zoneMuted(int vehicleKey, const QString &zoneKey) const { return _zoneMutes.value(vehicleKey).contains(zoneKey); }
-    /// @return Zones muted for the vehicle, by GeoZone::key
-    QSet<QString> mutedZones(int vehicleKey) const { return _zoneMutes.value(vehicleKey); }
-    int zoneMuteCount() const;
+    /// Approves the zone, by GeoZone::key, for the vehicle until setZones() no longer has it near: its pending alerts
+    /// and breach are dropped and its new alerts aren't announced
+    void approveZone(int vehicleKey, const QString &zoneKey);
+    bool zoneApproved(int vehicleKey, const QString &zoneKey) const { return _approvals.value(vehicleKey).contains(zoneKey); }
+    /// @return Zones approved for the vehicle, by GeoZone::key
+    QSet<QString> approvedZones(int vehicleKey) const { return _approvals.value(vehicleKey); }
+    int approvalCount() const;
 
     /// @return Breaches not acknowledged, which are repeated
     int breachCount() const { return static_cast<int>(_breaches.count()); }
@@ -128,7 +130,7 @@ private:
     QList<Alert> _pending;          ///< Submitted, not spoken yet, in submission order
     QList<Breach> _breaches;
     QSet<int> _suspended;           ///< Vehicle keys
-    QHash<int, QSet<QString>> _zoneMutes;   ///< Zone keys by vehicle key
+    QHash<int, QSet<QString>> _approvals;   ///< Zone keys by vehicle key
     qint64 _lastSpokenMSecs = -1;   ///< -1 before the first message
     int _lastSpokenUrgency = std::numeric_limits<int>::max();
     qint64 _mutedUntilMSecs = -1;

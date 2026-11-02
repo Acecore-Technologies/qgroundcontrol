@@ -130,6 +130,8 @@ public:
     bool inside() const;
     /// Keys of the nearby zones the vehicle is inside, see GeoZone::key
     QSet<QString> insideZoneKeys() const;
+    /// Keys of the nearby zones, those the vehicle is in or near
+    QSet<QString> nearbyZoneKeys() const;
     QVariantList keptZones() const;
 
     QVariantList verticalBands() const;

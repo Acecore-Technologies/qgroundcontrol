@@ -324,18 +324,20 @@ Guided commands of the Fly View are checked too: the confirmation of **Go To Loc
 
 ### Spoken Alerts, Repeats and Muting {#spoken-alerts}
 
-Alerts are shown in a popup below the toolbar, the most restrictive zone first, and spoken unless **Speak flight alerts** is off. Alerts raised together, also by several vehicles, are spoken as one message naming the two most restrictive and counting the others ("..., and 2 more"). Spoken messages are at least 5 seconds apart, unless a more urgent alert comes: a more restrictive zone, or entering rather than approaching it. While a vehicle stays inside a prohibited zone, "Still inside geozone ..." is shown again, and spoken, every 30 seconds until the alert is acknowledged or the vehicle leaves the zone; the reminders are shown also when the alerts aren't spoken. **Acknowledge** in the popup acknowledges an alert, as do **Show** and **Acknowledge All** in the indicator. **Mute Alerts for 1 min** in the popup silences the alerts for a minute (the indicator shows it, with **Unmute**): they are still shown, but neither spoken nor repeated, except that entering a prohibited zone is still announced once, and alerts raised while muted are not spoken later.
+Alerts are shown in a popup below the toolbar, the most restrictive zone first, and spoken unless **Speak flight alerts** is off. The popup closes by itself after 15 seconds, except while it asks for a [permission](#permission-question), and **Close** closes it. Alerts raised together, also by several vehicles, are spoken as one message naming the two most restrictive and counting the others ("..., and 2 more"). Spoken messages are at least 5 seconds apart, unless a more urgent alert comes: a more restrictive zone, or entering rather than approaching it. While a vehicle stays inside a prohibited zone, "Still inside geozone ..." is shown again, and spoken, every 30 seconds until you confirm the permission to fly there or the vehicle leaves the zone; the reminders are shown also when the alerts aren't spoken. **Dismiss** in the popup acknowledges an alert which asks nothing, as do **Show** and **Acknowledge All** in the indicator. **Mute Alerts for 1 min** in the popup (in its **•••** menu on phones and tablets) silences the alerts for a minute (the indicator shows it, with **Unmute**): they are still shown, but neither spoken nor repeated, except that entering a prohibited zone is still announced once, and alerts raised while muted are not spoken later.
+
+### Permission to Fly in a Zone {#permission-question}
+
+When a vehicle approaches or enters a prohibited, authorisation required, conditional or unknown zone, its alert asks **Do you have legal permission to fly here?**. **I do** answers it: the alerts about that zone are acknowledged and no longer shown, spoken or repeated for that vehicle (they are still logged) until it leaves the zone and its approach range, and the indicator marks the zone **Approved**. Coming back afterwards asks again. The popup stays open while a question is unanswered; once the vehicle has left the zone and its approach range the question no longer stands and the alert can be dismissed. Other alerts (U-space airspace, traffic, lost positions, vehicle fence breaches) only have **Dismiss**.
 
 ### Alert Actions {#alert-actions}
 
-When the popup shows alerts about the active vehicle while it flies, it offers:
+When the popup shows alerts about the active vehicle while it flies, its **•••** menu offers:
 
 - **Hold** and **Return**: pause the vehicle or return it to launch.
-- **Climb Above Ceiling**, next to a zone with a known ceiling above the vehicle: change the altitude to 30 m above the ceiling, offered when that is within the maximum altitude of the guided altitude slider (_Fly View_ settings).
+- **Climb Above Ceiling**, when the zones of the alerts have a known ceiling above the vehicle: change the altitude to 30 m above the highest ceiling, offered when that is within the maximum altitude of the guided altitude slider (_Fly View_ settings).
 
 Each opens the usual guided action confirmation of the Fly View, switching to it if needed, so the action is only sent once you confirm it with the slider; the climb sets the slider to the altitude above the ceiling, which you can still adjust.
-
-**Mute Zone**, next to a zone the vehicle is in, mutes that zone for that vehicle until it leaves the zone: its alerts are no longer shown, spoken or repeated, but still logged, and the indicator marks the zone **Muted**. The mute ends when the vehicle leaves the zone, so entering it again alerts again.
 
 ### Altitude Strip and Approach Path {#altitude-strip}
 
