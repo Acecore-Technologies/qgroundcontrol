@@ -602,7 +602,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY2(GeoZoneParser::parse(dipulFile.readAll(), dipul, errorString, GeoZoneParser::Format::Dipul, QStringLiteral("en")), qPrintable(errorString));
     QCOMPARE(dipul.zones.count(), 4);
     const GeoZone::Data &ctr = dipul.zones[0];
-    QCOMPARE(ctr.name, QStringLiteral("Frankfurt Main (EDDF) zone 1"));
+    QCOMPARE(ctr.name, QStringLiteral("Testhausen control zone 1"));
     QCOMPARE(ctr.restriction, GeoZone::ReqAuthorisation);
     QCOMPARE(ctr.country, QStringLiteral("DEU"));
     QCOMPARE(ctr.volumes[0].lowerLimit, 0.0);
