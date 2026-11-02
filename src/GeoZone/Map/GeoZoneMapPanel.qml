@@ -17,23 +17,21 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
-/// Geozones legend and display options for a map tool strip drop panel
+/// Geozones search, legend and display options for a map tool strip drop panel. The sources are managed in the
+/// Geozones settings, see manageRequested.
 ColumnLayout {
     id:         root
-    spacing:    ScreenTools.defaultFontPixelHeight / 2
+    spacing:    ScreenTools.defaultFontPixelHeight / 3
 
     property int    hiddenZoneCount:    0       ///< Smallest zones in the map view left out to limit the number of map items
     property var    map:                null    ///< Map whose visible area can be downloaded from providers serving zones by area
     property bool   showCrossedZones:   false   ///< See GeoZoneLegend
-    property bool   briefingEnabled:    false   ///< Offers to export the geozone briefing and the operational intent of the planned mission
 
-    signal manageRequested
+    signal manageRequested  ///< The sources row was clicked, to open the Geozones settings
     signal zoneSelected     ///< A zone picked in the search is shown on the map
-    signal exportBriefingRequested
-    signal exportOperationalIntentRequested
 
     readonly property var   _geoZoneManager:    GeoZoneManager
-    readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 32
+    readonly property real  _textWidth:         ScreenTools.defaultFontPixelWidth * 46
     readonly property bool  _planned:           !isNaN(_geoZoneManager.planning.plannedStart.getTime())
     readonly property string _timeFormat:       "yyyy-MM-dd HH:mm"
 
@@ -57,6 +55,11 @@ ColumnLayout {
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
+    GeoZoneSearch {
+        Layout.preferredWidth:  root._textWidth
+        onZoneSelected:         root.zoneSelected()
+    }
+
     QGCCheckBoxSlider {
         Layout.fillWidth:   true
         text:               qsTr("Show geozones")
@@ -68,20 +71,11 @@ ColumnLayout {
         showCrossedZones: root.showCrossedZones
     }
 
-    GeoZoneSourceSwitches {
-        Layout.preferredWidth: root._textWidth
-    }
-
     QGCLabel {
         Layout.preferredWidth:  root._textWidth
         text:                   qsTr("Click a zone on the map for its details, when not adding items.")
         wrapMode:               Text.WordWrap
         font.pointSize:         ScreenTools.smallFontPointSize
-    }
-
-    GeoZoneSearch {
-        Layout.preferredWidth:  root._textWidth
-        onZoneSelected:         root.zoneSelected()
     }
 
     QGCCheckBoxSlider {
@@ -129,12 +123,62 @@ ColumnLayout {
         hiddenZoneCount:        root.hiddenZoneCount
     }
 
+    RowLayout {
+        Layout.preferredWidth:  root._textWidth
+        spacing:                ScreenTools.defaultFontPixelWidth / 2
+
+        // The sources are turned on and off, refreshed and removed in the Geozones settings
+        Rectangle {
+            Layout.fillWidth:       true
+            Layout.preferredHeight: ScreenTools.implicitButtonHeight
+            radius:                 ScreenTools.defaultFontPixelWidth / 2
+            color:                  sourcesMouseArea.containsMouse ? qgcPal.buttonHighlight : qgcPal.button
+
+            RowLayout {
+                anchors.fill:           parent
+                anchors.leftMargin:     ScreenTools.defaultFontPixelWidth
+                anchors.rightMargin:    ScreenTools.defaultFontPixelWidth
+                spacing:                ScreenTools.defaultFontPixelWidth
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    elide:              Text.ElideRight
+                    color:              sourcesMouseArea.containsMouse ? qgcPal.buttonHighlightText : qgcPal.buttonText
+                    text:               root._geoZoneManager.disabledSourceCount > 0 ?
+                                            qsTr("Sources (%1, %2 off)").arg(root._geoZoneManager.sources.count).arg(root._geoZoneManager.disabledSourceCount) :
+                                            qsTr("Sources (%1)").arg(root._geoZoneManager.sources.count)
+                }
+
+                QGCLabel {
+                    color:          sourcesMouseArea.containsMouse ? qgcPal.buttonHighlightText : qgcPal.buttonText
+                    text:           "\u203A"
+                    font.pointSize: ScreenTools.largeFontPointSize
+                }
+            }
+
+            MouseArea {
+                id:             sourcesMouseArea
+                anchors.fill:   parent
+                hoverEnabled:   true
+                onClicked:      root.manageRequested()
+            }
+        }
+
+        // Collapsed, so that the panel fits small screens
+        QGCButton {
+            id:         areaButton
+            text:       qsTr("Map Area") + (checked ? " \u25B4" : " \u25BE")
+            checkable:  true
+            visible:    root.map !== null
+        }
+    }
+
     // Some national services serve their zones by area, the map area is downloaded and kept for offline use
     ColumnLayout {
         id:                     areaColumn
         Layout.preferredWidth:  root._textWidth
         spacing:                ScreenTools.defaultFontPixelHeight / 4
-        visible:                root.map !== null
+        visible:                root.map !== null && areaButton.checked
 
         readonly property var   _providers:     root._geoZoneManager.areaProviders
         readonly property var   _mapArea:       root.map ? root.map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
@@ -148,7 +192,7 @@ ColumnLayout {
         }
 
         RowLayout {
-            Layout.fillWidth: true
+            Layout.fillWidth:   true
 
             GeoZoneChoiceComboBox {
                 id:                 areaProviderCombo
@@ -185,25 +229,5 @@ ColumnLayout {
                                     (!areaProviderCombo.currentEnabled ? qsTr("The zones of the map area are downloaded already. Move the map or zoom out to download more.") :
                                                                          qsTr("Downloaded areas are kept for offline use and refreshed like feeds."))
         }
-    }
-
-    QGCButton {
-        Layout.fillWidth:   true
-        text:               qsTr("Export Briefing...")
-        visible:            root.briefingEnabled
-        onClicked:          root.exportBriefingRequested()
-    }
-
-    QGCButton {
-        Layout.fillWidth:   true
-        text:               qsTr("Export Operational Intent...")
-        visible:            root.briefingEnabled
-        onClicked:          root.exportOperationalIntentRequested()
-    }
-
-    QGCButton {
-        Layout.fillWidth:   true
-        text:               qsTr("Manage Geozones...")
-        onClicked:          root.manageRequested()
     }
 }

@@ -24,7 +24,7 @@ Where the zones are used:
 - **Fly View**: [flight alerts](#flight) warn when a connected vehicle approaches or enters a zone, and guided commands are checked before they are sent.
 - **Application Settings > Geozones**: the sources, authorisations and [settings](#settings-reference).
 
-When zones are loaded, the **Geozones** button in the Plan View tool strip and the geozone indicator in the Fly View toolbar show a color legend, the number of loaded zones and sources, and any outdated data warning. The Plan View panel also has a **Show geozones** switch, and the expanded Fly View indicator has the display and flight alert settings. Both have **Manage Geozones...** to open the geozone settings.
+When zones are loaded, the **Geozones** button in the Plan View tool strip and the geozone indicator in the Fly View toolbar show a color legend, the number of loaded zones and sources, and any outdated data warning. The Plan View panel starts with the zone search and also has a **Show geozones** switch, and the expanded Fly View indicator has the display and flight alert settings. **Sources (n) ›** in the Plan View panel and **Manage Geozones...** in the Fly View indicator open the geozone settings.
 
 ## Loading Data {#loading-data}
 
@@ -32,7 +32,7 @@ When zones are loaded, the **Geozones** button in the Plan View tool strip and t
 
 To add geozones:
 
-1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the Plan View **Geozones** panel or the Fly View geozone indicator.
+1. Open _Application Settings > Geozones_, or press **Sources (n) ›** in the Plan View **Geozones** panel or **Manage Geozones...** in the Fly View geozone indicator.
 1. Press **Add File...** and select one or more geozone files (`.json`, `.geojson`, AIXM `.xml` or `.zip` packages), or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**, or press **Add Service...** for a service needing credentials or an area (see [Geozone Services](#geozone-services)).
 
 The national feeds offered by **Add Feed...** are **Finland (Traficom)**, **Latvia (LGS)**, **Luxembourg (Geoportail)**, **Sweden (LFV)**, **United States TFRs (FAA)**, **Switzerland (FOCA)**, **Germany aviation zones (DiPUL)** and **United Kingdom FRZ (NATS)**. Feeds already added are grayed out as _(added)_, as is **Download** for an **Other URL** already added: turn them on or refresh them in the list of sources instead.
@@ -51,7 +51,7 @@ European NOTAMs can't be loaded, since EUROCONTROL only provides them to organis
 
 ### Zones of the Map Area {#zones-of-the-map-area}
 
-Some services serve their zones by area. In the Plan View **Geozones** panel, **Download zones for the map area** downloads the zones of the map area, up to about 100 km wide, from **Germany, all zones (DiPUL)** (including residential areas, hospitals and nature reserves) or **France, open category (IGN)** (where flights are prohibited or limited to a maximum height). The provider covering the map is chosen. A provider whose downloaded area already covers the whole map view is grayed out as _(downloaded here)_ and **Download** is disabled; move the map or zoom out to download more. Downloaded areas are kept for offline use and refreshed like feeds. When the server limits its responses, the further pages are downloaded too (up to 50), and a warning is shown below the source if zones are still missing.
+Some services serve their zones by area. In the Plan View **Geozones** panel, **Map Area ▾** opens **Download zones for the map area**, which downloads the zones of the map area, up to about 100 km wide, from **Germany, all zones (DiPUL)** (including residential areas, hospitals and nature reserves) or **France, open category (IGN)** (where flights are prohibited or limited to a maximum height). The provider covering the map is chosen. A provider whose downloaded area already covers the whole map view is grayed out as _(downloaded here)_ and **Download** is disabled; move the map or zoom out to download more. Downloaded areas are kept for offline use and refreshed like feeds. When the server limits its responses, the further pages are downloaded too (up to 50), and a warning is shown below the source if zones are still missing.
 
 ### Geozone Services {#geozone-services}
 
@@ -83,7 +83,7 @@ Each source shows its format, zone count and date, for feeds when the server las
 Use **Remove** to remove a source and **Remove All** to remove all of them.
 
 Sources can publish the same zones, like a national file and a regional extract of it. A zone published alike by several sources turned on (the same identifier and country, restriction, shapes, altitude limits and schedule) is kept once, from the first of them in the list: it is drawn, checked, alerted, searched and imported into the GeoFence once, and its details and search result show how many sources publish it, like _· 2 sources_. Zones with the same identifier whose content differs are all kept, so that each is checked. The zone count says how many zones were counted once. When most zones (over 80 %) of a file or feed you add are already loaded from another source, a note says so below the sources and in the geozone summary, until you dismiss it.
-The check box of a source turns it off or on, in the settings and, with several sources, in the Plan View **Geozones** panel and the Fly View indicator, whose **Sources** lists scroll when there are many sources and show long names in full when the pointer rests on them. The zones of a source turned off are not shown, checked or alerted, its outdated data isn't reported, and it stays off after a restart until it is turned on or added again.
+The check box of a source turns it off or on, in the settings and, with several sources, in the Fly View indicator, whose **Sources** list scrolls when there are many sources and shows long names in full when the pointer rests on them. The zones of a source turned off are not shown, checked or alerted, its outdated data isn't reported, and it stays off after a restart until it is turned on or added again.
 
 Problems found while reading a source are shown below it and in the details of the zones concerned: altitude limits in an unknown unit are ignored, so the zone applies at all altitudes, unknown days in a schedule are taken as every day, and times of day without UTC offset are taken as UTC when the time zone of the zone's country isn't known. Zone shapes are checked too: repeated points are dropped and boundaries need not be closed, but polygons with fewer than 3 distinct points or without area, polygons touching or enclosing a pole (within about 11 km of it) and circles without a positive radius are ignored, with a warning naming them. A zone left without any shape is counted as skipped. An invalid hole is ignored, so the zone covers it. A polygon whose boundary crosses itself is kept with a warning; the zone conservatively covers all the parts it encloses, also those it encloses twice (like the center of a star drawn in one stroke). Points on a zone boundary are inside the zone.
 
@@ -217,7 +217,7 @@ The cost of a detour is the distance it adds; a climb or a descent counts 8 m of
 
 ### Pre-flight Briefing {#pre-flight-briefing}
 
-**Export Briefing...** in the Plan View **Geozones** panel or in the geozone banner above the map saves a briefing of the geozones of the planned mission. The file dialog proposes the folder and name of the open plan with `-briefing.pdf`; the extension of the file name chooses the format:
+**Export ▾** > **Geozone Briefing...** in the geozone banner above the Plan View map saves a briefing of the geozones of the planned mission. The file dialog proposes the folder and name of the open plan with `-briefing.pdf`; the extension of the file name chooses the format:
 
 - **PDF** (`.pdf`): an A4 document to print or take along, with page numbers. It is printed in dark text on white whatever the color theme of the desktop, and its text can be searched and copied.
 - **Web page** (`.html`): a single file without external resources, which reads well on a phone and prints cleanly, in dark text on white also in browsers with a dark theme.
@@ -239,7 +239,7 @@ The JSON file has `"schema": "qgc-geozone-briefing"` and `"version": 1`. The ver
 
 ### Operational Intent {#operational-intent}
 
-**Export Operational Intent...** in the Plan View **Geozones** panel or in the geozone banner above the map saves the operational intent of the planned mission as JSON, for a flight authorisation request to a U-space service provider (USSP) or a UTM service supplier (USS): 4D volumes which together contain the flight path while the vehicle is expected to fly it. The file dialog proposes the folder and name of the open plan with `-intent.json`. It needs the flight time: turn on **Check zones at the flight time** in the **Geozones** panel first (see [Flight Time](#flight-time)), and the flight must not be over.
+**Export ▾** > **Operational Intent...** in the geozone banner above the Plan View map saves the operational intent of the planned mission as JSON, for a flight authorisation request to a U-space service provider (USSP) or a UTM service supplier (USS): 4D volumes which together contain the flight path while the vehicle is expected to fly it. The file dialog proposes the folder and name of the open plan with `-intent.json`. It needs the flight time: turn on **Check zones at the flight time** in the **Geozones** panel first (see [Flight Time](#flight-time)), and the flight must not be over.
 
 The volumes contain the flight path with a horizontal buffer of 50 m around it and a vertical buffer below and above it (20 m), from a time buffer before the vehicle is estimated at each place until the time buffer after it (15 minutes, like the schedule tolerance of the mission check). The times are estimated from the mission duration, the flight path includes the loops of `DO_JUMP` items and the return to launch of the mission, and survey patterns are covered by their flight lines. Legs close together, like those of a survey or the short legs of a pattern, share a volume; long legs are cut into volumes of their own, so that the airspace isn't reserved along the whole route for the whole flight; and when there would be more volumes than the maximum (50) the legs adding the least airspace are merged. Each volume is a polygon (or a circle for a hover in place) widened by 1 % for the differences between the earth models, its altitudes are heights above the WGS84 ellipsoid, converted from the mission altitudes with the EGM96 geoid, rounded outward to whole meters, and its times are rounded outward to whole seconds.
 

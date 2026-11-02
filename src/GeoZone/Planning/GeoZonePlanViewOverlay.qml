@@ -109,21 +109,12 @@ Item {
             map:                control.map
             hiddenZoneCount:    mapVisuals.hiddenZoneCount
             showCrossedZones:   banner.crossedZones.length > 0
-            briefingEnabled:    true
 
             onManageRequested: {
                 dropPanel.hide()
                 mainWindow.showSettingsTool(qsTr("Geozones"))
             }
             onZoneSelected: dropPanel.hide()
-            onExportBriefingRequested: {
-                dropPanel.hide()
-                banner.exportBriefing()
-            }
-            onExportOperationalIntentRequested: {
-                dropPanel.hide()
-                banner.exportOperationalIntent()
-            }
         }
     }
 }
