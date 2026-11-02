@@ -20,7 +20,7 @@
 /// path, or straight to the item a DO_JUMP jumps to as many times as its repeat count, a jump repeating without end
 /// being flown once more, until the first return to launch reached. Like the mission controller, the drawn flight path
 /// ends at the first return to launch, so the legs between the items after it, which a jump can skip it to reach, are
-/// straight. A pure computation on the items and the drawn segments, see GeoZoneMissionPath::fromMission.
+/// straight. A pure computation on the items and the drawn segments, see GeoZoneMissionPathBuilder.
 class GeoZoneMissionJumps
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionJumps)

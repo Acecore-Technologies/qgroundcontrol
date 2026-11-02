@@ -109,6 +109,11 @@ QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double radius, i
     return ring;
 }
 
+QGeoCoordinate _offsetFrom(const QGeoCoordinate &coordinate, double north, double east)
+{
+    return coordinate.atDistanceAndAzimuth(std::hypot(north, east), qRadiansToDegrees(std::atan2(east, north)));
+}
+
 QJsonArray _mazeFeatures(const QGeoCoordinate &southWest, int columns, int rows, double pitch, quint32 seed)
 {
     QRandomGenerator random(seed);

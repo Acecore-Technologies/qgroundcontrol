@@ -12,7 +12,7 @@
 #include "GeoZoneOperationalIntent.h"
 #include "GeoZoneTestHelpers.h"
 #ifndef GEOZONE_CORE_TEST
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZoneOperationalIntentExport.h"
 #endif
 
@@ -468,7 +468,7 @@ void GeoZoneIntentTest::_testExport()
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 270), 1);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(3500, 90), 2);
     // The flight path is updated after the items
-    QTRY_VERIFY(GeoZoneMissionPath::fromMission(missionController).totalDistance() > 3900);
+    QTRY_VERIFY(GeoZoneMissionReader::path(missionController).totalDistance() > 3900);
 
     GeoZoneOperationalIntentExport exporter(&manager);
     exporter.setMissionController(missionController);

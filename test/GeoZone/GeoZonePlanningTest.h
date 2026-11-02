@@ -31,14 +31,12 @@ private slots:
 
     void _testGuidedPathWarning();
     void _testApproximationReports();
-    void _testMissionPathTimes();
     void _testFenceExcludes();
     void _testAntimeridianProfile();
     void _testMissionCheck();
     void _testMissionControllerSwitch();
     void _testMissionCoverage();
     void _testMissionJumps();
-    void _testMissionJumpWalk();
     void _testMissionContingencies();
     void _testMissionReturnParameters();
     void _testAuthorisations();

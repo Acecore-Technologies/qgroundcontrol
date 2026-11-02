@@ -104,6 +104,12 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneFences.cc
     Evaluation/GeoZoneFences.h
     Evaluation/GeoZoneMissionItem.h
+    Evaluation/GeoZoneMissionJumps.cc
+    Evaluation/GeoZoneMissionJumps.h
+    Evaluation/GeoZoneMissionPath.cc
+    Evaluation/GeoZoneMissionPath.h
+    Evaluation/GeoZoneMissionPathBuilder.cc
+    Evaluation/GeoZoneMissionPathBuilder.h
     Evaluation/GeoZonePathEvaluator.cc
     Evaluation/GeoZonePathEvaluator.h
     Evaluation/GeoZoneReturnDestinations.cc

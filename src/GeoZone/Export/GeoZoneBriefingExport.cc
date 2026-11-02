@@ -11,7 +11,7 @@
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneRemoteId.h"
 #include "GeoZoneSource.h"
@@ -416,7 +416,7 @@ bool GeoZoneBriefingExport::exportBriefing(const QString &fileName)
 GeoZoneBriefing GeoZoneBriefingExport::briefing() const
 {
     MissionController *const missionController = this->missionController();
-    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController, true);
+    const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController, true);
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, missionController);
     const QDateTime flightEnd = path.flightEnd(start, end);
 
@@ -466,7 +466,7 @@ GeoZoneBriefing GeoZoneBriefingExport::briefing() const
         mission.maxAltitudeAboveHome = mission.maxAltitudeAMSL - mission.home.altitude();
     }
 
-    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(vehicle);
+    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionReader::returnParameters(vehicle);
     mission.returnAssumptions.append(parameters.assumed ? tr("Returns modeled on %1 with its default parameters, as the vehicle's are unknown.").arg(returnAutopilotText(parameters.autopilot)) :
                                                           tr("Returns modeled on %1 with the vehicle's parameters.").arg(returnAutopilotText(parameters.autopilot)));
     mission.returnAssumptions.append(returnAltitudeText(parameters));

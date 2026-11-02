@@ -12,7 +12,7 @@
 #include "GeoZoneDisplay.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneShape.h"
 #include "GeoZoneSource.h"
@@ -477,7 +477,7 @@ GeoZoneAltitudeRange GeoZoneMapModel::_readAltitudes() const
 {
     GeoZoneAltitudeRange range;
     if (_missionController) {
-        const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_missionController);
+        const GeoZoneMissionPath path = GeoZoneMissionReader::path(_missionController);
         for (const QList<GeoZone::Position> &positions : path.positionLists()) {
             for (const GeoZone::Position &position : positions) {
                 range.add(position);

@@ -11,7 +11,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZoneReturnDestinations.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMonitor.h"
@@ -150,7 +150,7 @@ QString GeoZoneGuidedCheck::returnWarning(Vehicle *guidedVehicle, MissionControl
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid()) {
         return QString();
     }
-    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(guidedVehicle);
+    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionReader::returnParameters(guidedVehicle);
     const GeoZoneReturnModel::Destinations destinations = returnDestinations(guidedVehicle, mission);
     // PX4 returns along the mission from the item flown to, which also chooses the direction while flying the mission
     const int currentItem = mission ? mission->currentMissionIndex() : -1;
@@ -158,7 +158,7 @@ QString GeoZoneGuidedCheck::returnWarning(Vehicle *guidedVehicle, MissionControl
     start.position = _monitor->vehiclePosition(guidedVehicle, guidedVehicle->coordinate());
     start.sequenceNumber = (guidedVehicle->flightMode() == guidedVehicle->missionFlightMode()) ? currentItem : -1;
     const GeoZoneReturnModel::Path path = GeoZoneReturnModel::returnPath(parameters, destinations, start);
-    const QList<GeoZonePathEvaluator::Path> paths = returnPaths(path, start, destinations, GeoZoneMissionPath::fromMission(mission, parameters), currentItem,
+    const QList<GeoZonePathEvaluator::Path> paths = returnPaths(path, start, destinations, GeoZoneMissionReader::path(mission, parameters), currentItem,
                                                                 groundBelow(guidedVehicle, start.position));
     // Like "The return to rally point 2 assuming the PX4 default return altitude of 30 m"
     QString subject = GeoZoneMissionPath::returnDescription(path, parameters, true);
@@ -182,7 +182,7 @@ QString GeoZoneGuidedCheck::missionWarning(Vehicle *guidedVehicle, MissionContro
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || !mission) {
         return QString();
     }
-    QList<GeoZonePathEvaluator::Path> paths = missionPaths(GeoZoneMissionPath::fromMission(mission, GeoZoneMissionPath::returnParameters(guidedVehicle)),
+    QList<GeoZonePathEvaluator::Path> paths = missionPaths(GeoZoneMissionReader::path(mission, GeoZoneMissionReader::returnParameters(guidedVehicle)),
                                                            sequenceNumber);
     if (paths.isEmpty()) {
         return QString();
@@ -206,7 +206,7 @@ QString GeoZoneGuidedCheck::startWarning(MissionController *missionController) c
     GeoZoneManager *const manager = _monitor->manager();
     const QDateTime start = GeoZoneEnvironment::currentDateTimeUtc();
     const QDateTime end = start.addSecs(std::llround((std::max)(missionController->missionTime(), 0.0)));
-    const GeoZoneMissionCheck::Evaluation evaluation = GeoZoneMissionCheck::evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController), start, end,
+    const GeoZoneMissionCheck::Evaluation evaluation = GeoZoneMissionCheck::evaluate(manager->catalog(), GeoZoneMissionReader::path(missionController), start, end,
                                                                                                       manager->planning()->authorisations());
     PlanMasterController *const masterController = missionController->masterController();
     const QList<GeoZoneMissionCheck::Entry> entries = GeoZoneMissionCheck::classify(evaluation, manager->planning()->authorisations(),
@@ -233,7 +233,7 @@ GeoZoneReturnModel::Destinations GeoZoneGuidedCheck::returnDestinations(Vehicle 
             }
         }
     }
-    const QList<GeoZoneMissionItem> items = missionController ? GeoZoneMissionPath::missionItems(missionController).mid(1) : QList<GeoZoneMissionItem>();
+    const QList<GeoZoneMissionItem> items = missionController ? GeoZoneMissionReader::items(missionController).mid(1) : QList<GeoZoneMissionItem>();
     return GeoZoneReturnDestinations::fromMission(items, home, rallyPoints);
 }
 

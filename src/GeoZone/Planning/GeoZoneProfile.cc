@@ -10,6 +10,7 @@
 #include "GeoZoneProfile.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionWorker.h"
@@ -86,7 +87,7 @@ void GeoZoneProfile::update()
     }
     _worker->runNow([this]() {
         const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _worker->missionController());
-        return computeBands(GeoZoneMissionPath::fromMission(_worker->missionController()).segments(), _manager->catalog(), plannedStart, plannedEnd);
+        return computeBands(GeoZoneMissionReader::path(_worker->missionController()).segments(), _manager->catalog(), plannedStart, plannedEnd);
     }, [this](const QList<Band> &bands) { _apply(bands); });
 }
 
@@ -98,7 +99,7 @@ void GeoZoneProfile::_updateConcurrently()
     }
     const auto [plannedStart, plannedEnd] = GeoZoneMissionCheck::plannedFlightTimes(_manager, _worker->missionController());
     const GeoZoneCatalog catalog = _manager->catalog();
-    const QList<GeoZoneMissionPath::Segment> segments = GeoZoneMissionPath::fromMission(_worker->missionController()).segments();
+    const QList<GeoZoneMissionPath::Segment> segments = GeoZoneMissionReader::path(_worker->missionController()).segments();
     _worker->run([segments, catalog, start = plannedStart, end = plannedEnd]() { return computeBands(segments, catalog, start, end); },
                  [this](const QList<Band> &bands) { _apply(bands); });
 }

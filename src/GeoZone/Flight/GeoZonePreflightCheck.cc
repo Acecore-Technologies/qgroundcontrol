@@ -15,6 +15,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePolicy.h"
@@ -151,7 +152,7 @@ void GeoZonePreflightCheck::update()
         _updateTimer.start();
     } else {
         const QList<GeoZoneMissionCheck::Entry> &entries = _missionCheck->entries();
-        const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController);
+        const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController);
         const int itemCount = path.paths().isEmpty() ? 0 : (missionController ? (std::max)(missionController->visualItems()->count() - 1, 0) : 0);
         mission = missionItem(itemCount, entries, _manager->planning()->plannedStart());
 

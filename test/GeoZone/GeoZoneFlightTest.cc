@@ -19,7 +19,7 @@
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePreflightCheck.h"
@@ -292,7 +292,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QVERIFY(vehicle->parameterManager()->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("RTL_RETURN_ALT")));
     const double returnAltitude = vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, QStringLiteral("RTL_RETURN_ALT"))->rawValue().toDouble();
     QVERIFY(returnAltitude > 0);
-    QCOMPARE(GeoZoneMissionPath::returnAltitude(vehicle), returnAltitude);
+    QCOMPARE(GeoZoneMissionReader::returnAltitude(vehicle), returnAltitude);
 
     // A parked vehicle is on the ground below the CTRs, even before terrain data is received
     QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
@@ -377,7 +377,7 @@ void GeoZoneFlightTest::_testReturnParameterChanges()
     ParameterManager *const parameterManager = vehicle->parameterManager();
     Fact *const returnAltitude = parameterManager->getParameter(ParameterManager::defaultComponentId, QStringLiteral("RTL_ALT"));
     QCOMPARE(returnAltitude->rawValue().toInt(), 1500);
-    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(vehicle);
+    const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionReader::returnParameters(vehicle);
     QCOMPARE(static_cast<int>(parameters.autopilot), static_cast<int>(GeoZoneReturnModel::Autopilot::ArduCopter));
     QCOMPARE(parameters.returnAltitude, 15.0);
     QCOMPARE(parameters.coneSlope, 3.0);
@@ -415,7 +415,7 @@ void GeoZoneFlightTest::_testReturnParameterChanges()
         QVERIFY(item);
         item->altitude()->setRawValue(30);
     }
-    QTRY_COMPARE(GeoZoneMissionPath::fromMission(missionController).segments().count(), 3);
+    QTRY_COMPARE(GeoZoneMissionReader::path(missionController).segments().count(), 3);
 
     // Returning at the altitude of the mission stays below the zone
     GeoZoneMissionCheck check(&manager);
@@ -476,7 +476,7 @@ void GeoZoneFlightTest::_testGuidedReturnLandMission()
         QVERIFY(item);
         item->altitude()->setRawValue(100);
     }
-    QTRY_COMPARE(GeoZoneMissionPath::fromMission(missionController).segments().count(), 4);
+    QTRY_COMPARE(GeoZoneMissionReader::path(missionController).segments().count(), 4);
     const GeoZoneReturnModel::Destinations destinations = GeoZoneGuidedCheck::returnDestinations(vehicle, missionController);
     QVERIFY(destinations.home.coordinate.distanceTo(home) < 0.01);
     QVERIFY(destinations.firstWaypoint.coordinate.distanceTo(offset(1000, 0)) < 0.01);
@@ -511,14 +511,14 @@ void GeoZoneFlightTest::_testGuidedReturnLandMission()
     QVERIFY(check->missionWarning(vehicle, missionController, 9).isEmpty());
 
     // Returns along the mission: on to its end, or back to the first waypoint and home
-    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
+    const GeoZoneMissionPath missionPath = GeoZoneMissionReader::path(missionController);
     GeoZoneReturnModel::Start start;
     start.position = monitor.vehiclePosition(vehicle, vehicle->coordinate());
     GeoZoneReturnModel::Path forward;
     forward.destination = GeoZoneReturnModel::Destination::MissionForward;
     QVERIFY(check->pathsWarning(GeoZoneGuidedCheck::returnPaths(forward, start, destinations, missionPath, 2, home.altitude())).contains(QStringLiteral("EAST")));
     QVERIFY(check->pathsWarning(GeoZoneGuidedCheck::returnPaths(forward, start, destinations, missionPath, 3, home.altitude())).isEmpty());
-    GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(vehicle);
+    GeoZoneReturnModel::Parameters parameters = GeoZoneMissionReader::returnParameters(vehicle);
     parameters.returnType = 2;
     const GeoZoneReturnModel::Path reverse = GeoZoneReturnModel::returnPath(parameters, destinations, start);
     QCOMPARE(static_cast<int>(reverse.destination), static_cast<int>(GeoZoneReturnModel::Destination::ReverseMission));
@@ -885,7 +885,7 @@ void GeoZoneFlightTest::_testConformance()
     MissionController *const missionController = masterController.missionController();
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 270), 1);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(500, 90), 2);
-    QTRY_VERIFY(GeoZoneMissionPath::fromMission(missionController).totalDistance() > 900);
+    QTRY_VERIFY(GeoZoneMissionReader::path(missionController).totalDistance() > 900);
     conformance.setPlanController(&masterController);
     conformance.updateVolumes();
     QVERIFY(conformance.volumes().isEmpty());

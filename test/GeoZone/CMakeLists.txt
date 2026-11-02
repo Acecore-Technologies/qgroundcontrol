@@ -10,6 +10,7 @@
 set(GEOZONE_SHARED_TESTS
     GeoZoneGeometryTest
     GeoZoneIntentTest
+    GeoZoneMissionPathTest
     GeoZoneParserTest
     GeoZoneReturnTest
 )

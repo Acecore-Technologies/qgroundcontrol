@@ -87,6 +87,7 @@
 #include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtCore/QtMath>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <algorithm>
@@ -156,6 +157,9 @@ QJsonObject _polygonFeature(const QString &identifier, const QString &restrictio
 QString _writeFeatures(const QTemporaryDir &dir, const QString &name, const QJsonArray &features);
 
 QList<QGeoCoordinate> _circleRing(const QGeoCoordinate &center, double radius, int vertexCount);
+
+/// @return The coordinate the meters north and east of the coordinate
+QGeoCoordinate _offsetFrom(const QGeoCoordinate &coordinate, double north, double east);
 
 /// Prohibited zones on a grid of columns by rows cells of the pitch in meters, north-east of the corner: circles and
 /// irregular polygons of random sizes and positions, so that about half the gaps between them are narrower than twice

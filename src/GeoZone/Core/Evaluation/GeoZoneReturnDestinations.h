@@ -24,7 +24,7 @@ public:
     ///         in reverse before flying home, the landing sequences from their DO_LAND_START or landing pattern, and the
     ///         positions after an ArduPlane DO_RETURN_PATH_START up to its landing. The coordinates are without altitude,
     ///         the altitudes AMSL those given and those of the items. Rally points without coordinate are left out.
-    /// @param items Of the mission after the planned home, in mission order, see GeoZoneMissionPath::missionItems
+    /// @param items Of the mission after the planned home, in mission order, see GeoZoneMissionReader::items in QGroundControl
     /// @param home Planned home with its ground altitude, invalid without
     /// @param rallyPoints With their altitudes AMSL, which are above home in the plan
     /// @param breachReturnPoint Of the fence, with its altitude AMSL, invalid without

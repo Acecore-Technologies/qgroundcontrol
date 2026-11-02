@@ -17,23 +17,21 @@
 
 #include "GeoZone.h"
 #include "GeoZoneBox.h"
-#include "GeoZoneMissionItem.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneReturnModel.h"
-
-class MissionController;
-class Vehicle;
 
 /// Flight path of a planned mission as the geozone checks see it: the segments flown with their altitudes and
 /// terrain, the areas of patterns, and the legs between mission items. Besides the flight path the mission
 /// controller draws, it covers loiter circles, the loiter of landing patterns, the distance VTOL transitions
 /// overshoot, the loops of DO_JUMP items and the return to launch the vehicle flies, see GeoZoneReturnModel. The
 /// contingency paths are the returns the vehicle would fly from along the mission after a failsafe or a fence breach.
-/// Built on the GUI thread from the MissionController, see fromMission, then only read, so that zone checks can run on
-/// other threads.
+/// Built by GeoZoneMissionPathBuilder, from the MissionController by GeoZoneMissionReader in QGroundControl, on the GUI
+/// thread, then only read, so that zone checks can run on other threads.
 class GeoZoneMissionPath
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionPath)
+
+    friend class GeoZoneMissionPathBuilder;
 
 public:
     /// Straight flight path segment, in mission order
@@ -92,18 +90,6 @@ public:
 
     GeoZoneMissionPath() = default;
 
-    /// @return The current path of the mission, empty without a controller, read the way the controller draws its flight
-    ///         path: the segments of the items in order with their altitudes and terrain, the areas of patterns, the legs
-    ///         between the items with a coordinate and the segment home after a return to launch. The DO_JUMP items are
-    ///         followed (GeoZoneMissionJumps) and the paths the drawn flight path leaves out are added. Returns are flown
-    ///         with the parameters of the controller's vehicle, see returnParameters. The contingency paths, which take
-    ///         longer to build, are only built withContingencies.
-    static GeoZoneMissionPath fromMission(MissionController *missionController, bool withContingencies = false);
-    /// @return The current path of the mission with returns flown with the parameters
-    static GeoZoneMissionPath fromMission(MissionController *missionController, const GeoZoneReturnModel::Parameters &returnParameters,
-                                          bool withContingencies = false);
-    /// @return The visual items of the mission, the planned home first
-    static QList<GeoZoneMissionItem> missionItems(MissionController *missionController);
     /// @return Path made of the segments, for tests and paths which aren't missions
     static GeoZoneMissionPath fromSegments(const QList<Segment> &segments, const QList<GeoZone::Area> &areas = {});
 
@@ -156,13 +142,6 @@ public:
     static constexpr double minContingencySpacing = 250;    ///< Meters between the starts of the contingency paths along legs
     static constexpr double contingencyTerrainSpacing = 250;    ///< Meters between terrain positions along contingency paths
 
-    /// @return Return altitude above home in meters from the vehicle's parameters, 0 to return at the current
-    ///         altitude, NaN when unknown like for the offline vehicle
-    static double returnAltitude(Vehicle *vehicle);
-    /// @return The parameters the vehicle returns with. Without them, like for the offline vehicle or before they are
-    ///         loaded, the defaults of its firmware and vehicle class, see GeoZoneReturnModel::defaultParameters.
-    ///         GeoZoneReturnModel::Autopilot::Unknown without vehicle.
-    static GeoZoneReturnModel::Parameters returnParameters(Vehicle *vehicle);
     /// @return Description of the return with the parameters, like "the return to rally point 2", for paths and their
     ///         labels, saying when the altitude is unknown or assumed
     static QString returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, bool definite,
@@ -177,11 +156,6 @@ public:
     static QList<Path> pathsFromSegments(const QList<Segment> &segments);
 
 private:
-    /// Adds the returns from along the mission
-    /// @param outgoingSequenceNumbers Of the items the drawn segments to the next item lead to, by segment
-    void _appendContingencies(const QHash<int, int> &outgoingSequenceNumbers, const GeoZoneReturnModel::Parameters &returnParameters,
-                              const GeoZoneReturnModel::Destinations &destinations);
-
     QList<Segment> _segments;
     QList<GeoZone::Area> _areas;
     QList<Leg> _legs;

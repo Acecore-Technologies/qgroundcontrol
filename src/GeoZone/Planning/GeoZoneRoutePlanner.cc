@@ -12,7 +12,7 @@
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneTerrain.h"
@@ -280,7 +280,7 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
         return job;
     }
 
-    const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
+    const GeoZoneMissionPath missionPath = GeoZoneMissionReader::path(missionController);
     for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
         const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
         const double length = segment.isValid() ? segment.from.distanceTo(segment.to) : 0;

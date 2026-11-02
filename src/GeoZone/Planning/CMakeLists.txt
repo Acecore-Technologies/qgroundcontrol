@@ -12,10 +12,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneFenceUpload.h
         GeoZoneMissionCheck.cc
         GeoZoneMissionCheck.h
-        GeoZoneMissionJumps.cc
-        GeoZoneMissionJumps.h
-        GeoZoneMissionPath.cc
-        GeoZoneMissionPath.h
+        GeoZoneMissionReader.cc
+        GeoZoneMissionReader.h
         GeoZoneMissionWorker.cc
         GeoZoneMissionWorker.h
         GeoZoneOperatorZones.cc

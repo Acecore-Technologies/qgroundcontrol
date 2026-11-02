@@ -12,7 +12,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneRemoteId.h"
 #include "MissionController.h"
@@ -43,7 +43,7 @@ std::optional<GeoZoneOperationalIntent> GeoZoneOperationalIntentExport::intent(Q
     GeoZoneOperationalIntent intent;
     intent.generatedAt = GeoZoneEnvironment::currentDateTimeUtc();
     intent.operatorDetails = GeoZoneRemoteId::exportedOperatorDetails();
-    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController);
+    const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController);
     const QDateTime flightEnd = path.flightEnd(start, end);
     if (flightEnd.addSecs(intent.parameters.timeBuffer) <= intent.generatedAt) {
         errorString = tr("The planned flight is over, set a later planned start.");

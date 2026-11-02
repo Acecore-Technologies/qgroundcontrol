@@ -16,6 +16,7 @@
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
@@ -497,7 +498,7 @@ void GeoZoneMissionCheck::update()
 {
     _worker->runNow([this]() {
         const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
-        const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
+        const GeoZoneMissionPath path = GeoZoneMissionReader::path(_worker->missionController(), true);
         _manager->repository()->setMissionArea(this, missionArea(path));
         return evaluate(_manager->catalog(), path, start, end);
     }, [this](const Evaluation &evaluation) { _apply(evaluation); });
@@ -524,7 +525,7 @@ QGeoRectangle GeoZoneMissionCheck::missionArea(const GeoZoneMissionPath &path)
 void GeoZoneMissionCheck::_updateConcurrently()
 {
     const GeoZoneCatalog catalog = _manager->catalog();
-    const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
+    const GeoZoneMissionPath path = GeoZoneMissionReader::path(_worker->missionController(), true);
     // The services taking the area of interest download the zones around the mission
     _manager->repository()->setMissionArea(this, missionArea(path));
     const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
@@ -589,7 +590,7 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
 GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluatePlan(const GeoZoneManager *manager, MissionController *missionController)
 {
     const auto [start, end] = plannedFlightTimes(manager, missionController);
-    return evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController, true), start, end, manager->planning()->authorisations());
+    return evaluate(manager->catalog(), GeoZoneMissionReader::path(missionController, true), start, end, manager->planning()->authorisations());
 }
 
 QHash<const GeoZone*, QStringList> GeoZoneMissionCheck::groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result)

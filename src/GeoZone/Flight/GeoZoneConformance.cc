@@ -12,7 +12,7 @@
 #include "GeoZoneGeoid.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneVehicleMonitor.h"
 #include "MissionController.h"
@@ -167,7 +167,7 @@ void GeoZoneConformance::updateVolumes()
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, missionController);
     if (missionController && start.isValid()) {
         // Like the export of the operational intent
-        const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(missionController);
+        const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController);
         QString errorString;
         if (const std::optional<QList<Volume>> built = GeoZoneOperationalIntent::buildVolumes(path.evaluatorPaths(start, end), GeoZoneOperationalIntent::Parameters(), errorString)) {
             volumes = *built;

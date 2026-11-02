@@ -14,7 +14,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneManager.h"
-#include "GeoZoneMissionPath.h"
+#include "GeoZoneMissionReader.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneSourceRepository.h"
@@ -235,7 +235,7 @@ void GeoZoneFenceImporter::_prepareSelection(bool now)
     // Proximity to the planned flight: its paths and the areas of its patterns, or the planned home without them
     MissionController *const missionController = _geoFenceController->masterController() ? _geoFenceController->masterController()->missionController() : nullptr;
     if (missionController && (_query || !_zones.isEmpty())) {
-        const GeoZoneMissionPath missionPath = GeoZoneMissionPath::fromMission(missionController);
+        const GeoZoneMissionPath missionPath = GeoZoneMissionReader::path(missionController);
         input.paths = missionPath.evaluatorPaths();
         input.areas = missionPath.areas();
         for (const GeoZoneMissionPath::Segment &segment : missionPath.segments()) {
