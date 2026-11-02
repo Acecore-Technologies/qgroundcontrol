@@ -660,7 +660,7 @@ QDataStream &operator<<(QDataStream &stream, const GeoZone::Data &data)
     stream << data.uSpaceClass << data.regulationExemption;
     GeoZoneDataStream::writeList(stream, data.extendedProperties);
     GeoZoneDataStream::writeList(stream, data.issues);
-    return stream << data.contentHash;
+    return stream << data.contentHash << data.notificationAuthority << data.notificationLeadSecs;
 }
 
 QDataStream &operator>>(QDataStream &stream, GeoZone::Data &data)
@@ -681,5 +681,5 @@ QDataStream &operator>>(QDataStream &stream, GeoZone::Data &data)
     if (!GeoZoneDataStream::readStrings(stream, data.extendedProperties) || !GeoZoneDataStream::readStrings(stream, data.issues)) {
         return stream;
     }
-    return stream >> data.contentHash;
+    return stream >> data.contentHash >> data.notificationAuthority >> data.notificationLeadSecs;
 }

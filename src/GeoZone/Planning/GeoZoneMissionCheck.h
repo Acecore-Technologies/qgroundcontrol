@@ -96,6 +96,10 @@ public:
         /// Why the operator's authorisation of a crossed zone doesn't cover the flight, like "authorised from
         /// 2026-12-01", empty without
         QString authorisationNote;
+        /// Notice the zone's authority needs before the flight, like "notify Tower by 2026-06-13 12:00", empty
+        /// without or when notified, see GeoZoneAuthorisations::notificationText
+        QString notificationNote;
+        bool notificationOverdue = false;   ///< The notice is due by now
         friend bool operator==(const Entry &a, const Entry &b) = default;
     };
 
@@ -115,7 +119,7 @@ public:
     static QString warningText(const QList<Entry> &entries);
     /// @return A line per entry of the kind with an authorisation note, like "CTR: authorised from 2026-12-01."
     static QStringList authorisationNotes(const QList<Entry> &entries, Kind kind);
-    /// U-space airspaces and no restriction zones entered, which don't prevent the flight
+    /// U-space airspaces and no restriction zones entered, which don't prevent the flight, and the notices due later
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
     GeoFenceController *geoFenceController() const;
@@ -207,6 +211,8 @@ signals:
     void auditChanged();
 
 private:
+    /// @return The lines of warningText about the restricted zones entered
+    static QStringList crossedText(const QList<Entry> &entries);
     void _clearZones(GeoZoneSource *source);
     /// Clears the zones of the mission checked, like when the mission controller changes
     void _clearResults();

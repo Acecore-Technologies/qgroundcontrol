@@ -40,6 +40,10 @@ QGCPopupDialog {
     property int _authorisationRevision: 0  ///< Re-reads the authorisation when the authorisations change
     readonly property var _authorisation: (_authorisationRevision, geoZone ? _authorisations.authorisationOf(geoZone) : ({}))
     readonly property bool _authorised: _authorisation.zoneKey !== undefined
+    readonly property var _notification: (_authorisationRevision, geoZone ? _authorisations.notificationOf(geoZone) : ({}))
+    readonly property bool _notified: _notification.zoneKey !== undefined
+    readonly property string _notificationRequirement: geoZone ? _authorisations.notificationRequirement(geoZone) : ""
+    property bool _notificationForm: false  ///< The form records a notification of the zone's authority rather than an authorisation
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
@@ -179,7 +183,7 @@ QGCPopupDialog {
         ColumnLayout {
             Layout.preferredWidth:  root._contentWidth
             spacing:                ScreenTools.defaultFontPixelHeight / 4
-            visible:                root.geoZone && root.geoZone.restriction !== GeoZone.NoRestriction
+            visible:                root.geoZone && (root.geoZone.restriction !== GeoZone.NoRestriction || root._notificationRequirement !== "")
 
             InfoRow {
                 label:      qsTr("Authorisation")
@@ -189,13 +193,26 @@ QGCPopupDialog {
                 valueWidth: root._valueWidth
             }
 
-            RowLayout {
-                spacing:    ScreenTools.defaultFontPixelWidth
-                visible:    !authorisationForm.visible
+            // The notice the zone's authority needs, until the notification is recorded
+            InfoRow {
+                label:      qsTr("Notification")
+                value:      !root._notified ? root._notificationRequirement :
+                                              (root._notification.permit !== "" ? qsTr("%1, reference %2").arg(root._notification.statusText).arg(root._notification.permit) :
+                                                                                  root._notification.statusText)
+                labelWidth: root._labelWidth
+                valueWidth: root._valueWidth
+            }
+
+            Flow {
+                Layout.preferredWidth:  root._contentWidth
+                spacing:                ScreenTools.defaultFontPixelWidth
+                visible:                !authorisationForm.visible
 
                 QGCButton {
                     text:       root._authorised ? qsTr("Edit Authorisation") : qsTr("Add Authorisation")
+                    visible:    root.geoZone && root.geoZone.restriction !== GeoZone.NoRestriction
                     onClicked: {
+                        root._notificationForm = false
                         permitField.text = root._authorised ? root._authorisation.permit : ""
                         validFromField.text = root._authorised ? root._authorisation.validFrom : ""
                         validToField.text = root._authorised ? root._authorisation.validTo : ""
@@ -214,6 +231,25 @@ QGCPopupDialog {
                     visible:    root._authorised
                     onClicked:  root._authorisations.revoke(root._authorisation.zoneKey)
                 }
+
+                QGCButton {
+                    text:       root._notified ? qsTr("Edit Notification...") : qsTr("Add Notification...")
+                    visible:    root._notified || root._notificationRequirement !== ""
+                    onClicked: {
+                        root._notificationForm = true
+                        permitField.text = root._notified ? root._notification.permit : ""
+                        validFromField.text = root._notified ? root._notification.validFrom : ""
+                        validToField.text = root._notified ? root._notification.validTo : ""
+                        authorisationError.text = ""
+                        authorisationForm.visible = true
+                    }
+                }
+
+                QGCButton {
+                    text:       qsTr("Remove Notification")
+                    visible:    root._notified
+                    onClicked:  root._authorisations.revoke(root._notification.zoneKey, true)
+                }
             }
 
             GridLayout {
@@ -222,11 +258,11 @@ QGCPopupDialog {
                 columnSpacing:  ScreenTools.defaultFontPixelWidth
                 visible:        false
 
-                QGCLabel { text: qsTr("Permit") }
+                QGCLabel { text: root._notificationForm ? qsTr("Reference") : qsTr("Permit") }
                 QGCTextField {
                     id:                     permitField
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
-                    placeholderText:        qsTr("Number or reference")
+                    placeholderText:        root._notificationForm ? qsTr("Optional") : qsTr("Number or reference")
                 }
 
                 QGCLabel { text: qsTr("First day") }
@@ -244,17 +280,25 @@ QGCPopupDialog {
                 }
 
                 // The scope, unlimited when empty
-                QGCLabel { text: qsTr("Ceiling (%1)").arg(root.geoZone ? root._authorisations.ceilingUnits(root.geoZone) : "") }
+                QGCLabel {
+                    text:       qsTr("Ceiling (%1)").arg(root.geoZone ? root._authorisations.ceilingUnits(root.geoZone) : "")
+                    visible:    !root._notificationForm
+                }
                 QGCTextField {
                     id:                     ceilingField
+                    visible:                !root._notificationForm
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
                     placeholderText:        qsTr("Optional")
                     inputMethodHints:       Qt.ImhFormattedNumbersOnly
                 }
 
-                QGCLabel { text: qsTr("Daily hours") }
+                QGCLabel {
+                    text:       qsTr("Daily hours")
+                    visible:    !root._notificationForm
+                }
                 RowLayout {
-                    spacing: ScreenTools.defaultFontPixelWidth / 2
+                    spacing:    ScreenTools.defaultFontPixelWidth / 2
+                    visible:    !root._notificationForm
 
                     QGCTextField {
                         id:                     dailyFromField
@@ -269,9 +313,13 @@ QGCPopupDialog {
                     }
                 }
 
-                QGCLabel { text: qsTr("Aircraft") }
+                QGCLabel {
+                    text:       qsTr("Aircraft")
+                    visible:    !root._notificationForm
+                }
                 QGCTextField {
                     id:                     aircraftField
+                    visible:                !root._notificationForm
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
                     placeholderText:        qsTr("Registration, optional")
                 }
@@ -280,7 +328,8 @@ QGCPopupDialog {
                     id:                 missionAreaCheckBox
                     Layout.columnSpan:  2
                     text:               qsTr("Only within the mission area")
-                    visible:            GeoZoneManager.planning.missionArea.isValid || (root._authorised && root._authorisation.limitToMission)
+                    visible:            !root._notificationForm &&
+                                        (GeoZoneManager.planning.missionArea.isValid || (root._authorised && root._authorisation.limitToMission))
                 }
 
                 QGCLabel {
@@ -297,7 +346,9 @@ QGCPopupDialog {
                     Layout.preferredWidth:  root._contentWidth
                     wrapMode:               Text.WordWrap
                     font.pointSize:         ScreenTools.smallFontPointSize
-                    text:                   qsTr("While the authorisation is valid and the flight stays within the ceiling, area and daily hours entered, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
+                    text:                   root._notificationForm ?
+                                                qsTr("While the notification is valid, the mission check no longer asks to notify the zone's authority. It doesn't authorise the flight.") :
+                                                qsTr("While the authorisation is valid and the flight stays within the ceiling, area and daily hours entered, the mission check, flight alerts and guided command checks leave out the zone. Plans entering the zone keep the authorisation.")
                 }
 
                 RowLayout {
@@ -307,7 +358,9 @@ QGCPopupDialog {
                     QGCButton {
                         text:       qsTr("Save")
                         onClicked: {
-                            authorisationError.text = root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text, {
+                            authorisationError.text = root._notificationForm ?
+                                root._authorisations.recordNotification(root.geoZone, permitField.text, validFromField.text, validToField.text) :
+                                root._authorisations.authorise(root.geoZone, permitField.text, validFromField.text, validToField.text, {
                                 ceiling:        ceilingField.text,
                                 dailyFrom:      dailyFromField.text,
                                 dailyTo:        dailyToField.text,

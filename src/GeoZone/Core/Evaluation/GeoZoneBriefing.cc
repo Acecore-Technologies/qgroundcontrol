@@ -200,6 +200,17 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
                 result.authorisation = briefed;
             }
         }
+        if (const GeoZoneAuthorisation *const notification = input.authorisations ? input.authorisations->findNotification(zone) : nullptr) {
+            const QString status = GeoZoneAuthorisations::statusText(*notification, now);
+            result.notification = notification->permit.isEmpty() ? status : tr("%1, reference %2").arg(status, notification->permit);
+        } else {
+            bool overdue = false;
+            QString notice = GeoZoneAuthorisations::notificationText(zone, start, now, &overdue);
+            if (!notice.isEmpty()) {
+                notice[0] = notice[0].toUpper();
+                result.notification = overdue ? tr("%1, the notice period has passed.").arg(notice) : tr("%1.").arg(notice);
+            }
+        }
         return result;
     };
 

@@ -273,6 +273,7 @@ QString zoneHtml(const Briefing::Zone &zone, const Briefing &briefing)
     } else if (GeoZonePolicy::isRestricted(zone.restriction) && (zone.restriction != GeoZone::Prohibited)) {
         html += row(Text::tr("Authorisation"), escaped(Text::tr("None recorded.")));
     }
+    html += row(Text::tr("Notification"), escaped(zone.notification));
     QString source = zone.sourceKey;
     for (const GeoZoneSourceVersion &version : briefing.sources) {
         if ((version.key == zone.sourceKey) && !version.name.isEmpty()) {
@@ -598,6 +599,7 @@ QJsonObject GeoZoneBriefingExport::toJson(const GeoZoneBriefing &briefing)
             };
         }
         json.insert(QStringLiteral("authorisation"), authorisation);
+        json.insert(QStringLiteral("notification"), zone.notification.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(zone.notification));
         json.insert(QStringLiteral("source"), zone.sourceKey);
         json.insert(QStringLiteral("contentHash"), QString::fromLatin1(zone.contentHash.toHex()));
         json.insert(QStringLiteral("approximations"), QJsonArray::fromStringList(GeoZonePathEvaluator::approximationTexts(zone.approximations, true)));

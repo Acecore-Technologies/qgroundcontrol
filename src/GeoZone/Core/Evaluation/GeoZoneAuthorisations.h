@@ -43,6 +43,9 @@ struct GeoZoneAuthorisation
     QTime dailyFrom;                ///< Local time of day the flight may start, invalid without daily hours
     QTime dailyTo;                  ///< Local time of day the flight must end by, before dailyFrom across midnight
     QString aircraft;               ///< Registration or description of the aircraft, for information
+    /// A notification the operator gave the authority to notify, see GeoZone::Data::notificationLeadSecs, with its
+    /// reference as permit, rather than a permit. A zone can have both.
+    bool notification = false;
 
     static constexpr double areaBuffer = 250;   ///< Meters around the mission area of an authorisation limited to it
 
@@ -72,7 +75,9 @@ struct GeoZoneAuthorisation
 };
 
 /// Zones the operator is authorised to fly in, which the checks and alerts leave out while the authorisation is
-/// valid and the flight stays within its scope, see GeoZonePolicy::excludingAuthorised. Kept in a file, with roles zoneKey, zoneName, permit and statusText.
+/// valid and the flight stays within its scope, see GeoZonePolicy::excludingAuthorised, and the notifications given to the
+/// authorities of zones requiring them. Kept in a file, with roles zoneKey, zoneName, permit, statusText and
+/// notification.
 class GeoZoneAuthorisations : public QAbstractListModel
 {
     Q_OBJECT
@@ -87,6 +92,7 @@ public:
         ZoneNameRole,
         PermitRole,
         StatusTextRole,
+        NotificationRole,
     };
 
     static constexpr const char *fileName = "authorisations.json";
@@ -101,9 +107,11 @@ public:
     const QList<GeoZoneAuthorisation> &authorisations() const { return _authorisations; }
 
     /// @return Authorisation of the zone, null without
-    const GeoZoneAuthorisation *find(const GeoZone *zone) const;
+    const GeoZoneAuthorisation *find(const GeoZone *zone) const { return _find(zone, false); }
+    /// @return Notification recorded for the zone, null without
+    const GeoZoneAuthorisation *findNotification(const GeoZone *zone) const { return _find(zone, true); }
 
-    /// Adds the authorisation, replacing the one of the same zone
+    /// Adds the authorisation, replacing the one of the same zone and kind
     void set(const GeoZoneAuthorisation &authorisation);
     /// Adds authorisations, like those of a plan file. They replace those of the same zones which end sooner.
     void merge(const QList<GeoZoneAuthorisation> &authorisations);
@@ -127,11 +135,24 @@ public:
     /// @return Error message, empty on success
     Q_INVOKABLE QString authorise(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo,
                                   const QVariantMap &scope = QVariantMap());
-    Q_INVOKABLE void revoke(const QString &zoneKey);
+    /// Records the notification of the zone's authority from local dates, like authorise
+    /// @param reference Reference of the notification, may be empty
+    Q_INVOKABLE QString recordNotification(const QVariant &zone, const QString &reference, const QString &validFrom, const QString &validTo);
+    Q_INVOKABLE void revoke(const QString &zoneKey, bool notification = false);
     /// @return Map with zoneKey, permit, validFrom and validTo (local dates, empty when open), the scope (ceiling in
     ///         the vertical distance units, dailyFrom, dailyTo, aircraft and limitToMission when it has an area) and
     ///         statusText of the authorisation of a GeoZoneInfo, empty without
     Q_INVOKABLE QVariantMap authorisationOf(const QVariant &zone) const;
+    /// @return Map with zoneKey, permit (the reference), validFrom, validTo and statusText of the notification
+    ///         recorded for a GeoZoneInfo, empty without
+    Q_INVOKABLE QVariantMap notificationOf(const QVariant &zone) const;
+    /// @return What notice the authority of the GeoZoneInfo needs, like "Notify Tower 2 d before the flight",
+    ///         empty when it doesn't need any
+    Q_INVOKABLE QString notificationRequirement(const QVariant &zone) const;
+    /// @return Notice the zone's authority needs before the flight, like "notify Tower by 2026-06-13 12:00" with a
+    ///         start, empty without notification
+    /// @param overdue Set to whether the notice is due by now
+    static QString notificationText(const GeoZone *zone, const QDateTime &start, const QDateTime &now, bool *overdue = nullptr);
     /// @return Units of the ceiling of an authorisation of the GeoZoneInfo, above ground when the zone has limits
     ///         above ground, like "m AGL"
     Q_INVOKABLE QString ceilingUnits(const QVariant &zone) const;
@@ -160,6 +181,7 @@ signals:
 private:
     /// @return Validity of the authorisation at the time without its scope
     static QString validityText(const GeoZoneAuthorisation &authorisation, const QDateTime &now);
+    const GeoZoneAuthorisation *_find(const GeoZone *zone, bool notification) const;
 
     void _load();
     void _save();

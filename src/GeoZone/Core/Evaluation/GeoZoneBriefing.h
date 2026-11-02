@@ -128,6 +128,9 @@ public:
         QString uSpaceClass;
         QString regulationExemption;
         std::optional<Authorisation> authorisation;
+        /// The notice the zone's authority needs, like "Notify Tower by 2026-06-13 12:00.", or the notification
+        /// given, empty when it needs none
+        QString notification;
         QString sourceKey;
         QByteArray contentHash;
         GeoZonePathEvaluator::Approximations approximations;    ///< Why how the paths meet the zone is approximate

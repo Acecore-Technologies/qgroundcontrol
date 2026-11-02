@@ -42,6 +42,7 @@ ColumnLayout {
             required property string zoneName
             required property string permit
             required property string statusText
+            required property bool   notification
 
             ColumnLayout {
                 Layout.fillWidth:   true
@@ -58,14 +59,15 @@ ColumnLayout {
                     Layout.fillWidth:   true
                     wrapMode:           Text.WordWrap
                     font.pointSize:     ScreenTools.smallFontPointSize
-                    text:               authorisationRow.permit !== "" ? qsTr("%1, permit %2").arg(authorisationRow.statusText).arg(authorisationRow.permit) : authorisationRow.statusText
+                    text:               authorisationRow.permit === "" ? authorisationRow.statusText :
+                                            (authorisationRow.notification ? qsTr("%1, reference %2") : qsTr("%1, permit %2")).arg(authorisationRow.statusText).arg(authorisationRow.permit)
                     textFormat:         Text.PlainText
                 }
             }
 
             QGCButton {
                 text:       qsTr("Remove")
-                onClicked:  root._authorisations.revoke(authorisationRow.zoneKey)
+                onClicked:  root._authorisations.revoke(authorisationRow.zoneKey, authorisationRow.notification)
             }
         }
     }

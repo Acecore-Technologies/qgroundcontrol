@@ -69,6 +69,13 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
                 authorisations.append(authorisation->toJson());
             }
         }
+        // The notifications given for the zones entered
+        for (const GeoZoneMissionCheck::Entry &entry : std::as_const(entries)) {
+            const GeoZoneAuthorisation *const notification = manager->planning()->authorisations()->findNotification(entry.zone);
+            if (notification && !entry.kinds.testFlag(GeoZoneMissionCheck::Inactive) && !authorisations.contains(notification->toJson())) {
+                authorisations.append(notification->toJson());
+            }
+        }
         if (audit) {
             json.insert(auditKey, record.toJson());
             manager->planning()->setPlanAudit(record);

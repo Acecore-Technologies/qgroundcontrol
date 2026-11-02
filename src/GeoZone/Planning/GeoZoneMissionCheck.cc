@@ -327,9 +327,21 @@ QList<std::pair<QString, QList<const GeoZone*>>> zonesByLabel(const QList<GeoZon
 
 QString GeoZoneMissionCheck::warningText(const QList<Entry> &entries)
 {
+    QStringList lines = crossedText(entries);
+    // Notices which can't be given in time any more
+    for (const Entry &entry : entries) {
+        if (entry.notificationOverdue) {
+            lines.append(tr("%1: %2, the notice period has passed.").arg(entry.zone->displayName(), entry.notificationNote));
+        }
+    }
+    return lines.join(QStringLiteral("\n"));
+}
+
+QStringList GeoZoneMissionCheck::crossedText(const QList<Entry> &entries)
+{
     const QList<const GeoZone*> crossed = zones(entries, Crossed);
     if (crossed.isEmpty()) {
-        return QString();
+        return {};
     }
     QStringList lines = { tr("The mission path enters restricted geozones: %1").arg(GeoZonePathEvaluator::zoneNames(crossed, maxListedZones, true)) };
     // Zones entered besides the drawn flight path, like by a loiter circle or the return to launch
@@ -346,7 +358,7 @@ QString GeoZoneMissionCheck::warningText(const QList<Entry> &entries)
         lines.append(tr("Approximate: %1.").arg(GeoZonePathEvaluator::approximationTexts(approximations).join(QStringLiteral("; "))));
     }
     lines.append(authorisationNotes(entries, Crossed));
-    return lines.join(QStringLiteral("\n"));
+    return lines;
 }
 
 QStringList GeoZoneMissionCheck::authorisationNotes(const QList<Entry> &entries, Kind kind)
@@ -392,6 +404,11 @@ QString GeoZoneMissionCheck::infoText() const
     const int inactive = static_cast<int>(zones(Inactive).count());
     if (inactive > 0) {
         lines.append(tr("%n zone(s) on the path are not active at the planned flight time.", nullptr, inactive));
+    }
+    for (const Entry &entry : _entries) {
+        if (!entry.notificationNote.isEmpty() && !entry.notificationOverdue) {
+            lines.append(tr("%1: %2.").arg(entry.zone->displayName(), entry.notificationNote));
+        }
     }
     return lines.join(QStringLiteral("\n"));
 }
@@ -607,7 +624,17 @@ QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation
         } else {
             kinds = (zone->restriction() == GeoZone::USpace) ? USpace : Permitted;
         }
-        entries.append(Entry{ zone, kinds, evaluation.pathLabels.value(zone), evaluation.approximations.value(zone), authorisationNote });
+        Entry entry{ zone, kinds, evaluation.pathLabels.value(zone), evaluation.approximations.value(zone), authorisationNote };
+        // The authority to notify before flights in the zone, unless notified for the flight
+        if (!kinds.testFlag(Inactive)) {
+            const GeoZoneAuthorisation *const notification = authorisations ? authorisations->findNotification(zone) : nullptr;
+            const auto [start, end] = policy.authorisationPeriod();
+            if (!notification || !notification->covers(start, end)) {
+                entry.notificationNote = GeoZoneAuthorisations::notificationText(zone, evaluation.start, GeoZoneEnvironment::currentDateTimeUtc(),
+                                                                                 &entry.notificationOverdue);
+            }
+        }
+        entries.append(entry);
     }
 
     // Restricted zones only the returns from along the mission enter, unless authorised

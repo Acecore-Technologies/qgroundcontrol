@@ -40,6 +40,7 @@ constexpr const char *areaCircleKey = "areaCircle";
 constexpr const char *dailyFromKey = "dailyFrom";
 constexpr const char *dailyToKey = "dailyTo";
 constexpr const char *aircraftKey = "aircraft";
+constexpr const char *kindKey = "kind";
 constexpr const char *versionKey = "version";
 constexpr const char *authorisationsKey = "authorisations";
 constexpr int fileVersion = 1;
@@ -194,6 +195,9 @@ QJsonObject GeoZoneAuthorisation::toJson() const
     if (!aircraft.isEmpty()) {
         json.insert(aircraftKey, aircraft);
     }
+    if (notification) {
+        json.insert(kindKey, QStringLiteral("notification"));
+    }
     return json;
 }
 
@@ -237,6 +241,7 @@ std::optional<GeoZoneAuthorisation> GeoZoneAuthorisation::fromJson(const QJsonOb
         authorisation.dailyTo = dailyTo;
     }
     authorisation.aircraft = json.value(aircraftKey).toString();
+    authorisation.notification = (json.value(kindKey).toString() == QStringLiteral("notification"));
     return authorisation;
 }
 
@@ -255,14 +260,14 @@ QString GeoZoneAuthorisations::zoneKey(const GeoZone *zone)
     return zone->identifier().isEmpty() ? zone->key() : QStringLiteral("%1/%2").arg(zone->country(), zone->identifier());
 }
 
-const GeoZoneAuthorisation *GeoZoneAuthorisations::find(const GeoZone *zone) const
+const GeoZoneAuthorisation *GeoZoneAuthorisations::_find(const GeoZone *zone, bool notification) const
 {
     if (_authorisations.isEmpty() || !zone) {
         return nullptr;
     }
     const QString key = zoneKey(zone);
     for (const GeoZoneAuthorisation &authorisation : _authorisations) {
-        if (authorisation.zoneKey == key) {
+        if ((authorisation.zoneKey == key) && (authorisation.notification == notification)) {
             return &authorisation;
         }
     }
@@ -272,7 +277,9 @@ const GeoZoneAuthorisation *GeoZoneAuthorisations::find(const GeoZone *zone) con
 void GeoZoneAuthorisations::set(const GeoZoneAuthorisation &authorisation)
 {
     QList<GeoZoneAuthorisation> updated = _authorisations;
-    const auto it = std::find_if(updated.begin(), updated.end(), [&authorisation](const GeoZoneAuthorisation &existing) { return existing.zoneKey == authorisation.zoneKey; });
+    const auto it = std::find_if(updated.begin(), updated.end(), [&authorisation](const GeoZoneAuthorisation &existing) {
+        return (existing.zoneKey == authorisation.zoneKey) && (existing.notification == authorisation.notification);
+    });
     if (it == updated.end()) {
         updated.append(authorisation);
     } else {
@@ -288,7 +295,9 @@ QList<GeoZoneAuthorisation> GeoZoneAuthorisations::_merged(const QList<GeoZoneAu
 {
     QList<GeoZoneAuthorisation> merged = _authorisations;
     for (const GeoZoneAuthorisation &authorisation : authorisations) {
-        const auto it = std::find_if(merged.begin(), merged.end(), [&authorisation](const GeoZoneAuthorisation &existing) { return existing.zoneKey == authorisation.zoneKey; });
+        const auto it = std::find_if(merged.begin(), merged.end(), [&authorisation](const GeoZoneAuthorisation &existing) {
+            return (existing.zoneKey == authorisation.zoneKey) && (existing.notification == authorisation.notification);
+        });
         if (it == merged.end()) {
             merged.append(authorisation);
         } else if (it->validTo.isValid() && (!authorisation.validTo.isValid() || (authorisation.validTo > it->validTo))) {
@@ -427,10 +436,26 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
     return QString();
 }
 
-void GeoZoneAuthorisations::revoke(const QString &zoneKey)
+QString GeoZoneAuthorisations::recordNotification(const QVariant &zone, const QString &reference, const QString &validFrom, const QString &validTo)
+{
+    // Checked like an authorisation without scope, then recorded as the notification
+    GeoZoneAuthorisations checked{ QString() };
+    const QString error = checked.authorise(zone, reference, validFrom, validTo);
+    if (!error.isEmpty()) {
+        return error;
+    }
+    GeoZoneAuthorisation notification = checked.authorisations().constFirst();
+    notification.notification = true;
+    set(notification);
+    return QString();
+}
+
+void GeoZoneAuthorisations::revoke(const QString &zoneKey, bool notification)
 {
     QList<GeoZoneAuthorisation> remaining = _authorisations;
-    if (remaining.removeIf([&zoneKey](const GeoZoneAuthorisation &authorisation) { return authorisation.zoneKey == zoneKey; }) > 0) {
+    if (remaining.removeIf([&zoneKey, notification](const GeoZoneAuthorisation &authorisation) {
+            return (authorisation.zoneKey == zoneKey) && (authorisation.notification == notification);
+        }) > 0) {
         _reset(remaining);
         _save();
     }
@@ -454,6 +479,65 @@ QVariantMap GeoZoneAuthorisations::authorisationOf(const QVariant &zone) const
         { QStringLiteral("limitToMission"), authorisation->hasArea() },
         { QStringLiteral("statusText"), statusText(*authorisation, GeoZoneEnvironment::currentDateTimeUtc()) },
     };
+}
+
+QVariantMap GeoZoneAuthorisations::notificationOf(const QVariant &zone) const
+{
+    const GeoZoneAuthorisation *const notification = findNotification(zone.value<GeoZoneInfo>().zone());
+    if (!notification) {
+        return QVariantMap();
+    }
+    return QVariantMap{
+        { QStringLiteral("zoneKey"), notification->zoneKey },
+        { QStringLiteral("permit"), notification->permit },
+        { QStringLiteral("validFrom"), firstDayText(notification->validFrom) },
+        { QStringLiteral("validTo"), lastDayText(notification->validTo) },
+        { QStringLiteral("statusText"), statusText(*notification, GeoZoneEnvironment::currentDateTimeUtc()) },
+    };
+}
+
+QString GeoZoneAuthorisations::notificationRequirement(const QVariant &zone) const
+{
+    const GeoZone *const geoZone = zone.value<GeoZoneInfo>().zone();
+    QString text = geoZone ? notificationText(geoZone, QDateTime(), QDateTime()) : QString();
+    if (!text.isEmpty()) {
+        text[0] = text[0].toUpper();
+    }
+    return text;
+}
+
+QString GeoZoneAuthorisations::notificationText(const GeoZone *zone, const QDateTime &start, const QDateTime &now, bool *overdue)
+{
+    if (overdue) {
+        *overdue = false;
+    }
+    const qint64 lead = zone ? zone->data().notificationLeadSecs : -1;
+    if (lead < 0) {
+        return QString();
+    }
+    const QString authority = zone->data().notificationAuthority.isEmpty() ? tr("the zone authority") : zone->data().notificationAuthority;
+    if (start.isValid()) {
+        const QDateTime due = start.addSecs(-lead);
+        if (overdue) {
+            *overdue = now.isValid() && (due <= now);
+        }
+        return tr("notify %1 by %2").arg(authority, QLocale().toString(due.toLocalTime(), QStringLiteral("yyyy-MM-dd HH:mm")));
+    }
+    if (lead == 0) {
+        return tr("notify %1 before the flight").arg(authority);
+    }
+    // In days and hours, rounded up to the hour, abbreviated since English has no translation choosing plural forms
+    const qint64 hours = (lead + 3599) / 3600;
+    const qint64 days = hours / 24;
+    const qint64 remainder = hours % 24;
+    QStringList parts;
+    if (days > 0) {
+        parts.append(tr("%1 d").arg(days));
+    }
+    if ((remainder > 0) || (days == 0)) {
+        parts.append(tr("%1 h").arg(remainder));
+    }
+    return tr("notify %1 %2 before the flight").arg(authority, parts.join(QStringLiteral(" ")));
 }
 
 QString GeoZoneAuthorisations::ceilingUnits(const QVariant &zone) const
@@ -488,6 +572,9 @@ QString GeoZoneAuthorisations::scopeText(const GeoZoneAuthorisation &authorisati
 
 QString GeoZoneAuthorisations::statusText(const GeoZoneAuthorisation &authorisation, const QDateTime &now)
 {
+    if (authorisation.notification) {
+        return tr("Notified, %1").arg(validityText(authorisation, now).toLower());
+    }
     const QString scope = scopeText(authorisation);
     return scope.isEmpty() ? validityText(authorisation, now) : QStringLiteral("%1, %2").arg(validityText(authorisation, now), scope);
 }
@@ -538,6 +625,8 @@ QVariant GeoZoneAuthorisations::data(const QModelIndex &index, int role) const
         return authorisation.permit;
     case StatusTextRole:
         return statusText(authorisation, GeoZoneEnvironment::currentDateTimeUtc());
+    case NotificationRole:
+        return authorisation.notification;
     default:
         return QVariant();
     }
@@ -545,7 +634,8 @@ QVariant GeoZoneAuthorisations::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneAuthorisations::roleNames() const
 {
-    return { { ZoneKeyRole, "zoneKey" }, { ZoneNameRole, "zoneName" }, { PermitRole, "permit" }, { StatusTextRole, "statusText" } };
+    return { { ZoneKeyRole, "zoneKey" }, { ZoneNameRole, "zoneName" }, { PermitRole, "permit" }, { StatusTextRole, "statusText" },
+             { NotificationRole, "notification" } };
 }
 
 void GeoZoneAuthorisations::_reset(const QList<GeoZoneAuthorisation> &authorisations)

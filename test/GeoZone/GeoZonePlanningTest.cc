@@ -1146,6 +1146,81 @@ void GeoZonePlanningTest::_testAuthorisations()
     QCOMPARE(planJson[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("authorisations")].toArray()[0].toObject()[QStringLiteral("area")].toArray().count(), 4);
 }
 
+void GeoZonePlanningTest::_testNotifications()
+{
+    // A conditional zone whose authority is notified two days before flights
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(12, 0)));
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QJsonObject zoneJson = _circleFeature(QStringLiteral("NOTE"), QStringLiteral("CONDITIONAL"), center, 300);
+    zoneJson[QStringLiteral("country")] = QStringLiteral("CHE");
+    zoneJson[QStringLiteral("zoneAuthority")] = QJsonArray{ QJsonObject{ { QStringLiteral("name"), QStringLiteral("Tower") }, { QStringLiteral("purpose"), QStringLiteral("NOTIFICATION") },
+                                                                         { QStringLiteral("intervalBefore"), QStringLiteral("P2D") } } };
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ zoneJson }), errorString), qPrintable(errorString));
+    const GeoZone *const zone = manager.zoneList().constFirst();
+    QCOMPARE(zone->data().notificationLeadSecs, qint64{ 2 * 24 * 3600 });
+    const QVariant zoneInfo = QVariant::fromValue(GeoZoneInfo(zone));
+    GeoZoneAuthorisations *const authorisations = manager.planning()->authorisations();
+    QCOMPARE(authorisations->notificationRequirement(zoneInfo), QStringLiteral("Notify Tower 2 d before the flight"));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    QTRY_VERIFY2(check.infoText().contains(QStringLiteral("NOTE: notify Tower 2 d before the flight.")), qPrintable(check.infoText()));
+
+    // With a planned start, by when, and a warning once the notice period has passed
+    const QDateTime start(QDate(2026, 6, 20), QTime(10, 0));
+    manager.planning()->setPlannedStart(start);
+    const QString due = QLocale().toString(start.addDays(-2), QStringLiteral("yyyy-MM-dd HH:mm"));
+    QTRY_VERIFY2(check.infoText().contains(QStringLiteral("NOTE: notify Tower by %1.").arg(due)), qPrintable(check.infoText()));
+    manager.planning()->setPlannedStart(QDateTime(QDate(2026, 6, 16), QTime(10, 0)));
+    QTRY_VERIFY2(check.warningText().contains(QStringLiteral("NOTE: notify Tower by")) && check.warningText().contains(QStringLiteral("the notice period has passed.")),
+                 qPrintable(check.warningText()));
+
+    // The briefing says so too
+    GeoZoneBriefingExport exporter(&manager);
+    exporter.setMissionController(missionController);
+    const GeoZoneBriefing briefing = exporter.briefing();
+    QCOMPARE(briefing.zones.count(), 1);
+    QVERIFY2(briefing.zones[0].notification.endsWith(QStringLiteral("the notice period has passed.")), qPrintable(briefing.zones[0].notification));
+    QCOMPARE(GeoZoneBriefingExport::toJson(briefing)[QStringLiteral("zones")].toArray()[0].toObject()[QStringLiteral("notification")].toString(),
+             briefing.zones[0].notification);
+
+    // The notification recorded satisfies it, without authorising the flight
+    QVERIFY(authorisations->recordNotification(zoneInfo, QStringLiteral(" N-1 "), QString(), QString()).isEmpty());
+    QCOMPARE(authorisations->notificationOf(zoneInfo)[QStringLiteral("permit")].toString(), QStringLiteral("N-1"));
+    QCOMPARE(authorisations->notificationOf(zoneInfo)[QStringLiteral("statusText")].toString(), QStringLiteral("Notified, valid"));
+    QVERIFY(authorisations->authorisationOf(zoneInfo).isEmpty());
+    QTRY_VERIFY2(!check.warningText().contains(QStringLiteral("notice")), qPrintable(check.warningText()));
+    QVERIFY(!check.infoText().contains(QStringLiteral("notify")));
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
+    QCOMPARE(exporter.briefing().zones[0].notification, QStringLiteral("Notified, valid, reference N-1"));
+
+    // Kept with the plan, apart from an authorisation of the zone
+    QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-1"), QString(), QString()).isEmpty());
+    QCOMPARE(authorisations->count(), 2);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
+    QJsonObject planJson;
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    const QJsonArray saved = planJson[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("authorisations")].toArray();
+    QCOMPARE(saved.count(), 2);
+    QCOMPARE(saved[1].toObject()[QStringLiteral("kind")].toString(), QStringLiteral("notification"));
+    authorisations->revoke(QStringLiteral("CHE/NOTE"), true);
+    QCOMPARE(authorisations->count(), 1);
+    QVERIFY(authorisations->find(zone));
+    manager.planning()->clearPlannedStart();
+}
+
 void GeoZonePlanningTest::_testBriefingDocuments()
 {
     // The briefing of GeoZoneBriefingTest::_testBriefing

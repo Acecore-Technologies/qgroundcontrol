@@ -121,6 +121,9 @@ public:
         QString restrictionConditions;
         QString message;
         QStringList authorities;    ///< One human readable line per zone authority
+        QString notificationAuthority;  ///< Name or contact of the authority to notify before flights, may be empty
+        qint64 notificationLeadSecs = -1;   ///< How long before a flight the authority must be notified, 0 without
+                                            ///< interval, -1 when the zone doesn't require a notification
         QList<TimePeriod> applicability;
         QList<Volume> volumes;
         QString uSpaceClass;            ///< ED-269/ED-318 U-space classification, as published

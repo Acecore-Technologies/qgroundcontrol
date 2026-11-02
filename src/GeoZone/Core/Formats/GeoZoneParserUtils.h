@@ -78,6 +78,13 @@ bool _lengthUnit(const QJsonValue &value, bool &feet, QStringList &issues);
 
 QStringList _authorities(const QJsonValue &value);
 
+/// Reads the first authority with the NOTIFICATION purpose into the zone's notificationAuthority and
+/// notificationLeadSecs, from its name or contact and its intervalBefore
+void _notification(const QJsonValue &value, GeoZone::Data &zone);
+
+/// @return Seconds of an ISO 8601 duration like P2D or PT12H, years as 365 days and months as 30, -1 when invalid
+qint64 _durationSecs(const QString &duration);
+
 bool _position(const QJsonValue &value, QGeoCoordinate &coordinate);
 
 /// Reads the positions of a ring, without the closing one. Their number is checked by _normalizeVolumes.

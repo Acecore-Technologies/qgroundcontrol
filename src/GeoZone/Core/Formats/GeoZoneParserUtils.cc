@@ -428,6 +428,47 @@ QStringList _authorities(const QJsonValue &value)
     return authorities;
 }
 
+void _notification(const QJsonValue &value, GeoZone::Data &zone)
+{
+    for (const QJsonValue &authorityValue : value.toArray()) {
+        const QJsonObject authority = authorityValue.toObject();
+        if (authority.value(QStringLiteral("purpose")).toString().toUpper() != QStringLiteral("NOTIFICATION")) {
+            continue;
+        }
+        QStringList names = { _text(authority.value(QStringLiteral("name"))), _text(authority.value(QStringLiteral("service"))) };
+        names.removeAll(QString());
+        if (names.isEmpty()) {
+            names = QStringList{ _text(authority.value(QStringLiteral("email"))), _text(authority.value(QStringLiteral("phone"))) };
+            names.removeAll(QString());
+        }
+        zone.notificationAuthority = names.join(QStringLiteral(" / "));
+        // A notice without a valid interval is due before the flight
+        zone.notificationLeadSecs = (std::max)(_durationSecs(_text(authority.value(QStringLiteral("intervalBefore")))), qint64{ 0 });
+        return;
+    }
+}
+
+qint64 _durationSecs(const QString &duration)
+{
+    static const QRegularExpression pattern(QStringLiteral("^P(?:(\\d+(?:[.,]\\d+)?)Y)?(?:(\\d+(?:[.,]\\d+)?)M)?(?:(\\d+(?:[.,]\\d+)?)W)?(?:(\\d+(?:[.,]\\d+)?)D)?"
+                                                           "(?:T(?:(\\d+(?:[.,]\\d+)?)H)?(?:(\\d+(?:[.,]\\d+)?)M)?(?:(\\d+(?:[.,]\\d+)?)S)?)?$"),
+                                            QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = pattern.match(duration.trimmed());
+    if (!match.hasMatch() || (duration.trimmed().size() < 3) || duration.trimmed().endsWith(QLatin1Char('T'), Qt::CaseInsensitive)) {
+        return -1;
+    }
+    static constexpr qint64 day = 24 * 3600;
+    static constexpr qint64 units[] = { 365 * day, 30 * day, 7 * day, day, 3600, 60, 1 };
+    double seconds = 0;
+    for (int i = 0; i < 7; i++) {
+        const QString number = match.captured(i + 1);
+        if (!number.isEmpty()) {
+            seconds += QString(number).replace(QLatin1Char(','), QLatin1Char('.')).toDouble() * static_cast<double>(units[i]);
+        }
+    }
+    return std::llround(seconds);
+}
+
 bool _position(const QJsonValue &value, QGeoCoordinate &coordinate)
 {
     const QJsonArray position = value.toArray();
@@ -641,6 +682,7 @@ void _commonProperties(const QJsonObject &object, const QString &restrictionKey,
     zone.otherReasonInfo = _text(object.value(QStringLiteral("otherReasonInfo")));
     zone.message = _text(object.value(QStringLiteral("message")));
     zone.authorities = _authorities(object.value(QStringLiteral("zoneAuthority")));
+    _notification(object.value(QStringLiteral("zoneAuthority")), zone);
 
     const QJsonValue conditions = object.value(QStringLiteral("restrictionConditions"));
     zone.restrictionConditions = conditions.isArray() ? _stringList(conditions).join(QStringLiteral("; ")) : _text(conditions);

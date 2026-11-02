@@ -78,7 +78,8 @@ QString _resultDifference(const GeoZoneParser::Result &a, const GeoZoneParser::R
             (x.restriction != y.restriction) || (x.reasons != y.reasons) || (x.otherReasonInfo != y.otherReasonInfo) ||
             (x.restrictionConditions != y.restrictionConditions) || (x.message != y.message) || (x.authorities != y.authorities) ||
             (x.uSpaceClass != y.uSpaceClass) || (x.regulationExemption != y.regulationExemption) || (x.extendedProperties != y.extendedProperties) ||
-            (x.issues != y.issues) || (x.contentHash != y.contentHash)) {
+            (x.issues != y.issues) || (x.contentHash != y.contentHash) || (x.notificationAuthority != y.notificationAuthority) ||
+            (x.notificationLeadSecs != y.notificationLeadSecs)) {
             return QStringLiteral("texts of zone %1").arg(i);
         }
         if (!std::equal(x.applicability.cbegin(), x.applicability.cend(), y.applicability.cbegin(), y.applicability.cend(), sameTimePeriod)) {
@@ -120,6 +121,8 @@ GeoZoneParser::Result _syntheticResult()
     zone.restrictionConditions = QStringLiteral("Conditions");
     zone.message = QStringLiteral("Message\nwith lines");
     zone.authorities = { QStringLiteral("Authority, +41 0000") };
+    zone.notificationAuthority = QStringLiteral("Tower");
+    zone.notificationLeadSecs = 2 * 24 * 3600;
     GeoZone::DailyPeriod daily;
     daily.days = { Qt::Monday, Qt::Saturday };
     daily.startTime = QTime(6, 0);
@@ -177,7 +180,7 @@ constexpr int _fieldCount()
 }
 
 /// GeoZoneParser::version the hashes of the fixtures' results in _testParseFixtures_data were recorded for
-constexpr quint16 kResultHashVersion = 8;
+constexpr quint16 kResultHashVersion = 9;
 
 /// @return Hash of a serialized result, with the vertices rounded to 1e-7 degrees, which the differences of the math
 ///         libraries computing arcs and geodesics don't change
@@ -289,13 +292,13 @@ void GeoZoneParserTest::_testParseFixtures_data()
                                 << missingFeatures << QString::fromLatin1(resultHash);
     };
     // The ED-269 and ED-318 test files each have a feature without a supported geometry, the IGN response was limited
-    row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0, "3a763bc04f21f93f");
-    row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "abe8e17f6efea0ef");
-    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "c601f4f0e4e62b5b");
-    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "2a26acbe85fc598f");
-    row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "31fc1dab378d6d73");
-    row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "90de6abd039f12bf");
-    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "17efcf9175694242");
+    row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0, "9229fa5a8ab6ffc6");
+    row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "e2d4b0d264592f37");
+    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "3c0d3f716763a061");
+    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "bb11ebfc2907b643");
+    row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
+    row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
+    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "1cc47a3d61d437ed");
 }
 
 void GeoZoneParserTest::_testParseFixtures()
@@ -442,6 +445,8 @@ void GeoZoneParserTest::_testParseED269()
     QCOMPARE(prohibited.authorities.count(), 1);
     QVERIFY(prohibited.authorities[0].contains(QStringLiteral("Test Authority")));
     QVERIFY(prohibited.authorities[0].contains(QStringLiteral("zones@example.com")));
+    // The notice of an authorisation request isn't a notification
+    QCOMPARE(prohibited.notificationLeadSecs, -1);
 
     const GeoZone::Data &authorisation = result.zones[1];
     QCOMPARE(authorisation.restriction, GeoZone::ReqAuthorisation);
@@ -563,6 +568,9 @@ void GeoZoneParserTest::_testParseED318()
     QCOMPARE(collection.volumes[1].lowerLimit, 0.0);
     QCOMPARE(collection.volumes[1].upperLimit, 50.0);
     QVERIFY(!collection.volumes[1].feet);
+    // An authority to notify, without name or notice period
+    QVERIFY(collection.notificationAuthority.isEmpty());
+    QCOMPARE(collection.notificationLeadSecs, 0);
 
     // Times without an offset are UTC whatever the local time zone, also in its daylight saving gaps
     const QByteArray offsetless = R"({ "type": "FeatureCollection",
@@ -573,6 +581,16 @@ void GeoZoneParserTest::_testParseED318()
     QCOMPARE(result.issued, _utc(QDate(2026, 3, 8), QTime(0, 0)));
     QCOMPARE(result.validFrom, _utc(QDate(2026, 3, 8), QTime(2, 30)));
     QCOMPARE(result.validTo, _utc(QDate(2026, 3, 29), QTime(2, 30, 0, 500)));
+
+    // The notice period of the authority to notify, an ISO 8601 duration
+    const QByteArray notified = R"({ "type": "FeatureCollection",
+        "features": [ { "type": "Feature", "properties": { "type": "CONDITIONAL", "zoneAuthority": [ { "name": "Info", "purpose": "INFORMATION" },
+        { "name": "Tower", "phone": "+41 0000", "purpose": "NOTIFICATION", "intervalBefore": "P2DT12H" } ] },
+        "geometry": { "type": "Polygon", "coordinates": [ [ [0, 0], [1, 0], [1, 1], [0, 0] ] ] } } ] })";
+    QVERIFY2(GeoZoneParser::parse(notified, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones[0].notificationAuthority, QStringLiteral("Tower"));
+    QCOMPARE(result.zones[0].notificationLeadSecs, qint64{ (2 * 24 + 12) * 3600 });
+    QVERIFY(result.zones[0].authorities[1].contains(QStringLiteral("notice P2DT12H")));
 }
 
 void GeoZoneParserTest::_testParseFaaTfr()
@@ -1633,7 +1651,7 @@ void GeoZoneParserTest::_testParseCacheRoundTrip()
         // _resultDifference, then counted here
         QCOMPARE(_fieldCount<GeoZoneParser::Result>(), 12);
         QCOMPARE(_fieldCount<GeoZoneParser::Companion>(), 2);
-        QCOMPARE(_fieldCount<GeoZone::Data>(), 17);
+        QCOMPARE(_fieldCount<GeoZone::Data>(), 19);
         QCOMPARE(_fieldCount<GeoZone::Volume>(), 11);
         QCOMPARE(_fieldCount<GeoZone::TimePeriod>(), 4);
         QCOMPARE(_fieldCount<GeoZone::DailyPeriod>(), 8);
