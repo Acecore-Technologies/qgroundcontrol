@@ -480,6 +480,30 @@ void GeoZoneManagerTest::_testManagerBackgroundLoad()
     QTRY_VERIFY(!manager.busy());
     QCOMPARE(manager.sources()->count(), 0);
 
+    // Files added together are reported once, with the reasons of those which failed
+    const QString brokenFile = sourceDir.filePath(QStringLiteral("broken.json"));
+    QFile broken(brokenFile);
+    QVERIFY(broken.open(QIODevice::WriteOnly));
+    QVERIFY(broken.write("{ \"broken\": ") > 0);
+    broken.close();
+    QSignalSpy finishedSpy(&manager, &GeoZoneManager::fileOperationFinished);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    manager.addFiles({ ed318File, ed269File, brokenFile, aixmFile });
+    QVERIFY(finishedSpy.wait(10000));
+    QTRY_VERIFY(!manager.busy());
+    QCOMPARE(finishedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+    QCOMPARE(finishedSpy.first().at(0).toBool(), false);
+    const QString summary = finishedSpy.first().at(1).toString();
+    QVERIFY2(summary.startsWith(QStringLiteral("3 geozone file(s) added, 1 failed:\nbroken.json: ")), qPrintable(summary));
+    QCOMPARE(manager.sources()->count(), 3);
+    finishedSpy.clear();
+    manager.addFiles({ brokenFile });
+    QVERIFY(failedSpy.wait(10000));
+    QCOMPARE(finishedSpy.count(), 0);
+    manager.clear();
+    QTRY_VERIFY(!manager.busy());
+
     // Feeds keep their URL as key and can be refreshed
     const QString feedUrl = QUrl::fromLocalFile(ed318File).toString();
     addedSpy.clear();
@@ -2078,6 +2102,15 @@ void GeoZoneManagerTest::_testOfflinePack()
     QVERIFY(!other.importPack(fileName));
     QVERIFY(otherSpy.last()[1].toString().startsWith(QStringLiteral("The geozone pack could not be read.")));
     QCOMPARE(QDir(QDir(otherDir.path()).filePath(QStringLiteral("downloads"))).entryList(QDir::Files).count(), 0);
+
+    // Packs imported together are reported once
+    otherSpy.clear();
+    QVERIFY(!other.importPacks({ packPath, fileName }));
+    QTRY_VERIFY(!other.busy());
+    QCOMPARE(otherSpy.count(), 1);
+    QVERIFY(!otherSpy.last()[0].toBool());
+    QVERIFY(otherSpy.last()[1].toString().startsWith(QStringLiteral("3 geozone source(s) imported from field.zip. The pack is not signed.\n\nThe geozone pack could not be read.")));
+    QCOMPARE(other.sources()->count(), 3);
 }
 
 void GeoZoneManagerTest::_testPackServiceTrust()

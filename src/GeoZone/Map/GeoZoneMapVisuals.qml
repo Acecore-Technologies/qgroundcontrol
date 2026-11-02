@@ -87,7 +87,8 @@ Item {
         target:     _root._geoZoneManager
         enabled:    _root.fitToAddedSources
         function onSourceAdded(source) {
-            _root._boxToFit = source.boundingBox
+            // Files added together are shown together when the map is shown again
+            _root._boxToFit = _root._boxToFit && _root._boxToFit.isValid ? _root._boxToFit.united(source.boundingBox) : source.boundingBox
             _root._fitAddedSource()
         }
     }

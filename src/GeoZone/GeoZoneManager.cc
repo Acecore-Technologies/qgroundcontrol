@@ -112,6 +112,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(_repository, &GeoZoneSourceRepository::userLoaded, _display, [this]() { _display->setVisible(true); });
     (void) connect(_repository, &GeoZoneSourceRepository::sourceAdded, this, &GeoZoneManager::sourceAdded);
     (void) connect(_repository, &GeoZoneSourceRepository::loadFailed, this, &GeoZoneManager::loadFailed);
+    (void) connect(_repository, &GeoZoneSourceRepository::filesAdded, this, &GeoZoneManager::_filesAdded);
     (void) connect(_repository, &GeoZoneSourceRepository::storageFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_planning->authorisations(), &GeoZoneAuthorisations::saveFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::outdatedDataFound, this, &GeoZoneManager::outdatedDataFound);
@@ -193,20 +194,55 @@ bool GeoZoneManager::exportPack(const QString &fileName, const QStringList &keys
 
 bool GeoZoneManager::importPack(const QString &fileName)
 {
+    return importPacks({ fileName });
+}
+
+bool GeoZoneManager::importPacks(const QStringList &fileNames)
+{
+    bool readable = true;
+    bool complete = true;
+    QStringList messages;
+    for (const QString &fileName : fileNames) {
+        QString message;
+        bool packComplete = false;
+        readable = _importPack(fileName, message, packComplete) && readable;
+        complete = complete && packComplete;
+        messages.append(message);
+    }
+    if (!messages.isEmpty()) {
+        emit fileOperationFinished(complete, messages.join(QStringLiteral("\n\n")));
+    }
+    return readable;
+}
+
+bool GeoZoneManager::_importPack(const QString &fileName, QString &message, bool &complete)
+{
     const QString localFileName = fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
     QString errorString;
     QString signatureText;
     const int count = _repository->importPack(localFileName, errorString, &signatureText);
+    complete = (count >= 0) && errorString.isEmpty();
     if (count < 0) {
-        emit fileOperationFinished(false, errorString);
+        message = errorString;
         return false;
     }
-    QString message = tr("%n geozone source(s) imported from %1.", nullptr, count).arg(QFileInfo(localFileName).fileName()) + QLatin1Char(' ') + signatureText;
+    message = tr("%n geozone source(s) imported from %1.", nullptr, count).arg(QFileInfo(localFileName).fileName()) + QLatin1Char(' ') + signatureText;
     if (!errorString.isEmpty()) {
         message += QStringLiteral("\n") + tr("Left out:") + QStringLiteral("\n") + errorString;
     }
-    emit fileOperationFinished(errorString.isEmpty(), message);
     return true;
+}
+
+void GeoZoneManager::_filesAdded(int addedCount, const QStringList &failures)
+{
+    const QString added = tr("%n geozone file(s) added", nullptr, addedCount);
+    if (failures.isEmpty()) {
+        emit fileOperationFinished(true, tr("%1.", "Number of geozone files added").arg(added));
+        return;
+    }
+    const QString failed = tr("%n failed", "Number of geozone files which failed to load", static_cast<int>(failures.count()));
+    emit fileOperationFinished(false, tr("%1, %2:", "Number of geozone files added and failed, followed by the reasons").arg(added, failed) +
+                                          QStringLiteral("\n") + failures.join(QStringLiteral("\n")));
 }
 
 void GeoZoneManager::_updatePackSigning()

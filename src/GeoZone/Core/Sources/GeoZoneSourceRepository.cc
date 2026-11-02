@@ -91,6 +91,48 @@ void GeoZoneSourceRepository::addFile(const QString &fileName)
     _startLoad(job, LoadMode::Background);
 }
 
+void GeoZoneSourceRepository::addFiles(const QStringList &fileNames)
+{
+    if (fileNames.count() == 1) {
+        addFile(fileNames.constFirst());
+        return;
+    }
+    if (fileNames.isEmpty()) {
+        return;
+    }
+    const quint32 batchId = ++_lastBatchId;
+    _fileBatches.insert(batchId, FileBatch{ static_cast<int>(fileNames.count()), 0, QStringList() });
+    for (const QString &fileName : fileNames) {
+        GeoZoneLoader::Job job = GeoZoneLoader::fileJob(fileName);
+        job.request = GeoZoneLoader::Request::Add;
+        job.batchId = batchId;
+        job.cancelToken = _beginOperation(job.key);
+        _startLoad(job, LoadMode::Background);
+    }
+}
+
+void GeoZoneSourceRepository::_batchLoaded(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult)
+{
+    const auto it = _fileBatches.find(job.batchId);
+    if (it == _fileBatches.end()) {
+        return;
+    }
+    // Files removed or listed again while loading count neither as added nor as failed
+    if (!job.cancelToken.isCancelled() && !loadResult.cancelled) {
+        if (loadResult.errorString.isEmpty()) {
+            it->added++;
+        } else {
+            it->failures.append(tr("%1: %2").arg(QFileInfo(job.sourcePath).fileName(), loadResult.errorString));
+        }
+    }
+    if (--it->pending > 0) {
+        return;
+    }
+    const FileBatch batch = *it;
+    _fileBatches.erase(it);
+    emit filesAdded(batch.added, batch.failures);
+}
+
 bool GeoZoneSourceRepository::loadFile(const QString &fileName, QString &errorString)
 {
     GeoZoneLoader::Job job = GeoZoneLoader::fileJob(fileName);
@@ -477,9 +519,13 @@ void GeoZoneSourceRepository::_startLoad(GeoZoneLoader::Job job, LoadMode mode)
 
     QFutureWatcher<GeoZoneLoader::Result> *const watcher = new QFutureWatcher<GeoZoneLoader::Result>(this);
     (void) connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, job]() {
-        _applyLoad(job, watcher->result());
+        const GeoZoneLoader::Result loadResult = watcher->result();
+        _applyLoad(job, loadResult);
         watcher->deleteLater();
         _setPending(-1);
+        if (job.batchId != 0) {
+            _batchLoaded(job, loadResult);
+        }
     });
     watcher->setFuture(QtConcurrent::run(&GeoZoneLoader::run, job, _store));
 }
@@ -508,7 +554,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         } else {
             _services.forget(job.key);
         }
-        if (job.request != GeoZoneLoader::Request::Automatic) {
+        if ((job.request != GeoZoneLoader::Request::Automatic) && (job.batchId == 0)) {
             emit loadFailed(job.key, tr("Geozone file load failed. %1").arg(loadResult.errorString));
         }
         return;

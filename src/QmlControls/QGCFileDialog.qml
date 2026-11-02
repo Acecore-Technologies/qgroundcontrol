@@ -21,8 +21,11 @@ Item {
     property bool   selectFolder:   false
     property string defaultSuffix:  ""
     property string fileName:       ""  ///< Name proposed when saving, without the folder
+    property bool   selectMultiple: false   ///< Loads several files, see acceptedForLoadFiles
 
     signal acceptedForLoad(string file)
+    /// Emitted instead of acceptedForLoad with selectMultiple. The mobile file picker chooses one file.
+    signal acceptedForLoadFiles(var files)
     signal acceptedForSave(string file)
     signal rejected
 
@@ -33,8 +36,16 @@ Item {
         } else if (selectFolder) {
             fullFolderDialog.open()
         } else {
-            fullFileDialog.fileMode = FileDialog.OpenFile
+            fullFileDialog.fileMode = selectMultiple ? FileDialog.OpenFiles : FileDialog.OpenFile
             fullFileDialog.open()
+        }
+    }
+
+    function _acceptForLoad(file) {
+        if (selectMultiple) {
+            acceptedForLoadFiles([ file ])
+        } else {
+            acceptedForLoad(file)
         }
     }
 
@@ -104,6 +115,14 @@ Item {
         defaultSuffix:  _root.defaultSuffix
 
         onAccepted: {
+            if (fileMode == FileDialog.OpenFiles) {
+                var files = []
+                for (var i = 0; i < selectedFiles.length; i++) {
+                    files.push(controller.urlToLocalFile(selectedFiles[i]))
+                }
+                _root.acceptedForLoadFiles(files)
+                return
+            }
             var fullPath = controller.urlToLocalFile(selectedFile)
             if (fileMode == FileDialog.OpenFile) {
                 _root.acceptedForLoad(fullPath)
@@ -150,7 +169,7 @@ Item {
 
                         onClicked: {
                             mobileFileOpenDialog.close()
-                            _root.acceptedForLoad(controller.fullyQualifiedFilename(folder, modelData))
+                            _root._acceptForLoad(controller.fullyQualifiedFilename(folder, modelData))
                         }
 
                         onHamburgerClicked: {

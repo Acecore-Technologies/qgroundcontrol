@@ -53,6 +53,9 @@ public:
 
     /// See GeoZoneManager::addFile
     void addFile(const QString &fileName);
+    /// Loads files in the background like addFile. With several files, filesAdded tells the outcome once all are
+    /// loaded instead of loadFailed for each.
+    void addFiles(const QStringList &fileNames);
     /// See GeoZoneManager::addUrl
     void addUrl(const QString &url);
     /// Adds a feed requested from a service taking credentials, a POST query or the area of interest, replacing the
@@ -153,6 +156,9 @@ signals:
     /// A source the user added or refreshed was loaded, its zones should be shown
     void userLoaded();
     void loadFailed(const QString &key, const QString &message);
+    /// The files addFiles added together were loaded
+    /// @param failures File name and why it failed, for each file which failed
+    void filesAdded(int addedCount, const QStringList &failures);
     void storageFailed(const QString &message);
     void outdatedDataFound(const QString &message);
     void busyChanged(bool busy);
@@ -163,6 +169,8 @@ private:
     void _prepareJob(GeoZoneLoader::Job &job) const;
     void _startLoad(GeoZoneLoader::Job job, LoadMode mode);
     void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
+    /// Counts the outcome of a load of files added together, see addFiles
+    void _batchLoaded(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _updateStoredEntry(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);
     void _download(const QString &url, GeoZoneLoader::Request request);
     void _fetchFinished(GeoZoneFeedFetch *fetch, const GeoZoneFeedFetch::Result &result, GeoZoneLoader::Request request);
@@ -197,6 +205,13 @@ private:
     int _pendingCount = 0;
     QHash<QString, GeoZoneCancelToken> _operations; ///< Fetch or load in progress per source key, earlier ones were canceled
     QHash<QString, GeoZoneFeedFetch*> _fetches;     ///< Feeds being downloaded, by URL
+    struct FileBatch {
+        int pending = 0;
+        int added = 0;
+        QStringList failures;
+    };
+    QHash<quint32, FileBatch> _fileBatches;         ///< Files added together being loaded, see addFiles
+    quint32 _lastBatchId = 0;
     QHash<QString, GeoZoneParser::Companions> _companions;  ///< Companion documents of the feeds by URL, see GeoZoneFormat::companionRequests
     GeoZoneServiceRegistry _services;   ///< Of the feeds requested from a service, with their secrets and tokens
     QHash<quintptr, QGeoRectangle> _missionAreas;

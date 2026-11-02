@@ -747,11 +747,12 @@ ColumnLayout {
     QGCFileDialog {
         id:             fileDialog
         folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Select Geozone File")
+        title:          qsTr("Select Geozone Files")
         nameFilters:    _geoZoneManager.fileDialogFilters
+        selectMultiple: true
 
-        onAcceptedForLoad: (file) => {
-            _geoZoneManager.addFile(file)
+        onAcceptedForLoadFiles: (files) => {
+            _geoZoneManager.addFiles(files)
             close()
         }
     }
@@ -759,11 +760,12 @@ ColumnLayout {
     QGCFileDialog {
         id:             importPackDialog
         folder:         QGroundControl.settingsManager.appSettings.missionSavePath
-        title:          qsTr("Import Geozone Pack")
+        title:          qsTr("Import Geozone Packs")
         nameFilters:    [ qsTr("Geozone Packs (*.zip)") ]
+        selectMultiple: true
 
-        onAcceptedForLoad: (file) => {
-            _geoZoneManager.importPack(file)
+        onAcceptedForLoadFiles: (files) => {
+            _geoZoneManager.importPacks(files)
             close()
         }
     }

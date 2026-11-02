@@ -83,6 +83,9 @@ public:
     /// Loads an ED-269 or ED-318 file in the background, replacing the source loaded from the same file.
     /// loadFailed is emitted on errors and sourceAdded on success.
     Q_INVOKABLE void addFile(const QString &fileName) { _repository->addFile(fileName); }
+    /// Loads files in the background like addFile. With several files, fileOperationFinished tells how many were
+    /// added and why the others failed once all are loaded.
+    Q_INVOKABLE void addFiles(const QStringList &fileNames) { _repository->addFiles(fileNames); }
 
     /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the
     /// source with the same URL. loadFailed is emitted on errors and sourceAdded on success.
@@ -122,6 +125,9 @@ public:
     /// Imports the sources of an offline pack, loaded in the background. fileOperationFinished tells the outcome and
     /// how the pack is signed.
     Q_INVOKABLE bool importPack(const QString &fileName);
+    /// Imports several packs like importPack, fileOperationFinished telling the outcome of all of them at once
+    /// @return false when a pack can't be read
+    Q_INVOKABLE bool importPacks(const QStringList &fileNames);
 
     /// Trusts the signed packs of a publisher, see GeoZoneSettings::trustedPackPublishers
     /// @param publicKey Ed25519 public key, see GeoZonePackSignature::parsePublicKey
@@ -243,6 +249,10 @@ private:
     void _endZonesChange(GeoZoneSource *source);
     /// Applies the pack signing settings to the repository
     void _updatePackSigning();
+    void _filesAdded(int addedCount, const QStringList &failures);
+    /// @return false when the pack can't be read, message tells the outcome
+    /// @param complete Set to false when sources were left out or the pack can't be read
+    bool _importPack(const QString &fileName, QString &message, bool &complete);
     void _updateTrustedPublishers();
     /// @return The public key of the pack signing key, empty without
     QByteArray _packPublicKey() const;

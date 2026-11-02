@@ -58,6 +58,7 @@ public:
         QGeoRectangle area;         ///< Area of interest the feed was downloaded for, invalid when it doesn't take one
         GeoZoneProvenance provenance;   ///< Of the data, completed with the hash of the stored copy
         Request request = Request::Automatic;
+        quint32 batchId = 0;        ///< Files added together, see GeoZoneSourceRepository::addFiles, 0 for others
         GeoZoneCancelToken cancelToken;     ///< Canceled when the result is no longer wanted, run() then stops parsing or before storing
     };
 
