@@ -139,6 +139,8 @@ ColumnLayout {
         readonly property var   _providers:     root._geoZoneManager.areaProviders
         readonly property var   _mapArea:       root.map ? root.map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
         readonly property bool  _areaTooLarge:  _mapArea.isValid && (_mapArea.width > 1 || _mapArea.height > 1)
+        // Providers whose download covers the map area already, which is extended by moving or zooming out the map
+        readonly property var   _downloaded:    (root._geoZoneManager.sources.count, _providers.map(provider => root._geoZoneManager.areaDownloaded(provider.id, _mapArea)))
 
         QGCLabel {
             Layout.fillWidth:   true
@@ -148,10 +150,12 @@ ColumnLayout {
         RowLayout {
             Layout.fillWidth: true
 
-            QGCComboBox {
+            GeoZoneChoiceComboBox {
                 id:                 areaProviderCombo
                 Layout.fillWidth:   true
                 model:              areaColumn._providers.map(provider => provider.name)
+                choicesEnabled:     areaColumn._downloaded.map(downloaded => !downloaded)
+                disabledText:       qsTr("%1 (downloaded here)")
                 // The provider covering the map center
                 Component.onCompleted: {
                     const providers = areaColumn._providers
@@ -167,7 +171,7 @@ ColumnLayout {
 
             QGCButton {
                 text:       qsTr("Download")
-                enabled:    !areaColumn._areaTooLarge && !root._geoZoneManager.busy
+                enabled:    !areaColumn._areaTooLarge && !root._geoZoneManager.busy && areaProviderCombo.currentEnabled
                 onClicked:  root._geoZoneManager.addArea(areaColumn._providers[areaProviderCombo.currentIndex].id, areaColumn._mapArea)
             }
         }
@@ -178,7 +182,8 @@ ColumnLayout {
             font.pointSize:     ScreenTools.smallFontPointSize
             color:              areaColumn._areaTooLarge ? qgcPal.warningText : qgcPal.text
             text:               areaColumn._areaTooLarge ? qsTr("Zoom in to an area up to about 100 km wide.") :
-                                                       qsTr("Downloaded areas are kept for offline use and refreshed like feeds.")
+                                    (!areaProviderCombo.currentEnabled ? qsTr("The zones of the map area are downloaded already. Move the map or zoom out to download more.") :
+                                                                         qsTr("Downloaded areas are kept for offline use and refreshed like feeds."))
         }
     }
 

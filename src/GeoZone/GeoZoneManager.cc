@@ -315,6 +315,17 @@ bool GeoZoneManager::addArea(const QString &provider, const QGeoRectangle &area)
     return true;
 }
 
+bool GeoZoneManager::areaDownloaded(const QString &provider, const QGeoRectangle &area) const
+{
+    QStringList feedUrls;
+    for (const GeoZoneSource *const source : _repository->sourceList()) {
+        if (source->isFeed()) {
+            feedUrls.append(source->url());
+        }
+    }
+    return GeoZoneProviders::areaDownloaded(provider, feedUrls, area);
+}
+
 int GeoZoneManager::disabledSourceCount() const
 {
     const QList<const GeoZoneSource*> sources = _repository->sourceList();

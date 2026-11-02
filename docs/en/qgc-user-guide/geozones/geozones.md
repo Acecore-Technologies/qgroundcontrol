@@ -35,7 +35,7 @@ To add geozones:
 1. Open _Application Settings > Geozones_, or press **Manage Geozones...** in the Plan View **Geozones** panel or the Fly View geozone indicator.
 1. Press **Add File...** and select a geozone file (`.json`, `.geojson`, AIXM `.xml` or a `.zip` package), or press **Add Feed...**, select a national feed (or **Other URL** to enter an `https://` address) and press **Download**, or press **Add Service...** for a service needing credentials or an area (see [Geozone Services](#geozone-services)).
 
-The national feeds offered by **Add Feed...** are **Finland (Traficom)**, **Latvia (LGS)**, **Luxembourg (Geoportail)**, **Sweden (LFV)**, **United States TFRs (FAA)**, **Switzerland (FOCA)**, **Germany aviation zones (DiPUL)** and **United Kingdom FRZ (NATS)**.
+The national feeds offered by **Add Feed...** are **Finland (Traficom)**, **Latvia (LGS)**, **Luxembourg (Geoportail)**, **Sweden (LFV)**, **United States TFRs (FAA)**, **Switzerland (FOCA)**, **Germany aviation zones (DiPUL)** and **United Kingdom FRZ (NATS)**. Feeds already added are grayed out as _(added)_, as is **Download** for an **Other URL** already added: turn them on or refresh them in the list of sources instead.
 **Germany aviation zones (DiPUL)** holds the control zones, airports, aerodromes and flight restriction areas of the German DiPUL service (licensed CC BY-ND 4.0), and **United Kingdom FRZ (NATS)** the flight restriction and runway protection zones of protected aerodromes and the danger areas from the AIXM dataset NATS publishes every AIRAC cycle.
 German zone types are mapped to restrictions: restricted areas and temporary no-fly zones are prohibited, aviation, sensitive (including hospitals) and nature zones require authorisation, and residential areas, roads, railways and waterways are conditional.
 
@@ -51,7 +51,7 @@ European NOTAMs can't be loaded, since EUROCONTROL only provides them to organis
 
 ### Zones of the Map Area {#zones-of-the-map-area}
 
-Some services serve their zones by area. In the Plan View **Geozones** panel, **Download zones for the map area** downloads the zones of the map area, up to about 100 km wide, from **Germany, all zones (DiPUL)** (including residential areas, hospitals and nature reserves) or **France, open category (IGN)** (where flights are prohibited or limited to a maximum height). The provider covering the map is chosen. Downloaded areas are kept for offline use and refreshed like feeds. When the server limits its responses, the further pages are downloaded too (up to 50), and a warning is shown below the source if zones are still missing.
+Some services serve their zones by area. In the Plan View **Geozones** panel, **Download zones for the map area** downloads the zones of the map area, up to about 100 km wide, from **Germany, all zones (DiPUL)** (including residential areas, hospitals and nature reserves) or **France, open category (IGN)** (where flights are prohibited or limited to a maximum height). The provider covering the map is chosen. A provider whose downloaded area already covers the whole map view is grayed out as _(downloaded here)_ and **Download** is disabled; move the map or zoom out to download more. Downloaded areas are kept for offline use and refreshed like feeds. When the server limits its responses, the further pages are downloaded too (up to 50), and a warning is shown below the source if zones are still missing.
 
 ### Geozone Services {#geozone-services}
 

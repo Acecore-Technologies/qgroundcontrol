@@ -758,6 +758,19 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("france"), frankfurt).contains(QStringLiteral("BBOX=8.55000,50.00000,8.75000,50.15000,EPSG:4326")));
     QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))).isEmpty());
     QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("unknown"), frankfurt).isEmpty());
+
+    // Downloading an area adds nothing when a feed of the provider covers it, whatever the rounding of its bounds
+    QCOMPARE(GeoZoneProviders::feedArea(dipulUrl), frankfurt);
+    QVERIFY(!GeoZoneProviders::feedArea(QStringLiteral("https://example.com/zones.json?bbox=1,2")).isValid());
+    const QString franceUrl = GeoZoneProviders::areaFeedUrl(QStringLiteral("france"), frankfurt);
+    const QGeoRectangle unrounded(QGeoCoordinate(50.150004, 8.549996), QGeoCoordinate(49.999996, 8.750004));
+    const QGeoRectangle insideArea(QGeoCoordinate(50.1, 8.6), QGeoCoordinate(50.05, 8.7));
+    const QGeoRectangle larger(QGeoCoordinate(50.2, 8.55), QGeoCoordinate(50.0, 8.75));
+    QVERIFY(GeoZoneProviders::areaDownloaded(QStringLiteral("dipul"), { GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), unrounded) }, unrounded));
+    QVERIFY(GeoZoneProviders::areaDownloaded(QStringLiteral("dipul"), { dipulUrl }, insideArea));
+    QVERIFY(!GeoZoneProviders::areaDownloaded(QStringLiteral("dipul"), { dipulUrl }, larger));
+    QVERIFY(!GeoZoneProviders::areaDownloaded(QStringLiteral("france"), { dipulUrl }, insideArea));
+    QVERIFY(GeoZoneProviders::areaDownloaded(QStringLiteral("france"), { dipulUrl, franceUrl }, insideArea));
 #ifndef GEOZONE_CORE_TEST
     GeoZoneManager manager(QTemporaryDir().path());
     QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);

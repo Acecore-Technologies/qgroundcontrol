@@ -191,6 +191,55 @@ QString GeoZoneProviders::areaFeedUrl(const QString &serviceId, const QGeoRectan
     return QString();
 }
 
+QGeoRectangle GeoZoneProviders::feedArea(const QString &url)
+{
+    const QUrlQuery query{QUrl(url)};
+    for (const QPair<QString, QString> &item : query.queryItems(QUrl::FullyDecoded)) {
+        if (item.first.compare(QStringLiteral("bbox"), Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        // West, south, east and north, see _bboxQuery
+        const QStringList values = item.second.split(QLatin1Char(','));
+        if (values.count() < 4) {
+            return QGeoRectangle();
+        }
+        double bounds[4];
+        for (int i = 0; i < 4; i++) {
+            bool ok = false;
+            bounds[i] = values[i].toDouble(&ok);
+            if (!ok) {
+                return QGeoRectangle();
+            }
+        }
+        const QGeoRectangle area(QGeoCoordinate(bounds[3], bounds[0]), QGeoCoordinate(bounds[1], bounds[2]));
+        return area.isValid() ? area : QGeoRectangle();
+    }
+    return QGeoRectangle();
+}
+
+bool GeoZoneProviders::areaDownloaded(const QString &serviceId, const QStringList &feedUrls, const QGeoRectangle &area)
+{
+    if (!area.isValid()) {
+        return false;
+    }
+    // The URLs round the bounds to 5 decimals
+    constexpr double tolerance = 1e-5;
+    for (const QString &url : feedUrls) {
+        if (GeoZoneProviders::serviceId(url) != serviceId) {
+            continue;
+        }
+        const QGeoRectangle downloaded = feedArea(url);
+        if (downloaded.isValid() &&
+            (downloaded.topLeft().latitude() + tolerance >= area.topLeft().latitude()) &&
+            (downloaded.bottomRight().latitude() - tolerance <= area.bottomRight().latitude()) &&
+            (downloaded.topLeft().longitude() - tolerance <= area.topLeft().longitude()) &&
+            (downloaded.bottomRight().longitude() + tolerance >= area.bottomRight().longitude())) {
+            return true;
+        }
+    }
+    return false;
+}
+
 GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
 {
     const QString host = QUrl(url).host();

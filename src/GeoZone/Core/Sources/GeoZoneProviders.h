@@ -67,6 +67,11 @@ public:
     /// @return URL downloading the zones of the service in the area, empty for an unknown service or a larger area
     ///         than maxAreaDegrees
     static QString areaFeedUrl(const QString &serviceId, const QGeoRectangle &area);
+    /// @return Area of the zones a URL of areaFeedUrl downloads, invalid for URLs without an area
+    static QGeoRectangle feedArea(const QString &url);
+    /// @return true when one of the feeds downloads the zones of the service in the whole area, so downloading the area
+    ///         again would add nothing
+    static bool areaDownloaded(const QString &serviceId, const QStringList &feedUrls, const QGeoRectangle &area);
 
     /// @return The format to expect from a URL, Unknown for URLs of unknown services
     static GeoZoneParser::Format formatHint(const QString &url);

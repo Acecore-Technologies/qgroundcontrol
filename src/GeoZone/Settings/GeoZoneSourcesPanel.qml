@@ -292,6 +292,7 @@ ColumnLayout {
             onClicked: {
                 feedEntry.visible = !feedEntry.visible
                 serviceEntry.visible = false
+                feedPresetCombo.selectEnabledChoice()
             }
         }
 
@@ -322,10 +323,13 @@ ColumnLayout {
                                     .arg(_geoZoneSettings.liveFeedRefreshMinutes.rawValue)
         }
 
-        QGCComboBox {
+        GeoZoneChoiceComboBox {
             id:                 feedPresetCombo
             Layout.fillWidth:   true
             model:              _geoZoneManager.feedPresets.map(preset => preset.name).concat([ qsTr("Other URL") ])
+            // The feeds already added are turned on or refreshed in the list of sources instead
+            choicesEnabled:     (_geoZoneManager.sources.count, _geoZoneManager.feedPresets.map(preset => !_geoZoneManager.hasSource(preset.url)))
+            disabledText:       qsTr("%1 (added)")
 
             readonly property bool customUrl: currentIndex === _geoZoneManager.feedPresets.length
         }
@@ -337,14 +341,25 @@ ColumnLayout {
             visible:            feedPresetCombo.customUrl
         }
 
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               qsTr("This feed is added already. Turn it on or refresh it in the list of sources.")
+            visible:            !feedDownloadButton.enabled && (!feedPresetCombo.customUrl || feedUrlField.text.trim() !== "")
+        }
+
         QGCButton {
+            id:                 feedDownloadButton
             Layout.fillWidth:   true
             text:               qsTr("Download")
-            enabled:            !feedPresetCombo.customUrl || feedUrlField.text.trim() !== ""
+            enabled:            feedPresetCombo.customUrl ? (feedUrlField.text.trim() !== "" && !_feedUrlAdded) : feedPresetCombo.currentEnabled
             onClicked: {
                 _geoZoneManager.addUrl(feedPresetCombo.customUrl ? feedUrlField.text : _geoZoneManager.feedPresets[feedPresetCombo.currentIndex].url)
                 feedEntry.visible = false
             }
+
+            readonly property bool _feedUrlAdded: (_geoZoneManager.sources.count, _geoZoneManager.hasSource(feedUrlField.text))
         }
     }
 

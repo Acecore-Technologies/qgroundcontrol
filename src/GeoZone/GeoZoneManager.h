@@ -202,6 +202,10 @@ public:
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for
     /// offline use and refreshed like other feeds. loadFailed is emitted when the area is too large.
     Q_INVOKABLE bool addArea(const QString &provider, const QGeoRectangle &area);
+    /// @return true when a source downloaded the zones of the provider in the whole area, see GeoZoneProviders::areaDownloaded
+    Q_INVOKABLE bool areaDownloaded(const QString &provider, const QGeoRectangle &area) const;
+    /// @return true when a source has the key, the URL of a feed or the path of a file
+    Q_INVOKABLE bool hasSource(const QString &key) const { return _repository->source(key.trimmed()) != nullptr; }
 
     QString storageDir() const { return _repository->storageDir(); }
 
