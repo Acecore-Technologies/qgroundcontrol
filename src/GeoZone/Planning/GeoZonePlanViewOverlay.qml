@@ -83,8 +83,7 @@ Item {
         map:                control.map
         highlightedZones:   banner.crossedZones
         // The map filters don't hide the other zones the mission check reports
-        keptZones:          banner.missionCheck.uSpaceZones.concat(banner.missionCheck.permittedZones, banner.missionCheck.authorisedZones,
-                                                                   banner.missionCheck.contingencyZones)
+        keptZones:          banner.zones(GeoZoneMissionCheck.USpace | GeoZoneMissionCheck.Permitted | GeoZoneMissionCheck.Authorised | GeoZoneMissionCheck.Contingency)
         missionController:  control.planMasterController.missionController
         fitToAddedSources:  true
         // Above the terrain profile and its elevation provider notice, see the centerViewport of the Plan view's map

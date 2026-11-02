@@ -133,8 +133,8 @@ void GeoZonePlanningTest::_testApproximationReports()
     check.setMissionController(missionController);
     (void) missionController->insertSimpleMissionItem(start.atDistanceAndAzimuth(500, 270), 1);
     (void) missionController->insertSimpleMissionItem(start.atDistanceAndAzimuth(1500, 90), 2);
-    QTRY_VERIFY(check.crossedZones().contains(zoneNamed(QStringLiteral("LEVEL"))));
-    QVERIFY(check.approximations(zoneNamed(QStringLiteral("LEVEL"))).testFlag(GeoZonePathEvaluator::FlightLevel));
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Crossed).contains(zoneNamed(QStringLiteral("LEVEL"))));
+    QVERIFY(check.entry(zoneNamed(QStringLiteral("LEVEL")))->approximations.testFlag(GeoZonePathEvaluator::FlightLevel));
     QVERIFY2(check.warningText().contains(QStringLiteral("Approximate: ")), qPrintable(check.warningText()));
     QVERIFY(check.warningText().contains(QStringLiteral("Flight level limits converted with the QNH setting")));
 }
@@ -300,22 +300,22 @@ void GeoZonePlanningTest::_testMissionCheck()
     // Passes the no restriction zone only, which is reported without a warning
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 180).atDistanceAndAzimuth(1000, 270), 1);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 180).atDistanceAndAzimuth(1000, 90), 2);
-    QTRY_COMPARE(check.permittedZones().count(), 1);
-    QVERIFY(check.crossedZones().isEmpty());
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Permitted).count(), 1);
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     QVERIFY(check.warningText().isEmpty());
-    QVERIFY(check.uSpaceZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::USpace).isEmpty());
     QVERIFY(check.infoText().startsWith(QStringLiteral("Areas without restriction: N.")));
 
     // Through the prohibited zone and then the conditional one, listed most restrictive first
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 3);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 4);
     (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 0), 5);
-    QTRY_COMPARE(check.crossedZones().count(), 2);
-    QCOMPARE(check.crossedZones()[0]->identifier(), QStringLiteral("P"));
-    QCOMPARE(check.crossedZones()[1]->identifier(), QStringLiteral("C"));
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed)[0]->identifier(), QStringLiteral("P"));
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed)[1]->identifier(), QStringLiteral("C"));
     QVERIFY(check.warningText().contains(QStringLiteral("P (Prohibited)")));
     // The path north also passes through the U-space airspace
-    QCOMPARE(check.uSpaceZones().count(), 1);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::USpace).count(), 1);
     QVERIFY(check.infoText().contains(QStringLiteral("U-space airspace: U.")));
     QVERIFY(check.crossedZonesBoundingBox().contains(center));
     QVERIFY(check.crossedZonesBoundingBox().contains(center.atDistanceAndAzimuth(2000, 0)));
@@ -324,18 +324,18 @@ void GeoZonePlanningTest::_testMissionCheck()
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
     QVERIFY(geoFenceController->supported());
     check.setGeoFenceController(geoFenceController);
-    QTRY_COMPARE(check.unfencedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Unfenced).count(), 1);
     QVERIFY(check.fenceText().contains(QStringLiteral("P")));
     geoFenceController->addInclusionCircle(center.atDistanceAndAzimuth(1000, 315), center.atDistanceAndAzimuth(1000, 135));
     check.update();
-    QCOMPARE(check.unfencedZones().count(), 1);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Unfenced).count(), 1);
     GeoZoneFenceImporter importer;
     importer.setGeoFenceController(geoFenceController);
-    QCOMPARE(importer.addZones(check.property("unfencedZones").toList()), 1);
-    QTRY_VERIFY(check.unfencedZones().isEmpty());
+    QCOMPARE(importer.addZones(GeoZoneInfo::toVariantList(check.zones(GeoZoneMissionCheck::Unfenced))), 1);
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Unfenced).isEmpty());
     QVERIFY(check.fenceText().isEmpty());
     GeoZoneFenceTags::deleteFences(geoFenceController, false);
-    QTRY_COMPARE(check.unfencedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Unfenced).count(), 1);
     // A polygon zone excluded by a simplified polygon fence
     const QList<QGeoCoordinate> squareZone = { center.atDistanceAndAzimuth(300, 315), center.atDistanceAndAzimuth(300, 45),
                                                center.atDistanceAndAzimuth(300, 135), center.atDistanceAndAzimuth(300, 225) };
@@ -355,25 +355,25 @@ void GeoZonePlanningTest::_testMissionCheck()
     QJsonObject temporary = _circleFeature(QStringLiteral("T"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(700, 270), 100);
     temporary[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T10:00:00Z" }, { "endDateTime", "2027-01-01T12:00:00Z" } } };
     QVERIFY2(manager.loadFile(_writeFeatures(dir, QStringLiteral("temporary.json"), QJsonArray{ temporary }), errorString), qPrintable(errorString));
-    QTRY_COMPARE(check.crossedZones().count(), 3);
-    QCOMPARE(check.inactiveZoneCount(), 0);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Inactive).count(), 0);
     manager.planning()->setPlannedStart(_utc(QDate(2027, 1, 1), QTime(8, 0)));
-    QTRY_COMPARE(check.crossedZones().count(), 2);
-    QCOMPARE(check.inactiveZoneCount(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Inactive).count(), 1);
     QVERIFY(check.infoText().contains(QStringLiteral("1 zone(s) on the path are not active at the planned flight time.")));
     // The mission takes a few minutes, so a start just before the restriction overlaps it
     const QDateTime overlappingStart = _utc(QDate(2027, 1, 1), QTime(10, 0)).addSecs(-std::llround(missionController->missionTime() / 2));
     QVERIFY(missionController->missionTime() > 10);
     manager.planning()->setPlannedStart(overlappingStart);
-    QTRY_COMPARE(check.crossedZones().count(), 3);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
     // A mission started now, like one on the vehicle, ignores the planned start
     check.setFlightNow(true);
-    QTRY_COMPARE(check.crossedZones().count(), 2);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
     QVERIFY(!check.infoText().contains(QStringLiteral("planned flight time")));
     check.setFlightNow(false);
     manager.planning()->clearPlannedStart();
-    QTRY_COMPARE(check.inactiveZoneCount(), 0);
-    QCOMPARE(check.crossedZones().count(), 3);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Inactive).count(), 0);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
 
     // A survey whose area covers a zone its flight lines miss
     const QGeoCoordinate surveyCenter = center.atDistanceAndAzimuth(5000, 180);
@@ -386,7 +386,7 @@ void GeoZonePlanningTest::_testMissionCheck()
     survey->surveyAreaPolygon()->appendVertices({ surveyCenter.atDistanceAndAzimuth(424, 315), surveyCenter.atDistanceAndAzimuth(424, 45),
                                                   surveyCenter.atDistanceAndAzimuth(424, 135), surveyCenter.atDistanceAndAzimuth(424, 225) });
     const auto surveyZoneCrossed = [&check]() {
-        const QList<const GeoZone*> crossed = check.crossedZones();
+        const QList<const GeoZone*> crossed = check.zones(GeoZoneMissionCheck::Crossed);
         return std::any_of(crossed.cbegin(), crossed.cend(), [](const GeoZone *zone) {
             return zone->identifier() == QStringLiteral("S");
         });
@@ -395,7 +395,7 @@ void GeoZonePlanningTest::_testMissionCheck()
 
     // Zones are released before the manager deletes them
     manager.clear();
-    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
 }
 
 void GeoZonePlanningTest::_testMissionControllerSwitch()
@@ -433,24 +433,24 @@ void GeoZonePlanningTest::_testMissionControllerSwitch()
     profile.setMissionController(crossing.missionController());
     checkWorker->trigger();
     profileWorker->trigger();
-    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
     QTRY_COMPARE(profile.bands().count(), 1);
 
     // The results of the previous mission are cleared, and those of its evaluations in flight never applied
     checkWorker->trigger();
     profileWorker->trigger();
     QVERIFY(checkWorker->busy());
-    QSignalSpy crossedSpy(&check, &GeoZoneMissionCheck::crossedZonesChanged);
+    QSignalSpy crossedSpy(&check, &GeoZoneMissionCheck::zonesChanged);
     QSignalSpy bandsSpy(&profile, &GeoZoneProfile::bandsChanged);
     check.setMissionController(empty.missionController());
     profile.setMissionController(empty.missionController());
-    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     QVERIFY(check.relevantZones().isEmpty());
     QVERIFY(profile.bands().isEmpty());
     QCOMPARE(crossedSpy.count(), 1);
     QCOMPARE(bandsSpy.count(), 1);
     QVERIFY(_settleWorkers());
-    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     QVERIFY(profile.bands().isEmpty());
     QCOMPARE(crossedSpy.count(), 1);
     QCOMPARE(bandsSpy.count(), 1);
@@ -459,10 +459,10 @@ void GeoZonePlanningTest::_testMissionControllerSwitch()
     checkWorker->trigger();
     QVERIFY(checkWorker->busy());
     QTRY_VERIFY(!checkWorker->busy());
-    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     check.setMissionController(crossing.missionController());
     checkWorker->trigger();
-    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
 }
 
 void GeoZonePlanningTest::_testMissionCoverage()
@@ -514,20 +514,21 @@ void GeoZonePlanningTest::_testMissionCoverage()
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_COMPARE(check.crossedZones().count(), 3);
-    const auto zone = [&check](const QString &identifier) {
-        const auto it = std::find_if(check.crossedZones().cbegin(), check.crossedZones().cend(), [&identifier](const GeoZone *crossed) { return crossed->identifier() == identifier; });
-        return (it != check.crossedZones().cend()) ? *it : nullptr;
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
+    const auto zone = [&check](const QString &identifier) -> const GeoZone* {
+        const QList<const GeoZone*> crossed = check.zones(GeoZoneMissionCheck::Crossed);
+        const auto it = std::find_if(crossed.cbegin(), crossed.cend(), [&identifier](const GeoZone *zone) { return zone->identifier() == identifier; });
+        return (it != crossed.cend()) ? *it : nullptr;
     };
-    QCOMPARE(check.pathLabels(zone(QStringLiteral("L"))), QStringList({ QStringLiteral("the loiter at item 1") }));
-    QCOMPARE(check.pathLabels(zone(QStringLiteral("V"))), QStringList({ QStringLiteral("the VTOL transition at item 3") }));
-    QCOMPARE(check.pathLabels(zone(QStringLiteral("R"))), QStringList({ QStringLiteral("the return to launch assuming the PX4 default return altitude of 30 m") }));
+    QCOMPARE(check.entry(zone(QStringLiteral("L")))->labels, QStringList({ QStringLiteral("the loiter at item 1") }));
+    QCOMPARE(check.entry(zone(QStringLiteral("V")))->labels, QStringList({ QStringLiteral("the VTOL transition at item 3") }));
+    QCOMPARE(check.entry(zone(QStringLiteral("R")))->labels, QStringList({ QStringLiteral("the return to launch assuming the PX4 default return altitude of 30 m") }));
     QVERIFY2(check.warningText().contains(QStringLiteral("Only the loiter at item 1 enters L.")), qPrintable(check.warningText()));
 
     // A smaller loiter stays clear of L
     loiterItem->setRadius(100);
     QTRY_VERIFY(!zone(QStringLiteral("L")));
-    QCOMPARE(check.crossedZones().count(), 2);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
 }
 
 namespace {
@@ -626,8 +627,8 @@ void GeoZonePlanningTest::_testMissionJumps()
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_COMPARE(zoneIdentifiers(check.crossedZones()), QStringList{ QStringLiteral("J") });
-    QCOMPARE(check.pathLabels(check.crossedZones().first()), QStringList{ QStringLiteral("the jump at item 4") });
+    QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Crossed)), QStringList{ QStringLiteral("J") });
+    QCOMPARE(check.entry(check.zones(GeoZoneMissionCheck::Crossed).first())->labels, QStringList{ QStringLiteral("the jump at item 4") });
     // Without repeats the jump isn't flown
     for (int i = 0; i < jumpItem->textFieldFacts()->count(); i++) {
         Fact *const fact = jumpItem->textFieldFacts()->value<Fact*>(i);
@@ -636,7 +637,7 @@ void GeoZonePlanningTest::_testMissionJumps()
         }
     }
     QCOMPARE(qRound(jumpItem->missionItem().param2()), 0);
-    QTRY_VERIFY(check.crossedZones().isEmpty());
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
 
     // Repeating without end the loop is flown once more
     jumpItem->missionItem().setParam2(-1);
@@ -692,8 +693,8 @@ void GeoZonePlanningTest::_testMissionJumps()
     GeoZoneMissionCheck skippingCheck(&manager);
     skippingCheck.setUpdateDelay(0);
     skippingCheck.setMissionController(skipping);
-    QTRY_COMPARE(zoneIdentifiers(skippingCheck.crossedZones()), QStringList{ QStringLiteral("S") });
-    QCOMPARE(skippingCheck.pathLabels(skippingCheck.crossedZones().first()), QStringList{ QStringLiteral("the jump at item 2") });
+    QTRY_COMPARE(zoneIdentifiers(skippingCheck.zones(GeoZoneMissionCheck::Crossed)), QStringList{ QStringLiteral("S") });
+    QCOMPARE(skippingCheck.entry(skippingCheck.zones(GeoZoneMissionCheck::Crossed).first())->labels, QStringList{ QStringLiteral("the jump at item 2") });
 }
 
 namespace {
@@ -884,11 +885,11 @@ void GeoZonePlanningTest::_testMissionContingencies()
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
-    QVERIFY(check.crossedZones().isEmpty());
+    QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("X") });
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     QVERIFY(check.warningText().isEmpty());
-    const GeoZone *const x = check.contingencyZones().first();
-    QCOMPARE(check.contingencyLabels(x), QStringList{ QStringLiteral(u"a return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133") });
+    const GeoZone *const x = check.zones(GeoZoneMissionCheck::Contingency).first();
+    QCOMPARE(check.entry(x)->labels, QStringList{ QStringLiteral(u"a return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133") });
     QCOMPARE(check.contingencyText(), QStringLiteral(u"A return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133 would enter X (Prohibited)."));
 
     // The starts are grouped into ranges of items
@@ -912,15 +913,15 @@ void GeoZonePlanningTest::_testMissionContingencies()
     // A rally point closer than home, the returns from around the second item go there
     RallyPointController *const rallyPointController = masterController.rallyPointController();
     rallyPointController->addPoint(offsetFrom(home, 2000, 3000));
-    QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("R") });
-    QVERIFY(check.contingencyLabels(check.contingencyZones().first()).first().startsWith(QStringLiteral("a return to rally point 1 assuming the PX4 default return altitude of 30 m from items")));
+    QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("R") });
+    QVERIFY(check.entry(check.zones(GeoZoneMissionCheck::Contingency).first())->labels.first().startsWith(QStringLiteral("a return to rally point 1 assuming the PX4 default return altitude of 30 m from items")));
     // Moved away it isn't closer anymore
     rallyPointController->points()->value<RallyPoint*>(0)->setCoordinate(offsetFrom(home, 6000, 6000));
-    QTRY_COMPARE(zoneIdentifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
+    QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("X") });
 
     // Zones are released before the manager deletes them
     manager.clear();
-    QVERIFY(check.contingencyZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Contingency).isEmpty());
     QVERIFY(check.contingencyText().isEmpty());
 }
 
@@ -1037,7 +1038,7 @@ void GeoZonePlanningTest::_testAuthorisations()
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
 
     // Dates are local days, the last one included
     QVERIFY(!authorisations->authorise(zoneInfo, QString(), QStringLiteral("2026-13-40"), QString()).isEmpty());
@@ -1050,8 +1051,8 @@ void GeoZonePlanningTest::_testAuthorisations()
     QCOMPARE(authorisations->count(), 1);
     QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("permit")].toString(), QStringLiteral("P-123"));
     QCOMPARE(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString(), QStringLiteral("Valid"));
-    QTRY_VERIFY(check.crossedZones().isEmpty());
-    QCOMPARE(check.authorisedZones().count(), 1);
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
     QVERIFY(check.infoText().contains(QStringLiteral("Authorised: CTR.")));
 
     // Alerts and guided commands leave the zone out while authorised
@@ -1066,7 +1067,7 @@ void GeoZonePlanningTest::_testAuthorisations()
     QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-122"), QString(), today.addDays(-1).toString(Qt::ISODate)).isEmpty());
     QCOMPARE(authorisations->count(), 1);
     QVERIFY(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString().startsWith(QStringLiteral("Expired")));
-    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
     QVERIFY(!monitor.guidedCheck()->pathWarning(path).isEmpty());
     monitor.evaluate({ center });
     QCOMPARE(alertSpy.count(), 1);
@@ -1074,9 +1075,9 @@ void GeoZonePlanningTest::_testAuthorisations()
     // An authorisation from tomorrow covers a flight planned then, not one now
     QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-124"), today.addDays(1).toString(Qt::ISODate), today.addDays(3).toString(Qt::ISODate)).isEmpty());
     manager.planning()->setPlannedStart(QDateTime(today, QTime(12, 0)));
-    QTRY_COMPARE(check.crossedZones().count(), 1);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
     manager.planning()->setPlannedStart(QDateTime(today.addDays(2), QTime(12, 0)));
-    QTRY_VERIFY(check.crossedZones().isEmpty());
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
 
     // Plans entering the zone keep the planned start and the authorisation
     QJsonObject planJson;
@@ -1353,7 +1354,7 @@ void GeoZonePlanningTest::_testBriefingExport()
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_COMPARE(check.crossedZones().count(), 2);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
 
     GeoZoneBriefingExport exporter(&manager);
     exporter.setMissionController(missionController);
@@ -1598,7 +1599,7 @@ void GeoZonePlanningTest::_testUploadReasons()
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
     check.setGeoFenceController(masterController.geoFenceController());
-    QTRY_COMPARE(check.crossedZones().count(), 2);
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
 
     // The prohibited zone the fence doesn't exclude, not the zone requiring an authorisation
     QStringList reasons = check.uploadReasons();
@@ -1610,7 +1611,7 @@ void GeoZonePlanningTest::_testUploadReasons()
     QCOMPARE(zone->identifier(), QStringLiteral("P"));
     QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(zone)), QStringLiteral("P-1"), QString(), QString()).isEmpty());
     QTRY_VERIFY(check.uploadReasons().isEmpty());
-    QCOMPARE(check.authorisedZones().count(), 1);
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
 
     // Geozone data changed since the plan was saved, until acknowledged
     QJsonObject planJson;
@@ -1783,7 +1784,7 @@ void GeoZonePlanningTest::_testRoutePlanner()
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_VERIFY_WITH_TIMEOUT(check.crossedZones().isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(check.zones(GeoZoneMissionCheck::Crossed).isEmpty(), 5000);
     QTRY_VERIFY(!planner.busy());
     QVERIFY(planner.suggestions().isEmpty());
     QVERIFY(!planner.applySuggestion(0));

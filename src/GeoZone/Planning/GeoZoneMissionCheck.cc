@@ -270,9 +270,10 @@ GeoFenceController *GeoZoneMissionCheck::geoFenceController() const
     return _geoFenceController;
 }
 
-QString GeoZoneMissionCheck::fenceText() const
+QString GeoZoneMissionCheck::fenceText(const QList<Entry> &entries)
 {
-    return _unfencedZones.isEmpty() ? QString() : tr("The GeoFence doesn't exclude prohibited zones on the path: %1").arg(GeoZonePathEvaluator::zoneNames(_unfencedZones, maxListedZones, false));
+    const QList<const GeoZone*> unfenced = zones(entries, Unfenced);
+    return unfenced.isEmpty() ? QString() : tr("The GeoFence doesn't exclude prohibited zones on the path: %1").arg(GeoZonePathEvaluator::zoneNames(unfenced, maxListedZones, false));
 }
 
 bool GeoZoneMissionCheck::fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone)
@@ -280,29 +281,68 @@ bool GeoZoneMissionCheck::fenceExcludes(GeoFenceController *geoFenceController, 
     return GeoZoneFences::fencesCover(GeoZoneFenceImporter::exclusionFences(geoFenceController), zone);
 }
 
-QString GeoZoneMissionCheck::warningText() const
+QVariantList GeoZoneMissionCheck::zonesInfo() const
 {
-    if (_crossedZones.isEmpty()) {
-        return QString();
+    QVariantList list;
+    for (const Entry &entry : _entries) {
+        list.append(QVariantMap{ { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(entry.zone)) }, { QStringLiteral("kind"), entry.kinds.toInt() } });
     }
-    QStringList lines = { tr("The mission path enters restricted geozones: %1").arg(GeoZonePathEvaluator::zoneNames(_crossedZones, maxListedZones, true)) };
-    // Zones entered besides the drawn flight path, like by a loiter circle or the return to launch
-    QStringList labels;
-    QHash<QString, QList<const GeoZone*>> labelZones;
-    for (const GeoZone *zone : _crossedZones) {
-        for (const QString &label : _pathLabels.value(zone)) {
-            if (!labels.contains(label)) {
-                labels.append(label);
-            }
-            labelZones[label].append(zone);
+    return list;
+}
+
+QList<const GeoZone*> GeoZoneMissionCheck::zones(const QList<Entry> &entries, Kind kind)
+{
+    QList<const GeoZone*> result;
+    for (const Entry &entry : entries) {
+        if (entry.kinds.testFlag(kind)) {
+            result.append(entry.zone);
         }
     }
-    for (const QString &label : std::as_const(labels)) {
-        lines.append(tr("Only %1 enters %2.").arg(label, GeoZonePathEvaluator::zoneNames(labelZones.value(label), maxListedZones, false)));
+    return result;
+}
+
+const GeoZoneMissionCheck::Entry *GeoZoneMissionCheck::entry(const GeoZone *zone) const
+{
+    const auto it = std::find_if(_entries.cbegin(), _entries.cend(), [zone](const Entry &entry) { return entry.zone == zone; });
+    return (it != _entries.cend()) ? &*it : nullptr;
+}
+
+namespace {
+
+/// @return The labels of the entries of the kind in the order they come, with the zones of each
+QList<std::pair<QString, QList<const GeoZone*>>> zonesByLabel(const QList<GeoZoneMissionCheck::Entry> &entries, GeoZoneMissionCheck::Kind kind)
+{
+    QList<std::pair<QString, QList<const GeoZone*>>> result;
+    for (const GeoZoneMissionCheck::Entry &entry : entries) {
+        for (const QString &label : (entry.kinds.testFlag(kind) ? entry.labels : QStringList())) {
+            auto it = std::find_if(result.begin(), result.end(), [&label](const auto &labelZones) { return labelZones.first == label; });
+            if (it == result.end()) {
+                it = result.insert(result.end(), { label, {} });
+            }
+            it->second.append(entry.zone);
+        }
+    }
+    return result;
+}
+
+} // namespace
+
+QString GeoZoneMissionCheck::warningText(const QList<Entry> &entries)
+{
+    const QList<const GeoZone*> crossed = zones(entries, Crossed);
+    if (crossed.isEmpty()) {
+        return QString();
+    }
+    QStringList lines = { tr("The mission path enters restricted geozones: %1").arg(GeoZonePathEvaluator::zoneNames(crossed, maxListedZones, true)) };
+    // Zones entered besides the drawn flight path, like by a loiter circle or the return to launch
+    for (const auto &[label, labelZones] : zonesByLabel(entries, Crossed)) {
+        lines.append(tr("Only %1 enters %2.").arg(label, GeoZonePathEvaluator::zoneNames(labelZones, maxListedZones, false)));
     }
     GeoZonePathEvaluator::Approximations approximations;
-    for (const GeoZone *zone : _crossedZones) {
-        approximations |= _approximations.value(zone);
+    for (const Entry &entry : entries) {
+        if (entry.kinds.testFlag(Crossed)) {
+            approximations |= entry.approximations;
+        }
     }
     if (approximations) {
         lines.append(tr("Approximate: %1.").arg(GeoZonePathEvaluator::approximationTexts(approximations).join(QStringLiteral("; "))));
@@ -313,23 +353,14 @@ QString GeoZoneMissionCheck::warningText() const
 QString GeoZoneMissionCheck::contingencyText() const
 {
     // A line per contingency path and the items it starts from, with the zones it enters
-    QStringList labels;
-    QHash<QString, QList<const GeoZone*>> labelZones;
-    for (const GeoZone *zone : _contingencyZones) {
-        for (const QString &label : _contingencyLabels.value(zone)) {
-            if (!labels.contains(label)) {
-                labels.append(label);
-            }
-            labelZones[label].append(zone);
-        }
-    }
+    const QList<std::pair<QString, QList<const GeoZone*>>> labels = zonesByLabel(_entries, Contingency);
     QStringList lines;
-    for (const QString &label : std::as_const(labels)) {
+    for (const auto &[label, labelZones] : labels) {
         if (lines.count() == maxListedZones) {
             lines.append(tr("%n more contingency path(s) enter restricted geozones.", nullptr, static_cast<int>(labels.count() - maxListedZones)));
             break;
         }
-        QString line = tr("%1 would enter %2.").arg(label, GeoZonePathEvaluator::zoneNames(labelZones.value(label), maxListedZones, true));
+        QString line = tr("%1 would enter %2.").arg(label, GeoZonePathEvaluator::zoneNames(labelZones, maxListedZones, true));
         line[0] = line[0].toUpper();
         lines.append(line);
     }
@@ -339,17 +370,18 @@ QString GeoZoneMissionCheck::contingencyText() const
 QString GeoZoneMissionCheck::infoText() const
 {
     QStringList lines;
-    if (!_uSpaceZones.isEmpty()) {
-        lines.append(tr("U-space airspace: %1. A flight authorisation from a U-space service provider is required.").arg(GeoZonePathEvaluator::zoneNames(_uSpaceZones, maxListedZones, false)));
+    if (const QList<const GeoZone*> uSpace = zones(USpace); !uSpace.isEmpty()) {
+        lines.append(tr("U-space airspace: %1. A flight authorisation from a U-space service provider is required.").arg(GeoZonePathEvaluator::zoneNames(uSpace, maxListedZones, false)));
     }
-    if (!_authorisedZones.isEmpty()) {
-        lines.append(tr("Authorised: %1.").arg(GeoZonePathEvaluator::zoneNames(_authorisedZones, maxListedZones, false)));
+    if (const QList<const GeoZone*> authorised = zones(Authorised); !authorised.isEmpty()) {
+        lines.append(tr("Authorised: %1.").arg(GeoZonePathEvaluator::zoneNames(authorised, maxListedZones, false)));
     }
-    if (!_permittedZones.isEmpty()) {
-        lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(GeoZonePathEvaluator::zoneNames(_permittedZones, maxListedZones, false)));
+    if (const QList<const GeoZone*> permitted = zones(Permitted); !permitted.isEmpty()) {
+        lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(GeoZonePathEvaluator::zoneNames(permitted, maxListedZones, false)));
     }
-    if ((_inactiveZoneCount > 0) && !_flightNow) {
-        lines.append(tr("%n zone(s) on the path are not active at the planned flight time.", nullptr, _inactiveZoneCount));
+    const int inactive = static_cast<int>(zones(Inactive).count());
+    if ((inactive > 0) && !_flightNow) {
+        lines.append(tr("%n zone(s) on the path are not active at the planned flight time.", nullptr, inactive));
     }
     return lines.join(QStringLiteral("\n"));
 }
@@ -367,7 +399,7 @@ std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::plannedFlightTimes(const Ge
 QGeoRectangle GeoZoneMissionCheck::crossedZonesBoundingBox() const
 {
     GeoZoneBox box;
-    for (const GeoZone *zone : _crossedZones) {
+    for (const GeoZone *zone : zones(Crossed)) {
         box = box.united(zone->box());
     }
     return box.toRectangle();
@@ -383,15 +415,9 @@ void GeoZoneMissionCheck::_clearZones(GeoZoneSource *source)
     _worker->invalidate();
     // The other zones stay listed until the check runs again
     const auto fromSource = [source](const GeoZone *zone) { return zone->sourceKey() == source->key(); };
-    (void) _pathLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
-    (void) _approximations.removeIf([&fromSource](const QHash<const GeoZone*, GeoZonePathEvaluator::Approximations>::iterator &it) { return fromSource(it.key()); });
-    (void) _contingencyLabels.removeIf([&fromSource](const QHash<const GeoZone*, QStringList>::iterator &it) { return fromSource(it.key()); });
     (void) _relevantZones.removeIf(fromSource);
-    const qsizetype removed = _crossedZones.removeIf(fromSource) + _uSpaceZones.removeIf(fromSource) + _permittedZones.removeIf(fromSource) +
-                              _authorisedZones.removeIf(fromSource) +
-                              _unfencedZones.removeIf(fromSource) + _contingencyZones.removeIf(fromSource);
-    if (removed > 0) {
-        emit crossedZonesChanged();
+    if (_entries.removeIf([&fromSource](const Entry &entry) { return fromSource(entry.zone); }) > 0) {
+        emit zonesChanged();
     }
 }
 
@@ -399,20 +425,9 @@ void GeoZoneMissionCheck::_clearResults()
 {
     _relevantZones.clear();
     _area = GeoZoneBox();
-    const bool listed = !_crossedZones.isEmpty() || !_uSpaceZones.isEmpty() || !_permittedZones.isEmpty() || !_authorisedZones.isEmpty() ||
-                        !_unfencedZones.isEmpty() || !_contingencyZones.isEmpty() || !_pathLabels.isEmpty() || !_contingencyLabels.isEmpty() ||
-                        (_inactiveZoneCount != 0);
-    _crossedZones.clear();
-    _uSpaceZones.clear();
-    _permittedZones.clear();
-    _authorisedZones.clear();
-    _unfencedZones.clear();
-    _contingencyZones.clear();
-    _pathLabels.clear();
-    _contingencyLabels.clear();
-    _inactiveZoneCount = 0;
-    if (listed) {
-        emit crossedZonesChanged();
+    if (!_entries.isEmpty()) {
+        _entries.clear();
+        emit zonesChanged();
     }
     if (!_auditText.isEmpty() || !_auditDetails.isEmpty()) {
         _auditText.clear();
@@ -551,66 +566,46 @@ QHash<const GeoZone*, QStringList> GeoZoneMissionCheck::groupContingencies(const
     return labels;
 }
 
-GeoZoneMissionCheck::Classification GeoZoneMissionCheck::classify(const Evaluation &evaluation, const GeoZoneAuthorisations *authorisations)
+QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation &evaluation, const GeoZoneAuthorisations *authorisations,
+                                                                 GeoFenceController *geoFenceController)
 {
-    Classification classification;
-    QList<const GeoZone*> zones = evaluation.zones;
-    // Zones which aren't active while the mission flies through them don't apply
-    classification.inactiveZoneCount = static_cast<int>(zones.removeIf([&evaluation](const GeoZone *zone) { return evaluation.inactiveZones.contains(zone); }));
     // Zones authorised during the whole flight are listed for information
     const GeoZonePolicy policy = GeoZonePolicy::mission(evaluation.start, evaluation.end).excludingAuthorised(authorisations);
+    // Vehicles which support a fence can be stopped at prohibited zones by it
+    const bool fenced = geoFenceController && geoFenceController->supported();
+    QList<Entry> entries;
+    for (const GeoZone *zone : evaluation.zones) {
+        Kinds kinds;
+        // Zones which aren't active while the mission flies through them don't apply
+        if (evaluation.inactiveZones.contains(zone)) {
+            kinds = Inactive;
+        } else if (policy.authorised(zone)) {
+            kinds = Authorised;
+        } else if (GeoZonePolicy::isRestricted(zone->restriction())) {
+            const bool unfenced = fenced && (zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(geoFenceController, zone);
+            kinds = unfenced ? (Crossed | Unfenced) : Kinds(Crossed);
+        } else {
+            kinds = (zone->restriction() == GeoZone::USpace) ? USpace : Permitted;
+        }
+        entries.append(Entry{ zone, kinds, evaluation.pathLabels.value(zone), evaluation.approximations.value(zone) });
+    }
 
     // Restricted zones only the returns from along the mission enter, unless authorised
     for (const GeoZone *zone : evaluation.contingencyZones) {
-        if (GeoZonePolicy::isRestricted(zone->restriction()) && !zones.contains(zone) && !policy.authorised(zone)) {
-            classification.contingencyZones.append(zone);
-            classification.contingencyLabels.insert(zone, evaluation.contingencyLabels.value(zone));
+        const bool entered = evaluation.zones.contains(zone) && !evaluation.inactiveZones.contains(zone);
+        if (GeoZonePolicy::isRestricted(zone->restriction()) && !entered && !policy.authorised(zone)) {
+            entries.append(Entry{ zone, Contingency, evaluation.contingencyLabels.value(zone) });
         }
     }
-
-    for (const GeoZone *zone : std::as_const(zones)) {
-        if (policy.authorised(zone)) {
-            classification.authorisedZones.append(zone);
-        } else if (GeoZonePolicy::isRestricted(zone->restriction())) {
-            classification.crossedZones.append(zone);
-        } else if (zone->restriction() == GeoZone::USpace) {
-            classification.uSpaceZones.append(zone);
-        } else {
-            classification.permittedZones.append(zone);
-        }
-    }
-    return classification;
+    return entries;
 }
 
 void GeoZoneMissionCheck::_apply(const Evaluation &evaluation)
 {
-    const Classification classification = classify(evaluation, _manager->planning()->authorisations());
-
-    // Vehicles which support a fence can be stopped at prohibited zones by it
-    QList<const GeoZone*> unfenced;
-    if (_geoFenceController && _geoFenceController->supported()) {
-        for (const GeoZone *zone : classification.crossedZones) {
-            if ((zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(_geoFenceController, zone)) {
-                unfenced.append(zone);
-            }
-        }
-    }
-
-    if ((classification.crossedZones != _crossedZones) || (classification.uSpaceZones != _uSpaceZones) || (classification.permittedZones != _permittedZones) ||
-        (classification.authorisedZones != _authorisedZones) || (classification.inactiveZoneCount != _inactiveZoneCount) || (unfenced != _unfencedZones) ||
-        (evaluation.pathLabels != _pathLabels) || (classification.contingencyZones != _contingencyZones) || (classification.contingencyLabels != _contingencyLabels) ||
-        (evaluation.approximations != _approximations)) {
-        _pathLabels = evaluation.pathLabels;
-        _approximations = evaluation.approximations;
-        _contingencyZones = classification.contingencyZones;
-        _contingencyLabels = classification.contingencyLabels;
-        _unfencedZones = unfenced;
-        _crossedZones = classification.crossedZones;
-        _uSpaceZones = classification.uSpaceZones;
-        _permittedZones = classification.permittedZones;
-        _authorisedZones = classification.authorisedZones;
-        _inactiveZoneCount = classification.inactiveZoneCount;
-        emit crossedZonesChanged();
+    const QList<Entry> entries = classify(evaluation, _manager->planning()->authorisations(), _geoFenceController);
+    if (entries != _entries) {
+        _entries = entries;
+        emit zonesChanged();
     }
     _relevantZones = evaluation.relevantZones;
     _area = evaluation.area;
@@ -639,11 +634,11 @@ QStringList GeoZoneMissionCheck::uploadReasons() const
 {
     QStringList reasons;
     // Authorised zones aren't crossed zones
-    QList<const GeoZone*> prohibited = _crossedZones;
+    QList<const GeoZone*> prohibited = zones(Crossed);
     (void) prohibited.removeIf([](const GeoZone *zone) { return zone->restriction() != GeoZone::Prohibited; });
     if (!prohibited.isEmpty()) {
         QString reason = tr("The mission path enters prohibited geozones: %1.").arg(GeoZonePathEvaluator::zoneNames(prohibited, maxListedZones, false));
-        const auto unfenced = std::count_if(prohibited.cbegin(), prohibited.cend(), [this](const GeoZone *zone) { return _unfencedZones.contains(zone); });
+        const qsizetype unfenced = zones(Unfenced).count();
         if (unfenced > 0) {
             reason += QStringLiteral(" ") + tr("The GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.",
                                                nullptr, static_cast<int>(unfenced));

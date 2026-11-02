@@ -239,7 +239,7 @@ void GeoZoneFlightTest::_testMissionCrossedZones()
     }
 
     const QStringList expected = { QStringLiteral("CTR0015"), QStringLiteral("GZW0001"), QStringLiteral("LSZH001") };
-    QTRY_COMPARE_WITH_TIMEOUT(identifiers(check.crossedZones()), expected, 20000);
+    QTRY_COMPARE_WITH_TIMEOUT(identifiers(check.zones(GeoZoneMissionCheck::Crossed)), expected, 20000);
     QVERIFY(check.warningText().contains(findZone(manager, QStringLiteral("GZW0001"))->name()));
 }
 
@@ -400,16 +400,16 @@ void GeoZoneFlightTest::_testReturnParameterChanges()
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
     check.update();
-    QVERIFY(check.contingencyZones().isEmpty());
-    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Contingency).isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
 
     // Returns at RTL_ALT 100 m from around the second item enter it, the mission is checked again when it changes
     returnAltitude->setRawValue(10000);
-    QTRY_COMPARE(identifiers(check.contingencyZones()), QStringList{ QStringLiteral("X") });
+    QTRY_COMPARE(identifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("X") });
     QVERIFY2(check.contingencyText().startsWith(QStringLiteral("A return to launch from items")), qPrintable(check.contingencyText()));
-    QVERIFY(check.crossedZones().isEmpty());
+    QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     returnAltitude->setRawValue(1500);
-    QTRY_VERIFY(check.contingencyZones().isEmpty());
+    QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Contingency).isEmpty());
 
     check.setMissionController(nullptr);
     _disconnectMockLink();

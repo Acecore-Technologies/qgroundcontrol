@@ -53,20 +53,14 @@ class GeoZoneMissionCheck : public QObject
     Q_MOC_INCLUDE("GeoFenceController.h")
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
-    Q_PROPERTY(QVariantList         crossedZones        READ crossedZonesInfo                               NOTIFY crossedZonesChanged FINAL)
-    Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY crossedZonesChanged FINAL)
-    Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY crossedZonesChanged FINAL)
-    Q_PROPERTY(QVariantList         uSpaceZones         READ uSpaceZonesInfo                                NOTIFY crossedZonesChanged FINAL)     ///< U-space airspaces the mission enters
-    Q_PROPERTY(QVariantList         permittedZones      READ permittedZonesInfo                             NOTIFY crossedZonesChanged FINAL)     ///< No restriction zones the mission enters
-    Q_PROPERTY(QVariantList         authorisedZones     READ authorisedZonesInfo                            NOTIFY crossedZonesChanged FINAL)     ///< Zones entered with an authorisation covering the flight, see GeoZoneAuthorisations
-    Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY crossedZonesChanged FINAL)
-    Q_PROPERTY(int                  inactiveZoneCount   READ inactiveZoneCount                              NOTIFY crossedZonesChanged FINAL)     ///< Zones entered which aren't active during the planned flight
+    Q_PROPERTY(QVariantList         zones               READ zonesInfo                                      NOTIFY zonesChanged FINAL)            ///< The entries as maps of the GeoZoneInfo "zone" and the Kinds "kind"
+    Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY zonesChanged FINAL)
+    Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY zonesChanged FINAL)
+    Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY zonesChanged FINAL)
     Q_PROPERTY(bool                 flightNow           READ flightNow          WRITE setFlightNow          NOTIFY flightNowChanged FINAL)        ///< Checks a flight starting now instead of at the planned start, like a mission on the vehicle
     Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)   ///< Fence expected to exclude the prohibited zones
-    Q_PROPERTY(QVariantList         unfencedZones       READ unfencedZonesInfo                              NOTIFY crossedZonesChanged FINAL)     ///< Prohibited zones entered which the fence doesn't exclude
-    Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY crossedZonesChanged FINAL)
-    Q_PROPERTY(QVariantList         contingencyZones    READ contingencyZonesInfo                           NOTIFY crossedZonesChanged FINAL)     ///< Restricted zones only returns from along the mission enter
-    Q_PROPERTY(QString              contingencyText     READ contingencyText                                NOTIFY crossedZonesChanged FINAL)
+    Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY zonesChanged FINAL)
+    Q_PROPERTY(QString              contingencyText     READ contingencyText                                NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QString              auditText           READ auditText                                      NOTIFY auditChanged FINAL)            ///< How the geozone data changed since the plan was saved, empty without changes
     Q_PROPERTY(QStringList          auditDetails        READ auditDetails                                   NOTIFY auditChanged FINAL)            ///< One line per change
 
@@ -78,38 +72,57 @@ public:
 
     static constexpr int maxListedZones = 5;
 
+    /// How a zone the mission or the returns from along it enter applies to the planned flight
+    enum Kind {
+        Crossed = 0x01,     ///< Restricted zone the mission enters
+        Unfenced = 0x02,    ///< Crossed prohibited zone which the fence doesn't exclude, with a fence supported
+        USpace = 0x04,      ///< U-space airspace the mission enters
+        Permitted = 0x08,   ///< No restriction zone the mission enters
+        Authorised = 0x10,  ///< Entered with an authorisation covering the flight, see GeoZoneAuthorisations
+        Contingency = 0x20, ///< Restricted zone only the returns from along the mission enter
+        Inactive = 0x40,    ///< Entered while not active during the flight
+    };
+    Q_ENUM(Kind)
+    Q_DECLARE_FLAGS(Kinds, Kind)
+
+    /// Zone the check lists. A zone entered while inactive can also have a contingency entry.
+    struct Entry {
+        const GeoZone *zone = nullptr;
+        Kinds kinds;
+        /// Labels of the paths besides the drawn flight path entering the zone when only those do, or of the
+        /// contingency paths entering it with the items they start from, like "a return to launch from items 3–7"
+        QStringList labels;
+        GeoZonePathEvaluator::Approximations approximations;    ///< Why the check of the zone entered is approximate
+
+        friend bool operator==(const Entry &a, const Entry &b) = default;
+    };
+
     MissionController *missionController() const;
     void setMissionController(MissionController *missionController);
 
-    /// Restricted zones the mission enters, most restrictive first
-    const QList<const GeoZone*> &crossedZones() const { return _crossedZones; }
-    QVariantList crossedZonesInfo() const { return GeoZoneInfo::toVariantList(_crossedZones); }
-    QString warningText() const;
-    const QList<const GeoZone*> &uSpaceZones() const { return _uSpaceZones; }
-    QVariantList uSpaceZonesInfo() const { return GeoZoneInfo::toVariantList(_uSpaceZones); }
-    const QList<const GeoZone*> &permittedZones() const { return _permittedZones; }
-    QVariantList permittedZonesInfo() const { return GeoZoneInfo::toVariantList(_permittedZones); }
-    const QList<const GeoZone*> &authorisedZones() const { return _authorisedZones; }
-    QVariantList authorisedZonesInfo() const { return GeoZoneInfo::toVariantList(_authorisedZones); }
+    /// Zones of each kind in the order of the evaluation, most restrictive first
+    const QList<Entry> &entries() const { return _entries; }
+    QVariantList zonesInfo() const;
+    /// @return The zones of the entries of the kind
+    QList<const GeoZone*> zones(Kind kind) const { return zones(_entries, kind); }
+    static QList<const GeoZone*> zones(const QList<Entry> &entries, Kind kind);
+    /// @return The first entry of the zone, null without
+    const Entry *entry(const GeoZone *zone) const;
+    /// Restricted zones the mission enters, with the paths entering them and the approximations
+    QString warningText() const { return warningText(_entries); }
+    static QString warningText(const QList<Entry> &entries);
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
-    int inactiveZoneCount() const { return _inactiveZoneCount; }
     bool flightNow() const { return _flightNow; }
     void setFlightNow(bool flightNow);
     GeoFenceController *geoFenceController() const;
     void setGeoFenceController(GeoFenceController *geoFenceController);
-    const QList<const GeoZone*> &unfencedZones() const { return _unfencedZones; }
-    QVariantList unfencedZonesInfo() const { return GeoZoneInfo::toVariantList(_unfencedZones); }
-    QString fenceText() const;
-    /// Restricted zones the returns from along the mission enter but the mission doesn't, most restrictive first
-    const QList<const GeoZone*> &contingencyZones() const { return _contingencyZones; }
-    QVariantList contingencyZonesInfo() const { return GeoZoneInfo::toVariantList(_contingencyZones); }
+    /// Names the unfenced zones
+    QString fenceText() const { return fenceText(_entries); }
+    static QString fenceText(const QList<Entry> &entries);
     /// Which returns from which items enter the contingency zones, like "A return to launch from items 3–7 would enter X."
     QString contingencyText() const;
-    /// @return Labels of the contingency paths entering the zone with the items they start from, like "a return to
-    ///         launch from items 3–7"
-    QStringList contingencyLabels(const GeoZone *zone) const { return _contingencyLabels.value(zone); }
 
     /// Zones the mission and the returns from along it enter, whether or not they apply then, see GeoZonePlanAudit
     const QList<const GeoZone*> &relevantZones() const { return _relevantZones; }
@@ -171,32 +184,18 @@ public:
     ///         start, on the calling thread without side effects, like setting the area of interest
     static Evaluation evaluatePlan(const GeoZoneManager *manager, MissionController *missionController);
 
-    /// Zones of an evaluation sorted by the policies of its flight, see the properties of the same names
-    struct Classification {
-        QList<const GeoZone*> crossedZones;
-        QList<const GeoZone*> uSpaceZones;
-        QList<const GeoZone*> permittedZones;
-        QList<const GeoZone*> authorisedZones;
-        QList<const GeoZone*> contingencyZones;
-        QHash<const GeoZone*, QStringList> contingencyLabels;
-        int inactiveZoneCount = 0;
-    };
-    /// @return The zones of the evaluation which apply during its flight, by restriction, authorised zones apart
-    static Classification classify(const Evaluation &evaluation, const GeoZoneAuthorisations *authorisations);
+    /// @return The zones of the evaluation by how they apply during its flight, unfenced ones only with a fence
+    static QList<Entry> classify(const Evaluation &evaluation, const GeoZoneAuthorisations *authorisations,
+                                 GeoFenceController *geoFenceController = nullptr);
     /// @return The labels of the contingency paths the evaluator result has entering zones while active, grouped by
     ///         label with the items they start from, like "a return to launch from items 3–7", by zone
     static QHash<const GeoZone*, QStringList> groupContingencies(const GeoZoneMissionPath &path, const GeoZonePathEvaluator::Result &result);
     /// @return Bounds of the flight path and pattern areas of the mission, invalid without, see GeoZoneManager::setMissionArea
     static QGeoRectangle missionArea(const GeoZoneMissionPath &path);
 
-    /// @return Labels of the paths besides the drawn flight path entering the zone, when only those do
-    QStringList pathLabels(const GeoZone *zone) const { return _pathLabels.value(zone); }
-    /// @return Why the check of the zone entered is approximate, see GeoZonePathEvaluator::Approximation
-    GeoZonePathEvaluator::Approximations approximations(const GeoZone *zone) const { return _approximations.value(zone); }
-
 signals:
     void missionControllerChanged();
-    void crossedZonesChanged();
+    void zonesChanged();
     void flightNowChanged();
     void geoFenceControllerChanged();
     void auditChanged();
@@ -222,18 +221,9 @@ private:
 
     GeoZoneManager *_manager = nullptr;
     GeoZoneMissionWorker *_worker = nullptr;    ///< Follows the mission, evaluates it and drops outdated results
-    QList<const GeoZone*> _crossedZones;
-    QList<const GeoZone*> _uSpaceZones;
-    QList<const GeoZone*> _permittedZones;
-    QList<const GeoZone*> _authorisedZones;
-    int _inactiveZoneCount = 0;
+    QList<Entry> _entries;
     bool _flightNow = false;
     QPointer<GeoFenceController> _geoFenceController;
-    QList<const GeoZone*> _unfencedZones;
-    QHash<const GeoZone*, QStringList> _pathLabels;
-    QHash<const GeoZone*, GeoZonePathEvaluator::Approximations> _approximations;
-    QList<const GeoZone*> _contingencyZones;
-    QHash<const GeoZone*, QStringList> _contingencyLabels;
     QList<const GeoZone*> _relevantZones;
     GeoZoneBox _area;
     QString _auditText;
@@ -246,3 +236,5 @@ private:
 
     static constexpr int _updateDelayMSecs = 500;
 };
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(GeoZoneMissionCheck::Kinds)

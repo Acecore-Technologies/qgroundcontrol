@@ -37,7 +37,12 @@ Rectangle {
     property real           rightLimit: parent ? parent.width : 0
 
     readonly property alias missionCheck:   check
-    readonly property var   crossedZones:   check.crossedZones
+    readonly property var   crossedZones:   zones(GeoZoneMissionCheck.Crossed)  ///< GeoZoneInfo of the restricted zones the mission enters
+
+    /// @return GeoZoneInfo of the zones the mission check lists with any of the kinds, see GeoZoneMissionCheck::Kind
+    function zones(kind) {
+        return check.zones.filter(entry => entry.kind & kind).map(entry => entry.zone)
+    }
 
     // Outdated data, like an old list of temporary restrictions, can miss zones the mission enters
     readonly property string _outdatedText: GeoZoneManager.validityWarning !== "" ?
@@ -275,7 +280,7 @@ Rectangle {
             anchors.horizontalCenter:   parent.horizontalCenter
             text:                       qsTr("Add Exclusion Fences")
             visible:                    fenceLabel.visible
-            onClicked:                  fenceImporter.addZones(check.unfencedZones)
+            onClicked:                  fenceImporter.addZones(control.zones(GeoZoneMissionCheck.Unfenced))
         }
 
         Row {

@@ -52,19 +52,19 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
     QJsonArray authorisations;
     if (planController && (audit || (manager->planning()->authorisations()->count() > 0))) {
         MissionController *const missionController = planController->missionController();
-        QList<const GeoZone*> authorisedZones;
+        QList<GeoZoneMissionCheck::Entry> entries;
         GeoZonePlanAudit::Record record;
         // The Plan View checks the mission as it changes, otherwise it is evaluated here, without the side effects of a
         // check like downloading the zones around it
         if (const GeoZoneMissionCheck *const check = GeoZoneMissionCheck::settledCheck(manager, missionController)) {
-            authorisedZones = check->authorisedZones();
+            entries = check->entries();
             record = check->auditRecord();
         } else {
             const GeoZoneMissionCheck::Evaluation evaluation = GeoZoneMissionCheck::evaluatePlan(manager, missionController);
-            authorisedZones = GeoZoneMissionCheck::classify(evaluation, manager->planning()->authorisations()).authorisedZones;
+            entries = GeoZoneMissionCheck::classify(evaluation, manager->planning()->authorisations());
             record = GeoZoneMissionCheck::auditRecord(manager, evaluation.relevantZones, evaluation.area);
         }
-        for (const GeoZone *zone : std::as_const(authorisedZones)) {
+        for (const GeoZone *zone : GeoZoneMissionCheck::zones(entries, GeoZoneMissionCheck::Authorised)) {
             if (const GeoZoneAuthorisation *const authorisation = manager->planning()->authorisations()->find(zone)) {
                 authorisations.append(authorisation->toJson());
             }
