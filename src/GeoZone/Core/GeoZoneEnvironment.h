@@ -32,7 +32,7 @@ inline constexpr double kMaxQnhHPa = 1100;
 struct SourceSettings {
     int feedRefreshHours = 24;
     int liveFeedRefreshMinutes = 15;    ///< Feeds of temporary restrictions, see GeoZoneSource::isLive
-    int staleDays = 28;
+    int staleDays = 7;
 };
 
 struct Hooks {

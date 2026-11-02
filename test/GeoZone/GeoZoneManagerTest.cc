@@ -1076,8 +1076,8 @@ void GeoZoneManagerTest::_testSourceValidity()
     result.format = GeoZoneParser::Format::ED269;
     const QDateTime now = environment.now();
 
-    // Without an issue date the file date counts
-    source.setResult(result, now, now.addDays(-10));
+    // Without an issue date the file date counts, outdated after 7 days by default
+    source.setResult(result, now, now.addDays(-5));
     QVERIFY(source.validityText().isEmpty());
     source.setResult(result, now, now.addDays(-30));
     QCOMPARE(source.validityText(), QStringLiteral("Data is 30 days old"));
@@ -2688,7 +2688,7 @@ void GeoZoneManagerTest::_testSettings()
     const QGeoCoordinate center(47, 8);
     const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) });
     QFile file(fileName);
-    QVERIFY(file.open(QIODevice::ReadWrite) && file.setFileTime(environment.now().addDays(-10), QFileDevice::FileModificationTime));
+    QVERIFY(file.open(QIODevice::ReadWrite) && file.setFileTime(environment.now().addDays(-5), QFileDevice::FileModificationTime));
     file.close();
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
@@ -2702,10 +2702,10 @@ void GeoZoneManagerTest::_testSettings()
     manager.display()->setVisible(true);
     QVERIFY(settings->showZones()->rawValue().toBool());
 
-    // Outdated data is reported at the configured age
+    // Outdated data is reported at the configured age, 7 days by default
     QVERIFY(manager.repository()->validityWarning().isEmpty());
-    settings->staleDays()->setRawValue(7);
-    QCOMPARE(manager.repository()->validityWarning(), QStringLiteral("zones.json: Data is 10 days old"));
+    settings->staleDays()->setRawValue(3);
+    QCOMPARE(manager.repository()->validityWarning(), QStringLiteral("zones.json: Data is 5 days old"));
 
     // Feeds are refreshed at the configured intervals
     GeoZoneSource feed(QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://example.com/zones.json"));

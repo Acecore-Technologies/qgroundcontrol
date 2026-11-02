@@ -126,7 +126,7 @@
     "units":        "days",
     "min":          1,
     "max":          365,
-    "default":      28
+    "default":      7
 },
 {
     "name":         "followAreaOfInterest",
