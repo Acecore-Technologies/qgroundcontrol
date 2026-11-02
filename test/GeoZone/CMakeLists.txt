@@ -20,10 +20,15 @@ set(GEOZONE_CORE_TESTS
     GeoZoneRouteTest
 )
 set(GEOZONE_APP_TESTS
+    GeoZoneFenceImportTest
     GeoZoneFlightTest
     GeoZoneManagerTest
     GeoZoneMonitorTest
+    GeoZonePackTest
     GeoZonePlanningTest
+    GeoZoneRepositoryTest
+    GeoZoneRoutePlannerTest
+    GeoZoneServiceTest
 )
 
 target_sources(${CMAKE_PROJECT_NAME}

@@ -31,14 +31,9 @@ private slots:
 
     void _testGuidedPathWarning();
     void _testApproximationReports();
-    void _testFenceExcludes();
     void _testAntimeridianProfile();
     void _testMissionCheck();
     void _testMissionControllerSwitch();
-    void _testMissionCoverage();
-    void _testMissionJumps();
-    void _testMissionContingencies();
-    void _testMissionReturnParameters();
     void _testAuthorisations();
     void _testNotifications();
     void _testBriefingDocuments();
@@ -48,15 +43,8 @@ private slots:
     void _testPlanSave();
     void _testUploadReasons();
     void _testPlannedStartPerPlan();
-    void _testRoutePlanner();
-    void _testRoutePlannerWorker();
     void _testProfileBands();
-    void _testGeoFenceImport();
     void _testOperatorZones();
-    void _testGeoFenceSelection();
-    void _testGeoFenceStale();
-    void _testGeoFenceUpload();
-    void _testGeoFenceUploadChanges();
     void _testMapModel();
     void _testMapModelShapeLimit();
     void _testMapModelLabels();

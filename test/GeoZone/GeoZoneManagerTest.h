@@ -11,44 +11,13 @@
 
 #include "UnitTest.h"
 
+/// Tests of GeoZoneManager: its startup, its settings, the labels and search of its zones, the snapshots of its catalog
+/// and the zones several sources publish
 class GeoZoneManagerTest : public UnitTest
 {
     Q_OBJECT
 
 private slots:
-    void _testManagerLoadPersistClear();
-    void _testManagerStoreFailures();
-    void _testManagerBackgroundLoad();
-    void _testFeedNotModified();
-    void _testFeedDatasetLink();
-    void _testWfsPaging();
-    void _testArcGisPaging();
-    void _testOpenAipService();
-    void _testFeedCompanions();
-    void _testFeedFetchFormatCompanions();
-    void _testFeedCancellation();
-    void _testRefreshScheduler();
-    void _testReloadChanges();
-    void _testAiracCycles_data();
-    void _testAiracCycles();
-    void _testAiracExpiry();
-    void _testSourceValidity();
-    void _testDownloadSizeLimit();
-    void _testDownloadFailures();
-    void _testDownloadRedirects();
-    void _testServiceApiKeys();
-    void _testServiceOAuth2();
-    void _testEd318Service();
-    void _testServiceAreaOfInterest();
-    void _testMapViewAreaOfInterest();
-    void _testProvenance();
-    void _testIntegrity();
-    void _testOfflinePack();
-    void _testPackServiceTrust();
-    void _testStoredFileNames();
-    void _testCredentials();
-    void _testSignedPacks();
-    void _testPacksWithoutSigning();
     void _testManagerStartup();
     void _testSettings();
     void _testLabelZonesLimit();
