@@ -13,7 +13,6 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtPositioning
 
-import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.GeoZone
 import QGroundControl.Palette
@@ -70,10 +69,6 @@ QGCPopupDialog {
         function onZonesChanged()   { selectionTimer.restart() }
     }
 
-    function _horizontalDistanceText(meters) {
-        const distance = QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)
-        return Math.round(distance) + " " + QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
-    }
 
     function _restrictions() {
         const restrictions = []
@@ -102,7 +97,7 @@ QGCPopupDialog {
         if (choice.selected) {
             parts.push(qsTr("%n point(s)", "", choice.points))
             if (choice.simplifyTolerance > 0) {
-                parts.push(qsTr("simplified %1").arg(_horizontalDistanceText(choice.simplifyTolerance)))
+                parts.push(qsTr("simplified %1").arg(GeoZoneStyle.horizontalText(choice.simplifyTolerance)))
             }
         } else {
             parts.push(choice.reason)
@@ -276,7 +271,7 @@ QGCPopupDialog {
                 id:                 simplifyCombo
                 Layout.fillWidth:   true
                 currentIndex:       3
-                model:              tolerances.map(meters => meters === 0 ? qsTr("Off") : control._horizontalDistanceText(meters))
+                model:              tolerances.map(meters => meters === 0 ? qsTr("Off") : GeoZoneStyle.horizontalText(meters))
                 onActivated:        selectionTimer.restart()
 
                 readonly property var tolerances: [ 0, 10, 25, 50, 100, 250 ]

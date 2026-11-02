@@ -11,7 +11,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 
-import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.GeoZone
 import QGroundControl.Palette
@@ -146,14 +145,7 @@ Item {
 
     function _heightText(altitude) {
         // Above the ground when it is known, as the zone limits mostly are
-        const height = isNaN(_terrain) ? altitude : altitude - _terrain
-        return Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(height)) + " " +
-                QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsString + (isNaN(_terrain) ? qsTr(" AMSL") : "")
-    }
-
-    function _distanceText(meters) {
-        return Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(meters)) + " " +
-                QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsString
+        return isNaN(_terrain) ? GeoZoneStyle.verticalText(altitude, qsTr("AMSL")) : GeoZoneStyle.verticalText(altitude - _terrain)
     }
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
@@ -163,22 +155,6 @@ Item {
         text:           "X"
         font.pointSize: ScreenTools.smallFontPointSize
         visible:        false
-    }
-
-    component Badge: Rectangle {
-        property alias text: badgeLabel.text
-
-        width:  badgeLabel.contentWidth + ScreenTools.defaultFontPixelWidth
-        height: badgeLabel.contentHeight + 2
-        radius: height / 2
-
-        QGCLabel {
-            id:                 badgeLabel
-            anchors.centerIn:   parent
-            font.pointSize:     ScreenTools.smallFontPointSize
-            font.bold:          true
-            color:              "black"
-        }
     }
 
     // Collapsed: what the vehicle is in, without limits near it
@@ -220,7 +196,7 @@ Item {
             QGCLabel {
                 width:          Math.min(implicitWidth, chipColumn._maxWidth)
                 text:           control._insideBand ? qsTr("In %1").arg(control._names(control._insideBand)) :
-                                                      qsTr("No limit within %1").arg(control._distanceText(control._reach))
+                                                      qsTr("No limit within %1").arg(GeoZoneStyle.verticalText(control._reach))
                 font.pointSize: ScreenTools.smallFontPointSize
                 textFormat:     Text.PlainText
                 elide:          Text.ElideRight
@@ -267,13 +243,13 @@ Item {
                 spacing:    control._margin
                 visible:    control._stale || control._degraded
 
-                Badge {
+                GeoZoneBadge {
                     text:       qsTr("Stale")
                     color:      qgcPal.colorOrange
                     visible:    control._stale
                 }
 
-                Badge {
+                GeoZoneBadge {
                     text:       qsTr("AGL estimated")
                     color:      qgcPal.colorYellow
                     visible:    control._degraded
@@ -294,7 +270,7 @@ Item {
             y:          control._y(control._terrain)
             width:      control._barWidth
             height:     Math.max(0, control._plotTop + control._plotHeight - y)
-            color:      Qt.rgba(0.45, 0.35, 0.2, 0.8)
+            color:      GeoZoneStyle.terrainColor
             visible:    !isNaN(control._terrain) && y < control._plotTop + control._plotHeight
         }
 

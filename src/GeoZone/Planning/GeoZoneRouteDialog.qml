@@ -31,15 +31,6 @@ QGCPopupDialog {
     // Narrower on small screens, so that the texts wrap rather than scroll sideways
     readonly property real _width: Math.min(ScreenTools.defaultFontPixelWidth * 64, mainWindow.width - ScreenTools.defaultFontPixelWidth * 8)
 
-    function _horizontalText(meters) {
-        return Math.round(QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)) + " " +
-               QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
-    }
-
-    function _verticalText(meters) {
-        return Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(meters)) + " " +
-               QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsString
-    }
 
     GeoZoneRoutePlanner {
         id:                 planner
@@ -59,7 +50,7 @@ QGCPopupDialog {
             text:                   planner.suggestions.length === 0 ?
                                         qsTr("No leg between waypoints enters a restricted geozone.") :
                                         qsTr("Detours keep %1 from the zones at the altitudes of the leg, climbs and descents keep %2 from their limits. The cheapest way of each leg is recommended. Check the new waypoints, altitudes, terrain and obstacles before flying.")
-                                            .arg(root._horizontalText(planner.margin)).arg(root._verticalText(planner.verticalMargin))
+                                            .arg(GeoZoneStyle.horizontalText(planner.margin)).arg(GeoZoneStyle.verticalText(planner.verticalMargin))
         }
 
         RowLayout {
@@ -163,7 +154,7 @@ QGCPopupDialog {
                     }
 
                     QGCButton {
-                        text:       qsTr("Allow Climb to %1").arg(root._verticalText(suggestionColumn.modelData.suggestedMaxAltitude))
+                        text:       qsTr("Allow Climb to %1").arg(GeoZoneStyle.verticalText(suggestionColumn.modelData.suggestedMaxAltitude))
                         visible:    suggestionColumn._noRoute && suggestionColumn._canAllowClimb
                         onClicked:  planner.maxAltitude = suggestionColumn.modelData.suggestedMaxAltitude
                     }
@@ -192,7 +183,7 @@ QGCPopupDialog {
 
                 QGCButton {
                     Layout.leftMargin:  ScreenTools.defaultFontPixelWidth * 2
-                    text:               qsTr("Allow Climb to %1").arg(root._verticalText(suggestionColumn.modelData.suggestedMaxAltitude))
+                    text:               qsTr("Allow Climb to %1").arg(GeoZoneStyle.verticalText(suggestionColumn.modelData.suggestedMaxAltitude))
                     visible:            suggestionColumn._showReasons && !suggestionColumn._noRoute && suggestionColumn._canAllowClimb
                     onClicked:          planner.maxAltitude = suggestionColumn.modelData.suggestedMaxAltitude
                 }

@@ -53,62 +53,39 @@ Item {
         opacity:            (control._monitor.monitoring && control._active?.positionUnavailable !== true) ? 1 : 0.5
     }
 
+    component IconBadge: GeoZoneBadge {
+        height:         ScreenTools.defaultFontPixelHeight * 0.9
+        minimumWidth:   height
+    }
+
     // The nearby zones are those of the last known position
-    Rectangle {
+    IconBadge {
         anchors.bottom: parent.bottom
         anchors.right:  geoZoneIcon.right
-        height:         ScreenTools.defaultFontPixelHeight * 0.9
-        width:          height
-        radius:         height / 2
+        text:           "?"
         color:          qgcPal.colorOrange
         visible:        control._stale
-
-        QGCLabel {
-            anchors.centerIn:   parent
-            text:               "?"
-            color:              "black"
-            font.bold:          true
-            font.pointSize:     ScreenTools.smallFontPointSize
-        }
     }
 
     // Some data may be outdated (yellow), or treated as invalid when outdated (red, its zones still apply), see
     // GeoZoneSourceRepository::dataInvalid; the page details them
-    Rectangle {
+    IconBadge {
         anchors.bottom: parent.bottom
         anchors.left:   geoZoneIcon.left
-        height:         ScreenTools.defaultFontPixelHeight * 0.9
-        width:          height
-        radius:         height / 2
+        text:           "!"
+        textColor:      GeoZoneManager.repository.dataInvalid ? "white" : "black"
         color:          GeoZoneManager.repository.dataInvalid ? qgcPal.colorRed : qgcPal.colorYellow
         visible:        control._outdated || GeoZoneManager.repository.dataInvalid
-
-        QGCLabel {
-            anchors.centerIn:   parent
-            text:               "!"
-            color:              GeoZoneManager.repository.dataInvalid ? "white" : "black"
-            font.bold:          true
-            font.pointSize:     ScreenTools.smallFontPointSize
-        }
     }
 
     // Alerts not acknowledged in the alert history
-    Rectangle {
+    IconBadge {
         anchors.top:    parent.top
         anchors.right:  geoZoneIcon.right
-        height:         ScreenTools.defaultFontPixelHeight * 0.9
-        width:          Math.max(height, badgeLabel.contentWidth + (height / 2))
-        radius:         height / 2
+        text:           control._history.unacknowledgedCount
+        textColor:      "white"
         color:          qgcPal.colorRed
         visible:        control._history.unacknowledgedCount > 0
-
-        QGCLabel {
-            id:                 badgeLabel
-            anchors.centerIn:   parent
-            text:               control._history.unacknowledgedCount
-            color:              "white"
-            font.pointSize:     ScreenTools.smallFontPointSize
-        }
     }
 
     MouseArea {

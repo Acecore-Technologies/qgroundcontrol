@@ -39,16 +39,6 @@ ToolIndicatorPage {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
     }
 
-    function _distanceText(meters) {
-        return Math.round(QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)) + " " +
-                QGroundControl.unitsConversion.appSettingsHorizontalDistanceUnitsString
-    }
-
-    function _altitudeText(meters) {
-        return isNaN(meters) ? "" : qsTr("%1 %2 AMSL").arg(Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(meters)))
-                                                     .arg(QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsString)
-    }
-
     QGCPalette { id: qgcPal }
 
     contentComponent: Component {
@@ -94,7 +84,7 @@ ToolIndicatorPage {
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth
                 heading:            qsTr("Nearby Geozones")
-                headingDescription: qsTr("Active restricted and U-space zones within %1 of the active vehicle, or reached within %2 s at its velocity.").arg(control._distanceText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
+                headingDescription: qsTr("Active restricted and U-space zones within %1 of the active vehicle, or reached within %2 s at its velocity.").arg(GeoZoneStyle.horizontalText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
 
                 QGCLabel {
                     text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
@@ -119,21 +109,10 @@ ToolIndicatorPage {
                     spacing:            ScreenTools.defaultFontPixelWidth
                     visible:            control._stale
 
-                    Rectangle {
-                        Layout.alignment:       Qt.AlignTop
-                        Layout.preferredWidth:  staleLabel.contentWidth + ScreenTools.defaultFontPixelWidth
-                        Layout.preferredHeight: staleLabel.contentHeight + 2
-                        radius:                 height / 2
-                        color:                  qgcPal.colorOrange
-
-                        QGCLabel {
-                            id:                 staleLabel
-                            anchors.centerIn:   parent
-                            text:               qsTr("Stale")
-                            color:              "black"
-                            font.bold:          true
-                            font.pointSize:     ScreenTools.smallFontPointSize
-                        }
+                    GeoZoneBadge {
+                        Layout.alignment:   Qt.AlignTop
+                        text:               qsTr("Stale")
+                        color:              qgcPal.colorOrange
                     }
 
                     QGCLabel {
@@ -207,8 +186,8 @@ ToolIndicatorPage {
 
                         QGCLabel {
                             text: nearbyRow.inside ? qsTr("Inside") :
-                                      (nearbyRow.timeToEntry >= 0 ? qsTr("%1, entry in %2 s").arg(control._distanceText(nearbyRow.distance)).arg(nearbyRow.timeToEntry) :
-                                                                    control._distanceText(nearbyRow.distance))
+                                      (nearbyRow.timeToEntry >= 0 ? qsTr("%1, entry in %2 s").arg(GeoZoneStyle.horizontalText(nearbyRow.distance)).arg(nearbyRow.timeToEntry) :
+                                                                    GeoZoneStyle.horizontalText(nearbyRow.distance))
                         }
 
                         QGCLabel {
@@ -223,7 +202,7 @@ ToolIndicatorPage {
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth
                 heading:            qsTr("Traffic in or near Geozones")
-                headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(control._distanceText(control._monitor.trafficRadius))
+                headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(GeoZoneStyle.horizontalText(control._monitor.trafficRadius))
                 visible:            control._geoZoneSettings.trafficEnabled.rawValue && control._monitor.monitoring
 
                 QGCLabel {
@@ -262,11 +241,11 @@ ToolIndicatorPage {
                         }
 
                         QGCLabel {
-                            text: trafficRow.modelData.inside ? qsTr("Inside") : control._distanceText(trafficRow.modelData.distance)
+                            text: trafficRow.modelData.inside ? qsTr("Inside") : GeoZoneStyle.horizontalText(trafficRow.modelData.distance)
                         }
 
                         QGCLabel {
-                            text:           control._altitudeText(trafficRow.modelData.altitude)
+                            text:           GeoZoneStyle.verticalText(trafficRow.modelData.altitude, qsTr("AMSL"))
                             font.pointSize: ScreenTools.smallFontPointSize
                         }
                     }
