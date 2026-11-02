@@ -104,7 +104,7 @@
 {
     "name":         "trafficEnabled",
     "shortDesc":    "Check traffic against geozones",
-    "longDesc":     "List the ADS-B and Remote ID aircraft received by QGroundControl within 10 km of the active vehicle which are in or near active geozones, and show an alert when one enters a zone.",
+    "longDesc":     "List the ADS-B and Remote ID aircraft received by QGroundControl within 10 km of the active vehicle which are in or near active geozones while flight alerts are on, and show an alert when one enters a zone.",
     "type":         "bool",
     "default":      false
 },

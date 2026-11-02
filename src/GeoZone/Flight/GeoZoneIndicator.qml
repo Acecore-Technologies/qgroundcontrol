@@ -32,7 +32,6 @@ Item {
 
     readonly property var _monitor:         GeoZoneMonitor
     readonly property var _active:          GeoZoneMonitor.activeVehicle     ///< GeoZoneVehicleMonitor, null without
-    readonly property var _traffic:         GeoZoneMonitor.traffic
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
     readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
@@ -252,15 +251,15 @@ Item {
                         Layout.preferredWidth:  control._pageWidth
                         heading:            qsTr("Traffic in or near Geozones")
                         headingDescription: qsTr("ADS-B and Remote ID aircraft within %1 of the active vehicle which are in or near active zones.").arg(control._distanceText(control._monitor.trafficRadius))
-                        visible:            control._traffic.enabled
+                        visible:            control._geoZoneSettings.trafficEnabled.rawValue && control._monitor.monitoring
 
                         QGCLabel {
                             text:       qsTr("No traffic in or near zones")
-                            visible:    control._traffic.count === 0
+                            visible:    control._monitor.traffic.length === 0
                         }
 
                         Repeater {
-                            model: control._traffic.aircraft
+                            model: control._monitor.traffic
 
                             RowLayout {
                                 id:                 trafficRow

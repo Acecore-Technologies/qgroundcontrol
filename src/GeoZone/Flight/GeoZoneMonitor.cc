@@ -15,19 +15,23 @@
 #include "GeoZoneAlertHistory.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneGuidedCheck.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSource.h"
+#include "GeoZoneTerrain.h"
 #include "MultiVehicleManager.h"
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
 
+#include <QtCore/QtMath>
 #include <QtCore/qapplicationstatic.h>
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 QGC_LOGGING_CATEGORY(GeoZoneMonitorLog, "qgc.geozone.geozonemonitor")
 
@@ -50,18 +54,11 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     _alertHistory->startLog();
     _audioSink = std::make_shared<ApplicationAudioSink>();
 
-    // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate
+    // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate, with the traffic
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
     (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::evaluateVehicles);
     (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateEvaluateTimer);
-
-    // The traffic is checked less often than the vehicles, it changes slower relative to the zones
     _adsbTraffic = true;
-    _trafficTimer.setInterval(GeoZoneTrafficMonitor::evaluateIntervalMSecs);
-    (void) connect(&_trafficTimer, &QTimer::timeout, this, &GeoZoneMonitor::_evaluateADSBTraffic);
-    (void) connect(_traffic, &GeoZoneTrafficMonitor::enabledChanged, this, &GeoZoneMonitor::_updateTrafficTimer);
-    (void) connect(this, &GeoZoneMonitor::monitoringChanged, this, &GeoZoneMonitor::_updateTrafficTimer);
-    _updateTrafficTimer();
 
     MultiVehicleManager *const multiVehicleManager = MultiVehicleManager::instance();
     (void) connect(multiVehicleManager, &MultiVehicleManager::vehicleAdded, this, &GeoZoneMonitor::addVehicle);
@@ -76,7 +73,6 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
-    , _traffic(new GeoZoneTrafficMonitor(this))
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
 {
@@ -101,7 +97,6 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
                               settings->trafficEnabled() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMonitor::_applicationSettingsChanged);
     }
-    _traffic->setEnabled(this->settings().trafficEnabled);
 }
 
 GeoZoneMonitor *GeoZoneMonitor::instance()
@@ -156,7 +151,9 @@ void GeoZoneMonitor::_settingsChanged(const Settings &previous)
         _resetMonitors();
         emit monitoringChanged();
     }
-    _traffic->setEnabled(settings().trafficEnabled);
+    if (!settings().trafficEnabled) {
+        _clearTraffic();
+    }
 }
 
 void GeoZoneMonitor::_resetMonitors()
@@ -282,29 +279,30 @@ void GeoZoneMonitor::_resolveActive()
     }
 }
 
-void GeoZoneMonitor::_updateTrafficTimer()
+QString GeoZoneMonitor::Aircraft::label() const
 {
-    if (_adsbTraffic && _traffic->enabled() && (_manager->zoneCount() > 0)) {
-        if (!_trafficTimer.isActive()) {
-            _trafficTimer.start();
+    // Callsigns are padded, some senders with null characters
+    QString printable;
+    for (const QChar character : callsign) {
+        if (character.isPrint()) {
+            printable.append(character);
         }
-    } else {
-        _trafficTimer.stop();
-        _traffic->clear();
     }
+    printable = printable.trimmed();
+    return printable.isEmpty() ? QStringLiteral("%1").arg(address, 6, 16, QLatin1Char('0')).toUpper() : printable;
 }
 
 void GeoZoneMonitor::_evaluateADSBTraffic()
 {
     const QmlObjectListModel *const adsbVehicles = ADSBVehicleManager::instance()->adsbVehicles();
-    QList<GeoZoneTrafficMonitor::Aircraft> aircraft;
+    QList<Aircraft> aircraft;
     aircraft.reserve(adsbVehicles->count());
     for (int i = 0; i < adsbVehicles->count(); i++) {
         const ADSBVehicle *const adsbVehicle = adsbVehicles->value<const ADSBVehicle*>(i);
         if (!adsbVehicle) {
             continue;
         }
-        GeoZoneTrafficMonitor::Aircraft plane;
+        Aircraft plane;
         plane.address = adsbVehicle->icaoAddress();
         plane.callsign = adsbVehicle->callsign();
         plane.coordinate = adsbVehicle->coordinate();
@@ -316,29 +314,110 @@ void GeoZoneMonitor::_evaluateADSBTraffic()
     evaluateTraffic(aircraft);
 }
 
-void GeoZoneMonitor::evaluateTraffic(const QList<GeoZoneTrafficMonitor::Aircraft> &aircraft)
+void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
 {
     // The traffic around the active vehicle, where it is now
     const GeoZoneVehicleMonitor *const active = _activeMonitor;
-    if (!active || active->positionUnavailable() || !active->position().coordinate.isValid()) {
-        _traffic->clear();
+    if (!settings().trafficEnabled || !active || active->positionUnavailable() || !active->position().coordinate.isValid()) {
+        _clearTraffic();
         return;
     }
-    const QList<GeoZoneTrafficMonitor::Entry> entries = _traffic->evaluate(aircraft, active->position(), trafficRadius(), _context());
-    if (!settings().alertsEnabled) {
-        return;
+    const GeoZone::Position &center = active->position();
+    const GeoZoneVehicleMonitor::Context context = _context();
+
+    // The closest aircraft within the radius
+    QList<std::pair<double, const Aircraft*>> nearby;
+    for (const Aircraft &candidate : aircraft) {
+        if (!candidate.coordinate.isValid()) {
+            continue;
+        }
+        const double distance = center.coordinate.distanceTo(candidate.coordinate);
+        if (distance <= trafficRadius()) {
+            nearby.append({ distance, &candidate });
+        }
     }
-    for (const GeoZoneTrafficMonitor::Entry &entry : entries) {
-        _raiseTraffic(entry);
+    std::sort(nearby.begin(), nearby.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+    if (nearby.count() > maxTrafficAircraft) {
+        nearby.resize(maxTrafficAircraft);
+    }
+
+    // Aircraft beyond the radius or gone are forgotten, so they alert again when they come back
+    QHash<quint32, GeoZoneAlertTracker> trackers;
+    QList<ZoneTraffic> traffic;
+    QList<AlertEvent> entries;
+    for (const auto &[distance, plane] : std::as_const(nearby)) {
+        Q_UNUSED(distance);
+        GeoZoneAlertTracker tracker = _trafficTrackers.take(plane->address);
+        // Without terrain data below the aircraft, the ground below the active vehicle is closer than none, which
+        // would put aircraft at any height into zones limited above the ground
+        GeoZone::Position position{ plane->coordinate, plane->coordinate.altitude(), GeoZoneTerrain::elevationAt(plane->coordinate) };
+        if (std::isnan(position.terrainAMSL)) {
+            position.terrainAMSL = center.terrainAMSL;
+        }
+        GeoZoneAlertTracker::Velocity velocity;
+        if (!std::isnan(plane->heading) && !std::isnan(plane->speed)) {
+            const double heading = qDegreesToRadians(plane->heading);
+            velocity = GeoZoneAlertTracker::Velocity{ plane->speed * std::cos(heading), plane->speed * std::sin(heading), plane->verticalSpeed, true };
+        }
+        const GeoZoneAlertTracker::Update update = tracker.update(*context.catalog, context.policy, position, velocity, context.limits);
+        for (const GeoZoneAlertTracker::Alert &zoneAlert : update.alerts) {
+            if (zoneAlert.inside && settings().alertsEnabled) {
+                entries.append(_alertEvent(zoneAlert.zone, AlertEvent::Traffic, true, 0, qQNaN(), position, noVehicle, plane->label()));
+            }
+        }
+        if (!update.nearby.isEmpty()) {
+            traffic.append(ZoneTraffic{ *plane, update.nearby.constFirst() });
+        }
+        trackers.insert(plane->address, std::move(tracker));
+    }
+    _trafficTrackers = std::move(trackers);
+
+    // Inside first, then the most restrictive zones, then the closest
+    std::stable_sort(traffic.begin(), traffic.end(), [](const ZoneTraffic &a, const ZoneTraffic &b) {
+        if (a.nearby.inside != b.nearby.inside) {
+            return a.nearby.inside;
+        }
+        const int severityA = GeoZone::restrictionSeverity(a.nearby.zone->restriction());
+        const int severityB = GeoZone::restrictionSeverity(b.nearby.zone->restriction());
+        return (severityA != severityB) ? (severityA < severityB) : (a.nearby.distance < b.nearby.distance);
+    });
+    _setTraffic(traffic);
+
+    // Not about a vehicle, so neither spoken, repeated nor muted with a zone
+    for (const AlertEvent &event : std::as_const(entries)) {
+        emit alertEvent(event);
+        emit alert(event.message, trafficSeverity + GeoZone::restrictionSeverity(event.restriction), event.id);
     }
 }
 
-void GeoZoneMonitor::_raiseTraffic(const GeoZoneTrafficMonitor::Entry &entry)
+void GeoZoneMonitor::_setTraffic(const QList<ZoneTraffic> &traffic)
 {
-    // Not about a vehicle, so neither spoken, repeated nor muted with a zone
-    const AlertEvent event = _alertEvent(entry.zone, AlertEvent::Traffic, true, 0, qQNaN(), entry.position, noVehicle, entry.aircraft.label());
-    emit alertEvent(event);
-    emit alert(event.message, trafficSeverity + GeoZone::restrictionSeverity(event.restriction), event.id);
+    if (traffic.isEmpty() && _traffic.isEmpty()) {
+        return;
+    }
+    _traffic = traffic;
+    emit trafficChanged();
+}
+
+void GeoZoneMonitor::_clearTraffic()
+{
+    _trafficTrackers.clear();
+    _setTraffic({});
+}
+
+QVariantList GeoZoneMonitor::traffic() const
+{
+    QVariantList aircraft;
+    for (const ZoneTraffic &traffic : _traffic) {
+        aircraft.append(QVariantMap{
+            { QStringLiteral("callsign"), traffic.aircraft.label() },
+            { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(traffic.nearby.zone)) },
+            { QStringLiteral("inside"), traffic.nearby.inside },
+            { QStringLiteral("distance"), traffic.nearby.distance },
+            { QStringLiteral("altitude"), traffic.aircraft.coordinate.altitude() },
+        });
+    }
+    return aircraft;
 }
 
 void GeoZoneMonitor::_updateEvaluateTimer()
@@ -350,6 +429,7 @@ void GeoZoneMonitor::_updateEvaluateTimer()
         }
     } else {
         _evaluateTimer.stop();
+        _clearTraffic();
     }
 }
 
@@ -361,6 +441,9 @@ void GeoZoneMonitor::evaluateVehicles()
         if (monitor && monitor->followsVehicle() && _monitors.contains(monitor)) {
             _raise(monitor, monitor->update(context));
         }
+    }
+    if (_adsbTraffic && settings().trafficEnabled) {
+        _evaluateADSBTraffic();
     }
     _announce();
 }
@@ -602,7 +685,10 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
     for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
         monitor->forgetZones(source->key());
     }
-    _traffic->forgetZones(source->key());
+    QList<ZoneTraffic> traffic = _traffic;
+    if (traffic.removeIf([source](const ZoneTraffic &zoneTraffic) { return zoneTraffic.nearby.zone->sourceKey() == source->key(); }) > 0) {
+        _setTraffic(traffic);
+    }
 }
 
 void GeoZoneMonitor::_zonesChanged(GeoZoneSource *source)

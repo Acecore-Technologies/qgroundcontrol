@@ -343,7 +343,7 @@ When the active vehicle would enter a zone within the approach alert time at its
 
 ### Traffic in Geozones {#traffic}
 
-With **Check traffic against geozones** on, the ADS-B and Remote ID aircraft received by _QGroundControl_ (see _Application Settings > ADSB Server_ and vehicles forwarding `ADSB_VEHICLE`) within 10 km of the active vehicle are checked against the active zones every 2 seconds, like the vehicles, using the altitude they report. The expanded geozone indicator lists the aircraft in or near zones in a **Traffic in or near Geozones** section, with their callsign (or ICAO address), the most restrictive zone, whether they are inside or how far from it, and their altitude. Without terrain data below an aircraft, the ground below the active vehicle is used for limits above the ground. The closest 100 aircraft are checked.
+With **Check traffic against geozones** on, the ADS-B and Remote ID aircraft received by _QGroundControl_ (see _Application Settings > ADSB Server_ and vehicles forwarding `ADSB_VEHICLE`) within 10 km of the active vehicle are checked against the active zones with the vehicles every second while flight alerts are on, using the altitude they report. The expanded geozone indicator lists the aircraft in or near zones in a **Traffic in or near Geozones** section, with their callsign (or ICAO address), the most restrictive zone, whether they are inside or how far from it, and their altitude. Without terrain data below an aircraft, the ground below the active vehicle is used for limits above the ground. The closest 100 aircraft are checked.
 
 When an aircraft enters a zone, a low priority alert "Traffic ... entered geozone ..." is shown after the alerts of the vehicles and logged, but not spoken.
 

@@ -1261,32 +1261,30 @@ void GeoZoneMonitorTest::_testTraffic()
     settings.limits.verticalDistance = 30;
     settings.trafficEnabled = true;
     monitor.setSettings(settings);
-    GeoZoneTrafficMonitor *const traffic = monitor.traffic();
-    QVERIFY(traffic->enabled());
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
     QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
 
     const auto aircraft = [](quint32 address, const QString &callsign, const QGeoCoordinate &coordinate, double altitude) {
-        GeoZoneTrafficMonitor::Aircraft plane;
+        GeoZoneMonitor::Aircraft plane;
         plane.address = address;
         plane.callsign = callsign;
         plane.coordinate = QGeoCoordinate(coordinate.latitude(), coordinate.longitude(), altitude);
         return plane;
     };
-    const GeoZoneTrafficMonitor::Aircraft inP = aircraft(0x4B1234, QStringLiteral("SWR123 ") + QChar(0), center.atDistanceAndAzimuth(100, 90), 600);
-    const GeoZoneTrafficMonitor::Aircraft nearP = aircraft(0x4B5678, QString(), center.atDistanceAndAzimuth(360, 90), 700);
-    const GeoZoneTrafficMonitor::Aircraft far = aircraft(0x4B9999, QStringLiteral("FAR"), center.atDistanceAndAzimuth(20000, 0), 600);
+    const GeoZoneMonitor::Aircraft inP = aircraft(0x4B1234, QStringLiteral("SWR123 ") + QChar(0), center.atDistanceAndAzimuth(100, 90), 600);
+    const GeoZoneMonitor::Aircraft nearP = aircraft(0x4B5678, QString(), center.atDistanceAndAzimuth(360, 90), 700);
+    const GeoZoneMonitor::Aircraft far = aircraft(0x4B9999, QStringLiteral("FAR"), center.atDistanceAndAzimuth(20000, 0), 600);
 
     // Traffic is checked around the active vehicle, here 5 km north of the prohibited zone, within the radius
     monitor.evaluateTraffic({ inP });
-    QCOMPARE(traffic->count(), 0);
+    QVERIFY(monitor.traffic().isEmpty());
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0), 500, 400 });
     QCOMPARE(alertSpy.count(), 0);
-    QSignalSpy trafficSpy(traffic, &GeoZoneTrafficMonitor::aircraftChanged);
+    QSignalSpy trafficSpy(&monitor, &GeoZoneMonitor::trafficChanged);
     monitor.evaluateTraffic({ far, nearP, inP });
     QCOMPARE(trafficSpy.count(), 1);
-    QCOMPARE(traffic->count(), 2);
-    const QVariantList listed = traffic->aircraft();
+    const QVariantList listed = monitor.traffic();
+    QCOMPARE(listed.count(), 2);
     QCOMPARE(listed[0].toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("SWR123"));
     QVERIFY(listed[0].toMap().value(QStringLiteral("inside")).toBool());
     QCOMPARE(listed[0].toMap().value(QStringLiteral("altitude")).toDouble(), 600.0);
@@ -1313,7 +1311,7 @@ void GeoZoneMonitorTest::_testTraffic()
     // Once per entry, and aircraft gone are forgotten
     monitor.evaluateTraffic({ inP });
     QCOMPARE(alertSpy.count(), 1);
-    QCOMPARE(traffic->count(), 1);
+    QCOMPARE(monitor.traffic().count(), 1);
 
     // An aircraft coming back enters again
     monitor.evaluateTraffic({ inP, aircraft(0x4B5678, QString(), center, 700) });
@@ -1323,15 +1321,14 @@ void GeoZoneMonitorTest::_testTraffic()
 
     // Without terrain data below an aircraft, the ground below the vehicle is used for limits above the ground
     monitor.evaluateTraffic({ aircraft(1, QStringLiteral("HIGH"), lowCenter, 600), aircraft(2, QStringLiteral("LOW"), lowCenter, 450) });
-    QCOMPARE(traffic->count(), 1);
-    QCOMPARE(traffic->aircraft().first().toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("LOW"));
+    QCOMPARE(monitor.traffic().count(), 1);
+    QCOMPARE(monitor.traffic().first().toMap().value(QStringLiteral("callsign")).toString(), QStringLiteral("LOW"));
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Traffic LOW entered geozone LOW (Authorisation required)"));
 
     // Turned off, the traffic is forgotten
     settings.trafficEnabled = false;
     monitor.setSettings(settings);
-    QVERIFY(!traffic->enabled());
-    QCOMPARE(traffic->count(), 0);
+    QVERIFY(monitor.traffic().isEmpty());
     monitor.evaluateTraffic({ inP });
-    QCOMPARE(traffic->count(), 0);
+    QVERIFY(monitor.traffic().isEmpty());
 }
