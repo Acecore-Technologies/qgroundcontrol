@@ -98,8 +98,8 @@ qt_add_qml_module(GeoZoneModule
         Map/GeoZoneSearch.qml
         Map/GeoZoneStyle.qml
         Map/GeoZoneSummary.qml
+        Planning/GeoZoneFenceGroup.qml
         Planning/GeoZoneFenceImportDialog.qml
-        Planning/GeoZoneFenceList.qml
         Planning/GeoZoneMissionBanner.qml
         Planning/GeoZonePlanViewOverlay.qml
         Planning/GeoZoneProfileOverlay.qml
