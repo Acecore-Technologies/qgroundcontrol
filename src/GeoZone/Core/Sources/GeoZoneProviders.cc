@@ -121,20 +121,7 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
                    "{start} or {end}, filled with the area around the mission and the vehicle.");
     templates.append(area);
 
-    // The FAA NOTAM Management Service publishes NOTAMs as GeoJSON or AIXM 5.1 events to registered clients
-    ServiceTemplate nms;
-    nms.url = QStringLiteral("https://api-nms.aim.faa.gov/nmsapi/v1/notams?latitude={lat}&longitude={lon}&radius={radiusNm}&feature=AIRSPACE");
-    nms.service.id = QStringLiteral("faa-nms");
-    nms.service.name = tr("United States NOTAMs (FAA NMS)");
-    nms.service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
-    nms.service.tokenUrl = QStringLiteral("https://api-nms.aim.faa.gov/v1/auth/token");
-    nms.service.headers = { { QStringLiteral("nmsResponseFormat"), QStringLiteral("GEOJSON") } };
-    nms.service.responseMember = QStringLiteral("data.geojson");
-    nms.service.areaOfInterest = true;
-    nms.service.timeWindowHours = 24;
-    nms.note = tr("Configuration only: QGroundControl does not read NOTAM GeoJSON yet. The FAA grants client credentials on request to NOTAMS@faa.gov.");
-    nms.supported = false;
-    templates.append(nms);
+    // The FAA NOTAM Management Service isn't offered until its NOTAM GeoJSON can be read
 
     return templates;
 }

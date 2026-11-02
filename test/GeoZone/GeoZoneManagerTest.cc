@@ -1630,36 +1630,36 @@ void GeoZoneManagerTest::_testEd318Service()
     QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("has no data.aixm")), qPrintable(failedSpy.last()[1].toString()));
     QCOMPARE(manager.mergedZoneCount(), 3);
 
-    // The FAA NOTAM Management Service is configured, but its NOTAMs can't be read yet
+    // The FAA NOTAM Management Service isn't offered while its NOTAMs can't be read
     const QList<GeoZoneProviders::ServiceTemplate> templates = GeoZoneProviders::serviceTemplates();
-    const auto nms = std::find_if(templates.cbegin(), templates.cend(), [](const GeoZoneProviders::ServiceTemplate &serviceTemplate) {
+    QVERIFY(std::none_of(templates.cbegin(), templates.cend(), [](const GeoZoneProviders::ServiceTemplate &serviceTemplate) {
         return serviceTemplate.service.id == QStringLiteral("faa-nms");
+    }));
+    const auto dfs = std::find_if(templates.cbegin(), templates.cend(), [](const GeoZoneProviders::ServiceTemplate &serviceTemplate) {
+        return serviceTemplate.service.id == QStringLiteral("dfs-ed318");
     });
-    QVERIFY(nms != templates.cend());
-    QVERIFY(!nms->supported);
-    QCOMPARE(nms->service.auth, GeoZoneService::Auth::OAuth2ClientCredentials);
-    QVERIFY(GeoZoneService::hasAreaPlaceholders(nms->url));
-    QCOMPARE(GeoZoneService::fromVariantMap(nms->service.toVariantMap()), nms->service);
+    QVERIFY(dfs != templates.cend());
+    QCOMPARE(GeoZoneService::fromVariantMap(dfs->service.toVariantMap()), dfs->service);
 
     // The Add Service form starts from the fields of a template, or another service last, and keeps the rest of it
     const QVariantList templateList = GeoZoneProviders::serviceTemplateList();
     QCOMPARE(templateList.count(), templates.count() + 1);
-    const int nmsIndex = static_cast<int>(nms - templates.cbegin());
-    QVariantMap form = templateList[nmsIndex].toMap().value(QStringLiteral("form")).toMap();
-    QCOMPARE(form.value(QStringLiteral("auth")).toInt(), static_cast<int>(GeoZoneService::Auth::OAuth2ClientCredentials));
-    QCOMPARE(GeoZoneProviders::serviceFromForm(nmsIndex, form), nms->service);
-    form.insert(QStringLiteral("auth"), static_cast<int>(GeoZoneService::Auth::Basic));
+    const int dfsIndex = static_cast<int>(dfs - templates.cbegin());
+    QVariantMap form = templateList[dfsIndex].toMap().value(QStringLiteral("form")).toMap();
+    QCOMPARE(form.value(QStringLiteral("auth")).toInt(), static_cast<int>(GeoZoneService::Auth::Basic));
+    QCOMPARE(GeoZoneProviders::serviceFromForm(dfsIndex, form), dfs->service);
+    form.insert(QStringLiteral("auth"), static_cast<int>(GeoZoneService::Auth::OAuth2ClientCredentials));
     form.insert(QStringLiteral("user"), QStringLiteral(" pilot "));
-    form.insert(QStringLiteral("method"), static_cast<int>(GeoZoneService::Method::Ed318Post));
-    const GeoZoneService edited = GeoZoneProviders::serviceFromForm(nmsIndex, form);
-    QCOMPARE(edited.auth, GeoZoneService::Auth::Basic);
+    form.insert(QStringLiteral("method"), static_cast<int>(GeoZoneService::Method::Get));
+    const GeoZoneService edited = GeoZoneProviders::serviceFromForm(dfsIndex, form);
+    QCOMPARE(edited.auth, GeoZoneService::Auth::OAuth2ClientCredentials);
     QCOMPARE(edited.user, QStringLiteral("pilot"));
-    QCOMPARE(edited.method, GeoZoneService::Method::Ed318Post);
-    QCOMPARE(edited.headers, nms->service.headers);
-    QCOMPARE(edited.id, nms->service.id);
+    QCOMPARE(edited.method, GeoZoneService::Method::Get);
+    QCOMPARE(edited.maxAreaKm2, dfs->service.maxAreaKm2);
+    QCOMPARE(edited.id, dfs->service.id);
     const GeoZoneService other = GeoZoneProviders::serviceFromForm(static_cast<int>(templates.count()), form);
-    QVERIFY(other.headers.isEmpty() && other.id.isEmpty());
-    QCOMPARE(other.auth, GeoZoneService::Auth::Basic);
+    QVERIFY((other.maxAreaKm2 == 0) && other.id.isEmpty());
+    QCOMPARE(other.auth, GeoZoneService::Auth::OAuth2ClientCredentials);
     manager.repository()->clear();
 }
 
