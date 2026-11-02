@@ -30,30 +30,37 @@ class Vehicle;
 class GeoZoneGuidedCheck : public QObject
 {
     Q_OBJECT
+    Q_MOC_INCLUDE("MissionController.h")
+    Q_MOC_INCLUDE("Vehicle.h")
 
 public:
     explicit GeoZoneGuidedCheck(GeoZoneMonitor *monitor);
 
-    /// @param vehicle Vehicle object, the checks return an empty string without a position
+    /// @param vehicle The checks return an empty string without a position
     /// @param altitudeAMSL Target altitude in meters above mean sea level, NaN to keep the vehicle's altitude
-    Q_INVOKABLE QString gotoWarning(QObject *vehicle, const QGeoCoordinate &coordinate, double altitudeAMSL = qQNaN()) const;
+    Q_INVOKABLE QString gotoWarning(Vehicle *vehicle, const QGeoCoordinate &coordinate, double altitudeAMSL = qQNaN()) const;
     /// Flying to and around the circle
-    Q_INVOKABLE QString orbitWarning(QObject *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const;
+    Q_INVOKABLE QString orbitWarning(Vehicle *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const;
     /// Climbing or descending at the vehicle's position, also for takeoffs
     /// @param relativeAltitude Target altitude in meters above the vehicle's home
-    Q_INVOKABLE QString altitudeWarning(QObject *vehicle, double relativeAltitude) const;
+    Q_INVOKABLE QString altitudeWarning(Vehicle *vehicle, double relativeAltitude) const;
     /// Returning to launch from the vehicle's position with its return parameters, to the destinations on the vehicle,
     /// see returnDestinations, and along its mission when the return follows it
     /// @param missionController The Fly View's, with the mission on the vehicle, null without
-    Q_INVOKABLE QString returnWarning(QObject *vehicle, QObject *missionController) const;
+    Q_INVOKABLE QString returnWarning(Vehicle *vehicle, MissionController *missionController) const;
     /// Landing at the vehicle's position: the descent to the ground below it, or to the home altitude where the terrain
     /// is unknown
-    Q_INVOKABLE QString landWarning(QObject *vehicle) const;
+    Q_INVOKABLE QString landWarning(Vehicle *vehicle) const;
     /// Flying the mission from the item on: from the vehicle's position to the item, then along the mission
     /// @param missionController The Fly View's, with the mission on the vehicle
     /// @param sequenceNumber Of the item, like the current item set or the item a mission resumes at
     /// @param fromGround The vehicle climbs to the altitude of the item first, like a resumed mission taking off
-    Q_INVOKABLE QString missionWarning(QObject *vehicle, QObject *missionController, int sequenceNumber, bool fromGround = false) const;
+    Q_INVOKABLE QString missionWarning(Vehicle *vehicle, MissionController *missionController, int sequenceNumber, bool fromGround = false) const;
+    /// Starting the mission now: the restricted zones its flight path enters while they apply, without an authorisation
+    /// covering the flight, and the prohibited ones the fence on the vehicle doesn't exclude, see
+    /// GeoZoneMissionCheck::warningText and GeoZoneMissionCheck::fenceText
+    /// @param missionController The Fly View's, with the mission and the fence on the vehicle
+    Q_INVOKABLE QString startWarning(MissionController *missionController) const;
 
     static constexpr int maxListedZones = 4;
 

@@ -44,8 +44,8 @@ class Vehicle;
 /// contingency zones, which don't need a confirmation for the upload, with the items they would be flown from.
 /// The mission is checked again when the return parameters of the vehicle, the rally points or the breach return
 /// point change.
-/// Without flightNow, the zones relevant to the mission are compared with the geozone data the open plan was saved
-/// with, see GeoZonePlanning::planAudit and GeoZonePlanAudit.
+/// The zones relevant to the mission are compared with the geozone data the open plan was saved with, see
+/// GeoZonePlanning::planAudit and GeoZonePlanAudit.
 class GeoZoneMissionCheck : public QObject
 {
     Q_OBJECT
@@ -57,7 +57,6 @@ class GeoZoneMissionCheck : public QObject
     Q_PROPERTY(QString              warningText         READ warningText                                    NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QGeoRectangle        crossedZonesBoundingBox READ crossedZonesBoundingBox                        NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QString              infoText            READ infoText                                       NOTIFY zonesChanged FINAL)
-    Q_PROPERTY(bool                 flightNow           READ flightNow          WRITE setFlightNow          NOTIFY flightNowChanged FINAL)        ///< Checks a flight starting now instead of at the planned start, like a mission on the vehicle
     Q_PROPERTY(GeoFenceController*  geoFenceController  READ geoFenceController WRITE setGeoFenceController NOTIFY geoFenceControllerChanged FINAL)   ///< Fence expected to exclude the prohibited zones
     Q_PROPERTY(QString              fenceText           READ fenceText                                      NOTIFY zonesChanged FINAL)
     Q_PROPERTY(QString              contingencyText     READ contingencyText                                NOTIFY zonesChanged FINAL)
@@ -114,8 +113,6 @@ public:
     /// U-space airspaces and no restriction zones entered, which don't prevent the flight
     QString infoText() const;
     QGeoRectangle crossedZonesBoundingBox() const;
-    bool flightNow() const { return _flightNow; }
-    void setFlightNow(bool flightNow);
     GeoFenceController *geoFenceController() const;
     void setGeoFenceController(GeoFenceController *geoFenceController);
     /// Names the unfenced zones
@@ -196,7 +193,6 @@ public:
 signals:
     void missionControllerChanged();
     void zonesChanged();
-    void flightNowChanged();
     void geoFenceControllerChanged();
     void auditChanged();
 
@@ -212,8 +208,6 @@ private:
     void _connectVehicle();
     /// Evaluates the mission path on another thread, the result is dropped when the mission or zones change meanwhile
     void _updateConcurrently();
-    /// @return Start and end of the flight checked, now with flightNow, invalid to check it at any time
-    std::pair<QDateTime, QDateTime> _flightTimes() const;
     /// Sorts the zones on the path by the policies of the planned flight
     void _apply(const Evaluation &evaluation);
     /// Compares the relevant zones with the data the plan was saved with
@@ -222,7 +216,6 @@ private:
     GeoZoneManager *_manager = nullptr;
     GeoZoneMissionWorker *_worker = nullptr;    ///< Follows the mission, evaluates it and drops outdated results
     QList<Entry> _entries;
-    bool _flightNow = false;
     QPointer<GeoFenceController> _geoFenceController;
     QList<const GeoZone*> _relevantZones;
     GeoZoneBox _area;

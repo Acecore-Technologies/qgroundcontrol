@@ -467,6 +467,11 @@ void GeoZoneFlightTest::_testGuidedReturnLandMission()
     const QString resumeWest = check->missionWarning(vehicle, missionController, 3, true);
     QVERIFY2(resumeWest.contains(QStringLiteral("ABOVE")) && !resumeWest.contains(QStringLiteral("EAST")), qPrintable(resumeWest));
     QVERIFY(check->missionWarning(vehicle, missionController, 3, false).isEmpty());
+    // Starting the mission now enters the zone east, which the fence on the vehicle doesn't exclude
+    const QString startWarning = check->startWarning(missionController);
+    QVERIFY2(startWarning.startsWith(QStringLiteral("The mission path enters restricted geozones:")) && startWarning.contains(QStringLiteral("EAST")) &&
+             startWarning.contains(QStringLiteral("The GeoFence doesn't exclude")), qPrintable(startWarning));
+    QVERIFY(check->startWarning(nullptr).isEmpty());
 
     // 300 m up, landing or returning to launch descends into the zone below
     vehicle->sendMavCommand(vehicle->defaultComponentId(), MAV_CMD_NAV_TAKEOFF, false /* showError */, 0, 0, 0, 0, 0, 0, 300);

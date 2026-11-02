@@ -366,10 +366,9 @@ void GeoZonePlanningTest::_testMissionCheck()
     manager.planning()->setPlannedStart(overlappingStart);
     QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
     // A mission started now, like one on the vehicle, ignores the planned start
-    check.setFlightNow(true);
-    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
-    QVERIFY(!check.infoText().contains(QStringLiteral("planned flight time")));
-    check.setFlightNow(false);
+    const GeoZoneMonitor monitor(&manager);
+    const QString startWarning = monitor.guidedCheck()->startWarning(missionController);
+    QVERIFY2(startWarning.contains(QStringLiteral("P (Prohibited)")) && !startWarning.contains(QStringLiteral("T (Prohibited)")), qPrintable(startWarning));
     manager.planning()->clearPlannedStart();
     QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Inactive).count(), 0);
     QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);

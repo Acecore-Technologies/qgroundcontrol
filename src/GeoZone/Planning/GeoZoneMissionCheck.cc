@@ -91,7 +91,7 @@ bool GeoZoneMissionCheck::settled() const
 const GeoZoneMissionCheck *GeoZoneMissionCheck::settledCheck(const GeoZoneManager *manager, const MissionController *missionController)
 {
     for (const GeoZoneMissionCheck *check : std::as_const(checks())) {
-        if ((check->_manager == manager) && (check->_worker->missionController() == missionController) && !check->_flightNow && check->settled()) {
+        if ((check->_manager == manager) && (check->_worker->missionController() == missionController) && check->settled()) {
             return check;
         }
     }
@@ -233,15 +233,6 @@ void GeoZoneMissionCheck::_connectMissionItems()
     }
 }
 
-void GeoZoneMissionCheck::setFlightNow(bool flightNow)
-{
-    if (flightNow != _flightNow) {
-        _flightNow = flightNow;
-        emit flightNowChanged();
-        _worker->schedule();
-    }
-}
-
 void GeoZoneMissionCheck::setGeoFenceController(GeoFenceController *geoFenceController)
 {
     if (geoFenceController == _geoFenceController) {
@@ -380,7 +371,7 @@ QString GeoZoneMissionCheck::infoText() const
         lines.append(tr("Areas without restriction: %1. Check their conditions.").arg(GeoZonePathEvaluator::zoneNames(permitted, maxListedZones, false)));
     }
     const int inactive = static_cast<int>(zones(Inactive).count());
-    if ((inactive > 0) && !_flightNow) {
+    if (inactive > 0) {
         lines.append(tr("%n zone(s) on the path are not active at the planned flight time.", nullptr, inactive));
     }
     return lines.join(QStringLiteral("\n"));
@@ -436,20 +427,10 @@ void GeoZoneMissionCheck::_clearResults()
     }
 }
 
-std::pair<QDateTime, QDateTime> GeoZoneMissionCheck::_flightTimes() const
-{
-    if (_flightNow) {
-        const QDateTime start = GeoZoneEnvironment::currentDateTimeUtc();
-        MissionController *const missionController = _worker->missionController();
-        return { start, start.addSecs(std::llround((std::max)(missionController ? missionController->missionTime() : 0.0, 0.0))) };
-    }
-    return plannedFlightTimes(_manager, _worker->missionController());
-}
-
 void GeoZoneMissionCheck::update()
 {
     _worker->runNow([this]() {
-        const auto [start, end] = _flightTimes();
+        const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
         const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
         _manager->setMissionArea(this, missionArea(path));
         return evaluate(_manager->catalog(), path, start, end);
@@ -480,7 +461,7 @@ void GeoZoneMissionCheck::_updateConcurrently()
     const GeoZoneMissionPath path = GeoZoneMissionPath::fromMission(_worker->missionController(), true);
     // The services taking the area of interest download the zones around the mission
     _manager->setMissionArea(this, missionArea(path));
-    const auto [start, end] = _flightTimes();
+    const auto [start, end] = plannedFlightTimes(_manager, _worker->missionController());
     // Zones of an outdated evaluation may be gone
     _worker->run([catalog, path, start, end]() { return evaluate(catalog, path, start, end); },
                  [this](const Evaluation &evaluation) { _apply(evaluation); });
@@ -661,7 +642,7 @@ void GeoZoneMissionCheck::_updateAudit()
     QString text;
     QStringList details;
     const std::optional<GeoZonePlanAudit::Record> &record = _manager->planning()->planAudit();
-    if (!_flightNow && record) {
+    if (record) {
         // Sources still loading would look removed
         if (_manager->busy()) {
             return;

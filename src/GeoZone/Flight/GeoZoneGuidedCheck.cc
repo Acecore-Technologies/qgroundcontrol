@@ -10,6 +10,7 @@
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
+#include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZoneReturnDestinations.h"
 #include "GeoZonePlanning.h"
@@ -17,6 +18,7 @@
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneTerrain.h"
 #include "MissionController.h"
+#include "PlanMasterController.h"
 #include "RallyPointManager.h"
 #include "Vehicle.h"
 
@@ -97,9 +99,8 @@ QString GeoZoneGuidedCheck::pathsWarning(const QList<GeoZonePathEvaluator::Path>
     return subject.isEmpty() ? tr("The vehicle would enter geozones: %1").arg(names) : tr("%1 would enter geozones: %2").arg(subject, names);
 }
 
-QString GeoZoneGuidedCheck::gotoWarning(QObject *vehicle, const QGeoCoordinate &coordinate, double altitudeAMSL) const
+QString GeoZoneGuidedCheck::gotoWarning(Vehicle *guidedVehicle, const QGeoCoordinate &coordinate, double altitudeAMSL) const
 {
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || !coordinate.isValid()) {
         return QString();
     }
@@ -108,9 +109,8 @@ QString GeoZoneGuidedCheck::gotoWarning(QObject *vehicle, const QGeoCoordinate &
     return pathWarning({ from, to });
 }
 
-QString GeoZoneGuidedCheck::orbitWarning(QObject *vehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const
+QString GeoZoneGuidedCheck::orbitWarning(Vehicle *guidedVehicle, const QGeoCoordinate &center, double radius, double altitudeAMSL) const
 {
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || !center.isValid() || !(radius > 0)) {
         return QString();
     }
@@ -125,9 +125,8 @@ QString GeoZoneGuidedCheck::orbitWarning(QObject *vehicle, const QGeoCoordinate 
     return pathWarning(path);
 }
 
-QString GeoZoneGuidedCheck::altitudeWarning(QObject *vehicle, double relativeAltitude) const
+QString GeoZoneGuidedCheck::altitudeWarning(Vehicle *guidedVehicle, double relativeAltitude) const
 {
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || std::isnan(relativeAltitude)) {
         return QString();
     }
@@ -146,13 +145,11 @@ QString GeoZoneGuidedCheck::altitudeWarning(QObject *vehicle, double relativeAlt
     return pathWarning(path);
 }
 
-QString GeoZoneGuidedCheck::returnWarning(QObject *vehicle, QObject *missionController) const
+QString GeoZoneGuidedCheck::returnWarning(Vehicle *guidedVehicle, MissionController *mission) const
 {
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid()) {
         return QString();
     }
-    MissionController *const mission = qobject_cast<MissionController*>(missionController);
     const GeoZoneReturnModel::Parameters parameters = GeoZoneMissionPath::returnParameters(guidedVehicle);
     const GeoZoneReturnModel::Destinations destinations = returnDestinations(guidedVehicle, mission);
     // PX4 returns along the mission from the item flown to, which also chooses the direction while flying the mission
@@ -171,9 +168,8 @@ QString GeoZoneGuidedCheck::returnWarning(QObject *vehicle, QObject *missionCont
     return pathsWarning(paths, subject);
 }
 
-QString GeoZoneGuidedCheck::landWarning(QObject *vehicle) const
+QString GeoZoneGuidedCheck::landWarning(Vehicle *guidedVehicle) const
 {
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid()) {
         return QString();
     }
@@ -181,10 +177,8 @@ QString GeoZoneGuidedCheck::landWarning(QObject *vehicle) const
     return pathsWarning({ landingPath(from, groundBelow(guidedVehicle, from)) }, tr("The landing"));
 }
 
-QString GeoZoneGuidedCheck::missionWarning(QObject *vehicle, QObject *missionController, int sequenceNumber, bool fromGround) const
+QString GeoZoneGuidedCheck::missionWarning(Vehicle *guidedVehicle, MissionController *mission, int sequenceNumber, bool fromGround) const
 {
-    Vehicle *const guidedVehicle = qobject_cast<Vehicle*>(vehicle);
-    MissionController *const mission = qobject_cast<MissionController*>(missionController);
     if (!guidedVehicle || !guidedVehicle->coordinate().isValid() || !mission) {
         return QString();
     }
@@ -202,6 +196,23 @@ QString GeoZoneGuidedCheck::missionWarning(QObject *vehicle, QObject *missionCon
     }
     vertices = leg + vertices;
     return pathsWarning(paths, tr("The mission from item %1").arg(sequenceNumber));
+}
+
+QString GeoZoneGuidedCheck::startWarning(MissionController *missionController) const
+{
+    if (!missionController) {
+        return QString();
+    }
+    GeoZoneManager *const manager = _monitor->manager();
+    const QDateTime start = GeoZoneEnvironment::currentDateTimeUtc();
+    const QDateTime end = start.addSecs(std::llround((std::max)(missionController->missionTime(), 0.0)));
+    const GeoZoneMissionCheck::Evaluation evaluation = GeoZoneMissionCheck::evaluate(manager->catalog(), GeoZoneMissionPath::fromMission(missionController), start, end);
+    PlanMasterController *const masterController = missionController->masterController();
+    const QList<GeoZoneMissionCheck::Entry> entries = GeoZoneMissionCheck::classify(evaluation, manager->planning()->authorisations(),
+                                                                                    masterController ? masterController->geoFenceController() : nullptr);
+    QStringList lines = { GeoZoneMissionCheck::warningText(entries), GeoZoneMissionCheck::fenceText(entries) };
+    lines.removeAll(QString());
+    return lines.join(QStringLiteral("\n"));
 }
 
 GeoZoneReturnModel::Destinations GeoZoneGuidedCheck::returnDestinations(Vehicle *vehicle, MissionController *missionController)

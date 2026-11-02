@@ -29,8 +29,6 @@ target_sources(${CMAKE_PROJECT_NAME}
         Planning/GeoZoneFenceTags.h
         Planning/GeoZoneFenceUpload.cc
         Planning/GeoZoneFenceUpload.h
-        Planning/GeoZoneGuidedCheck.cc
-        Planning/GeoZoneGuidedCheck.h
         Planning/GeoZoneMissionCheck.cc
         Planning/GeoZoneMissionCheck.h
         Planning/GeoZoneMissionExport.cc
@@ -55,6 +53,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Flight/GeoZoneAlertArbiter.h
         Flight/GeoZoneAlertHistory.cc
         Flight/GeoZoneAlertHistory.h
+        Flight/GeoZoneGuidedCheck.cc
+        Flight/GeoZoneGuidedCheck.h
         Flight/GeoZoneMonitor.cc
         Flight/GeoZoneMonitor.h
         Flight/GeoZoneVehicleMonitor.cc

@@ -34,13 +34,6 @@ QGCLabel {
     readonly property var _missionController:   _guidedController.missionController
     readonly property var _vehicle:             QGroundControl.multiVehicleManager.activeVehicle
 
-    property GeoZoneMissionCheck _vehicleMissionCheck: GeoZoneMissionCheck {
-        missionController:  control._missionController
-        // The fence on the vehicle is checked for excluding the prohibited zones of the mission
-        geoFenceController: control._missionController ? control._missionController.masterController.geoFenceController : null
-        flightNow:          true
-    }
-
     QGCPalette { id: qgcPal }
 
     /// @return Warning about the geozones the action would enter, empty when there are none. Bound to the slider value.
@@ -72,7 +65,7 @@ QGCLabel {
             return _missionController ? check.missionWarning(_vehicle, _missionController, _missionController.resumeMissionIndex, true) : ""
         case controller.actionStartMission:
         case controller.actionContinueMission:
-            return [ _vehicleMissionCheck.warningText, _vehicleMissionCheck.fenceText ].filter(text => text !== "").join("\n")
+            return check.startWarning(_missionController)
         default:
             return ""
         }
