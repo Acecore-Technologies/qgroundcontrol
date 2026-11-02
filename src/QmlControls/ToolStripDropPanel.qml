@@ -63,18 +63,20 @@ Item {
         var panelComponentWidth  = panelLoader.item.width
         var panelComponentHeight = panelLoader.item.height
 
-        dropDownItem.width  = panelComponentWidth  + (_dropMargin * 2) + _arrowPointWidth
-        dropDownItem.height = panelComponentHeight + (_dropMargin * 2)
-
-        dropDownItem.x = _dropEdgeTopPoint.x + _dropMargin
-        dropDownItem.y = _dropEdgeTopPoint.y -(dropDownItem.height / 2) + radius
+        // Computed before resizing the panel: a panel taller than the viewport, even briefly, would scroll its
+        // content back to the top whenever the content's height changes
+        var height = panelComponentHeight + (_dropMargin * 2)
+        var y = _dropEdgeTopPoint.y - (height / 2) + radius
 
         // Validate that dropdown is within viewport
-        dropDownItem.y = Math.min(dropDownItem.y + dropDownItem.height, _viewportMaxBottom) - dropDownItem.height
-        dropDownItem.y = Math.max(dropDownItem.y, _viewportMaxTop)
+        y = Math.min(y + height, _viewportMaxBottom) - height
+        y = Math.max(y, _viewportMaxTop)
 
+        dropDownItem.width  = panelComponentWidth  + (_dropMargin * 2) + _arrowPointWidth
+        dropDownItem.x = _dropEdgeTopPoint.x + _dropMargin
+        dropDownItem.y = y
         // Adjust height to not exceed viewport bounds
-        dropDownItem.height = Math.min(dropDownItem.height, _viewportMaxHeight - dropDownItem.y)
+        dropDownItem.height = Math.min(height, _viewportMaxHeight - y)
 
         // Arrow points
         arrowCanvas.arrowPoint.y = (_dropEdgeTopPoint.y + radius) - dropDownItem.y
