@@ -12,6 +12,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneOrigin.h"
 #include "GeoZoneProviders.h"
+#include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneSource.h"
 
 #include <QtCore/QFile>
@@ -165,7 +166,7 @@ void GeoZoneFeedFetch::_get(const QString &url, const QString &etag, const QStri
 
 void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
 {
-    _addMaxAge(download.maxAgeSecs);
+    _addMaxAge(GeoZoneRefreshScheduler::maxAgeSecsOf(download.headers));
     if (download.status == GeoZoneDownloader::Result::Status::NotModified) {
         _finish(Result::Status::NotModified);
         return;
@@ -206,7 +207,7 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
 
 void GeoZoneFeedFetch::_datasetReceived(const GeoZoneDownloader::Result &download)
 {
-    _addMaxAge(download.maxAgeSecs);
+    _addMaxAge(GeoZoneRefreshScheduler::maxAgeSecsOf(download.headers));
     if (download.status == GeoZoneDownloader::Result::Status::NotModified) {
         _finish(Result::Status::NotModified);
     } else if (download.status != GeoZoneDownloader::Result::Status::Ok) {

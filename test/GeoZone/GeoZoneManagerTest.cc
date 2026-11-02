@@ -725,12 +725,12 @@ void GeoZoneManagerTest::_testRefreshScheduler()
     ScopedEnvironment environment;
 
     // How long a response stays current, from its headers
-    QCOMPARE(GeoZoneDownloader::maxAgeSecs("public, max-age=600", QByteArray(), QByteArray(), QByteArray()), 600);
-    QCOMPARE(GeoZoneDownloader::maxAgeSecs("max-age=600", "Sat, 31 Oct 2026 12:00:00 GMT", QByteArray(), "100"), 500);
-    QCOMPARE(GeoZoneDownloader::maxAgeSecs(QByteArray(), "Sat, 31 Oct 2026 12:00:00 GMT", "Sat, 31 Oct 2026 11:00:00 GMT", QByteArray()), 3600);
-    QCOMPARE(GeoZoneDownloader::maxAgeSecs("no-cache", QByteArray(), QByteArray(), QByteArray()), -1);
-    QCOMPARE(GeoZoneDownloader::maxAgeSecs("max-age=0", "Sat, 31 Oct 2026 12:00:00 GMT", "Sat, 31 Oct 2026 11:00:00 GMT", QByteArray()), -1);
-    QCOMPARE(GeoZoneDownloader::maxAgeSecs(QByteArray(), "0", QByteArray(), QByteArray()), -1);
+    QCOMPARE(GeoZoneRefreshScheduler::maxAgeSecsOf({ { "cache-control", "public, max-age=600" } }), 600);
+    QCOMPARE(GeoZoneRefreshScheduler::maxAgeSecsOf({ { "cache-control", "max-age=600" }, { "expires", "Sat, 31 Oct 2026 12:00:00 GMT" }, { "age", "100" } }), 500);
+    QCOMPARE(GeoZoneRefreshScheduler::maxAgeSecsOf({ { "expires", "Sat, 31 Oct 2026 12:00:00 GMT" }, { "date", "Sat, 31 Oct 2026 11:00:00 GMT" } }), 3600);
+    QCOMPARE(GeoZoneRefreshScheduler::maxAgeSecsOf({ { "cache-control", "no-cache" } }), -1);
+    QCOMPARE(GeoZoneRefreshScheduler::maxAgeSecsOf({ { "cache-control", "max-age=0" }, { "expires", "Sat, 31 Oct 2026 12:00:00 GMT" }, { "date", "Sat, 31 Oct 2026 11:00:00 GMT" } }), -1);
+    QCOMPARE(GeoZoneRefreshScheduler::maxAgeSecsOf({ { "expires", "0" } }), -1);
 
     TestFeedServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));

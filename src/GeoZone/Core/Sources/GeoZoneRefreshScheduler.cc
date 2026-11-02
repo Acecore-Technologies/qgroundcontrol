@@ -11,6 +11,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneSource.h"
 
+#include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
@@ -96,6 +97,41 @@ void GeoZoneRefreshScheduler::refreshFailed(const GeoZoneSource &source)
     const qint64 delay = (std::min)(maxDelay, qint64{ minRetrySecs } << (std::min)(state.failureCount - 1, 16));
     const double jitter = 0.8 + (0.4 * QRandomGenerator::global()->generateDouble());
     state.retryAt = GeoZoneEnvironment::currentDateTimeUtc().addSecs(std::llround(delay * jitter));
+}
+
+qint64 GeoZoneRefreshScheduler::maxAgeSecsOf(const QHash<QByteArray, QByteArray> &headers)
+{
+    const auto httpDate = [](const QByteArray &value) {
+        const QDateTime parsed = QLocale::c().toDateTime(QString::fromLatin1(value.trimmed()), QStringLiteral("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
+        return parsed.isValid() ? QDateTime(parsed.date(), parsed.time(), QTimeZone::UTC) : QDateTime();
+    };
+
+    qint64 lifetime = -1;
+    bool hasMaxAge = false;
+    for (const QByteArray &directive : headers.value("cache-control").split(',')) {
+        const QByteArray trimmed = directive.trimmed().toLower();
+        if (trimmed.startsWith("max-age=")) {
+            bool ok = false;
+            const qint64 value = trimmed.mid(8).replace('"', QByteArray()).toLongLong(&ok);
+            if (ok) {
+                lifetime = value;
+                hasMaxAge = true;
+            }
+        }
+    }
+    if (const QByteArray expires = headers.value("expires"); !hasMaxAge && !expires.isEmpty()) {
+        // Relative to the server's Date, so that the clocks needn't agree
+        const QDateTime expiresAt = httpDate(expires);
+        const QByteArray date = headers.value("date");
+        const QDateTime sentAt = date.isEmpty() ? GeoZoneEnvironment::currentDateTimeUtc() : httpDate(date);
+        if (expiresAt.isValid() && sentAt.isValid()) {
+            lifetime = sentAt.secsTo(expiresAt);
+        }
+    }
+    if (lifetime > 0) {
+        lifetime -= headers.value("age").trimmed().toLongLong();
+    }
+    return (lifetime > 0) ? lifetime : -1;
 }
 
 void GeoZoneRefreshScheduler::remove(const QString &key)

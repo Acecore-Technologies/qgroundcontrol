@@ -49,7 +49,7 @@ public:
     bool isDue(const GeoZoneSource &source, const QDateTime &now) const;
 
     /// Records a load or refresh of a source which succeeded, the retries of failed refreshes end
-    /// @param maxAgeSecs How long the server said the data stays current, see GeoZoneDownloader::Result::maxAgeSecs
+    /// @param maxAgeSecs How long the server said the data stays current, see maxAgeSecsOf
     void refreshSucceeded(const QString &key, qint64 maxAgeSecs);
     /// Records a failed refresh, retried after minRetrySecs, then twice as long after each further failure up to
     /// maxRetrySecs or the refresh interval when shorter, within 20 % so that clients don't retry together
@@ -60,6 +60,9 @@ public:
     QDateTime retryAt(const QString &key) const { return _states.value(key).retryAt; }
     /// @return How long the server said the data of the source stays current, negative when it didn't
     qint64 maxAgeSecs(const QString &key) const { return _states.value(key).maxAgeSecs; }
+    /// @return Seconds a response stays current from its headers (by lower case name): Cache-Control max-age, or
+    ///         Expires after Date, less its Age. Negative when the response doesn't tell, or tells to revalidate it at once.
+    static qint64 maxAgeSecsOf(const QHash<QByteArray, QByteArray> &headers);
 
     static constexpr int minRetrySecs = 5 * 60;         ///< After the first failed refresh, doubling with each failure
     static constexpr int maxRetrySecs = 6 * 3600;       ///< Or the refresh interval when shorter
