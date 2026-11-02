@@ -3146,6 +3146,65 @@ void GeoZoneManagerTest::_testWfsPaging()
     QVERIFY(restarted.repository()->source(url)->warningText().contains(QStringLiteral("left out 1 zone(s)")));
 }
 
+void GeoZoneManagerTest::_testArcGisPaging()
+{
+    // An ArcGIS feature service answering the FAA layers by 3 features, with resultOffset, telling whether more follow
+    QFile fixture(QStringLiteral(":/unittest/faa_airspace_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QJsonObject document = QJsonDocument::fromJson(fixture.readAll()).object();
+    const QJsonArray allFeatures = document.value(QStringLiteral("features")).toArray();
+    QCOMPARE(allFeatures.count(), 7);
+    constexpr int pageSize = 3;
+    bool rateLimited = false;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [&](const QByteArray &request, QByteArray &, QByteArray &content, QByteArray &) {
+        const QUrlQuery query(QUrl(QString::fromLatin1(request.split(' ').value(1))));
+        const int offset = query.queryItemValue(QStringLiteral("resultOffset")).toInt();
+        if (rateLimited && (offset > 0)) {
+            content = R"({"error":{"code":429,"message":"Unable to perform query. Too many requests.","details":[]}})";
+            return true;
+        }
+        QJsonObject page = document;
+        QJsonArray features;
+        for (int i = offset; (i < offset + pageSize) && (i < allFeatures.count()); i++) {
+            features.append(allFeatures[i]);
+        }
+        page.insert(QStringLiteral("features"), features);
+        if (offset + pageSize < allFeatures.count()) {
+            page.insert(QStringLiteral("properties"), QJsonObject{ { QStringLiteral("exceededTransferLimit"), true } });
+        }
+        content = QJsonDocument(page).toJson(QJsonDocument::Compact);
+        return true;
+    };
+    const QString url = server.url(QStringLiteral("/arcgis/rest/services/Layer/FeatureServer/0/query?where=1%3D1&geometry=-77.6,38.3,-76.0,39.6"
+                                                  "&geometryType=esriGeometryEnvelope&f=geojson&resultRecordCount=3&resultOffset=0"));
+
+    // All pages are downloaded and stored together
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.repository()->addUrl(url);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(manager.zoneCount(), 6);
+    QCOMPARE(server.requestCount, 3);
+    QVERIFY(server.requestedPaths[1].contains("resultOffset=3"));
+    QVERIFY(server.requestedPaths[2].contains("resultOffset=6"));
+    GeoZoneSource *const source = manager.repository()->source(url);
+    QVERIFY(source->errorString().isEmpty());
+    QCOMPARE(source->area(), QGeoRectangle());
+    QVERIFY2(source->name().contains(QStringLiteral("area around")), qPrintable(source->name()));
+
+    // A page answered with an error fails the download, which keeps the zones instead of losing some
+    rateLimited = true;
+    manager.repository()->refreshFeeds();
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(manager.zoneCount(), 6);
+    QVERIFY2(source->errorString().contains(QStringLiteral("Too many requests")), qPrintable(source->errorString()));
+}
+
 void GeoZoneManagerTest::_testCatalogSnapshot()
 {
     // Checks on worker threads query copies of the catalog, which share its data and keep its zones while the

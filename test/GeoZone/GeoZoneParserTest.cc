@@ -296,6 +296,7 @@ void GeoZoneParserTest::_testParseFixtures_data()
     row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "e2d4b0d264592f37");
     row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "3c0d3f716763a061");
     row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "bb11ebfc2907b643");
+    row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 1, 0, "72b6048c5599c493");
     row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
     row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
     row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "1cc47a3d61d437ed");
@@ -383,6 +384,10 @@ void GeoZoneParserTest::_testEmptyResponses_data()
     row("area from FAA", wfsArea, Format::FaaTfr, Format::Unknown);
     row("area from ED-318", wfsArea, Format::ED318, Format::Unknown);
     row("area without hint", wfsArea, Format::Unknown, Format::Unknown);
+    // ArcGIS feature services answer an area without features with an empty collection, without counts
+    const QByteArray arcGisArea = R"({ "type": "FeatureCollection", "crs": { "type": "name", "properties": { "name": "EPSG:4326" } }, "features": [] })";
+    row("ArcGIS area from FAA", arcGisArea, Format::FaaAirspace, Format::FaaAirspace);
+    row("ArcGIS area without hint", arcGisArea, Format::Unknown, Format::Unknown);
 }
 
 void GeoZoneParserTest::_testEmptyResponses()
@@ -591,6 +596,78 @@ void GeoZoneParserTest::_testParseED318()
     QCOMPARE(result.zones[0].notificationAuthority, QStringLiteral("Tower"));
     QCOMPARE(result.zones[0].notificationLeadSecs, qint64{ (2 * 24 + 12) * 3600 });
     QVERIFY(result.zones[0].authorities[1].contains(QStringLiteral("notice P2DT12H")));
+}
+
+void GeoZoneParserTest::_testParseFaaAirspace()
+{
+    // Excerpts of the FAA's ArcGIS layers around Washington: UAS facility map cells, a national security restriction,
+    // class B airspace, a Mode C veil left out, and special use airspace
+    QFile file(QStringLiteral(":/unittest/faa_airspace_test.json"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(file.readAll(), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::FaaAirspace);
+    QVERIFY(result.title.contains(QStringLiteral("facility maps")));
+    QVERIFY(result.provider.contains(QStringLiteral("informational")));
+    QCOMPARE(result.zones.count(), 6);
+    QCOMPARE(result.skippedFeatures, 1);
+    QMap<QString, GeoZone::Data> byCode;
+    for (const GeoZone::Data &zone : std::as_const(result.zones)) {
+        QCOMPARE(zone.country, QStringLiteral("USA"));
+        QVERIFY(zone.extendedProperties.join(QLatin1Char('\n')).contains(QStringLiteral("informational")));
+        byCode.insert(zone.restrictionCode, zone);
+    }
+
+    // Facility map cells need an authorisation up to their ceiling, cells at 0 ft further coordination
+    const GeoZone::Data &cell = byCode.value(QStringLiteral("UASFM 300 FT"));
+    QCOMPARE(cell.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(cell.name, QStringLiteral("KIAD facility map, 300 ft"));
+    QCOMPARE(cell.restrictionConditions, QStringLiteral("LAANC up to 300 ft AGL"));
+    QVERIFY(cell.message.contains(QStringLiteral("Class B airspace")));
+    QCOMPARE(cell.reasons, QStringList(QStringLiteral("AIR_TRAFFIC")));
+    QCOMPARE(cell.volumes[0].lowerLimit, 0.0);
+    QCOMPARE(cell.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    QVERIFY(GeoZone(cell).contains(GeoZone::Position{ QGeoCoordinate(38.896, -77.487), 2000, 90 }));
+    const GeoZone::Data &closed = byCode.value(QStringLiteral("UASFM 0 FT"));
+    QCOMPARE(closed.restriction, GeoZone::Prohibited);
+    QVERIFY(closed.message.contains(QStringLiteral("further coordination")));
+
+    // National security restrictions are prohibited from the surface to their ceiling
+    const GeoZone::Data &security = byCode.value(QStringLiteral("NSUFR"));
+    QCOMPARE(security.restriction, GeoZone::Prohibited);
+    QCOMPARE(security.name, QStringLiteral("USNO"));
+    QCOMPARE(security.reasons, QStringList(QStringLiteral("SENSITIVE")));
+    QCOMPARE(security.otherReasonInfo, QStringLiteral("National Security"));
+    QVERIFY(security.authorities.join(QLatin1Char('\n')).contains(QStringLiteral("henry.alderete@navy.mil")));
+    QVERIFY(security.volumes[0].feet);
+    QCOMPARE(security.volumes[0].upperLimit, 400.0);
+    QCOMPARE(security.volumes[0].upperReference, GeoZone::VerticalReference::Ground);
+
+    // Class B from the surface to 10,000 ft MSL
+    const GeoZone::Data &classB = byCode.value(QStringLiteral("CLASS_B"));
+    QCOMPARE(classB.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(classB.name, QStringLiteral("WASHINGTON-TRI AREA CLASS B"));
+    QCOMPARE(classB.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    QCOMPARE(classB.volumes[0].upperLimit, 10000.0);
+    QCOMPARE(classB.volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
+
+    // Special use airspace: prohibited and restricted areas, the latter up to unlimited with its times of use
+    const GeoZone::Data &prohibited = byCode.value(QStringLiteral("P"));
+    QCOMPARE(prohibited.name, QStringLiteral("P-56"));
+    QCOMPARE(prohibited.restriction, GeoZone::Prohibited);
+    QCOMPARE(prohibited.volumes[0].upperLimit, 18000.0);
+    const GeoZone::Data &restricted = byCode.value(QStringLiteral("R"));
+    QCOMPARE(restricted.name, QStringLiteral("R-4001A"));
+    QCOMPARE(restricted.restriction, GeoZone::ReqAuthorisation);
+    QVERIFY(restricted.restrictionConditions.contains(QStringLiteral("SURFACE TO UNLIMITED")));
+    QCOMPARE(restricted.volumes[0].upperLimit, 99999.0);
+    QCOMPARE(restricted.authorities, QStringList(QStringLiteral("FAA, WASHINGTON ARTCC")));
+
+    // Errors like the rate limit of the ArcGIS services are reported
+    QVERIFY(!GeoZoneParser::parse(R"({"error":{"code":429,"message":"Unable to perform query. Too many requests.","details":["Retry after 60 sec."]}})",
+                                  result, errorString, GeoZoneParser::Format::FaaAirspace));
+    QCOMPARE(errorString, QStringLiteral("The server reported an error: Unable to perform query. Too many requests. Retry after 60 sec."));
 }
 
 void GeoZoneParserTest::_testParseFaaTfr()
@@ -1512,6 +1589,32 @@ void GeoZoneParserTest::_testProviders()
         }
     }
     QCOMPARE(GeoZoneProviders::feedPresets().count() + GeoZoneProviders::areaProviders().count(), services.count());
+    // The FAA layers share a host, their paths tell them apart, and their URLs give the area as an envelope
+    const QGeoRectangle washington(QGeoCoordinate(38.95, -77.1), QGeoCoordinate(38.85, -76.95));
+    const QString sua = GeoZoneProviders::areaFeedUrl(QStringLiteral("faa-sua"), washington);
+    QVERIFY2(sua.contains(QStringLiteral("/Special_Use_Airspace/FeatureServer/0/query?")) && sua.contains(QStringLiteral("geometry=-77.10000,38.85000,-76.95000,38.95000")),
+             qPrintable(sua));
+    QCOMPARE(GeoZoneProviders::serviceId(sua), QStringLiteral("faa-sua"));
+    QCOMPARE(GeoZoneProviders::serviceId(GeoZoneProviders::areaFeedUrl(QStringLiteral("faa-uasfm"), washington)), QStringLiteral("faa-uasfm"));
+    QCOMPARE(GeoZoneProviders::feedArea(sua), washington);
+    QVERIFY(GeoZoneProviders::areaDownloaded(QStringLiteral("faa-sua"), { sua }, washington));
+    QVERIFY(!GeoZoneProviders::areaDownloaded(QStringLiteral("faa-class"), { sua }, washington));
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://services6.arcgis.com/other/arcgis/rest/services/Layer/FeatureServer/0/query")), GeoZoneParser::Format::Unknown);
+
+    // Further pages of ArcGIS and numbered responses
+    using Paging = GeoZoneProviders::Paging;
+    const Paging arcGis = GeoZoneProviders::paging(sua, R"({"type":"FeatureCollection","properties":{"exceededTransferLimit":true},"features":[)", QByteArray());
+    QCOMPARE(arcGis.scheme, Paging::Scheme::ArcGisOffset);
+    QCOMPARE(arcGis.pageSize, 1000);
+    QVERIFY(GeoZoneProviders::pageUrl(sua, arcGis, 2).contains(QStringLiteral("resultOffset=2000")));
+    QCOMPARE(GeoZoneProviders::paging(sua, R"({"type":"FeatureCollection","features":[)", "]}").scheme, Paging::Scheme::None);
+    const QString numbered = QStringLiteral("https://example.com/api/airspaces?bbox=1,2,3,4&limit=100&page=1");
+    const Paging pages = GeoZoneProviders::paging(numbered, R"({"limit":100,"totalCount":250,"totalPages":3,"page":1,"items":[)", QByteArray());
+    QCOMPARE(pages.scheme, Paging::Scheme::PageNumber);
+    QCOMPARE(pages.pageCount, 2);
+    QCOMPARE(GeoZoneProviders::pageUrl(numbered, pages, 2), QStringLiteral("https://example.com/api/airspaces?bbox=1,2,3,4&limit=100&page=3"));
+    QCOMPARE(GeoZoneProviders::paging(numbered, R"({"limit":100,"totalCount":50,"totalPages":1,"page":1,"items":[)", QByteArray()).scheme, Paging::Scheme::None);
+
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://example.com/zones.json")), GeoZoneParser::Format::Unknown);
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://notfaa.gov/zones.json")), GeoZoneParser::Format::Unknown);
 }

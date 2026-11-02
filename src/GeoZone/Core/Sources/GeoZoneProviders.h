@@ -32,6 +32,7 @@ public:
         QString id;                         ///< Stable identifier
         QString name;                       ///< Shown to the user, translated
         QString host;                       ///< The service's URLs have this host or a subdomain of it
+        QString path;                       ///< and a path starting with this one, for services sharing a host
         GeoZoneParser::Format format = GeoZoneParser::Format::Unknown;
         QString feedUrl;                    ///< URL of the whole dataset, empty for services only serving areas
         /// URL of the zones in the area, null for services without area downloads
@@ -102,7 +103,35 @@ public:
     static QString wfsPageUrl(const QString &url, qint64 startIndex);
     static constexpr int maxWfsPages = 50;     ///< Pages downloaded after the first of a response the server limited
 
+    /// How the further pages of a response the server limited are requested
+    struct Paging {
+        enum class Scheme : quint8 {
+            None,           ///< The response is complete
+            WfsStartIndex,  ///< WFS GetFeature from STARTINDEX on, the counts of the response tell the pages
+            ArcGisOffset,   ///< ArcGIS feature service query from resultOffset on, each page tells whether more follow
+            PageNumber,     ///< Numbered pages, the response tells their count, like OpenAIP
+        };
+        Scheme scheme = Scheme::None;
+        qint64 pageSize = 0;    ///< Features per page of the offset schemes
+        int pageCount = 0;      ///< Further pages after the first, at most maxWfsPages. For ArcGIS the most requested.
+    };
+    /// @return How the further pages of a response are requested, from its first and last bytes, where servers write
+    ///         their counts, without parsing it
+    static Paging paging(const QString &url, const QByteArray &head, const QByteArray &tail);
+    /// @return URL of a further page, 1 for the one after the first
+    static QString pageUrl(const QString &url, const Paging &paging, int page);
+    /// @return true when the page of an ArcGIS feature service query says more features follow
+    static bool arcGisExceeded(const QByteArray &head, const QByteArray &tail);
+
 private:
+    /// @return Value of the first number member with the name in the bytes, -1 without
+    static qint64 _jsonCount(const QByteArray &head, const QByteArray &tail, const char *name);
+    /// @return The URL with the query item set, replacing an item with the same name in any case
+    static QString _withQueryItem(const QString &url, const QString &name, const QString &value);
     static QString _bboxQuery(const QGeoRectangle &area, const QString &suffix = QString());
     static QString _dipulUrl(const QStringList &layers, const QGeoRectangle &area);
+    /// @return URL of the query of a layer of the FAA's ArcGIS feature services, for the area or its {bbox} placeholder
+    static QString _faaUrl(const QString &service, const QString &where, const QString &fields, const QString &bbox);
+    /// @return true when the URL is one of the service's, see Service::host and Service::path
+    static bool _matches(const Service &service, const QUrl &url);
 };

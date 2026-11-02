@@ -45,6 +45,7 @@ public:
         Dipul,      ///< German geographical zones GeoJSON from the DiPUL WFS
         FranceUas,  ///< French UAS restrictions GeoJSON of the IGN Géoplateforme WFS
         Aixm,       ///< AIXM 5.1 airspaces, like the UK flight restriction zones from NATS
+        FaaAirspace,    ///< GeoJSON of the FAA's ArcGIS airspace layers: UAS facility maps, national security restrictions, class and special use airspace
     };
 
     /// Document a feed's features refer to, like the details of an FAA NOTAM, with its version

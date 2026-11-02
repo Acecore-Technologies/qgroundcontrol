@@ -21,12 +21,14 @@
 #include "GeoZoneDownloader.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneProvenance.h"
+#include "GeoZoneProviders.h"
 #include "GeoZoneService.h"
 
 class GeoZoneFormat;
 
 /// Downloads one feed for loading, in stages: the OAuth2 token of its service, the feed URL, which may be a page
-/// linking to the current dataset, then that dataset, the further pages of a WFS response the server limited, and the
+/// linking to the current dataset, then that dataset, the further pages of a response the server limited (WFS, ArcGIS
+/// or numbered pages, see GeoZoneProviders::paging), and the
 /// companion documents the format of the document refers to. The document is checked against the SHA-256 its
 /// publisher gives in a digest header or a .sha256 file, see GeoZoneService::sha256Url. The result is a document ready to load, the confirmation that the stored copy is current,
 /// or a failure. Canceling stops the downloads and drops whatever arrives later.
@@ -41,7 +43,7 @@ public:
         Feed,           ///< Downloading the feed URL
         Dataset,        ///< Downloading the dataset the feed's page linked to
         Integrity,      ///< Downloading the SHA-256 the service publishes of the document
-        Pages,          ///< Downloading the further pages of a WFS response
+        Pages,          ///< Downloading the further pages of a response the server limited
         Companions,     ///< Downloading the companion documents of the features
         Finished,       ///< finished was emitted, or the fetch was canceled
     };
@@ -69,7 +71,7 @@ public:
         };
         Status status = Status::Failed;
         QString filePath;           ///< Document with its companions, which the receiver adopts or removes
-        QStringList pagePaths;      ///< Further pages of a WFS response, see GeoZoneLoader::Job::pagePaths
+        QStringList pagePaths;      ///< Further pages of a paged response, see GeoZoneLoader::Job::pagePaths
         QString etag;               ///< Validators of the document
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, empty when the feed URL is the dataset
@@ -125,7 +127,7 @@ private:
     void _documentReceived(const GeoZoneDownloader::Result &download);
     void _sha256Received(const QString &url, const GeoZoneDownloader::Result &download);
     void _fetchRest();
-    /// @return false when the response isn't a WFS response the server limited
+    /// @return false when the response isn't one the server limited
     bool _startPages();
     void _fetchNextPage();
     void _fetchCompanions();
@@ -143,9 +145,8 @@ private:
     QString _accessToken;
     bool _tokenRequested = false;
 
-    qint64 _pageSize = 0;
-    int _pageCount = 0;     ///< After the first
-    int _nextPage = 1;
+    GeoZoneProviders::Paging _paging;
+    int _nextPage = 1;      ///< 1 for the page after the first
 
     QJsonObject _document;  ///< Document whose companions are downloaded
     GeoZoneParser::Companions _companions;

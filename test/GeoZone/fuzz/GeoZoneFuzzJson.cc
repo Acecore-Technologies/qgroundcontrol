@@ -29,6 +29,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         GeoZoneParser::Format::FaaTfr,
         GeoZoneParser::Format::Dipul,
         GeoZoneParser::Format::FranceUas,
+        GeoZoneParser::Format::FaaAirspace,
     };
     for (const GeoZoneParser::Format hint : hints) {
         GeoZoneParser::Result result;

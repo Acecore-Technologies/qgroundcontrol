@@ -51,6 +51,7 @@ set(GEOZONE_TEST_DATA
     data/dipul_test.json
     data/ed269_test.json
     data/ed318_test.json
+    data/faa_airspace_test.json
     data/faa_tfr_test.json
     data/france_uas_test.json
     data/uk_aixm_test.xml

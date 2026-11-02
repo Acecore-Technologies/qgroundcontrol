@@ -17,6 +17,7 @@
 
 #include <QtCore/QFile>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QUrl>
 #include <QtCore/QUuid>
 
@@ -285,48 +286,78 @@ void GeoZoneFeedFetch::_fetchRest()
     }
 }
 
+namespace {
+
+/// The counts of paged responses are at their start or their end, which aren't parsed here
+void readHeadAndTail(const QString &filePath, QByteArray &head, QByteArray &tail)
+{
+    constexpr qint64 countBytes = 4096;
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return;
+    }
+    head = file.read(countBytes);
+    (void) file.seek((std::max)(qint64{ 0 }, file.size() - countBytes));
+    tail = file.read(countBytes);
+}
+
+} // namespace
+
 bool GeoZoneFeedFetch::_startPages()
 {
-    // The counts are at the start or the end of the response, which isn't parsed here
-    constexpr qint64 countBytes = 4096;
-    QFile file(_result.filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return false;
-    }
-    const QByteArray head = file.read(countBytes);
-    (void) file.seek((std::max)(qint64{ 0 }, file.size() - countBytes));
-    const QByteArray tail = file.read(countBytes);
-    file.close();
-    const GeoZoneProviders::WfsCounts counts = GeoZoneProviders::wfsCounts(head, tail);
-    if ((counts.returned <= 0) || (counts.matched <= counts.returned) || GeoZoneProviders::wfsPageUrl(_requestUrl, counts.returned).isEmpty()) {
+    QByteArray head;
+    QByteArray tail;
+    readHeadAndTail(_result.filePath, head, tail);
+    _paging = GeoZoneProviders::paging(_requestUrl, head, tail);
+    if ((_paging.scheme == GeoZoneProviders::Paging::Scheme::None) || (_paging.pageCount <= 0)) {
         return false;
     }
 
     _stage = Stage::Pages;
-    _pageSize = counts.returned;
-    _pageCount = static_cast<int>((std::min)((counts.matched - 1) / counts.returned, qint64{ GeoZoneProviders::maxWfsPages }));
-    qCDebug(GeoZoneSourceLog) << "Downloading" << _pageCount << "more pages of" << counts.matched << "features from" << _request.url;
+    qCDebug(GeoZoneSourceLog) << "Downloading up to" << _paging.pageCount << "more pages from" << _request.url;
     _fetchNextPage();
     return true;
 }
 
 void GeoZoneFeedFetch::_fetchNextPage()
 {
-    if (_nextPage > _pageCount) {
+    if (_nextPage > _paging.pageCount) {
         _fetchCompanions();
         return;
     }
 
-    const QString pageUrl = GeoZoneProviders::wfsPageUrl(_requestUrl, _pageSize * _nextPage);
+    const QString pageUrl = GeoZoneProviders::pageUrl(_requestUrl, _paging, _nextPage);
     _get(pageUrl, QString(), QString(), [this](const GeoZoneDownloader::Result &page) {
+        QByteArray head;
+        QByteArray tail;
         if (page.status == GeoZoneDownloader::Result::Status::Ok) {
-            _result.pagePaths.append(page.filePath);
-            _nextPage++;
-        } else {
-            // The pages received are kept, the source shows how many zones the response still misses
-            qCWarning(GeoZoneSourceLog) << "Page download failed" << _request.url << page.errorString;
-            _nextPage = _pageCount + 1;
+            readHeadAndTail(page.filePath, head, tail);
         }
+        // ArcGIS services answer errors like their rate limit as JSON with status 200
+        static const QRegularExpression errorRegExp(QStringLiteral("^\\s*\\{\\s*\"error\"\\s*:"));
+        const bool failed = (page.status != GeoZoneDownloader::Result::Status::Ok) || errorRegExp.match(QString::fromLatin1(head)).hasMatch();
+        if (!failed) {
+            _result.pagePaths.append(page.filePath);
+            // ArcGIS pages tell whether more follow
+            if ((_paging.scheme == GeoZoneProviders::Paging::Scheme::ArcGisOffset) && !GeoZoneProviders::arcGisExceeded(head, tail)) {
+                _paging.pageCount = _nextPage;
+            }
+            _nextPage++;
+            _fetchNextPage();
+            return;
+        }
+        const QString error = (page.status == GeoZoneDownloader::Result::Status::Ok) ? QString::fromUtf8(head.left(300)) : page.errorString;
+        qCWarning(GeoZoneSourceLog) << "Page download failed" << _request.url << error;
+        if (page.status == GeoZoneDownloader::Result::Status::Ok) {
+            (void) QFile::remove(page.filePath);
+        }
+        if (_paging.scheme != GeoZoneProviders::Paging::Scheme::WfsStartIndex) {
+            // Only WFS responses tell how many zones are missing, the others would silently lack zones
+            _finish(Result::Status::Failed, tr("Page %1 of the response could not be downloaded. %2").arg(_nextPage + 1).arg(error));
+            return;
+        }
+        // The pages received are kept, the source shows how many zones the response still misses
+        _nextPage = _paging.pageCount + 1;
         _fetchNextPage();
     }, _optionsFor(pageUrl));
 }

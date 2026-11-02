@@ -198,9 +198,10 @@ QByteArray GeoZoneLoader::extractZipFile(const QString &archivePath, QString &er
 
 namespace {
 
-/// Appends the features of the further pages of a WFS response to its first page, so that the stored copy holds all
+/// Appends the features of the further pages of a paged response to its first page, so that the stored copy holds all
 /// of them, and removes the pages. Pages which can't be read are left out, the response then still misses zones.
-void mergePages(const QString &filePath, const QStringList &pagePaths)
+/// @param member Member of the pages holding the zones, see GeoZoneService::responseMember, empty for GeoJSON pages
+void mergePages(const QString &filePath, const QStringList &pagePaths, const QString &member)
 {
     const auto removePages = qScopeGuard([&pagePaths]() {
         for (const QString &pagePath : pagePaths) {
@@ -222,7 +223,12 @@ void mergePages(const QString &filePath, const QStringList &pagePaths)
         if (!page.open(QIODevice::ReadOnly)) {
             continue;
         }
-        for (const QJsonValue &feature : QJsonDocument::fromJson(page.readAll()).object().value(QStringLiteral("features")).toArray()) {
+        QByteArray document = page.readAll();
+        if (!member.isEmpty()) {
+            QString errorString;
+            document = GeoZoneService::extractMember(document, member, errorString);
+        }
+        for (const QJsonValue &feature : QJsonDocument::fromJson(document).object().value(QStringLiteral("features")).toArray()) {
             features.append(feature);
         }
     }
@@ -367,7 +373,7 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
         return loadResult;
     }
     if (!job.pagePaths.isEmpty()) {
-        mergePages(job.sourcePath, job.pagePaths);
+        mergePages(job.sourcePath, job.pagePaths, job.responseMember);
     }
 
     QFile file(job.sourcePath);

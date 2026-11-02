@@ -52,6 +52,7 @@ const GeoZoneFormat *GeoZoneAixmFormatInstance();
 const GeoZoneFormat *GeoZoneDipulFormatInstance();
 const GeoZoneFormat *GeoZoneEd269FormatInstance();
 const GeoZoneFormat *GeoZoneEd318FormatInstance();
+const GeoZoneFormat *GeoZoneFaaAirspaceFormatInstance();
 const GeoZoneFormat *GeoZoneFaaTfrFormatInstance();
 const GeoZoneFormat *GeoZoneFranceUasFormatInstance();
 
@@ -63,6 +64,7 @@ const QList<const GeoZoneFormat*> &GeoZoneFormat::formats()
             GeoZoneDipulFormatInstance(),
             GeoZoneEd269FormatInstance(),
             GeoZoneEd318FormatInstance(),
+            GeoZoneFaaAirspaceFormatInstance(),
             GeoZoneFaaTfrFormatInstance(),
             GeoZoneFranceUasFormatInstance(),
         };

@@ -13,6 +13,8 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 
+#include <algorithm>
+
 namespace {
 
 /// DiPUL layers of aviation zones, small enough to download for the whole country
@@ -32,6 +34,30 @@ const QStringList kDipulAllLayers = {
     QStringLiteral("temporaere_betriebseinschraenkungen"), QStringLiteral("umspannwerke"), QStringLiteral("vogelschutzgebiete"),
     QStringLiteral("windkraftanlagen"), QStringLiteral("wohngrundstuecke"),
 };
+
+/// The FAA's public ArcGIS feature services, see https://udds-faa.opendata.arcgis.com
+const QString kFaaHost = QStringLiteral("services6.arcgis.com");
+const QString kFaaPath = QStringLiteral("/ssFJjBXIUyZDrSYZ/arcgis/rest/services/");
+
+struct FaaLayer {
+    const char *id;
+    const char *service;
+    const char *where;
+    const char *fields;
+};
+
+/// The layers of the FAA airspace providers: UAS facility maps, national security UAS flight restrictions, the
+/// controlled airspace classes reaching the surface and special use airspace
+const FaaLayer kFaaLayers[] = {
+    { "faa-uasfm", "FAA_UAS_FacilityMap_Data", "1=1",
+      "OBJECTID,GLOBALID,CEILING,UNIT,MAP_EFF,ARPT_COUNT,APT1_FAAID,APT1_ICAO,APT1_NAME,APT1_LAANC,APT2_ICAO,APT2_NAME,APT2_LAANC,AIRSPACE_1,AIRSPACE_2" },
+    { "faa-nsufr", "DoD_Mar_13", "1=1", "*" },
+    { "faa-class", "Class_Airspace", "TYPE_CODE='CLASS' AND LOCAL_TYPE IN ('CLASS_B','CLASS_C','CLASS_D','CLASS_E2','CLASS_E3','CLASS_E4')", "*" },
+    { "faa-sua", "Special_Use_Airspace", "1=1", "*" },
+};
+
+/// The 50 states and the territories in the Caribbean
+const QGeoRectangle kUnitedStates(QGeoCoordinate(72.0, -180.0), QGeoCoordinate(17.5, -64.5));
 
 } // namespace
 
@@ -68,7 +94,23 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
     nats.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\""));
     nats.airac = true;
 
-    return {
+    const QStringList faaNames = {
+        tr("United States UAS facility maps (FAA)"), tr("United States national security UAS restrictions (FAA)"),
+        tr("United States controlled airspace (FAA)"), tr("United States special use airspace (FAA)"),
+    };
+    QList<Service> faa;
+    qsizetype nameIndex = 0;
+    for (const FaaLayer &layer : kFaaLayers) {
+        Service service = feed(QString::fromLatin1(layer.id), faaNames.value(nameIndex++), kFaaHost, Format::FaaAirspace, QString());
+        service.path = kFaaPath + QString::fromLatin1(layer.service) + QLatin1Char('/');
+        service.coverage = kUnitedStates;
+        service.areaUrl = [layer](const QGeoRectangle &area) {
+            return _faaUrl(QString::fromLatin1(layer.service), QString::fromLatin1(layer.where), QString::fromLatin1(layer.fields), _bboxQuery(area));
+        };
+        faa.append(service);
+    }
+
+    return QList<Service>{
         feed(QStringLiteral("traficom"), tr("Finland (Traficom)"), QStringLiteral("traficom.fi"), Format::Unknown,
              QStringLiteral("https://eservices.traficom.fi/Ilmatilasovellus/api/uas-reservations/json?lang=en")),
         feed(QStringLiteral("lgs"), tr("Latvia (LGS)"), QStringLiteral("drz.lv"), Format::Unknown,
@@ -85,7 +127,7 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
         nats,
         dipulAll,
         france,
-    };
+    } + faa;
 }
 
 QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
@@ -122,6 +164,21 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
     templates.append(area);
 
     // The FAA NOTAM Management Service isn't offered until its NOTAM GeoJSON can be read
+
+    // The FAA's public airspace layers, also offered for the map area, following the area of interest
+    const QList<Service> all = services();
+    for (const FaaLayer &layer : kFaaLayers) {
+        const auto service = std::find_if(all.cbegin(), all.cend(), [&layer](const Service &candidate) { return candidate.id == QLatin1String(layer.id); });
+        ServiceTemplate faa;
+        faa.url = _faaUrl(QString::fromLatin1(layer.service), QString::fromLatin1(layer.where), QString::fromLatin1(layer.fields), QStringLiteral("{bbox}"));
+        faa.service.id = service->id;
+        faa.service.name = service->name;
+        faa.service.areaOfInterest = true;
+        // Facility maps are grids of cells of about 900 m, many around large airports
+        faa.service.maxAreaKm2 = (faa.service.id == QStringLiteral("faa-uasfm")) ? 10000 : 0;
+        faa.note = tr("Public FAA data, no account needed. Informational: check B4UFLY or a LAANC provider before flying.");
+        templates.append(faa);
+    }
 
     return templates;
 }
@@ -192,7 +249,9 @@ QGeoRectangle GeoZoneProviders::feedArea(const QString &url)
 {
     const QUrlQuery query{QUrl(url)};
     for (const QPair<QString, QString> &item : query.queryItems(QUrl::FullyDecoded)) {
-        if (item.first.compare(QStringLiteral("bbox"), Qt::CaseInsensitive) != 0) {
+        // ArcGIS feature services take the area as an envelope geometry
+        if ((item.first.compare(QStringLiteral("bbox"), Qt::CaseInsensitive) != 0) &&
+            ((item.first != QStringLiteral("geometry")) || (query.queryItemValue(QStringLiteral("geometryType")) != QStringLiteral("esriGeometryEnvelope")))) {
             continue;
         }
         // West, south, east and north, see _bboxQuery
@@ -237,12 +296,18 @@ bool GeoZoneProviders::areaDownloaded(const QString &serviceId, const QStringLis
     return false;
 }
 
+bool GeoZoneProviders::_matches(const Service &service, const QUrl &url)
+{
+    const QString host = url.host();
+    return ((host == service.host) || host.endsWith(QLatin1Char('.') + service.host)) &&
+           (service.path.isEmpty() || url.path().startsWith(service.path, Qt::CaseInsensitive));
+}
+
 GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
 {
-    const QString host = QUrl(url).host();
+    const QUrl parsedUrl(url);
     for (const Service &service : services()) {
-        if ((service.format != GeoZoneParser::Format::Unknown) &&
-            ((host == service.host) || host.endsWith(QLatin1Char('.') + service.host))) {
+        if ((service.format != GeoZoneParser::Format::Unknown) && _matches(service, parsedUrl)) {
             return service.format;
         }
     }
@@ -257,12 +322,12 @@ QString GeoZoneProviders::serviceId(const QString &url)
             return service.id;
         }
     }
-    // Services sharing a host are told apart by whether the URL is that of an area
-    const QString host = QUrl(url).host();
-    const bool area = url.contains(QStringLiteral("bbox="), Qt::CaseInsensitive);
+    // Services sharing a host are told apart by their path, or by whether the URL is that of an area
+    const QUrl parsedUrl(url);
+    const bool area = url.contains(QStringLiteral("bbox="), Qt::CaseInsensitive) || url.contains(QStringLiteral("geometry="));
     QString id;
     for (const Service &service : all) {
-        if ((host == service.host) || host.endsWith(QLatin1Char('.') + service.host)) {
+        if (_matches(service, parsedUrl)) {
             if (id.isEmpty() || (area && service.areaUrl)) {
                 id = service.id;
             }
@@ -344,6 +409,15 @@ QString GeoZoneProviders::_bboxQuery(const QGeoRectangle &area, const QString &s
                                          .arg(area.bottomRight().longitude(), 0, 'f', 5).arg(area.topLeft().latitude(), 0, 'f', 5) + suffix;
 }
 
+QString GeoZoneProviders::_faaUrl(const QString &service, const QString &where, const QString &fields, const QString &bbox)
+{
+    // Pages of 1000 features, the most each of the services answers, see paging()
+    return QStringLiteral("https://") + kFaaHost + kFaaPath + service +
+           QStringLiteral("/FeatureServer/0/query?where=%1&geometry=%2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects"
+                          "&outFields=%3&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=1000&resultOffset=0")
+               .arg(QString::fromLatin1(QUrl::toPercentEncoding(where)), bbox, fields);
+}
+
 QString GeoZoneProviders::_dipulUrl(const QStringList &layers, const QGeoRectangle &area)
 {
     QStringList typeNames;
@@ -359,25 +433,109 @@ QString GeoZoneProviders::_dipulUrl(const QStringList &layers, const QGeoRectang
     return url;
 }
 
+qint64 GeoZoneProviders::_jsonCount(const QByteArray &head, const QByteArray &tail, const char *name)
+{
+    const QRegularExpression pattern(QStringLiteral("\"%1\"\\s*:\\s*(\\d+)").arg(QLatin1String(name)));
+    for (const QByteArray *bytes : { &head, &tail }) {
+        const QRegularExpressionMatch match = pattern.match(QString::fromLatin1(*bytes));
+        if (match.hasMatch()) {
+            return match.captured(1).toLongLong();
+        }
+    }
+    return -1;
+}
+
 GeoZoneProviders::WfsCounts GeoZoneProviders::wfsCounts(const QByteArray &head, const QByteArray &tail)
 {
-    const auto count = [&head, &tail](const char *name) -> qint64 {
-        const QRegularExpression pattern(QStringLiteral("\"%1\"\\s*:\\s*(\\d+)").arg(QLatin1String(name)));
-        for (const QByteArray *bytes : { &head, &tail }) {
-            const QRegularExpressionMatch match = pattern.match(QString::fromLatin1(*bytes));
-            if (match.hasMatch()) {
-                return match.captured(1).toLongLong();
+    WfsCounts counts;
+    counts.matched = _jsonCount(head, tail, "numberMatched");
+    if (counts.matched < 0) {
+        counts.matched = _jsonCount(head, tail, "totalFeatures");
+    }
+    counts.returned = _jsonCount(head, tail, "numberReturned");
+    return counts;
+}
+
+bool GeoZoneProviders::arcGisExceeded(const QByteArray &head, const QByteArray &tail)
+{
+    static const QRegularExpression pattern(QStringLiteral("\"exceededTransferLimit\"\\s*:\\s*true"));
+    return pattern.match(QString::fromLatin1(tail)).hasMatch() || pattern.match(QString::fromLatin1(head)).hasMatch();
+}
+
+GeoZoneProviders::Paging GeoZoneProviders::paging(const QString &url, const QByteArray &head, const QByteArray &tail)
+{
+    Paging paging;
+    const WfsCounts counts = wfsCounts(head, tail);
+    if ((counts.returned > 0) && (counts.matched > counts.returned) && !wfsPageUrl(url, counts.returned).isEmpty()) {
+        paging.scheme = Paging::Scheme::WfsStartIndex;
+        paging.pageSize = counts.returned;
+        paging.pageCount = static_cast<int>((std::min)((counts.matched - 1) / counts.returned, qint64{ maxWfsPages }));
+        return paging;
+    }
+
+    const QUrlQuery query{QUrl(url)};
+    const auto queryValue = [&query](const QString &name) {
+        for (const auto &[key, value] : query.queryItems(QUrl::FullyDecoded)) {
+            if (key.compare(name, Qt::CaseInsensitive) == 0) {
+                return value;
             }
         }
-        return -1;
+        return QString();
     };
-    WfsCounts counts;
-    counts.matched = count("numberMatched");
-    if (counts.matched < 0) {
-        counts.matched = count("totalFeatures");
+    // ArcGIS doesn't count the features, the page size is the one requested
+    if (arcGisExceeded(head, tail)) {
+        const qint64 pageSize = queryValue(QStringLiteral("resultRecordCount")).toLongLong();
+        if (pageSize > 0) {
+            paging.scheme = Paging::Scheme::ArcGisOffset;
+            paging.pageSize = pageSize;
+            paging.pageCount = maxWfsPages;
+        }
+        return paging;
     }
-    counts.returned = count("numberReturned");
-    return counts;
+
+    const qint64 totalPages = _jsonCount(head, tail, "totalPages");
+    const qint64 page = (std::max)(qint64{ 1 }, _jsonCount(head, tail, "page"));
+    if (totalPages > page) {
+        paging.scheme = Paging::Scheme::PageNumber;
+        paging.pageCount = static_cast<int>((std::min)(totalPages - page, qint64{ maxWfsPages }));
+    }
+    return paging;
+}
+
+QString GeoZoneProviders::pageUrl(const QString &url, const Paging &paging, int page)
+{
+    const QUrlQuery query{QUrl(url)};
+    switch (paging.scheme) {
+    case Paging::Scheme::WfsStartIndex:
+        return wfsPageUrl(url, paging.pageSize * page);
+    case Paging::Scheme::ArcGisOffset: {
+        const qint64 offset = query.queryItemValue(QStringLiteral("resultOffset")).toLongLong();
+        return _withQueryItem(url, QStringLiteral("resultOffset"), QString::number(offset + (paging.pageSize * page)));
+    }
+    case Paging::Scheme::PageNumber: {
+        const qint64 first = (std::max)(qint64{ 1 }, query.queryItemValue(QStringLiteral("page")).toLongLong());
+        return _withQueryItem(url, QStringLiteral("page"), QString::number(first + page));
+    }
+    case Paging::Scheme::None:
+        break;
+    }
+    return QString();
+}
+
+QString GeoZoneProviders::_withQueryItem(const QString &url, const QString &name, const QString &value)
+{
+    QUrl pageUrl(url);
+    QUrlQuery query(pageUrl);
+    QList<std::pair<QString, QString>> items;
+    for (const auto &[key, itemValue] : query.queryItems(QUrl::FullyDecoded)) {
+        if (key.compare(name, Qt::CaseInsensitive) != 0) {
+            items.append({ key, itemValue });
+        }
+    }
+    items.append({ name, value });
+    query.setQueryItems(items);
+    pageUrl.setQuery(query);
+    return pageUrl.toString();
 }
 
 QString GeoZoneProviders::wfsPageUrl(const QString &url, qint64 startIndex)

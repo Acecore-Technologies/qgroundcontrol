@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneSource.h"
+#include "GeoZoneProviders.h"
 #include "GeoZone.h"
 #include "GeoZoneAirac.h"
 #include "GeoZoneEnvironment.h"
@@ -18,7 +19,6 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QLocale>
 #include <QtCore/QUrl>
-#include <QtCore/QUrlQuery>
 
 #include <algorithm>
 #include <cmath>
@@ -148,18 +148,9 @@ QString GeoZoneSource::name() const
     }
     QString name = _title.isEmpty() ? (isFeed() ? QUrl(_url).host() : QFileInfo(_key).fileName()) : _title;
 
-    // Feeds of an area, like the map area downloaded from a WFS, are told apart by where they are
-    const QUrlQuery query(QUrl(_url).query());
-    for (const auto &[key, value] : query.queryItems()) {
-        if (key.compare(QStringLiteral("BBOX"), Qt::CaseInsensitive) != 0) {
-            continue;
-        }
-        const QStringList bounds = value.split(QLatin1Char(','));
-        if (bounds.count() >= 4) {
-            const double longitude = (bounds[0].toDouble() + bounds[2].toDouble()) / 2;
-            const double latitude = (bounds[1].toDouble() + bounds[3].toDouble()) / 2;
-            name = tr("%1, area around %2, %3").arg(name).arg(latitude, 0, 'f', 2).arg(longitude, 0, 'f', 2);
-        }
+    // Feeds of an area, like the map area downloaded from a WFS or an ArcGIS service, are told apart by where they are
+    if (const QGeoRectangle area = GeoZoneProviders::feedArea(_url); area.isValid()) {
+        name = tr("%1, area around %2, %3").arg(name).arg(area.center().latitude(), 0, 'f', 2).arg(area.center().longitude(), 0, 'f', 2);
     }
     return name;
 }

@@ -53,7 +53,7 @@ public:
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
         qint64 maxAgeSecs = -1;     ///< How long the server said a downloaded feed stays current, negative when it didn't
-        QStringList pagePaths;      ///< Further pages of a WFS response the server limited, merged into sourcePath and removed
+        QStringList pagePaths;      ///< Further pages of a response the server limited, merged into sourcePath and removed
         QString responseMember;     ///< Member of a downloaded JSON response holding the zones, see GeoZoneService::responseMember
         QGeoRectangle area;         ///< Area of interest the feed was downloaded for, invalid when it doesn't take one
         GeoZoneProvenance provenance;   ///< Of the data, completed with the hash of the stored copy

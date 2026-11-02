@@ -178,6 +178,13 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         root = root.value(QStringLiteral("document")).toObject();
     }
     const QJsonValue featuresValue = root.value(QStringLiteral("features"));
+    // Feature services like ArcGIS answer errors, like their rate limits, as JSON
+    if (const QJsonObject error = root.value(QStringLiteral("error")).toObject(); !featuresValue.isArray() && !error.isEmpty()) {
+        const QString message = _text(error.value(QStringLiteral("message")));
+        const QStringList details = _stringList(error.value(QStringLiteral("details")));
+        errorString = tr("The server reported an error: %1").arg(QStringList(QStringList{ message } + details).join(QLatin1Char(' ')).trimmed());
+        return false;
+    }
     if (!document.isObject() || !featuresValue.isArray()) {
         errorString = tr("Not a geozone file. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces and the FAA, DiPUL and IGN GeoJSON are supported.");
         return false;

@@ -42,6 +42,7 @@ qt_add_library(GeoZoneCore STATIC
     Formats/GeoZoneDipulFormat.cc
     Formats/GeoZoneEd269Format.cc
     Formats/GeoZoneEd318Format.cc
+    Formats/GeoZoneFaaAirspaceFormat.cc
     Formats/GeoZoneFaaTfrFormat.cc
     Formats/GeoZoneFormat.cc
     Formats/GeoZoneFormat.h
