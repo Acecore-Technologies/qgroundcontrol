@@ -18,8 +18,8 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include "GeoZone.h"
+#include "GeoZoneDisplay.h"
 #include "GeoZoneInfo.h"
-#include "GeoZoneMapFilter.h"
 
 class GeoZoneManager;
 class GeoZoneShape;

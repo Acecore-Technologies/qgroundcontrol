@@ -11,8 +11,6 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneSettings.h
         Map/GeoZoneDisplay.cc
         Map/GeoZoneDisplay.h
-        Map/GeoZoneMapFilter.cc
-        Map/GeoZoneMapFilter.h
         Map/GeoZoneMapLayer.cc
         Map/GeoZoneMapLayer.h
         Map/GeoZoneMapModel.cc
@@ -92,7 +90,6 @@ qt_add_qml_module(GeoZoneModule
     QML_FILES
         Map/GeoZoneInfoDialog.qml
         Map/GeoZoneLegend.qml
-        Map/GeoZoneMapFilters.qml
         Map/GeoZoneMapPanel.qml
         Map/GeoZoneMapVisuals.qml
         Map/GeoZoneSearch.qml

@@ -35,7 +35,7 @@ Item {
     property real   filterHintBottomMargin: ScreenTools.defaultFontPixelHeight  ///< Of the hint about zones hidden by the map filters
 
     readonly property int hiddenZoneCount:      _mapModel.hiddenZoneCount   ///< Smallest zones in view left out to limit the number of map items
-    readonly property int filteredZoneCount:    _mapModel.filteredZoneCount ///< Zones in view hidden by the map filters, see GeoZoneMapFilters
+    readonly property int filteredZoneCount:    _mapModel.filteredZoneCount ///< Zones in view hidden by the map filters, see GeoZoneLegend
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property bool  _showZones:         showZones && _geoZoneManager.display.visible && map.visible // Items are not kept for maps in hidden views
