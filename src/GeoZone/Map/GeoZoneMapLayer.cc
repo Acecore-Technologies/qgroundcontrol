@@ -16,7 +16,9 @@
 #include <QtGui/private/qtriangulator_p.h>
 #include <QtLocation/private/qdeclarativegeomap_p.h>
 #include <QtPositioning/QGeoCircle>
+#include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGGeometryNode>
+#include <QtQuick/QSGTextureMaterial>
 #include <QtQuick/QSGTransformNode>
 #include <QtQuick/QSGVertexColorMaterial>
 
@@ -26,6 +28,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -57,6 +60,44 @@ QList<QPointF> toMercator(const QList<QGeoCoordinate> &ring)
     }
     return points;
 }
+
+constexpr qreal kActiveHatchAlpha = 0.6;
+constexpr qreal kInactiveHatchAlpha = 0.25;  ///< Like the fainter fill of zones not active now
+
+/// Hatching drawn with a repeated texture, which it owns
+class HatchNode : public QSGGeometryNode
+{
+public:
+    HatchNode()
+    {
+        QSGGeometry *const geometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
+        geometry->setDrawingMode(QSGGeometry::DrawTriangles);
+        setGeometry(geometry);
+        setFlag(QSGNode::OwnsGeometry);
+        _material.setFlag(QSGMaterial::Blending);
+        _material.setHorizontalWrapMode(QSGTexture::Repeat);
+        _material.setVerticalWrapMode(QSGTexture::Repeat);
+        _material.setFiltering(QSGTexture::Linear);
+        setMaterial(&_material);
+    }
+
+    /// Replaces the texture when the color changed
+    void updateTexture(QQuickWindow *window, const QColor &color, qreal alpha)
+    {
+        if (_texture && (color == _color)) {
+            return;
+        }
+        _color = color;
+        _texture.reset(window->createTextureFromImage(GeoZoneMapLayer::hatchImage(color, alpha), QQuickWindow::TextureHasAlphaChannel));
+        _material.setTexture(_texture.get());
+        markDirty(QSGNode::DirtyMaterial);
+    }
+
+private:
+    QSGTextureMaterial _material;
+    std::unique_ptr<QSGTexture> _texture;
+    QColor _color;
+};
 
 } // namespace
 
@@ -231,8 +272,10 @@ void GeoZoneMapLayer::_updateCamera()
     if (!_mercatorTransform(transform)) {
         // Built again once the map can be projected
         _rebuildNeeded = true;
-        if (!_fillVertices.isEmpty() || !_strokeVertices.isEmpty()) {
+        if (vertexCount() > 0) {
             _fillVertices.clear();
+            _hatchVertices[0].clear();
+            _hatchVertices[1].clear();
             _strokeVertices.clear();
             _geometryDirty = true;
             emit vertexCountChanged();
@@ -269,6 +312,8 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
     _origin = mercatorToItem.inverted().map(QPointF(width() / 2, height() / 2));
     _scale = std::hypot(mercatorToItem.m11(), mercatorToItem.m12());
     _fillVertices.clear();
+    _hatchVertices[0].clear();
+    _hatchVertices[1].clear();
     _strokeVertices.clear();
     _geometryDirty = true;
 
@@ -298,9 +343,14 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
 
         const QColor restrictionColor = _restrictionColor(static_cast<int>(zone->restriction()));
         const auto fill = premultiplied(restrictionColor, active ? _activeFillAlpha : _inactiveFillAlpha);
+        QList<HatchVertex> *const hatch = (zone->restriction() == GeoZone::Prohibited) ? &_hatchVertices[active ? 0 : 1] : nullptr;
         for (const QPointF &mercator : triangulation.triangles) {
             const QPointF point = toVertex(mercator);
             _fillVertices.append(Vertex{ static_cast<float>(point.x()), static_cast<float>(point.y()), fill[0], fill[1], fill[2], fill[3] });
+            if (hatch) {
+                hatch->append(HatchVertex{ static_cast<float>(point.x()), static_cast<float>(point.y()),
+                                           static_cast<float>(point.x() / hatchSpacing), static_cast<float>(point.y() / hatchSpacing) });
+            }
         }
 
         // Outlines as quads with square caps, which cover the joins
@@ -436,14 +486,40 @@ GeoZoneMapLayer::Triangulation GeoZoneMapLayer::triangulateCircle(const QGeoCoor
     return result;
 }
 
+QImage GeoZoneMapLayer::hatchImage(const QColor &color, qreal alpha)
+{
+    // A line across the diagonal, wrapping around in both directions, anti-aliased by sampling each pixel 4 x 4 times
+    constexpr int samples = 4;
+    constexpr double lineWidth = hatchTextureSize * 0.22;  ///< Along the edges, about 1.5 item pixels across the line
+    QImage image(hatchTextureSize, hatchTextureSize, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < hatchTextureSize; y++) {
+        QRgb *const line = reinterpret_cast<QRgb*>(image.scanLine(y));
+        for (int x = 0; x < hatchTextureSize; x++) {
+            int covered = 0;
+            for (int i = 0; i < samples * samples; i++) {
+                const double sum = x + y + ((i % samples) + 0.5) / samples + ((i / samples) + 0.5) / samples;
+                covered += (std::fmod(sum, hatchTextureSize) < lineWidth) ? 1 : 0;
+            }
+            const double a = color.alphaF() * alpha * covered / (samples * samples);
+            line[x] = qRgba(qRound(color.redF() * a * 255), qRound(color.greenF() * a * 255), qRound(color.blueF() * a * 255), qRound(a * 255));
+        }
+    }
+    return image;
+}
+
 QSGNode *GeoZoneMapLayer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data)
 {
     Q_UNUSED(data);
 
+    // Fills, hatching of the active then inactive prohibited zones, outlines
     QSGTransformNode *root = static_cast<QSGTransformNode*>(oldNode);
     if (!root) {
         root = new QSGTransformNode();
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 4; i++) {
+            if ((i == 1) || (i == 2)) {
+                root->appendChildNode(new HatchNode());
+                continue;
+            }
             QSGGeometryNode *const node = new QSGGeometryNode();
             QSGGeometry *const geometry = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 0);
             geometry->setDrawingMode(QSGGeometry::DrawTriangles);
@@ -455,21 +531,29 @@ QSGNode *GeoZoneMapLayer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData 
         _geometryDirty = true;
     }
 
+    HatchNode *const activeHatch = static_cast<HatchNode*>(root->childAtIndex(1));
+    HatchNode *const inactiveHatch = static_cast<HatchNode*>(root->childAtIndex(2));
+    const QColor hatchColor = _restrictionColor(GeoZone::Prohibited);
+    activeHatch->updateTexture(window(), hatchColor, kActiveHatchAlpha);
+    inactiveHatch->updateTexture(window(), hatchColor, kInactiveHatchAlpha);
+
     if (_geometryDirty) {
         _geometryDirty = false;
-        const QList<Vertex> *const vertexLists[] = { &_fillVertices, &_strokeVertices };
-        QSGNode *child = root->firstChild();
-        for (const QList<Vertex> *vertices : vertexLists) {
-            QSGGeometryNode *const node = static_cast<QSGGeometryNode*>(child);
-            QSGGeometry *const geometry = node->geometry();
-            geometry->allocate(static_cast<int>(vertices->count()));
-            static_assert(sizeof(Vertex) == sizeof(QSGGeometry::ColoredPoint2D));
-            if (!vertices->isEmpty()) {
-                memcpy(geometry->vertexDataAsColoredPoint2D(), vertices->constData(), vertices->count() * sizeof(Vertex));
+        static_assert(sizeof(Vertex) == sizeof(QSGGeometry::ColoredPoint2D));
+        static_assert(sizeof(HatchVertex) == sizeof(QSGGeometry::TexturedPoint2D));
+        const auto upload = [](QSGNode *node, const void *vertices, qsizetype count, size_t vertexSize) {
+            QSGGeometryNode *const geometryNode = static_cast<QSGGeometryNode*>(node);
+            QSGGeometry *const geometry = geometryNode->geometry();
+            geometry->allocate(static_cast<int>(count));
+            if (count > 0) {
+                memcpy(geometry->vertexData(), vertices, count * vertexSize);
             }
-            node->markDirty(QSGNode::DirtyGeometry);
-            child = child->nextSibling();
-        }
+            geometryNode->markDirty(QSGNode::DirtyGeometry);
+        };
+        upload(root->childAtIndex(0), _fillVertices.constData(), _fillVertices.count(), sizeof(Vertex));
+        upload(activeHatch, _hatchVertices[0].constData(), _hatchVertices[0].count(), sizeof(HatchVertex));
+        upload(inactiveHatch, _hatchVertices[1].constData(), _hatchVertices[1].count(), sizeof(HatchVertex));
+        upload(root->childAtIndex(3), _strokeVertices.constData(), _strokeVertices.count(), sizeof(Vertex));
     }
 
     root->setMatrix(_matrix);

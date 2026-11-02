@@ -12,6 +12,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QPointer>
 #include <QtGui/QColor>
+#include <QtGui/QImage>
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QTransform>
 #include <QtPositioning/QGeoCoordinate>
@@ -23,8 +24,9 @@ class GeoZoneMapModel;
 class GeoZoneShape;
 class QDeclarativeGeoMap;
 
-/// Draws the polygons and circles of a GeoZoneMapModel on a map in two scene graph nodes, the fills then the
-/// outlines, instead of one map item per shape. Shapes are triangulated once per detail level in Web Mercator
+/// Draws the polygons and circles of a GeoZoneMapModel on a map in scene graph nodes, the fills, diagonal hatching
+/// over the prohibited zones so that their color isn't their only cue, then the outlines, instead of one map item per
+/// shape. Shapes are triangulated once per detail level in Web Mercator
 /// coordinates, kept for the last few levels while the model shows them, and moved with the map by a transform, so
 /// panning, zooming and rotating only rebuild the vertices when the zoom changes by half a level. Add it as a child of
 /// the map filling it; it doesn't take mouse events. The map is expected to be flat, tilted maps aren't supported.
@@ -57,7 +59,12 @@ public:
     void setActiveFillAlpha(qreal alpha);
     qreal inactiveFillAlpha() const { return _inactiveFillAlpha; }
     void setInactiveFillAlpha(qreal alpha);
-    int vertexCount() const { return static_cast<int>((_fillVertices.count() + _strokeVertices.count())); }
+    int vertexCount() const { return static_cast<int>((_fillVertices.count() + _hatchVertices[0].count() + _hatchVertices[1].count() + _strokeVertices.count())); }
+
+    static constexpr double hatchSpacing = 10;  ///< Item pixels from one hatching line to the next along x or y, about 7 at right angles to them
+    static constexpr int hatchTextureSize = 16; ///< Pixels of the repeated texture of one hatching period
+    /// @return Texture of one period of the hatching, a diagonal line of the color with the alpha, premultiplied
+    static QImage hatchImage(const QColor &color, qreal alpha);
 
     /// Shape of a map item in Web Mercator coordinates, see GeoZoneShape::toMercator
     struct Triangulation {
@@ -97,6 +104,14 @@ private:
         uchar a;
     };
 
+    /// Vertex of the hatching, matching QSGGeometry::TexturedPoint2D
+    struct HatchVertex {
+        float x;
+        float y;
+        float tx;
+        float ty;
+    };
+
     struct CachedShape {
         int detailLevel = -1;           ///< Of the polygon rings triangulated, see GeoZoneShape::mercatorRings
         Triangulation triangulation;
@@ -125,6 +140,7 @@ private:
     double _scale = 0;                  ///< Pixels per mercator unit of the vertices
     QMatrix4x4 _matrix;                 ///< Vertices to item coordinates
     QList<Vertex> _fillVertices;
+    QList<HatchVertex> _hatchVertices[2];   ///< Of the active then the inactive prohibited zones
     QList<Vertex> _strokeVertices;
     bool _geometryDirty = false;
 };

@@ -314,19 +314,35 @@ Item {
             required property var modelData
 
             sourceItem: Rectangle {
-                width:          zoneLabel.contentWidth + ScreenTools.defaultFontPixelWidth
-                height:         zoneLabel.contentHeight + ScreenTools.defaultFontPixelHeight / 4
+                width:          labelRow.implicitWidth + ScreenTools.defaultFontPixelWidth
+                height:         labelRow.implicitHeight + ScreenTools.defaultFontPixelHeight / 4
                 radius:         height / 4
                 color:          Qt.rgba(0, 0, 0, 0.6)
                 border.color:   GeoZoneStyle.restrictionColor(labelItem.modelData.restriction)
 
-                QGCLabel {
-                    id:                 zoneLabel
+                Accessible.role:    Accessible.Button
+                Accessible.name:    labelItem.modelData.displayName + ", " + labelItem.modelData.restrictionText
+
+                // The restriction letter, so that the color isn't its only cue
+                Row {
+                    id:                 labelRow
                     anchors.centerIn:   parent
-                    text:               labelItem.modelData.displayName
-                    textFormat:         Text.PlainText
-                    color:              "white"
-                    font.pointSize:     ScreenTools.smallFontPointSize
+                    spacing:            ScreenTools.defaultFontPixelWidth / 2
+
+                    GeoZoneBadge {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text:                   GeoZoneStyle.restrictionLetter(labelItem.modelData.restriction)
+                        color:                  GeoZoneStyle.restrictionColor(labelItem.modelData.restriction)
+                        textColor:              GeoZoneStyle.restrictionTextColor(labelItem.modelData.restriction)
+                    }
+
+                    QGCLabel {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text:                   labelItem.modelData.displayName
+                        textFormat:             Text.PlainText
+                        color:                  "white"
+                        font.pointSize:         ScreenTools.smallFontPointSize
+                    }
                 }
 
                 QGCMouseArea {

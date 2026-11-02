@@ -16,9 +16,10 @@ import QGroundControl.FactControls
 import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 
-/// Explains how the geozones are drawn on the maps, with the map filters: check boxes showing or hiding the zones by
-/// restriction, and filters by altitude, schedule and source. Zones the mission check or the flight alerts report
-/// stay shown, and hidden zones are still checked and alerted.
+/// Explains how the geozones are drawn on the maps, with their colors, restriction letters and the hatching of the
+/// prohibited zones, and the map filters: check boxes showing or hiding the zones by restriction, and filters by
+/// altitude, schedule and source. Zones the mission check or the flight alerts report stay shown, and hidden zones
+/// are still checked and alerted.
 ColumnLayout {
     id:         root
     spacing:    ScreenTools.defaultFontPixelHeight / 4
@@ -39,6 +40,7 @@ ColumnLayout {
     }
 
     component Swatch: Rectangle {
+        id:                     swatch
         property int    restriction
         property bool   active:         true
 
@@ -47,6 +49,34 @@ ColumnLayout {
         color:                  GeoZoneStyle.fillColor(restriction, active)
         border.color:           GeoZoneStyle.restrictionColor(restriction)
         border.width:           active ? 2 : 1
+        clip:                   true
+
+        // Hatched like prohibited zones on the maps
+        Repeater {
+            model: swatch.restriction === GeoZone.Prohibited ? 3 : 0
+
+            Rectangle {
+                required property int index
+
+                readonly property real _offset: (index - 1) * swatch.width / 3
+
+                x:          (swatch.width - width) / 2 + _offset / Math.SQRT2
+                y:          (swatch.height - height) / 2 + _offset / Math.SQRT2
+                width:      swatch.width * 1.5
+                height:     Math.max(1, Math.round(ScreenTools.defaultFontPixelHeight / 10))
+                rotation:   -45
+                color:      GeoZoneStyle.restrictionColor(swatch.restriction)
+                opacity:    swatch.active ? 0.8 : 0.35
+            }
+        }
+    }
+
+    component RestrictionBadge: GeoZoneBadge {
+        property int restriction
+
+        text:       GeoZoneStyle.restrictionLetter(restriction)
+        color:      GeoZoneStyle.restrictionColor(restriction)
+        textColor:  GeoZoneStyle.restrictionTextColor(restriction)
     }
 
     component RestrictionRow: RowLayout {
@@ -59,11 +89,17 @@ ColumnLayout {
         readonly property bool _shown: (root._geoZoneManager.display.hiddenRestrictions & (1 << restriction)) === 0
 
         QGCCheckBox {
-            checked:    restrictionRow._shown
-            onClicked:  root._geoZoneManager.display.setRestrictionVisible(restrictionRow.restriction, checked)
+            checked:                restrictionRow._shown
+            onClicked:              root._geoZoneManager.display.setRestrictionVisible(restrictionRow.restriction, checked)
+            Accessible.name:        qsTr("Show %1 zones on the maps").arg(restrictionRow.text)
         }
 
         Swatch {
+            restriction:    restrictionRow.restriction
+            opacity:        restrictionRow._shown ? 1 : 0.3
+        }
+
+        RestrictionBadge {
             restriction:    restrictionRow.restriction
             opacity:        restrictionRow._shown ? 1 : 0.3
         }
@@ -83,9 +119,14 @@ ColumnLayout {
         visible:    false
     }
 
+    RestrictionBadge {
+        id:         badgeMetrics
+        visible:    false
+    }
+
     // Aligned with the swatches of the restrictions
     GridLayout {
-        columns:        3
+        columns:        4
         columnSpacing:  ScreenTools.defaultFontPixelWidth
         rowSpacing:     root.spacing
 
@@ -94,6 +135,7 @@ ColumnLayout {
             restriction:    GeoZone.Prohibited
             active:         false
         }
+        Item { Layout.preferredWidth: badgeMetrics.implicitWidth }
         QGCLabel { text: qsTr("Faint: not active now") }
 
         Item {
@@ -106,6 +148,10 @@ ColumnLayout {
             color:                  "transparent"
             border.color:           GeoZoneStyle.highlightColor
             border.width:           3
+            visible:                root.showCrossedZones
+        }
+        Item {
+            Layout.preferredWidth:  badgeMetrics.implicitWidth
             visible:                root.showCrossedZones
         }
         QGCLabel {

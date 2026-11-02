@@ -40,6 +40,23 @@ QtObject {
         }
     }
 
+    /// @return Letter of the restriction, shown with its color so that the color isn't its only cue
+    function restrictionLetter(restriction) {
+        switch (restriction) {
+        case GeoZone.Prohibited:        return qsTr("P", "Prohibited zone")
+        case GeoZone.ReqAuthorisation:  return qsTr("A", "Zone requiring an authorisation")
+        case GeoZone.Conditional:       return qsTr("C", "Conditional zone")
+        case GeoZone.NoRestriction:     return "\u2713"
+        case GeoZone.USpace:            return qsTr("U", "U-space zone")
+        default:                        return "?"
+        }
+    }
+
+    /// @return Color of texts on the restriction color, like the letter of a badge
+    function restrictionTextColor(restriction) {
+        return (restriction === GeoZone.Prohibited || restriction === GeoZone.Unknown || restriction === undefined) ? "white" : "black"
+    }
+
     function fillColor(restriction, active) {
         const color = restrictionColor(restriction)
         return Qt.rgba(color.r, color.g, color.b, active ? activeFillAlpha : inactiveFillAlpha)
