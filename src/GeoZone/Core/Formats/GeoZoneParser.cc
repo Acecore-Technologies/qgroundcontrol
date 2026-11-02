@@ -268,10 +268,7 @@ QString GeoZoneParser::formatToString(Format format)
     return found ? found->name() : tr("Unknown");
 }
 
-// Fields added to the result must be serialized here, see GeoZoneParseCache::formatVersion
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneParser::Result) == 160), "Serialize the new fields of GeoZoneParser::Result");
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneParser::Companion) == 48), "Serialize the new fields of GeoZoneParser::Companion");
-
+// Fields added to the result must be serialized here, see GeoZoneParseCache::formatVersion and GeoZoneParserTest::_testParseCacheRoundTrip
 QDataStream &operator<<(QDataStream &stream, const GeoZoneParser::Result &result)
 {
     stream << static_cast<quint8>(result.format) << result.title << result.provider << result.issued << result.validFrom << result.validTo;

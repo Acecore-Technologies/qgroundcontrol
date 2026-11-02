@@ -446,10 +446,7 @@ QString GeoZoneSchedule::text(const QList<TimePeriod> &applicability)
     return lines.join(QStringLiteral("\n"));
 }
 
-// Fields added to the periods must be serialized here, see GeoZoneParseCache::formatVersion
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::DailyPeriod) == 104), "Serialize the new fields of DailyPeriod");
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZoneSchedule::TimePeriod) == 48), "Serialize the new fields of TimePeriod");
-
+// Fields added to the periods must be serialized here, see GeoZoneParseCache::formatVersion and GeoZoneParserTest::_testParseCacheRoundTrip
 QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod &period)
 {
     GeoZoneDataStream::writeCount(stream, period.days.count());

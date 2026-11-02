@@ -41,7 +41,8 @@ The files of `data/` are listed in `GEOZONE_TEST_DATA` of `CMakeLists.txt` and c
 `GeoZoneCoreTest` as `:/unittest/<file>`. They are also seeds of the fuzzers, and some of them are packed into the zip
 seeds made when configuring them. The provenance of the extracts of real data is only known as far as stated below:
 where it isn't recorded, check the publisher's terms before redistributing the file outside this repository. Add new
-fixtures to this list with their source, terms and tests.
+fixtures to this list with their source, terms and tests. `GeoZoneParserTest::_testParseFixtures_data` records a hash of
+the parse result of each fixture, which guards `GeoZoneParser::version`: record it again when the fixture changes.
 
 | File | Content | Source | Licence / terms | Used by |
 | ---- | ------- | ------ | --------------- | ------- |

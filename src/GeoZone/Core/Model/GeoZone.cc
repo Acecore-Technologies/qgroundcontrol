@@ -601,10 +601,7 @@ int GeoZone::restrictionSeverity(Restriction restriction)
     return 5;
 }
 
-// Fields added to the zones must be serialized here, see GeoZoneParseCache::formatVersion
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZone::Volume) == 128), "Serialize the new fields of GeoZone::Volume");
-static_assert((sizeof(void*) != 8) || (sizeof(GeoZone::Data) == 392), "Serialize the new fields of GeoZone::Data");
-
+// Fields added to the zones must be serialized here, see GeoZoneParseCache::formatVersion and GeoZoneParserTest::_testParseCacheRoundTrip
 QDataStream &operator<<(QDataStream &stream, const GeoZone::Volume &volume)
 {
     stream << volume.isCircle;

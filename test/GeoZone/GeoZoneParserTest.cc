@@ -99,6 +99,7 @@ GeoZoneParser::Result _syntheticResult()
     result.provider = QStringLiteral("Provider \u00e9\u00df");
     result.issued = _utc(QDate(2026, 8, 13), QTime(6, 30));
     result.validFrom = QDateTime(QDate(2026, 8, 14), QTime(0, 0), QTimeZone::fromSecondsAheadOfUtc(7200));
+    result.validTo = _utc(QDate(2027, 8, 14), QTime(0, 0));
     result.skippedFeatures = 3;
     result.missingFeatures = 7;
     result.contentHash = QByteArray(20, '\x5a');
@@ -131,7 +132,7 @@ GeoZoneParser::Result _syntheticResult()
     local.endTime = QTime(18, 0);
     local.timeZone = QTimeZone("Europe/Zurich");
     local.timeZoneAssumed = true;
-    zone.applicability = { GeoZone::TimePeriod{ false, _utc(QDate(2026, 9, 1), QTime(0, 0)), QDateTime(), { daily, events, local } },
+    zone.applicability = { GeoZone::TimePeriod{ false, _utc(QDate(2026, 9, 1), QTime(0, 0)), _utc(QDate(2026, 10, 1), QTime(0, 0)), { daily, events, local } },
                            GeoZone::TimePeriod{ true, QDateTime(), QDateTime(), {} } };
     GeoZone::Volume polygon;
     polygon.rings = { { QPointF(8.1, 47.1), QPointF(8.2, 47.1), QPointF(8.2, 47.2) }, { QPointF(8.15, 47.12), QPointF(8.16, 47.12), QPointF(8.16, 47.13) } };
@@ -155,6 +156,47 @@ GeoZoneParser::Result _syntheticResult()
     zone.contentHash = QByteArray(20, '\x01');
     result.zones = { zone, GeoZone::Data() };
     return result;
+}
+
+/// Converts to the type of any field, see _fieldCount
+struct AnyField {
+    template <typename T>
+    operator T &() const;
+};
+
+/// @return Number of fields of an aggregate: the most initializers it takes
+template <typename T, typename... Fields>
+constexpr int _fieldCount()
+{
+    if constexpr (requires { T{ Fields{}..., AnyField{} }; }) {
+        return _fieldCount<T, Fields..., AnyField>();
+    } else {
+        return sizeof...(Fields);
+    }
+}
+
+/// GeoZoneParser::version the hashes of the fixtures' results in _testParseFixtures_data were recorded for
+constexpr quint16 kResultHashVersion = 8;
+
+/// @return Hash of a serialized result, with the vertices rounded to 1e-7 degrees, which the differences of the math
+///         libraries computing arcs and geodesics don't change
+QString _resultHash(GeoZoneParser::Result result)
+{
+    const auto round = [](double value) { return (std::round(value * 1e7) / 1e7) + 0.0; };
+    for (GeoZone::Data &zone : result.zones) {
+        for (GeoZone::Volume &volume : zone.volumes) {
+            for (GeoZone::Ring &ring : volume.rings) {
+                for (QPointF &vertex : ring) {
+                    vertex = QPointF(round(vertex.x()), round(vertex.y()));
+                }
+            }
+        }
+    }
+    QByteArray serialized;
+    QDataStream stream(&serialized, QIODevice::WriteOnly);
+    stream.setVersion(GeoZoneParseCache::streamVersion);
+    stream << result;
+    return QString::fromLatin1(QCryptographicHash::hash(serialized, QCryptographicHash::Sha256).toHex().left(16));
 }
 
 /// Canceled by cancelOnSkippedFeature
@@ -238,19 +280,21 @@ void GeoZoneParserTest::_testParseFixtures_data()
     QTest::addColumn<int>("zones");
     QTest::addColumn<int>("skippedFeatures");
     QTest::addColumn<int>("missingFeatures");
+    QTest::addColumn<QString>("resultHash");
 
     using Format = GeoZoneParser::Format;
-    const auto row = [](const char *fileName, Format formatHint, Format format, int zones, int skippedFeatures, int missingFeatures) {
-        QTest::newRow(fileName) << QString::fromLatin1(fileName) << static_cast<int>(formatHint) << static_cast<int>(format) << zones << skippedFeatures << missingFeatures;
+    const auto row = [](const char *fileName, Format formatHint, Format format, int zones, int skippedFeatures, int missingFeatures, const char *resultHash) {
+        QTest::newRow(fileName) << QString::fromLatin1(fileName) << static_cast<int>(formatHint) << static_cast<int>(format) << zones << skippedFeatures
+                                << missingFeatures << QString::fromLatin1(resultHash);
     };
     // The ED-269 and ED-318 test files each have a feature without a supported geometry, the IGN response was limited
-    row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0);
-    row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0);
-    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0);
-    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0);
-    row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0);
-    row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8);
-    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0);
+    row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0, "3a763bc04f21f93f");
+    row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "abe8e17f6efea0ef");
+    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "c601f4f0e4e62b5b");
+    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "2a26acbe85fc598f");
+    row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "31fc1dab378d6d73");
+    row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "90de6abd039f12bf");
+    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "17efcf9175694242");
 }
 
 void GeoZoneParserTest::_testParseFixtures()
@@ -261,9 +305,11 @@ void GeoZoneParserTest::_testParseFixtures()
     QFETCH(int, zones);
     QFETCH(int, skippedFeatures);
     QFETCH(int, missingFeatures);
+    QFETCH(QString, resultHash);
 
+    // As text, Windows checkouts have other line endings, which change the hash of AIXM documents
     QFile file(QStringLiteral(":/unittest/") + fileName);
-    QVERIFY(file.open(QIODevice::ReadOnly));
+    QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
     const QByteArray bytes = file.readAll();
     GeoZoneParser::Result result;
     QString errorString;
@@ -276,6 +322,14 @@ void GeoZoneParserTest::_testParseFixtures()
     for (const GeoZone::Data &zone : std::as_const(result.zones)) {
         QVERIFY(!zone.volumes.isEmpty());
     }
+
+    // Parser version guard: stored sources are restored from parse caches of the same GeoZoneParser::version, so a
+    // change of the results must bump it
+    const QString hash = _resultHash(result);
+    QVERIFY2(GeoZoneParser::version == kResultHashVersion,
+             qPrintable(QStringLiteral("GeoZoneParser::version changed: set kResultHashVersion to it and record the result hash %1 of %2 in _testParseFixtures_data").arg(hash, fileName)));
+    QVERIFY2(hash == resultHash,
+             qPrintable(QStringLiteral("The parse result of %1 changed (hash %2): bump GeoZoneParser::version if the parser changed it, and record the new hash in _testParseFixtures_data").arg(fileName, hash)));
 
     // The format hint of the detected format and the loader give the same result
     GeoZoneParser::Result hinted;
@@ -1564,7 +1618,7 @@ void GeoZoneParserTest::_testParseCancel()
 void GeoZoneParserTest::_testParseCacheRoundTrip_data()
 {
     _testParseFixtures_data();
-    QTest::newRow("synthetic") << QString() << 0 << 0 << 0 << 0 << 0;
+    QTest::newRow("synthetic") << QString() << 0 << 0 << 0 << 0 << 0 << QString();
 }
 
 void GeoZoneParserTest::_testParseCacheRoundTrip()
@@ -1575,6 +1629,14 @@ void GeoZoneParserTest::_testParseCacheRoundTrip()
     GeoZoneParser::Result result;
     QByteArray bytes = "synthetic";
     if (fileName.isEmpty()) {
+        // Fields added to these structures must be serialized, set by _syntheticResult and compared by
+        // _resultDifference, then counted here
+        QCOMPARE(_fieldCount<GeoZoneParser::Result>(), 12);
+        QCOMPARE(_fieldCount<GeoZoneParser::Companion>(), 2);
+        QCOMPARE(_fieldCount<GeoZone::Data>(), 17);
+        QCOMPARE(_fieldCount<GeoZone::Volume>(), 11);
+        QCOMPARE(_fieldCount<GeoZone::TimePeriod>(), 4);
+        QCOMPARE(_fieldCount<GeoZone::DailyPeriod>(), 8);
         result = _syntheticResult();
     } else {
         QFile file(QStringLiteral(":/unittest/") + fileName);
