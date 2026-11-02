@@ -17,6 +17,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneBox.h"
+#include "GeoZoneMissionItem.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZoneReturnModel.h"
 
@@ -28,8 +29,8 @@ class Vehicle;
 /// controller draws, it covers loiter circles, the loiter of landing patterns, the distance VTOL transitions
 /// overshoot, the loops of DO_JUMP items and the return to launch the vehicle flies, see GeoZoneReturnModel. The
 /// contingency paths are the returns the vehicle would fly from along the mission after a failsafe or a fence breach.
-/// Built on the GUI thread from the MissionController by GeoZoneMissionReader, then only read, so that zone checks can
-/// run on other threads.
+/// Built on the GUI thread from the MissionController, see fromMission, then only read, so that zone checks can run on
+/// other threads.
 class GeoZoneMissionPath
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneMissionPath)
@@ -91,13 +92,18 @@ public:
 
     GeoZoneMissionPath() = default;
 
-    /// @return The current path of the mission, empty without a controller. Returns are flown with the parameters of the
-    ///         controller's vehicle, see returnParameters. The contingency paths, which take longer to build, are only
-    ///         built withContingencies.
+    /// @return The current path of the mission, empty without a controller, read the way the controller draws its flight
+    ///         path: the segments of the items in order with their altitudes and terrain, the areas of patterns, the legs
+    ///         between the items with a coordinate and the segment home after a return to launch. The DO_JUMP items are
+    ///         followed (GeoZoneMissionJumps) and the paths the drawn flight path leaves out are added. Returns are flown
+    ///         with the parameters of the controller's vehicle, see returnParameters. The contingency paths, which take
+    ///         longer to build, are only built withContingencies.
     static GeoZoneMissionPath fromMission(MissionController *missionController, bool withContingencies = false);
     /// @return The current path of the mission with returns flown with the parameters
     static GeoZoneMissionPath fromMission(MissionController *missionController, const GeoZoneReturnModel::Parameters &returnParameters,
                                           bool withContingencies = false);
+    /// @return The visual items of the mission, the planned home first
+    static QList<GeoZoneMissionItem> missionItems(MissionController *missionController);
     /// @return Path made of the segments, for tests and paths which aren't missions
     static GeoZoneMissionPath fromSegments(const QList<Segment> &segments, const QList<GeoZone::Area> &areas = {});
 
@@ -171,14 +177,10 @@ public:
     static QList<Path> pathsFromSegments(const QList<Segment> &segments);
 
 private:
-    friend class GeoZoneMissionReader;
-
     /// Adds the returns from along the mission
     /// @param outgoingSequenceNumbers Of the items the drawn segments to the next item lead to, by segment
     void _appendContingencies(const QHash<int, int> &outgoingSequenceNumbers, const GeoZoneReturnModel::Parameters &returnParameters,
                               const GeoZoneReturnModel::Destinations &destinations);
-    /// @return Positions along the model's path for zone checks, with terrain
-    static QList<GeoZone::Position> _modelPositions(const QList<GeoZone::Position> &positions, double terrainSpacing);
 
     QList<Segment> _segments;
     QList<GeoZone::Area> _areas;

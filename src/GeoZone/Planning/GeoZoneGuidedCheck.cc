@@ -11,7 +11,6 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionPath.h"
-#include "GeoZoneMissionReader.h"
 #include "GeoZoneReturnDestinations.h"
 #include "GeoZonePlanning.h"
 #include "GeoZoneMonitor.h"
@@ -222,7 +221,7 @@ GeoZoneReturnModel::Destinations GeoZoneGuidedCheck::returnDestinations(Vehicle 
             }
         }
     }
-    const QList<GeoZoneMissionItem> items = missionController ? GeoZoneMissionReader::items(missionController).mid(1) : QList<GeoZoneMissionItem>();
+    const QList<GeoZoneMissionItem> items = missionController ? GeoZoneMissionPath::missionItems(missionController).mid(1) : QList<GeoZoneMissionItem>();
     return GeoZoneReturnDestinations::fromMission(items, home, rallyPoints);
 }
 
