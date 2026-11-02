@@ -601,6 +601,10 @@ void GeoZoneFlightTest::_testPreflightChecklist()
 
     // Outdated data and no mission
     QCOMPARE(Check::dataItem(3, QStringLiteral("A: 40 days old\nB: expired")).text, QStringLiteral("Geozone data may be outdated: A: 40 days old; B: expired"));
+    // Treated as invalid, like the Plan View banner and the indicator report it
+    const Check::Item expired = Check::dataItem(3, QStringLiteral("A: 40 days old"), true);
+    QCOMPARE(expired.state, Check::Warning);
+    QCOMPARE(expired.text, QStringLiteral("Expired geozone data, its zones are still checked: A: 40 days old"));
     missionController->removeAll();
     QTRY_COMPARE(check.mission().state, Check::NotApplicable);
     QCOMPARE(check.qnh().state, Check::NotApplicable);

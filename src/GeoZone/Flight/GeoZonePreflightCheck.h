@@ -96,7 +96,8 @@ public:
 
     /// @param zoneCount Zones loaded
     /// @param validityWarning Sources with outdated data, see GeoZoneSourceRepository::validityWarning
-    static Item dataItem(int zoneCount, const QString &validityWarning);
+    /// @param dataInvalid The outdated data is treated as invalid, see GeoZoneSourceRepository::dataInvalid
+    static Item dataItem(int zoneCount, const QString &validityWarning, bool dataInvalid = false);
     /// @param itemCount Mission items, 0 without mission
     static Item missionItem(int itemCount, const QList<GeoZoneMissionCheck::Entry> &entries, const QDateTime &plannedStart);
     /// What the fence item checks

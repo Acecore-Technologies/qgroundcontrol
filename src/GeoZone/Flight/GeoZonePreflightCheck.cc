@@ -139,7 +139,7 @@ void GeoZonePreflightCheck::_scheduleUpdate()
 void GeoZonePreflightCheck::update()
 {
     _updateTimer.stop();
-    const Item data = dataItem(_manager->zoneCount(), _manager->repository()->validityWarning());
+    const Item data = dataItem(_manager->zoneCount(), _manager->repository()->validityWarning(), _manager->repository()->dataInvalid());
 
     Item mission{ Checking, tr("Checking the mission\u2026") };
     Item fence = mission;
@@ -183,13 +183,15 @@ void GeoZonePreflightCheck::update()
     emit itemsChanged();
 }
 
-GeoZonePreflightCheck::Item GeoZonePreflightCheck::dataItem(int zoneCount, const QString &validityWarning)
+GeoZonePreflightCheck::Item GeoZonePreflightCheck::dataItem(int zoneCount, const QString &validityWarning, bool dataInvalid)
 {
     if (zoneCount <= 0) {
         return { Warning, tr("No geozone data is loaded. Add sources in the Geozones settings.") };
     }
     if (!validityWarning.isEmpty()) {
-        return { Warning, tr("Geozone data may be outdated: %1").arg(QString(validityWarning).replace(QLatin1Char('\n'), QStringLiteral("; "))) };
+        const QString sources = QString(validityWarning).replace(QLatin1Char('\n'), QStringLiteral("; "));
+        return { Warning, dataInvalid ? tr("Expired geozone data, its zones are still checked: %1").arg(sources)
+                                      : tr("Geozone data may be outdated: %1").arg(sources) };
     }
     return { Passed, tr("No geozone data is outdated.") };
 }

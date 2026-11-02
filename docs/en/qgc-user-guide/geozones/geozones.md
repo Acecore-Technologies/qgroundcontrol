@@ -336,7 +336,7 @@ Holes in zone polygons are also dropped. The ArduPilot fence storage is estimate
 
 With the pre-flight checklist turned on (_Application Settings > Fly View > Use Preflight Checklist_), the checklist of the vehicle type ends with a **Geozones** group whose items check themselves for the active vehicle and its mission:
 
-- **Geozone data**: zones are loaded and no source is [outdated](#managing-sources).
+- **Geozone data**: zones are loaded and no source is [outdated](#managing-sources), or expired when outdated data is treated as invalid.
 - **Mission**: the mission on the vehicle enters no restricted zone, or only zones with an [authorisation](#authorisations) covering the [planned start](#flight-time) (at any time without one). A prohibited zone fails the check.
 - **Fence**: the vehicle's fence is the one an upload of the [fence import](#add-geozones-to-the-geofence) verified, its fences from geozones were made from data which hasn't changed since, and it excludes the prohibited zones the mission enters. A fence uploaded otherwise is reported as not verified.
 - **QNH**: limits published as flight levels within 1 km of the mission and 300 m of its altitudes are converted with a [QNH](#settings-reference) other than the standard pressure.
