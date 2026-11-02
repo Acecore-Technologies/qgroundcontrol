@@ -1613,6 +1613,26 @@ void GeoZoneManagerTest::_testEd318Service()
     QCOMPARE(nms->service.auth, GeoZoneService::Auth::OAuth2ClientCredentials);
     QVERIFY(GeoZoneService::hasAreaPlaceholders(nms->url));
     QCOMPARE(GeoZoneService::fromVariantMap(nms->service.toVariantMap()), nms->service);
+
+    // The Add Service form starts from the fields of a template, or another service last, and keeps the rest of it
+    const QVariantList templateList = GeoZoneProviders::serviceTemplateList();
+    QCOMPARE(templateList.count(), templates.count() + 1);
+    const int nmsIndex = static_cast<int>(nms - templates.cbegin());
+    QVariantMap form = templateList[nmsIndex].toMap().value(QStringLiteral("form")).toMap();
+    QCOMPARE(form.value(QStringLiteral("auth")).toInt(), static_cast<int>(GeoZoneService::Auth::OAuth2ClientCredentials));
+    QCOMPARE(GeoZoneProviders::serviceFromForm(nmsIndex, form), nms->service);
+    form.insert(QStringLiteral("auth"), static_cast<int>(GeoZoneService::Auth::Basic));
+    form.insert(QStringLiteral("user"), QStringLiteral(" pilot "));
+    form.insert(QStringLiteral("method"), static_cast<int>(GeoZoneService::Method::Ed318Post));
+    const GeoZoneService edited = GeoZoneProviders::serviceFromForm(nmsIndex, form);
+    QCOMPARE(edited.auth, GeoZoneService::Auth::Basic);
+    QCOMPARE(edited.user, QStringLiteral("pilot"));
+    QCOMPARE(edited.method, GeoZoneService::Method::Ed318Post);
+    QCOMPARE(edited.headers, nms->service.headers);
+    QCOMPARE(edited.id, nms->service.id);
+    const GeoZoneService other = GeoZoneProviders::serviceFromForm(static_cast<int>(templates.count()), form);
+    QVERIFY(other.headers.isEmpty() && other.id.isEmpty());
+    QCOMPARE(other.auth, GeoZoneService::Auth::Basic);
     manager.repository()->clear();
 }
 

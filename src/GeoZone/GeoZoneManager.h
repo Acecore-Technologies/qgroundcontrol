@@ -55,7 +55,7 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
     Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
     Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
-    Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< See GeoZoneProviders::serviceTemplateList
+    Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< Of the service form, see GeoZoneProviders::serviceTemplateList
     Q_PROPERTY(bool                 packSigningAvailable READ packSigningAvailable CONSTANT FINAL)  ///< The build can sign packs and check their signatures
     Q_PROPERTY(QString              packPublicKey       READ packPublicKey      NOTIFY packSigningChanged FINAL)   ///< Base64 public key of the pack signing key, empty without
     Q_PROPERTY(QString              packKeyId           READ packKeyId          NOTIFY packSigningChanged FINAL)   ///< See GeoZonePackSignature::keyId
@@ -89,6 +89,13 @@ public:
     Q_INVOKABLE QStringList serviceOtherOrigins(const QString &url, const QVariantMap &service) const
     {
         return GeoZoneService::fromVariantMap(service).otherOrigins(url.trimmed());
+    }
+
+    /// @return Fields of GeoZoneService::toVariantMap of the service form: the template at the index of serviceTemplates
+    ///         with the fields of the form, see GeoZoneService::toForm
+    Q_INVOKABLE QVariantMap serviceFromForm(int templateIndex, const QVariantMap &form) const
+    {
+        return GeoZoneProviders::serviceFromForm(templateIndex, form).toVariantMap();
     }
 
     /// Writes an offline pack of the sources, see GeoZonePack. fileOperationFinished tells the outcome.

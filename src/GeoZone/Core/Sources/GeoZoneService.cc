@@ -179,6 +179,31 @@ GeoZoneService GeoZoneService::fromJson(const QJsonObject &object)
     return service;
 }
 
+QVariantMap GeoZoneService::toForm() const
+{
+    return QVariantMap{
+        { QLatin1String(methodKey), static_cast<int>(method) },
+        { QLatin1String(authKey), static_cast<int>(auth) },
+        { QLatin1String(authParameterKey), authParameter },
+        { QLatin1String(userKey), user },
+        { QLatin1String(tokenUrlKey), tokenUrl },
+        { QLatin1String(responseMemberKey), responseMember },
+        { QLatin1String(sha256UrlKey), sha256Url },
+        { QLatin1String(areaOfInterestKey), areaOfInterest },
+    };
+}
+
+GeoZoneService GeoZoneService::withForm(const QVariantMap &form) const
+{
+    QJsonObject object = toJson();
+    for (const char *key : { authParameterKey, userKey, tokenUrlKey, responseMemberKey, sha256UrlKey, areaOfInterestKey }) {
+        object.insert(QLatin1String(key), QJsonValue::fromVariant(form.value(QLatin1String(key))));
+    }
+    object.insert(QLatin1String(methodKey), methodToString(static_cast<Method>(form.value(QLatin1String(methodKey)).toInt())));
+    object.insert(QLatin1String(authKey), authToString(static_cast<Auth>(form.value(QLatin1String(authKey)).toInt())));
+    return fromJson(object);
+}
+
 bool GeoZoneService::hasAreaPlaceholders(const QString &urlTemplate)
 {
     return std::any_of(kAreaPlaceholders.cbegin(), kAreaPlaceholders.cend(), [&urlTemplate](const QString &placeholder) {

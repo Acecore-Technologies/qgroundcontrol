@@ -56,9 +56,11 @@ public:
 
     static QList<Service> services();
     static QList<ServiceTemplate> serviceTemplates();
-    /// @return Maps with name, id, url, note, supported and service (GeoZoneService::toVariantMap) of the service
-    ///         templates, for QML
+    /// @return Maps with name, url, note, supported and form (GeoZoneService::toForm) of the service templates, and of
+    ///         another service last, for the form of QML
     static QVariantList serviceTemplateList();
+    /// @return The service of the template of serviceTemplateList at the index with the fields of the form
+    static GeoZoneService serviceFromForm(int templateIndex, const QVariantMap &form);
 
     /// @return Maps with name and url of the services with a whole dataset, for QML
     static QVariantList feedPresets();

@@ -84,6 +84,10 @@ public:
     /// For QML: the fields of toJson with the enums as their names
     QVariantMap toVariantMap() const { return toJson().toVariantMap(); }
     static GeoZoneService fromVariantMap(const QVariantMap &map) { return fromJson(QJsonObject::fromVariantMap(map)); }
+    /// For the service form of QML: the fields of toJson the form edits, with method and auth as the values of their enums
+    QVariantMap toForm() const;
+    /// @return This service with the fields of a form, see toForm
+    GeoZoneService withForm(const QVariantMap &form) const;
 
     /// @return true when the URL template has placeholders of the area
     static bool hasAreaPlaceholders(const QString &urlTemplate);

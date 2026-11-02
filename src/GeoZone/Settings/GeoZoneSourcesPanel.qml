@@ -372,37 +372,27 @@ ColumnLayout {
         visible:            false
 
         readonly property var   _templates: _geoZoneManager.serviceTemplates
-        readonly property var   _template:  serviceTemplateCombo.currentIndex < _templates.length ? _templates[serviceTemplateCombo.currentIndex] : null
-        readonly property var   _authTypes: [ "none", "apiKeyHeader", "apiKeyQuery", "bearer", "basic", "oauth2ClientCredentials" ]
+        readonly property var   _template:  _templates[Math.max(0, serviceTemplateCombo.currentIndex)]
         readonly property int   _auth:      authCombo.currentIndex
-        // Bindings follow the fields serviceMap reads
-        readonly property var   _otherOrigins: visible ? _geoZoneManager.serviceOtherOrigins(serviceUrlField.text, serviceMap()) : []
+        readonly property var   _service:   _geoZoneManager.serviceFromForm(serviceTemplateCombo.currentIndex, {
+                                                method: methodCombo.currentIndex, auth: _auth, authParameter: authParameterField.text,
+                                                user: userField.text, tokenUrl: tokenUrlField.text, responseMember: responseMemberField.text,
+                                                sha256Url: sha256UrlField.text, areaOfInterest: areaCheckBox.checked })
+        readonly property var   _otherOrigins: visible ? _geoZoneManager.serviceOtherOrigins(serviceUrlField.text, _service) : []
 
+        // The fields of the form start from the template
         function applyTemplate() {
-            var service = _template ? _template.service : {}
-            serviceUrlField.text = _template ? _template.url : ""
-            methodCombo.currentIndex = service.method === "ed318Post" ? 1 : 0
-            authCombo.currentIndex = Math.max(0, _authTypes.indexOf(service.auth || "none"))
-            authParameterField.text = service.authParameter || ""
-            userField.text = service.user || ""
-            tokenUrlField.text = service.tokenUrl || ""
-            responseMemberField.text = service.responseMember || ""
-            sha256UrlField.text = service.sha256Url || ""
-            areaCheckBox.checked = service.areaOfInterest || false
+            const form = _template.form
+            serviceUrlField.text = _template.url
+            methodCombo.currentIndex = form.method
+            authCombo.currentIndex = form.auth
+            authParameterField.text = form.authParameter
+            userField.text = form.user
+            tokenUrlField.text = form.tokenUrl
+            responseMemberField.text = form.responseMember
+            sha256UrlField.text = form.sha256Url
+            areaCheckBox.checked = form.areaOfInterest
             serviceSecretField.text = ""
-        }
-
-        function serviceMap() {
-            var service = _template ? Object.assign({}, _template.service) : {}
-            service.method = methodCombo.currentIndex === 1 ? "ed318Post" : "get"
-            service.auth = _authTypes[authCombo.currentIndex]
-            service.authParameter = authParameterField.text
-            service.user = userField.text
-            service.tokenUrl = tokenUrlField.text
-            service.responseMember = responseMemberField.text
-            service.sha256Url = sha256UrlField.text
-            service.areaOfInterest = areaCheckBox.checked
-            return service
         }
 
         Component.onCompleted: applyTemplate()
@@ -410,7 +400,7 @@ ColumnLayout {
         QGCComboBox {
             id:                 serviceTemplateCombo
             Layout.fillWidth:   true
-            model:              serviceEntry._templates.map(serviceTemplate => serviceTemplate.name).concat([ qsTr("Other service") ])
+            model:              serviceEntry._templates.map(serviceTemplate => serviceTemplate.name)
             onActivated:        serviceEntry.applyTemplate()
         }
 
@@ -418,7 +408,7 @@ ColumnLayout {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
-            text:               serviceEntry._template ? serviceEntry._template.note : qsTr("Enter the address of the service and how it is accessed.")
+            text:               serviceEntry._template.note
         }
 
         QGCTextField {
@@ -539,10 +529,10 @@ ColumnLayout {
         QGCButton {
             Layout.fillWidth:   true
             text:               qsTr("Download")
-            enabled:            serviceUrlField.text.trim() !== "" && (!serviceEntry._template || serviceEntry._template.supported) &&
+            enabled:            serviceUrlField.text.trim() !== "" && serviceEntry._template.supported &&
                                 (serviceEntry._otherOrigins.length === 0 || trustOtherOriginsCheckBox.checked)
             onClicked: {
-                _geoZoneManager.addService(serviceUrlField.text, serviceEntry.serviceMap(), serviceSecretField.text, trustOtherOriginsCheckBox.checked)
+                _geoZoneManager.addService(serviceUrlField.text, serviceEntry._service, serviceSecretField.text, trustOtherOriginsCheckBox.checked)
                 serviceSecretField.text = ""
                 trustOtherOriginsCheckBox.checked = false
                 serviceEntry.visible = false

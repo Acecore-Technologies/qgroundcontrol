@@ -141,18 +141,28 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
 
 QVariantList GeoZoneProviders::serviceTemplateList()
 {
+    ServiceTemplate other;
+    other.service.name = tr("Other service");
+    other.note = tr("Enter the address of the service and how it is accessed.");
+    QList<ServiceTemplate> templates = serviceTemplates();
+    templates.append(other);
     QVariantList list;
-    for (const ServiceTemplate &serviceTemplate : serviceTemplates()) {
+    for (const ServiceTemplate &serviceTemplate : std::as_const(templates)) {
         list.append(QVariantMap{
-            { QStringLiteral("id"), serviceTemplate.service.id },
             { QStringLiteral("name"), serviceTemplate.service.name },
             { QStringLiteral("url"), serviceTemplate.url },
             { QStringLiteral("note"), serviceTemplate.note },
             { QStringLiteral("supported"), serviceTemplate.supported },
-            { QStringLiteral("service"), serviceTemplate.service.toVariantMap() },
+            { QStringLiteral("form"), serviceTemplate.service.toForm() },
         });
     }
     return list;
+}
+
+GeoZoneService GeoZoneProviders::serviceFromForm(int templateIndex, const QVariantMap &form)
+{
+    const QList<ServiceTemplate> templates = serviceTemplates();
+    return (((templateIndex >= 0) && (templateIndex < templates.count())) ? templates[templateIndex].service : GeoZoneService()).withForm(form);
 }
 
 QVariantList GeoZoneProviders::feedPresets()
