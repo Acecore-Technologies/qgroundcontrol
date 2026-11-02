@@ -16,6 +16,7 @@
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneFenceUpload.h"
+#include "GeoZoneFlightRecorder.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapLayer.h"
@@ -130,6 +131,7 @@ void init()
     (void) QObject::connect(manager, &GeoZoneManager::fileOperationFinished, app, [app](bool, const QString &message) { app->showAppMessage(message, QCoreApplication::translate("GeoZoneModule", "Geozones")); });
     manager->init();
     (void) GeoZoneMonitor::instance();
+    (void) GeoZoneFlightRecorder::instance();
 }
 
 } // namespace GeoZoneModule

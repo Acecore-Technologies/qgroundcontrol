@@ -291,7 +291,7 @@ bool GeoZoneAlertHistory::_openLog()
     }
 
     // A file is started each day, a good time to delete those past the retention
-    (void) removeOldLogs(_logBufferDate, logRetentionDays);
+    (void) removeOldLogs(_logBufferDate, GeoZoneSettings::instance()->recordRetention()->rawValue().toInt());
     return true;
 }
 
@@ -346,6 +346,11 @@ void GeoZoneAlertHistory::_loadLog(const QString &filePath)
     _entries.append(earlier);
     endInsertRows();
     emit countChanged();
+}
+
+QStringList GeoZoneAlertHistory::logFields(const QString &line)
+{
+    return csvFields(line);
 }
 
 std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(const QString &line)

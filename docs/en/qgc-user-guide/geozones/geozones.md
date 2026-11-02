@@ -389,8 +389,21 @@ When a vehicle reports a breach of its own fence (MAVLink `FENCE_STATUS`), _QGro
 
 ### Alert Log {#alert-log}
 
-Alerts are also appended to a `GeoZoneAlerts-<date>.csv` file per day (UTC) in the _Telemetry_ folder of the application load/save path, with the time, vehicle, position, altitude, terrain elevation, event (`approaching`, `entered`, `position_lost` or `traffic_entered`), distance, zone, predicted time to entry, the aircraft of traffic alerts and the alert id, for reviewing flights. The log also records what the pilot was shown and answered, each with the id of its alert and the vehicle position and distance to the zone at that time: `notified` when the popup showed the alert (the `detail` column has the question when it asked for the [permission](#permission-question)), `approved` when the pilot answered **I do**, `dismissed` for **Dismiss** or **Close**, and `muted` for **Mute Alerts**. So a flight towards a restricted zone reads `approaching`, `notified`, `approved`, and the alerts while the zone is approved follow without `notified`. Alerts are written to the file within 2 seconds. When a new file is started, the files older than 30 days are deleted.
+Alerts are also appended to a `GeoZoneAlerts-<date>.csv` file per day (UTC) in the _Telemetry_ folder of the application load/save path, with the time, vehicle, position, altitude, terrain elevation, event (`approaching`, `entered`, `position_lost` or `traffic_entered`), distance, zone, predicted time to entry, the aircraft of traffic alerts and the alert id, for reviewing flights. The log also records what the pilot was shown and answered, each with the id of its alert and the vehicle position and distance to the zone at that time: `notified` when the popup showed the alert (the `detail` column has the question when it asked for the [permission](#permission-question)), `approved` when the pilot answered **I do**, `dismissed` for **Dismiss** or **Close**, and `muted` for **Mute Alerts**. So a flight towards a restricted zone reads `approaching`, `notified`, `approved`, and the alerts while the zone is approved follow without `notified`. Alerts are written to the file within 2 seconds. The files are kept for the time set in **Keep alert logs and flight records** (forever by default): when a new file is started, the older ones are deleted.
 The indicator lists the **Recent Alerts** of the session, newest first, followed by those logged earlier the same day. Alerts not looked at yet are shown in bold and counted in a red badge on the indicator; **Acknowledge All** clears them. **Show** opens the details of the alert's zone and marks the vehicle position at the time of the alert on the map for two minutes (click the mark to remove it).
+
+### Flight Records {#flight-records}
+
+When a vehicle disarms, _QGroundControl_ writes a record of its flight from arming to disarming to `GeoZones/GeoZoneFlight-<start>-vehicle<id>.json` in the _Telemetry_ folder, for the compliance records of the operation. It has the structure of the [JSON briefing](#pre-flight-briefing), with `schema` `qgc-geozone-flight-record`, evaluated for the track flown at the times it was flown:
+
+- `flight` instead of `mission`: `vehicleId`, `vehicle`, `firmware`, `start`, `end`, `plannedStart` (of the [planned flight](#flight-time), null without), `durationSeconds`, `distanceMeters`, `maxAltitudeAMSL`, `takeoff` and `landing` (`lat`, `lon`, `altitudeAMSL`).
+- `track`: the positions flown with their `time`, `lat`, `lon` and `altitudeAMSL`, one when the vehicle moved 10 m, climbed or descended 5 m or after 30 seconds, and every other one beyond 2000 positions.
+- `zones`: the zones the track entered (`entered`), with the times and altitudes of each crossing, and the restricted zones it passed within 500 m (`nearby`), like the briefing.
+- `permits`: the [authorisations](#authorisations) of the zones entered: `zoneKey`, `identifier`, `name`, `permit`, `validFrom`, `validTo` and `coversFlight`.
+- `alerts`: the rows of the [alert log](#alert-log) of the vehicle during the flight, the alerts and your answers to them, as objects of the log columns (`time_utc`, `vehicle`, `latitude`, `longitude`, `altitude_amsl_m`, `event`, `zone_identifier`, ...). With the log turned off, the alerts raised during the flight.
+- `sources`: the versions and provenance of the geozone data covering the track.
+
+Records are kept like the alert logs, for the time set in **Keep alert logs and flight records**.
 
 ## Settings Reference {#settings-reference}
 
@@ -402,6 +415,7 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 | Flight Alerts | **Flight alerts** | On | | Turns the flight alerts and the nearby zones of the toolbar indicator on or off. |
 | Flight Alerts | **Speak flight alerts** | On | | Turns the audio of the alerts on or off. |
 | Flight Alerts | **Log flight alerts** | On | | Appends the alerts to the [CSV log](#alert-log). |
+| Records | **Keep alert logs and flight records** | Forever | Forever, 30 days, 1 year, 3 years | How long the [alert logs](#alert-log) and [flight records](#flight-records) are kept. Older files are deleted when a new one is written. |
 | Flight Alerts | **Approach alert distance** | 100 m | 10–5000 m | How close horizontally the vehicle can come to a zone before it is alerted. Vertically it is alerted 30 m below the floor or above the ceiling of a zone. |
 | Flight Alerts | **Approach alert time** | 30 s | 6–600 s | How many seconds before entering a zone, at its current velocity, the vehicle is alerted. At least 6 s: 5 s of warning and 1 s between the checks. |
 | Traffic | **Check traffic against geozones** | Off | | Lists the [ADS-B and Remote ID traffic](#traffic) within 10 km in or near zones in the geozone indicator, and alerts when an aircraft enters a zone. |

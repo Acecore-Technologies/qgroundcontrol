@@ -25,4 +25,5 @@ private slots:
     void _testReturnParameterChanges();
     void _testGuidedReturnLandMission();
     void _testPreflightChecklist();
+    void _testFlightRecord();
 };

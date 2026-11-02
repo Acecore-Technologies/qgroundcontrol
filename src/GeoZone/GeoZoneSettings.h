@@ -29,6 +29,7 @@ public:
     DEFINE_SETTINGFACT(alertsEnabled)
     DEFINE_SETTINGFACT(audioAlerts)
     DEFINE_SETTINGFACT(logAlerts)
+    DEFINE_SETTINGFACT(recordRetention)
     DEFINE_SETTINGFACT(approachDistance)
     DEFINE_SETTINGFACT(approachTime)
     DEFINE_SETTINGFACT(trafficEnabled)

@@ -9,8 +9,10 @@
 
 #include "GeoZoneFlightTest.h"
 #include "GeoZone.h"
+#include "GeoZoneAlertHistory.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneGuidedCheck.h"
+#include "GeoZoneFlightRecorder.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
@@ -37,7 +39,9 @@
 #include "Vehicle.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QTemporaryDir>
@@ -625,6 +629,137 @@ void GeoZoneFlightTest::_testPreflightChecklist()
     fence.vehicleFence = verification.fence;
     fence.unfenced = { prohibited };
     QVERIFY(Check::fenceItem(fence).text.startsWith(QStringLiteral("The vehicle's fence doesn't exclude the prohibited geozones the mission enters: P.")));
+    manager.repository()->clear();
+}
+
+void GeoZoneFlightTest::_testFlightRecord()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(10, 0)));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(kZonesFile, errorString), qPrintable(errorString));
+    const GeoZone *const prison = findZone(manager, QStringLiteral("GZW0001"));
+    QVERIFY(prison);
+    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(prison)), QStringLiteral("GZW-42"), QString(), QString()).isEmpty());
+
+    GeoZoneMonitor monitor(&manager);
+    GeoZoneAlertHistory *const history = monitor.alertHistory();
+    history->startLog(dir.filePath(QStringLiteral("logs")));
+    GeoZoneFlightRecorder recorder(&manager, &monitor);
+    recorder.setDirectory(dir.filePath(QStringLiteral("records")));
+
+    // Through the authorised prison zone into CTR ZURICH and LSZH Zürich, a position each second
+    constexpr int vehicleId = 1;
+    int steps = 0;
+    const auto flyTo = [&](const Waypoint &from, const Waypoint &to) {
+        const double horizontal = std::hypot(to.east - from.east, to.north - from.north);
+        const int count = std::max(1, static_cast<int>(std::ceil(std::max(horizontal / 10, std::abs(to.height - from.height) / 5))));
+        for (int i = 1; i <= count; i++) {
+            const double fraction = static_cast<double>(i) / count;
+            environment.addSecs(1);
+            const GeoZone::Position at = position(from.east + ((to.east - from.east) * fraction), from.north + ((to.north - from.north) * fraction),
+                                                  from.height + ((to.height - from.height) * fraction));
+            monitor.evaluate(at, vehicleId);
+            recorder.addPosition(vehicleId, at);
+            steps++;
+        }
+    };
+    recorder.addPosition(vehicleId, position(kStart.east, kStart.north, kStart.height));
+    QVERIFY(!recorder.recording(vehicleId));
+    recorder.start(vehicleId, QStringLiteral("Quadrotor"), QStringLiteral("PX4 1.15.0"));
+    const QDateTime start = environment.now();
+    const Waypoint overPrison{ kPrison.east, kPrison.north, kCruiseHeight };
+    const Waypoint overAirport{ kAirport.east, kAirport.north, kCruiseHeight };
+    flyTo(kStart, kPrison);
+    flyTo(kPrison, overPrison);
+    flyTo(overPrison, overAirport);
+    flyTo(overAirport, kAirport);
+    QVERIFY(recorder.flight(vehicleId)->alerts.count() >= 4);
+
+    // The pilot's answer to the last alert, which the alert popup logs
+    history->flushLog();
+    QFile log(history->logFilePath(environment.now().date()));
+    QVERIFY(log.open(QIODevice::Append | QIODevice::Text));
+    (void) log.write(QStringLiteral("%1,%2,47.42,8.53,710.0,430.0,approved,,LSZH001,Zürich,Prohibited,,,\n").arg(environment.now().toString(Qt::ISODateWithMs)).arg(vehicleId).toUtf8());
+    log.close();
+    environment.addSecs(5);
+    const QString path = recorder.finish(vehicleId);
+    QVERIFY(!path.isEmpty());
+    QVERIFY(!recorder.recording(vehicleId));
+    QCOMPARE(QFileInfo(path).fileName(), QStringLiteral("GeoZoneFlight-2026-06-15T10-00-00Z-vehicle1.json"));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+    QCOMPARE(json[QStringLiteral("schema")].toString(), QStringLiteral("qgc-geozone-flight-record"));
+    QCOMPARE(json[QStringLiteral("version")].toInt(), 1);
+    const QJsonObject flight = json[QStringLiteral("flight")].toObject();
+    QCOMPARE(flight[QStringLiteral("vehicleId")].toInt(), vehicleId);
+    QCOMPARE(flight[QStringLiteral("firmware")].toString(), QStringLiteral("PX4 1.15.0"));
+    QCOMPARE(QDateTime::fromString(flight[QStringLiteral("start")].toString(), Qt::ISODateWithMs), start);
+    QCOMPARE(flight[QStringLiteral("durationSeconds")].toDouble(), static_cast<double>(steps + 5));
+    QVERIFY(_near(flight[QStringLiteral("maxAltitudeAMSL")].toDouble(), kTerrainAMSL + kCruiseHeight));
+
+    // The track keeps a position each 10 m or 5 m of climb, with the last one
+    const QJsonArray track = json[QStringLiteral("track")].toArray();
+    QVERIFY2((track.count() > (steps / 3)) && (track.count() <= steps), qPrintable(QString::number(track.count())));
+    QCOMPARE(QDateTime::fromString(track.last()[QStringLiteral("time")].toString(), Qt::ISODateWithMs), start.addSecs(steps));
+    QVERIFY(_near(track.last()[QStringLiteral("altitudeAMSL")].toDouble(), kTerrainAMSL + kAirport.height));
+
+    // The zones entered with the times, the briefing of the track flown
+    QStringList entered;
+    for (const QJsonValue &zone : json[QStringLiteral("zones")].toArray()) {
+        if (zone[QStringLiteral("involvement")].toString() == QStringLiteral("entered")) {
+            entered.append(zone[QStringLiteral("identifier")].toString());
+            const QJsonObject crossing = zone[QStringLiteral("crossings")].toArray().first().toObject();
+            QVERIFY(QDateTime::fromString(crossing[QStringLiteral("entryTime")].toString(), Qt::ISODate) > start);
+        }
+    }
+    for (const QString &identifier : { QStringLiteral("GZW0001"), QStringLiteral("CTR0015"), QStringLiteral("LSZH001") }) {
+        QVERIFY2(entered.contains(identifier), qPrintable(entered.join(QLatin1Char(' '))));
+    }
+    const QJsonArray permits = json[QStringLiteral("permits")].toArray();
+    QCOMPARE(permits.count(), 1);
+    QCOMPARE(permits[0][QStringLiteral("permit")].toString(), QStringLiteral("GZW-42"));
+    QVERIFY(permits[0][QStringLiteral("coversFlight")].toBool());
+    QVERIFY(!json[QStringLiteral("sources")].toArray().isEmpty());
+
+    // The alerts and answers of the log
+    QStringList events;
+    for (const QJsonValue &alert : json[QStringLiteral("alerts")].toArray()) {
+        QCOMPARE(alert[QStringLiteral("vehicle")].toInt(), vehicleId);
+        events.append(alert[QStringLiteral("event")].toString());
+    }
+    QVERIFY2(events.contains(QStringLiteral("approaching")) && events.contains(QStringLiteral("entered")), qPrintable(events.join(QLatin1Char(' '))));
+    QCOMPARE(events.constLast(), QStringLiteral("approved"));
+    QCOMPARE(json[QStringLiteral("alerts")].toArray().last()[QStringLiteral("altitude_amsl_m")].toDouble(), 710.0);
+
+    // Without the log, the alerts raised during the flight
+    GeoZoneSettings::instance()->logAlerts()->setRawValue(false);
+    recorder.start(vehicleId);
+    environment.addSecs(1);
+    monitor.removePositionMonitor(vehicleId);
+    monitor.evaluate(position(kAirport.east, kAirport.north, kAirport.height), vehicleId);
+    environment.addSecs(1);
+    const QString secondPath = recorder.finish(vehicleId);
+    QFile secondFile(secondPath);
+    QVERIFY(secondFile.open(QIODevice::ReadOnly));
+    const QJsonArray alerts = QJsonDocument::fromJson(secondFile.readAll()).object()[QStringLiteral("alerts")].toArray();
+    QVERIFY(!alerts.isEmpty());
+    QCOMPARE(alerts[0][QStringLiteral("event")].toString(), QStringLiteral("entered"));
+
+    // Records older than the retention are deleted, none when kept forever
+    QCOMPARE(GeoZoneFlightRecorder::retentionDays(), 0);
+    QFile old(dir.filePath(QStringLiteral("records/GeoZoneFlight-2025-06-15T09-00-00Z-vehicle1.json")));
+    QVERIFY(old.open(QIODevice::WriteOnly));
+    old.close();
+    QCOMPARE(recorder.removeOldRecords(QDate(2026, 6, 15), 0), 0);
+    QCOMPARE(recorder.removeOldRecords(QDate(2026, 6, 15), 365), 1);
+    QVERIFY(!old.exists());
+    QVERIFY(QFile::exists(path));
     manager.repository()->clear();
 }
 

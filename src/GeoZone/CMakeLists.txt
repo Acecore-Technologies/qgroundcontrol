@@ -55,6 +55,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         Flight/GeoZoneAlertHistory.h
         Flight/GeoZoneAlertModel.cc
         Flight/GeoZoneAlertModel.h
+        Flight/GeoZoneFlightRecorder.cc
+        Flight/GeoZoneFlightRecorder.h
         Flight/GeoZoneGuidedCheck.cc
         Flight/GeoZoneGuidedCheck.h
         Flight/GeoZoneMonitor.cc

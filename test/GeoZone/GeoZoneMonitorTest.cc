@@ -531,7 +531,11 @@ void GeoZoneMonitorTest::_testAlertLog()
     // The alerts are logged on the same day whenever the test runs
     ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
+    const auto restoreDefault = qScopeGuard([settings]() {
+        for (Fact *const fact : { settings->logAlerts(), settings->recordRetention() }) {
+            fact->setRawValue(fact->rawDefaultValue());
+        }
+    });
 
     const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
@@ -589,6 +593,7 @@ void GeoZoneMonitorTest::_testAlertLog()
     file.close();
 
     // The files of the days past the retention are deleted when a file is started, others are kept
+    settings->recordRetention()->setRawValue(30);
     const QDir logDir(dir.filePath(QStringLiteral("logs")));
     const QDate today = logDate.addDays(1);
     const QStringList kept = { log.logFilePath(today.addDays(-29)), log.logFilePath(logDate), dir.filePath(QStringLiteral("logs/GeoZoneAlerts-notes.csv")) };

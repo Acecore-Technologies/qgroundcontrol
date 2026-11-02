@@ -26,8 +26,8 @@ class GeoZoneManager;
 /// them after a flight or while the alert popups are gone. Once started, the log appends the alerts to a CSV file per
 /// UTC day, with what the pilot was shown and answered about them (GeoZoneMonitor::AlertEvent::pilotEvent()),
 /// buffered and written to the open file every logFlushIntervalMSecs rather than opening and flushing the file for
-/// each alert. The files of days older than logRetentionDays are deleted when a new file is started. Logging is turned
-/// on and off in GeoZoneSettings.
+/// each alert. The files of the days before the retention of GeoZoneSettings::recordRetention are deleted when a new
+/// file is started. Logging is turned on and off in GeoZoneSettings.
 class GeoZoneAlertHistory : public QAbstractListModel
 {
     Q_OBJECT
@@ -52,7 +52,6 @@ public:
     static constexpr int maxEntries = 500;
     static constexpr int shownPositionMSecs = 2 * 60 * 1000;   ///< How long the map shows the position of a shown alert
     static constexpr int logFlushIntervalMSecs = 2000;
-    static constexpr int logRetentionDays = 30;
 
     /// @param manager Zones the alerts are shown on, GeoZoneManager::instance() when null
     explicit GeoZoneAlertHistory(GeoZoneManager *manager = nullptr, QObject *parent = nullptr);
@@ -74,7 +73,7 @@ public:
     QString logFilePath(const QDate &date) const;
     /// Writes the buffered alerts now
     void flushLog();
-    /// Deletes the log files of the folder for the days before the last ones, today included
+    /// Deletes the log files of the folder for the days before the last ones, today included, none when days is 0
     /// @return Number of files deleted
     int removeOldLogs(const QDate &today, int days);
 
@@ -88,6 +87,8 @@ public:
 
     static QString logHeader();
     static QString logLine(const GeoZoneMonitor::AlertEvent &event);
+    /// @return The fields of a line of a log file, unquoted
+    static QStringList logFields(const QString &line);
     /// @return The alert of a line of a log file, nothing when it can't be read
     static std::optional<GeoZoneMonitor::AlertEvent> parseLogLine(const QString &line);
 

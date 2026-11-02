@@ -126,6 +126,21 @@ SettingsPage {
     SettingsGroupLayout {
         Layout.fillWidth:       true
         Layout.preferredWidth:  _groupWidth
+        heading:                qsTr("Records")
+        headingDescription:     qsTr("Each flight is recorded in the GeoZones folder of the telemetry folder when the vehicle disarms: its track, the zones it entered or passed near, the permits used and the alerts with your answers.")
+
+        LabelledFactComboBox {
+            Layout.fillWidth:   true
+            label:              fact.shortDescription
+            fact:               _geoZoneSettings.recordRetention
+            indexModel:         false
+            visible:            fact.visible
+        }
+    }
+
+    SettingsGroupLayout {
+        Layout.fillWidth:       true
+        Layout.preferredWidth:  _groupWidth
         heading:                qsTr("Altitude Limits")
         headingDescription:     _geoZoneSettings.qnhHPa.longDescription
 
