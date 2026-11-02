@@ -28,7 +28,8 @@ QGCPopupDialog {
 
     required property var missionController
 
-    readonly property real _width: ScreenTools.defaultFontPixelWidth * 64
+    // Narrower on small screens, so that the texts wrap rather than scroll sideways
+    readonly property real _width: Math.min(ScreenTools.defaultFontPixelWidth * 64, mainWindow.width - ScreenTools.defaultFontPixelWidth * 8)
 
     function _horizontalText(meters) {
         return Math.round(QGroundControl.unitsConversion.metersToAppSettingsHorizontalDistanceUnits(meters)) + " " +

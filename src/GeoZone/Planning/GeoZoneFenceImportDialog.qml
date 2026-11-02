@@ -33,7 +33,8 @@ QGCPopupDialog {
 
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _margin:            ScreenTools.defaultFontPixelHeight / 2
-    readonly property real  _contentWidth:      ScreenTools.defaultFontPixelWidth * 56
+    // Narrower on small screens, so that the texts wrap rather than scroll sideways
+    readonly property real  _contentWidth:      Math.min(ScreenTools.defaultFontPixelWidth * 56, mainWindow.width - ScreenTools.defaultFontPixelWidth * 8)
     readonly property var   _capacity:          importer.capacity
     readonly property var   _upload:            importer.upload
     readonly property bool  _uploading:         _upload.busy
