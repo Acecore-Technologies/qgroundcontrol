@@ -58,7 +58,9 @@ public:
     bool operator==(const GeoZoneSourceChanges &other) const = default;
 };
 
-/// Zones loaded from one geozone file or downloaded feed
+/// Zones loaded from one geozone file or downloaded feed. Its properties stay flat rather than grouped in gadgets: they
+/// change separately with their own signals (busy, enabled, validity, service) while QML binds to them one by one, and
+/// a group would notify all its bindings at each change.
 class GeoZoneSource : public QObject
 {
     Q_OBJECT

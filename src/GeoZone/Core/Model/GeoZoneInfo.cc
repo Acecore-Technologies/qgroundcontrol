@@ -14,7 +14,7 @@ GeoZoneInfo::GeoZoneInfo(const GeoZone *zone)
 {
 }
 
-QString GeoZoneInfo::sourceText() const
+QString GeoZoneDetails::sourceText() const
 {
     if (!_zone) {
         return QString();
@@ -26,7 +26,7 @@ QString GeoZoneInfo::sourceText() const
     return QCoreApplication::translate("GeoZoneInfo", "%1 · %n source(s)", "Source of a zone, number of sources publishing it", count).arg(_zone->sourceText());
 }
 
-QString GeoZoneInfo::sourcesText() const
+QString GeoZoneDetails::sourcesText() const
 {
     if (!_zone) {
         return QString();

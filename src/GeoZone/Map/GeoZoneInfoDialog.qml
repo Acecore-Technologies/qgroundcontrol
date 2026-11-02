@@ -382,7 +382,7 @@ QGCPopupDialog {
 
         InfoRow {
             label:      qsTr("Conditions")
-            value:      root.geoZone ? root.geoZone.restrictionConditions : ""
+            value:      root.geoZone ? root.geoZone.details.restrictionConditions : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
@@ -396,56 +396,56 @@ QGCPopupDialog {
 
         InfoRow {
             label:      qsTr("Applicability")
-            value:      root.geoZone ? root.geoZone.applicabilityText : ""
+            value:      root.geoZone ? root.geoZone.details.applicabilityText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("Reason")
-            value:      root.geoZone ? root.geoZone.reasonText : ""
+            value:      root.geoZone ? root.geoZone.details.reasonText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("Message")
-            value:      root.geoZone ? root.geoZone.message : ""
+            value:      root.geoZone ? root.geoZone.details.message : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("Authority")
-            value:      root.geoZone ? root.geoZone.authorityText : ""
+            value:      root.geoZone ? root.geoZone.details.authorityText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("Exemptions")
-            value:      root.geoZone ? root.geoZone.regulationExemptionText : ""
+            value:      root.geoZone ? root.geoZone.details.regulationExemptionText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("U-space class")
-            value:      root.geoZone ? root.geoZone.uSpaceClass : ""
+            value:      root.geoZone ? root.geoZone.details.uSpaceClass : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("Details")
-            value:      root.geoZone ? root.geoZone.extendedPropertiesText : ""
+            value:      root.geoZone ? root.geoZone.details.extendedPropertiesText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
 
         InfoRow {
             label:      qsTr("Data issues")
-            value:      root.geoZone ? root.geoZone.issuesText : ""
+            value:      root.geoZone ? root.geoZone.details.issuesText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }
@@ -459,7 +459,7 @@ QGCPopupDialog {
 
         InfoRow {
             label:      qsTr("Source")
-            value:      root.geoZone ? root.geoZone.sourceText : ""
+            value:      root.geoZone ? root.geoZone.details.sourceText : ""
             labelWidth: root._labelWidth
             valueWidth: root._valueWidth
         }

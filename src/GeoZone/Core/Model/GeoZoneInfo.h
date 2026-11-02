@@ -16,8 +16,48 @@
 #include <QtCore/QSharedPointer>
 #include <QtCore/QVariantList>
 
+/// The texts describing a zone in detail, which the zone details show, see GeoZoneInfo::details. Like GeoZoneInfo, a
+/// value sharing the zone whose properties are read from the zone when used.
+class GeoZoneDetails
+{
+    Q_GADGET
+
+    Q_PROPERTY(QString          restrictionConditions   READ restrictionConditions  CONSTANT FINAL)
+    Q_PROPERTY(QString          reasonText              READ reasonText             CONSTANT FINAL)
+    Q_PROPERTY(QString          message                 READ message                CONSTANT FINAL)
+    Q_PROPERTY(QString          authorityText           READ authorityText          CONSTANT FINAL)
+    Q_PROPERTY(QString          uSpaceClass             READ uSpaceClass            CONSTANT FINAL)
+    Q_PROPERTY(QString          regulationExemptionText READ regulationExemptionText CONSTANT FINAL)
+    Q_PROPERTY(QString          extendedPropertiesText  READ extendedPropertiesText CONSTANT FINAL)  ///< Publisher specific properties, one per line
+    Q_PROPERTY(QString          issuesText              READ issuesText             CONSTANT FINAL)  ///< Problems reading the zone, one per line
+    Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
+    Q_PROPERTY(bool             approximateLimits       READ approximateLimits      CONSTANT FINAL)   ///< Flight levels converted with the QNH
+    Q_PROPERTY(QString          sourceText              READ sourceText             CONSTANT FINAL)   ///< File or feed the zone was loaded from, with its date, and the number of sources publishing it when several do
+    Q_PROPERTY(QString          sourcesText             READ sourcesText            CONSTANT FINAL)   ///< Files or feeds publishing the zone with their dates, one per line
+
+public:
+    GeoZoneDetails() = default;
+    explicit GeoZoneDetails(const QSharedPointer<const GeoZone> &zone) : _zone(zone) {}
+
+    QString restrictionConditions() const { return _zone ? _zone->restrictionConditions() : QString(); }
+    QString reasonText() const { return _zone ? GeoZoneText::reasons(_zone->data()) : QString(); }
+    QString message() const { return _zone ? _zone->message() : QString(); }
+    QString authorityText() const { return _zone ? _zone->authorityText() : QString(); }
+    QString uSpaceClass() const { return _zone ? _zone->uSpaceClass() : QString(); }
+    QString regulationExemptionText() const { return _zone ? GeoZoneText::regulationExemption(_zone->data()) : QString(); }
+    QString extendedPropertiesText() const { return _zone ? _zone->extendedPropertiesText() : QString(); }
+    QString issuesText() const { return _zone ? _zone->issuesText() : QString(); }
+    QString applicabilityText() const { return _zone ? GeoZoneSchedule::text(_zone->data().applicability) : QString(); }
+    bool approximateLimits() const { return _zone && _zone->approximateLimits(); }
+    QString sourceText() const;
+    QString sourcesText() const;
+
+private:
+    QSharedPointer<const GeoZone> _zone;
+};
+
 /// A zone as seen by QML: a value sharing the zone, which stays valid when its source is reloaded or removed.
-/// Properties are read from the zone when used.
+/// Properties are read from the zone when used, those only the zone details show are grouped in details.
 class GeoZoneInfo
 {
     Q_GADGET
@@ -30,24 +70,13 @@ class GeoZoneInfo
     Q_PROPERTY(QString          country                 READ country                CONSTANT FINAL)
     Q_PROPERTY(int              restriction             READ restriction            CONSTANT FINAL)   ///< GeoZone::Restriction
     Q_PROPERTY(QString          restrictionText         READ restrictionText        CONSTANT FINAL)
-    Q_PROPERTY(QString          restrictionConditions   READ restrictionConditions  CONSTANT FINAL)
-    Q_PROPERTY(QString          reasonText              READ reasonText             CONSTANT FINAL)
-    Q_PROPERTY(QString          message                 READ message                CONSTANT FINAL)
-    Q_PROPERTY(QString          authorityText           READ authorityText          CONSTANT FINAL)
-    Q_PROPERTY(QString          uSpaceClass             READ uSpaceClass            CONSTANT FINAL)
-    Q_PROPERTY(QString          regulationExemptionText READ regulationExemptionText CONSTANT FINAL)
-    Q_PROPERTY(QString          extendedPropertiesText  READ extendedPropertiesText CONSTANT FINAL)  ///< Publisher specific properties, one per line
-    Q_PROPERTY(QString          issuesText              READ issuesText             CONSTANT FINAL)  ///< Problems reading the zone, one per line
-    Q_PROPERTY(QString          applicabilityText       READ applicabilityText      CONSTANT FINAL)
     Q_PROPERTY(QString          verticalLimitsText      READ verticalLimitsText     CONSTANT FINAL)
-    Q_PROPERTY(bool             approximateLimits       READ approximateLimits      CONSTANT FINAL)   ///< Flight levels converted with the QNH
     Q_PROPERTY(QGeoCoordinate   center                  READ center                 CONSTANT FINAL)
     Q_PROPERTY(QGeoRectangle    boundingBox             READ boundingBox            CONSTANT FINAL)
     Q_PROPERTY(bool             active                  READ active                 CONSTANT FINAL)   ///< When read
     Q_PROPERTY(QString          sourceKey               READ sourceKey              CONSTANT FINAL)   ///< Key of the GeoZoneSource
-    Q_PROPERTY(QString          sourceText              READ sourceText             CONSTANT FINAL)   ///< File or feed the zone was loaded from, with its date, and the number of sources publishing it when several do
     Q_PROPERTY(int              sourceCount             READ sourceCount            CONSTANT FINAL)   ///< Sources publishing the zone, see GeoZone::otherSources
-    Q_PROPERTY(QString          sourcesText             READ sourcesText            CONSTANT FINAL)   ///< Files or feeds publishing the zone with their dates, one per line
+    Q_PROPERTY(GeoZoneDetails   details                 READ details                CONSTANT FINAL)
 
 public:
     GeoZoneInfo() = default;
@@ -63,24 +92,13 @@ public:
     QString country() const { return _zone ? _zone->country() : QString(); }
     int restriction() const { return _zone ? static_cast<int>(_zone->restriction()) : static_cast<int>(GeoZone::Unknown); }
     QString restrictionText() const { return _zone ? GeoZoneText::restriction(_zone->restriction()) : QString(); }
-    QString restrictionConditions() const { return _zone ? _zone->restrictionConditions() : QString(); }
-    QString reasonText() const { return _zone ? GeoZoneText::reasons(_zone->data()) : QString(); }
-    QString message() const { return _zone ? _zone->message() : QString(); }
-    QString authorityText() const { return _zone ? _zone->authorityText() : QString(); }
-    QString uSpaceClass() const { return _zone ? _zone->uSpaceClass() : QString(); }
-    QString regulationExemptionText() const { return _zone ? GeoZoneText::regulationExemption(_zone->data()) : QString(); }
-    QString extendedPropertiesText() const { return _zone ? _zone->extendedPropertiesText() : QString(); }
-    QString issuesText() const { return _zone ? _zone->issuesText() : QString(); }
-    QString applicabilityText() const { return _zone ? GeoZoneSchedule::text(_zone->data().applicability) : QString(); }
     QString verticalLimitsText() const { return _zone ? GeoZoneText::verticalLimits(_zone->data()) : QString(); }
-    bool approximateLimits() const { return _zone && _zone->approximateLimits(); }
     QGeoCoordinate center() const { return _zone ? _zone->center() : QGeoCoordinate(); }
     QGeoRectangle boundingBox() const { return _zone ? _zone->boundingBox() : QGeoRectangle(); }
     bool active() const { return _zone && _zone->active(); }
     QString sourceKey() const { return _zone ? _zone->sourceKey() : QString(); }
-    QString sourceText() const;
     int sourceCount() const { return _zone ? _zone->sourceCount() : 0; }
-    QString sourcesText() const;
+    GeoZoneDetails details() const { return GeoZoneDetails(_zone); }
 
     friend bool operator==(const GeoZoneInfo &a, const GeoZoneInfo &b) { return a._zone == b._zone; }
 
@@ -105,4 +123,5 @@ private:
     QSharedPointer<const GeoZone> _zone;
 };
 
+Q_DECLARE_METATYPE(GeoZoneDetails)
 Q_DECLARE_METATYPE(GeoZoneInfo)

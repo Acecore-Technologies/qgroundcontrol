@@ -3355,8 +3355,8 @@ void GeoZoneManagerTest::_testMergedSources()
     QCOMPARE(sameZone->otherSources().count(), 1);
     QCOMPARE(sameZone->otherSources()[0].key, extractKey);
     QVERIFY(sameZone->fromSource(extractKey));
-    QVERIFY(GeoZoneInfo(sameZone).sourceText().endsWith(QStringLiteral(" · 2 source(s)")));
-    QCOMPARE(GeoZoneInfo(sameZone).sourcesText().split(QLatin1Char('\n')).count(), 2);
+    QVERIFY(GeoZoneInfo(sameZone).details().sourceText().endsWith(QStringLiteral(" · 2 source(s)")));
+    QCOMPARE(GeoZoneInfo(sameZone).details().sourcesText().split(QLatin1Char('\n')).count(), 2);
     QCOMPARE(manager.catalog().zonesAt(other).count(), 3);
     QCOMPARE(manager.catalog().search(QStringLiteral("SAME"), 10).count(), 1);
     QCOMPARE(manager.catalog().search(QStringLiteral("LIMITS"), 10).count(), 2);
