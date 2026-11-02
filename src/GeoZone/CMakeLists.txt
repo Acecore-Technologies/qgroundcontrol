@@ -111,6 +111,7 @@ qt_add_qml_module(GeoZoneModule
         Flight/GeoZoneFlyMapLayer.qml
         Flight/GeoZoneGuidedActionWarning.qml
         Flight/GeoZoneIndicator.qml
+        Flight/GeoZoneIndicatorPage.qml
         Flight/GeoZoneMapClickButton.qml
         Settings/GeoZoneAuthorisationsPanel.qml
         Settings/GeoZoneChoiceComboBox.qml
