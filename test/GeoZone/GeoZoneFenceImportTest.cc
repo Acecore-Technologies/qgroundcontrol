@@ -430,6 +430,70 @@ void GeoZoneFenceImportTest::_testGeoFenceNotFenced()
     QVERIFY(masterController.saveToJson().object()[PlanMasterController::kJsonGeoFenceObjectKey].toObject().contains(QStringLiteral("geoZoneImport")));
 }
 
+void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
+{
+    // A permanent zone, one ending in an hour and one starting in half an hour
+    ScopedEnvironment environment;
+    const QDateTime now = _utc(QDate(2026, 6, 15), QTime(12, 0));
+    environment.setNow(now);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    const auto clearZones = qScopeGuard([manager]() { manager->repository()->clear(); });
+    const auto scheduled = [](const QString &name, double longitude, const QDateTime &start, const QDateTime &end) {
+        QJsonObject feature = _circleFeature(name, QStringLiteral("PROHIBITED"), QGeoCoordinate(47, longitude), 300);
+        QJsonObject period{ { QStringLiteral("startDateTime"), start.toString(Qt::ISODate) } };
+        if (end.isValid()) {
+            period[QStringLiteral("endDateTime")] = end.toString(Qt::ISODate);
+        }
+        feature[QStringLiteral("applicability")] = QJsonArray{ period };
+        return feature;
+    };
+    QString errorString;
+    QVERIFY2(manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 300),
+        scheduled(QStringLiteral("ENDS"), 8.1, now.addDays(-1), now.addSecs(3600)),
+        scheduled(QStringLiteral("STARTS"), 8.2, now.addSecs(1800), QDateTime()),
+    }), errorString), qPrintable(errorString));
+    QTRY_COMPARE(manager->zoneCount(), 3);
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(masterController.geoFenceController());
+    GeoZonePlanning *const planning = manager->planning();
+    const auto clearPlannedStart = qScopeGuard([planning]() { planning->clearPlannedStart(); });
+    // The selected zones, then those left out with why, which can't be included
+    const auto select = [&importer](int activeWithinHours) {
+        importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), activeWithinHours, 25);
+        (void) QTest::qWaitFor([&importer]() { return !importer.busy(); }, 5000);
+        QStringList selected;
+        QStringList leftOut;
+        for (const GeoZoneFenceChoiceModel::Row &row : importer.choices()->rows()) {
+            (row.selected ? selected : leftOut).append(row.selected ? row.name : QStringLiteral("%1: %2%3").arg(row.name, row.reason, row.includable ? QStringLiteral(" (includable)") : QString()));
+        }
+        selected.sort();
+        leftOut.sort();
+        return selected + QStringList{ QStringLiteral("|") } + leftOut;
+    };
+    const QString partTime = QStringLiteral("Active only part of the flight, QGroundControl warns instead");
+
+    // The flight from 12:20 to 12:20, widened by 15 minutes: the zone starting at 12:30 is left out, since its fence
+    // would make the vehicle act once it becomes active. The zone ending at 13:00 is active all the time.
+    planning->setPlannedStart(now.addSecs(20 * 60));
+    QCOMPARE(select(GeoZoneFenceImporter::AtFlightTime), QStringList({ QStringLiteral("A"), QStringLiteral("ENDS"), QStringLiteral("|"), QStringLiteral("STARTS: ") + partTime }));
+    // From 12:50: the zone ending at 13:00 is left out instead
+    planning->setPlannedStart(now.addSecs(50 * 60));
+    QCOMPARE(select(GeoZoneFenceImporter::AtFlightTime), QStringList({ QStringLiteral("A"), QStringLiteral("STARTS"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime }));
+    QCOMPARE(importer.notFencedCount(), 1);
+    // In the next three hours both change, now only the zone starting later is inactive and not a candidate
+    QCOMPARE(select(3), QStringList({ QStringLiteral("A"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime, QStringLiteral("STARTS: ") + partTime }));
+    QCOMPARE(select(0), QStringList({ QStringLiteral("A"), QStringLiteral("ENDS"), QStringLiteral("|") }));
+    // Any time fences them all, whatever their schedule
+    QCOMPARE(select(GeoZoneFenceImporter::AnyTime), QStringList({ QStringLiteral("A"), QStringLiteral("ENDS"), QStringLiteral("STARTS"), QStringLiteral("|") }));
+}
+
 void GeoZoneFenceImportTest::_testGeoFenceStale()
 {
     // A permanent zone and one ending in an hour, selected from the zones of the manager

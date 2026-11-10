@@ -162,6 +162,11 @@ bool GeoZone::isActiveDuring(const QDateTime &start, const QDateTime &end) const
     return GeoZoneSchedule::isActiveDuring(_data.applicability, start, end, _box.center());
 }
 
+bool GeoZone::isActiveThroughout(const QDateTime &start, const QDateTime &end) const
+{
+    return GeoZoneSchedule::isActiveThroughout(_data.applicability, start, end, _box.center());
+}
+
 bool GeoZone::updateActive(const QDateTime &now)
 {
     const bool active = isActiveAt(now);

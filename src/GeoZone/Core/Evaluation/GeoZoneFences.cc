@@ -352,7 +352,8 @@ Prepared prepare(const QList<Candidate> &candidates, const QList<double> &simpli
         const GeoZone *const zoneB = b.candidate.zone;
         const auto key = [](const Prepared::Entry &entry) {
             const Candidate &candidate = entry.candidate;
-            return std::make_tuple(_tier(candidate.zone->restriction()), static_cast<int>(candidate.proximity),
+            // Zones active only part of the flight aren't fenced, the zones with their area after them may be
+            return std::make_tuple(candidate.partTime, _tier(candidate.zone->restriction()), static_cast<int>(candidate.proximity),
                                    (candidate.proximity == Proximity::Far) ? candidate.distance : 0.0,
                                    GeoZone::restrictionSeverity(candidate.zone->restriction()), entry.usage.items);
         };
@@ -438,6 +439,8 @@ Selection select(const Prepared &prepared, const Capacity &capacity, const Usage
             choice.status = Status::NoShape;
         } else if (choice.duplicateOf) {
             choice.status = Status::Duplicate;
+        } else if (candidate.partTime) {
+            choice.status = Status::PartTime;
         } else if (candidate.excluded) {
             choice.status = Status::Excluded;
         } else if (!capacity.exclusions) {
@@ -515,6 +518,8 @@ QString statusText(const Choice &choice)
         return QCoreApplication::translate("GeoZoneFences", "The vehicle doesn't support exclusion fences");
     case Status::NoShape:
         return QCoreApplication::translate("GeoZoneFences", "No area to fence");
+    case Status::PartTime:
+        return QCoreApplication::translate("GeoZoneFences", "Active only part of the flight, QGroundControl warns instead");
     case Status::Duplicate:
         if (choice.duplicateSelected) {
             return QCoreApplication::translate("GeoZoneFences", "Same area as %1, covered by its fence").arg(choice.duplicateOf ? choice.duplicateOf->displayName() : QString());

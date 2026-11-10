@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QDateTime>
 #include <QtCore/QHash>
 #include <QtCore/QJsonObject>
 #include <QtCore/QObject>
@@ -71,7 +72,8 @@ public:
     /// Special values of the activeWithinHours of updateSelection
     enum ActiveTime {
         AnyTime = -1,       ///< Whatever the zone schedules
-        AtFlightTime = -2,  ///< Active from the planned start to the estimated end, see GeoZonePlanning, or any time without planned start
+        AtFlightTime = -2,  ///< Active from the planned start to the estimated end, see GeoZonePlanning, or any time without planned start.
+                            ///< Zones active only part of that time are left out.
     };
     Q_ENUM(ActiveTime)
 
@@ -100,7 +102,9 @@ public:
     /// are prepared, unless another selection starts meanwhile
     ///     @param restrictions: GeoZone::Restriction values of the zones
     ///     @param area: Only zones intersecting this area. Invalid for zones anywhere.
-    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours, see ActiveTime for the others
+    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours, see ActiveTime for the
+    ///                               others. Zones active only part of the next hours or of the flight are left out,
+    ///                               see GeoZoneFences::Candidate::partTime.
     ///     @param maxSimplifyTolerance: Meters fences may be simplified by to fit, see GeoZoneFences::zoneFences
     Q_INVOKABLE void updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = -1, double maxSimplifyTolerance = 0);
 
@@ -166,6 +170,8 @@ private:
     struct AreaQuery {
         GeoZoneBox area;
         GeoZonePolicy policy;
+        QDateTime activeFrom;   ///< Zones not active during the whole time from activeFrom to activeTo are left out,
+        QDateTime activeTo;     ///< see GeoZoneFences::Candidate::partTime. Invalid for any time.
     };
 
     /// What preparing a selection needs, gathered on the GUI thread

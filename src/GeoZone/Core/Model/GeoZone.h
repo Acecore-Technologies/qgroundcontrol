@@ -191,6 +191,10 @@ public:
     /// @return true if the zone applies at any time between start and end inclusive
     bool isActiveDuring(const QDateTime &start, const QDateTime &end) const;
 
+    /// @return true if the zone applies at every time between start and end inclusive, see
+    ///         GeoZoneSchedule::isActiveThroughout
+    bool isActiveThroughout(const QDateTime &start, const QDateTime &end) const;
+
     /// @return true if the schedule can't be fully evaluated, like daily periods from or to an unknown daylight event,
     ///         which are then taken from the start or to the end of the day, so the zone is assumed active longer
     bool scheduleAssumed() const { return _scheduleAssumed; }

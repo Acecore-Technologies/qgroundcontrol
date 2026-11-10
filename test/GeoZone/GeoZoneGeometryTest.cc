@@ -175,6 +175,26 @@ void GeoZoneGeometryTest::_testIsActiveDuring()
     QVERIFY(night.isActiveDuring(_utc(friday.addDays(2), QTime(22, 30)), _utc(friday.addDays(2), QTime(23, 10))));
     QVERIFY(!night.isActiveDuring(_utc(friday.addDays(3), QTime(1, 1)), _utc(friday.addDays(6), QTime(21, 0))));
 
+    // Active during the whole interval, as the fences from geozones need: within one period, not across its start or
+    // end, nor across the days between two periods, while periods following each other within a minute join
+    QVERIFY(permanent.isActiveThroughout(_utc(QDate(2035, 1, 1), QTime(0, 0)), _utc(QDate(2035, 3, 1), QTime(0, 0))));
+    QVERIFY(scheduled.isActiveThroughout(_utc(monday, QTime(9, 0)), _utc(monday, QTime(11, 0))));
+    QVERIFY(scheduled.isActiveThroughout(_utc(monday, QTime(9, 0)), QDateTime()));
+    QVERIFY(!scheduled.isActiveThroughout(_utc(monday, QTime(4, 0)), _utc(monday, QTime(6, 0))));
+    QVERIFY(!scheduled.isActiveThroughout(_utc(monday, QTime(17, 0)), _utc(monday, QTime(18, 30))));
+    QVERIFY(!scheduled.isActiveThroughout(_utc(monday, QTime(17, 0)), _utc(monday.addDays(1), QTime(6, 0))));
+    QVERIFY(!scheduled.isActiveThroughout(_utc(monday, QTime(20, 0)), _utc(monday, QTime(10, 0))));
+    QVERIFY(night.isActiveThroughout(_utc(friday, QTime(22, 30)), _utc(friday.addDays(1), QTime(1, 30))));
+    QVERIFY(!night.isActiveThroughout(_utc(friday, QTime(21, 30)), _utc(friday.addDays(1), QTime(1, 30))));
+    QVERIFY2(GeoZoneParser::parse(R"({ "features": [ { "identifier": "J", "restriction": "PROHIBITED",
+        "applicability": [ { "permanent": "NO", "startDateTime": "2026-06-01T00:00:00Z", "endDateTime": "2026-06-01T11:59:30Z" },
+                           { "permanent": "NO", "startDateTime": "2026-06-01T12:00:00Z", "endDateTime": "2026-06-02T00:00:00Z",
+                             "schedule": [ { "day": ["ANY"], "startTime": "00:00Z", "endTime": "23:59Z" } ] } ],
+        "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [8, 47], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
+    const GeoZone joined(result.zones[0]);
+    QVERIFY(joined.isActiveThroughout(_utc(monday, QTime(11, 0)), _utc(monday, QTime(23, 59))));
+    QVERIFY(!joined.isActiveThroughout(_utc(monday, QTime(11, 0)), _utc(monday.addDays(1), QTime(0, 30))));
+
     // The catalog filters zones by the activity window
     ScopedEnvironment environment;
     environment.setNow(_utc(monday, QTime(12, 0)));
@@ -717,6 +737,26 @@ void GeoZoneGeometryTest::_testFenceSelection()
     selection = select(candidateList, Capacity::unsupported());
     QCOMPARE(choiceOf(enteredRound).status, Status::Unsupported);
     QCOMPARE(selection.usage, Usage());
+
+    // Zones active only part of the flight aren't fenced, whatever the user chooses, and come after the zones with
+    // their area, which are fenced in their place
+    QList<Candidate> partTime = candidateList;
+    for (Candidate &candidate : partTime) {
+        candidate.partTime = (candidate.zone == enteredRound) || (candidate.zone == farProhibited);
+    }
+    selection = select(partTime, Capacity::arduPilot(true, 8));
+    QCOMPARE(choiceOf(enteredRound).status, Status::PartTime);
+    QVERIFY(!choiceOf(enteredRound).includable());
+    QVERIFY(!choiceOf(enteredRound).fenced());
+    QCOMPARE(statusText(choiceOf(enteredRound)), QStringLiteral("Active only part of the flight, QGroundControl warns instead"));
+    QCOMPARE(choiceOf(duplicate).status, Status::Selected);
+    QCOMPARE(choiceOf(farProhibited).status, Status::Duplicate);
+    QVERIFY(choiceOf(farProhibited).fenced());
+    QCOMPARE(names(sortedByPriority(partTime), candidateZone).mid(priority.count() - 2), QStringList({ QStringLiteral("Prohibited entered"), QStringLiteral("Prohibited far") }));
+    for (Candidate &candidate : partTime) {
+        candidate.excluded = false;
+    }
+    QCOMPARE(select(partTime, Capacity::arduPilot(true, 8)).selectedZones().count(), zones.count() - 2);
 }
 
 void GeoZoneGeometryTest::_testContainsAndPaths()

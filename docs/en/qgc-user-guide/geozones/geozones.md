@@ -437,7 +437,7 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 
 1. Check the zone types to add (**Prohibited**, **Authorisation**, **Conditional**).
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
-1. Select when the zones must be **Active**: **At flight time** (offered and selected when the plan has a planned start: from the planned start to the estimated end of the mission, widened by 15 minutes), **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**.
+1. Select when the zones must be **Active**: **At flight time** (offered and selected when the plan has a planned start: from the planned start to the estimated end of the mission, widened by 15 minutes), **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**. Except for **Any time**, only zones active during the whole of that time are fenced, see [Time-limited Zones](#time-limited-zones-and-fences).
 1. Select how far fences may be simplified to fit (**Simplify up to**). Fences are only simplified as far as needed, the most important zones the least. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
 1. Check the zones selected and, with **Show**, those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
 
@@ -458,6 +458,10 @@ Zones are selected in priority order until the fence is full: prohibited zones f
 The checkbox of a zone means _include it if it fits_. Checked zones are included in priority order while they fit, so a checked zone can be left out when there is no room for it. Unchecked zones are left out by you. Uncheck a zone to leave it out, which makes room for the zones after it, or check a zone left out by you to include it again in its place in the priority order. The lists change as soon as you click: a zone moves between **Selected zones** and **Left out**, and zones after it may follow when the room changes. Zones without a fence of their own can't be checked: those without an area, those when the vehicle doesn't support exclusion fences, and those with the same area as a zone before them in priority, which follow that zone: they are covered by its fence when it is selected and left out with it otherwise, so unchecking a zone leaves out its area. Hover over a row to see its whole name and reason when they don't fit.
 
 Zones the flight only passes above or below are left out unless you check them, since their exclusion fence would stop the vehicle there.
+
+#### Time-limited Zones and Fences {#time-limited-zones-and-fences}
+
+A vehicle fence has no schedule: once uploaded, the vehicle enforces it all the time. A fence of a zone active only part of the flight would make the vehicle act at a zone which isn't active yet, or when the zone becomes active while the vehicle is inside it, where EN 4709-003 §6.2.1 asks for a warning but no automatic manoeuvre. So the import only fences zones active during the whole planned time: with **At flight time** from the planned start to the estimated end widened by 15 minutes, with **Next 3 hours** and **Next 24 hours** from now to then, and with **Now** the zones active now. A zone active only part of that time, like one starting or ending during the flight, is left out with the reason _Active only part of the flight, QGroundControl warns instead_ and can't be checked: the [flight alerts](#flight-alerts) follow its schedule and warn when it becomes active. A zone with the same area which is active all the time is fenced in its place. **Any time** fences the zones whatever their schedule, also while they are inactive.
 
 #### Zones Not Fenced {#zones-not-fenced}
 
@@ -646,7 +650,7 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 - Schedules with unknown days are taken as every day, which isn't marked as approximate; the zone details show the problem.
 - Return and contingency paths are estimates, see [Return and Contingency Paths](#return-and-contingency-paths).
 - The [operational intent](#operational-intent) is only exported: it isn't submitted to a U-space or UTM service provider, checked against other flights or approved, and only includes the operator and aircraft details of the Remote ID settings.
-- GeoFences made from zones have no altitude limits and no holes, and the ArduPilot fence storage is estimated.
+- GeoFences made from zones have no altitude limits, no holes and no schedule (zones active only part of the flight aren't fenced), and the ArduPilot fence storage is estimated.
 - Secrets of services are stored unencrypted in the settings. Feeds are only checked by SHA-256, not signatures; offline packs are signed only in builds with OpenSSL, by default desktop Linux builds.
 
 Developers can find the architecture of the geozone module in the [Geozones developer guide](../../qgc-dev-guide/geozones.md).

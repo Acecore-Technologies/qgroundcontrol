@@ -278,6 +278,17 @@ QGCPopupDialog {
             }
         }
 
+        // The vehicle's fence has no schedule, so it only fences zones active the whole time
+        QGCLabel {
+            Layout.preferredWidth:  _contentWidth
+            wrapMode:               Text.WordWrap
+            font.pointSize:         ScreenTools.smallFontPointSize
+            text:                   activeCombo.hours[activeCombo.currentIndex] === GeoZoneFenceImporter.AnyTime ?
+                                        qsTr("Any time fences zones whatever their schedule, also while they are inactive.") :
+                                        qsTr("The vehicle's fence has no schedule: zones active only part of the time are not fenced, so that a zone becoming active can't make the vehicle act. QGroundControl warns about them instead.")
+            visible:                helpButton.checked
+        }
+
         QGCLabel {
             Layout.preferredWidth:  _contentWidth
             wrapMode:               Text.WordWrap

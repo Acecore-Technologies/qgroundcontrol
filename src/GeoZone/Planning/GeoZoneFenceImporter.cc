@@ -193,7 +193,8 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
         }
     }
 
-    _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo) };
+    // Fences can't follow schedules: the zones fenced must be active from the start to the end
+    _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo), activeFrom, activeTo.isValid() ? activeTo : activeFrom };
     _settings = QJsonObject{
         { QStringLiteral("restrictions"), QJsonArray::fromVariantList(restrictions) },
         { QStringLiteral("activeWithinHours"), activeWithinHours },
@@ -295,7 +296,13 @@ GeoZoneFenceImporter::Prepared GeoZoneFenceImporter::_prepare(const PrepareInput
         evaluation = evaluator.evaluate(input.paths, input.areas);
     }
 
-    Prepared prepared{ input.catalog, GeoZoneFences::prepare(GeoZoneFences::candidates(zones, evaluation, input.lines), input.simplifyTolerances, input.circlesAsPolygons) };
+    QList<GeoZoneFences::Candidate> candidates = GeoZoneFences::candidates(zones, evaluation, input.lines);
+    if (input.query && input.query->activeFrom.isValid()) {
+        for (GeoZoneFences::Candidate &candidate : candidates) {
+            candidate.partTime = !candidate.zone->isActiveThroughout(input.query->activeFrom, input.query->activeTo);
+        }
+    }
+    Prepared prepared{ input.catalog, GeoZoneFences::prepare(candidates, input.simplifyTolerances, input.circlesAsPolygons) };
     prepared.indexes.reserve(prepared.fences.entries.count());
     for (qsizetype i = 0; i < prepared.fences.entries.count(); i++) {
         prepared.indexes.insert(prepared.fences.entries[i].candidate.zone->key(), i);

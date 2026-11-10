@@ -246,6 +246,24 @@ bool _dailyPeriodOverlaps(const GeoZoneSchedule::DailyPeriod &period, const QDat
     return false;
 }
 
+/// Adds the windows of the daily period overlapping the interval to the windows, clipped to it
+void _addDailyWindows(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &startUtc, const QDateTime &endUtc, const QGeoCoordinate &location,
+                      Reading reading, QList<std::pair<QDateTime, QDateTime>> &windows)
+{
+    const QDate firstDate = _publishedDate(period, startUtc, reading).addDays(-1);
+    const QDate lastDate = _publishedDate(period, endUtc, reading).addDays(1);
+    // Longer intervals are not flights, a period with a gap in a week isn't active throughout anyway
+    if (firstDate.daysTo(lastDate) > 400) {
+        return;
+    }
+    for (QDate date = firstDate; date <= lastDate; date = date.addDays(1)) {
+        const auto window = _dailyWindow(period, date, location, reading);
+        if (window && (window->first <= endUtc) && (window->second >= startUtc)) {
+            windows.append({ (std::max)(window->first, startUtc), (std::min)(window->second, endUtc) });
+        }
+    }
+}
+
 // Periods whose time zone was assumed apply both in it and in UTC, since their times may have been either
 
 bool _dailyPeriodContains(const GeoZoneSchedule::DailyPeriod &period, const QDateTime &utc, const QGeoCoordinate &location)
@@ -417,6 +435,50 @@ bool GeoZoneSchedule::isActiveDuring(const QList<TimePeriod> &applicability, con
     }
 
     return false;
+}
+
+bool GeoZoneSchedule::isActiveThroughout(const QList<TimePeriod> &applicability, const QDateTime &start, const QDateTime &end, const QGeoCoordinate &location)
+{
+    if (applicability.isEmpty()) {
+        return true;
+    }
+    const QDateTime startUtc = start.toUTC();
+    const QDateTime endUtc = end.isValid() ? end.toUTC() : startUtc;
+    if (endUtc < startUtc) {
+        return false;
+    }
+
+    // The windows the periods apply in within the interval, which must cover it
+    QList<std::pair<QDateTime, QDateTime>> windows;
+    for (const TimePeriod &period : applicability) {
+        if (period.permanent) {
+            return true;
+        }
+        const QDateTime from = (period.start.isValid() && (period.start > startUtc)) ? period.start.toUTC() : startUtc;
+        const QDateTime to = (period.end.isValid() && (period.end < endUtc)) ? period.end.toUTC() : endUtc;
+        if (to < from) {
+            continue;
+        }
+        if (period.schedule.isEmpty()) {
+            windows.append({ from, to });
+            continue;
+        }
+        for (const DailyPeriod &dailyPeriod : period.schedule) {
+            _addDailyWindows(dailyPeriod, from, to, location, Reading::Published, windows);
+            if (dailyPeriod.timeZoneAssumed) {
+                _addDailyWindows(dailyPeriod, from, to, location, Reading::Utc, windows);
+            }
+        }
+    }
+    std::sort(windows.begin(), windows.end());
+    QDateTime covered = startUtc;
+    for (const auto &window : std::as_const(windows)) {
+        if (covered.secsTo(window.first) > maxGapSecs) {
+            return false;
+        }
+        covered = (std::max)(covered, window.second);
+    }
+    return !windows.isEmpty() && (covered.secsTo(endUtc) <= maxGapSecs);
 }
 
 QString GeoZoneSchedule::text(const QList<TimePeriod> &applicability)

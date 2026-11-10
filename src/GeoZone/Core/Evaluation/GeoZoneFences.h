@@ -123,6 +123,9 @@ struct Candidate {
     Proximity proximity = Proximity::Far;
     double distance = qInf();       ///< Horizontal meters from the planned flight, infinity without a flight
     bool excluded = false;          ///< Left out by the user. Overflown zones are left out unless included.
+    /// Active only part of the planned flight. Vehicle fences don't follow schedules, so such zones aren't fenced:
+    /// a zone becoming active while the vehicle is inside must only be warned about, not make the vehicle act.
+    bool partTime = false;
 };
 
 constexpr double defaultProximityMargin = 1000;    ///< Meters around the planned flight zones are near
@@ -141,6 +144,7 @@ enum class Status {
     Unsupported,    ///< The vehicle doesn't store exclusion fences
     NoShape,        ///< The zone has no area, like a line
     Duplicate,      ///< Its fences are those of a zone before it
+    PartTime,       ///< Active only part of the planned flight, see Candidate::partTime
 };
 
 struct Choice {
@@ -152,10 +156,10 @@ struct Choice {
     const GeoZone *duplicateOf = nullptr;   ///< The zone before it in priority with the same fences
     bool duplicateSelected = false;         ///< duplicateOf is selected, so that its fences cover the zone
 
-    /// @return false if the zone can't be included whatever the user chooses, since it adds no fence of its own: it
+    /// @return false if the zone can't be included whatever the user chooses: it adds no fence of its own, since it
     ///         has no area, has the same area as a zone before it, which it follows, or the vehicle stores no
-    ///         exclusion fences
-    bool includable() const { return (status != Status::NoShape) && (status != Status::Duplicate) && (status != Status::Unsupported); }
+    ///         exclusion fences, or it is active only part of the planned flight
+    bool includable() const { return (status != Status::NoShape) && (status != Status::Duplicate) && (status != Status::Unsupported) && (status != Status::PartTime); }
     /// @return true if the fence excludes the zone: it is selected, or a duplicate of a selected zone
     bool fenced() const { return (status == Status::Selected) || ((status == Status::Duplicate) && duplicateSelected); }
 };
@@ -170,9 +174,10 @@ struct Selection {
     QList<Choice> notFenced() const;
 };
 
-/// @return The candidates in priority order: prohibited zones, other restricted ones (GeoZonePolicy::isRestricted),
-///         then the others; by proximity within those, by distance for far zones, then the most restrictive ones and
-///         those with fewer fence items at the largest simplification
+/// @return The candidates in priority order: zones active during the whole planned flight before those active only part
+///         of it, then prohibited zones, other restricted ones (GeoZonePolicy::isRestricted), then the others; by
+///         proximity within those, by distance for far zones, then the most restrictive ones and those with fewer
+///         fence items at the largest simplification
 QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances = { 0 }, bool circlesAsPolygons = false);
 
 /// Candidates in priority order with the fences of their zones measured: what selections need besides the capacity,

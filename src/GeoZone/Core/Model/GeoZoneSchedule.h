@@ -54,6 +54,11 @@ public:
     /// @return true if a period applies at any time between start and end inclusive, see isActiveAt
     static bool isActiveDuring(const QList<TimePeriod> &applicability, const QDateTime &start, const QDateTime &end, const QGeoCoordinate &location);
 
+    /// @return true if the periods apply at every time between start and end inclusive, see isActiveAt. Gaps of up to
+    ///         maxGapSecs between periods, like a daily period ending at 23:59 and starting at 00:00, don't count.
+    static bool isActiveThroughout(const QList<TimePeriod> &applicability, const QDateTime &start, const QDateTime &end, const QGeoCoordinate &location);
+    static constexpr int maxGapSecs = 60;
+
     /// @return Human readable periods, one per line
     static QString text(const QList<TimePeriod> &applicability);
 
