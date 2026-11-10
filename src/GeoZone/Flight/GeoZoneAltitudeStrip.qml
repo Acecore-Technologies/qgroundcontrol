@@ -21,7 +21,8 @@ import QGroundControl.ScreenTools
 /// like the same zone from two sources, are drawn as one, with their labels listed beside the bar without overlapping.
 /// While no limit is within reach of the vehicle the strip collapses to a chip, which expands it when clicked. Badges
 /// mark the strip stale while the vehicle's position is lost, and its height above ground as estimated from terrain
-/// data when the vehicle sends none.
+/// data when the vehicle sends none. While the vehicle is in a zone, the strip is framed in the color of its alert
+/// level (GeoZoneMonitor.activeLevel), like the alert popup, while the bands keep the colors of their restrictions.
 Item {
     id:         control
     width:      ScreenTools.defaultFontPixelWidth * 18
@@ -43,6 +44,9 @@ Item {
     readonly property real  _plotHeight:    height - _plotTop - _margin
     readonly property real  _reach:         300     ///< Meters within which a limit keeps the strip expanded
     readonly property color _background:    Qt.rgba(qgcPal.window.r, qgcPal.window.g, qgcPal.window.b, 0.8)
+    readonly property bool  _levelShown:    !!_insideBand && _monitor.activeLevel >= 0
+    readonly property color _levelColor:    GeoZoneStyle.levelColor(_monitor.activeLevel)
+    readonly property real  _levelBorder:   _levelShown ? ScreenTools.defaultFontPixelHeight * 0.15 : 0
 
     property bool _expandedByUser: false
 
@@ -165,6 +169,8 @@ Item {
         height:                 chipColumn.height + control._margin * 2
         radius:                 control._margin
         color:                  control._background
+        border.color:           control._levelColor
+        border.width:           control._levelBorder
         opacity:                control._stale ? 0.5 : 1
         visible:                control._collapsed
 
@@ -214,6 +220,8 @@ Item {
         anchors.fill:   parent
         radius:         control._margin
         color:          control._background
+        border.color:   control._levelColor
+        border.width:   control._levelBorder
         visible:        !control._collapsed
 
         Column {

@@ -529,7 +529,7 @@ Alerts have a level after EN 4709-003 Annex D, shown by its color and word in th
 | **CAUTION** | Amber | The vehicle approaches such a zone, is in or near U-space airspace, a zone becomes active soon, or its position is lost. |
 | **ADVISORY** | Neutral | Conditional zones, zones you approved (**I do**), traffic entering zones. |
 
-So a vehicle flying towards a prohibited zone gets a caution when it comes within the [alert thresholds](#alert-thresholds), a warning when the entry is imminent and a warning when it enters. Each alert in the popup has a bar and the word of its level, and the popup's frame takes the color of the highest level shown; its background stays dark so that it is readable over the zone colors of the map. The zone fills of the map keep the colors of their restriction (see the legend), which tell the kind of zone rather than how urgent an alert is.
+So a vehicle flying towards a restricted zone, horizontally or climbing or descending into it, gets a caution when it comes within the [alert thresholds](#alert-thresholds), a warning when the entry is imminent and a warning when it enters, each shown and spoken. Each alert in the popup has a bar and the word of its level, and the popup's frame takes the color of the highest level shown; its background stays dark so that it is readable over the zone colors of the map. While the vehicle is in a zone, the **Zone altitudes** strip (or its chip) is framed in the level's color too. The zone fills of the map keep the colors of their restriction (see the legend), which tell the kind of zone rather than how urgent an alert is.
 
 ### On the Ground Inside a Zone {#on-the-ground}
 

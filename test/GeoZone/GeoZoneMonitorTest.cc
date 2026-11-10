@@ -2389,6 +2389,31 @@ void GeoZoneMonitorTest::_testAlertLevels()
     emit monitor.fenceBreach(QStringLiteral("Boundary fence breached"));
     QCOMPARE(shown->level(), static_cast<int>(GeoZoneAlertLevel::Warning));
     QCOMPARE(shown->alerts().constFirst().message, QStringLiteral("Boundary fence breached"));
+
+    // Vertically alike: climbing at 3 m/s into a prohibited zone from 300 m AMSL above the vehicle is cautioned, then
+    // warned imminent and entered, each spoken
+    const QGeoCoordinate above = center.atDistanceAndAzimuth(20000, 0);
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("above.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("HIGH"), QStringLiteral("PROHIBITED"), above, 1000), 300, QStringLiteral("AMSL"), 2000, QStringLiteral("AMSL")),
+    }), errorString), qPrintable(errorString));
+    GeoZoneMonitor climbing(&manager);
+    const auto climbSink = std::make_shared<RecordingAudioSink>();
+    climbing.setAudioSink(climbSink);
+    qint64 now = 0;
+    climbing.setClock([&now]() { return now; });
+    QSignalSpy climbSpy(&climbing, &GeoZoneMonitor::alertEvent);
+    for (int tick = 0; (tick < 100) && !(climbing.activeMonitor() && climbing.activeMonitor()->inside()); tick++) {
+        climbing.evaluate({ above, 100 + (3.0 * tick), 50 }, GeoZoneMonitor::noVehicle, GeoZoneMonitor::Velocity{ 0, 0, 3, true });
+        now += 1000;
+    }
+    QStringList climbSpoken;
+    for (const QString &text : std::as_const(climbSink->spoken)) {
+        climbSpoken.append(text.section(QLatin1Char(','), 0, 0));
+    }
+    QCOMPARE(climbSpoken, (QStringList{ QStringLiteral("Caution: Approaching geozone HIGH (Prohibited)"), QStringLiteral("Warning: Approaching geozone HIGH (Prohibited)"),
+                                        QStringLiteral("Warning: Entered geozone HIGH (Prohibited)") }));
+    const GeoZoneMonitor::AlertEvent climbCaution = climbSpy.first().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY2(climbCaution.timeToEntry >= 5 + (3 / 2.0) + 1, qPrintable(climbCaution.message));
 }
 
 void GeoZoneMonitorTest::_testZoneActivation()
