@@ -803,10 +803,13 @@ void GeoZoneFenceImportTest::_testFenceWarningVehicle()
         GeoZoneFenceWarning *const warning = vehicleMonitor->fenceWarning();
         QVERIFY(warning);
 
-        // The fence action from the parameters: PX4 GF_ACTION 1 only warns, the MockLink ArduCopter has FENCE_ACTION 1
-        // with its fence disabled
+        // The fence action and how to take control from the parameters: PX4 GF_ACTION 1 only warns, the MockLink
+        // ArduCopter has FENCE_ACTION 1 with its fence disabled
         QCOMPARE(warning->config().firmware, px4 ? GeoZoneFenceWarning::Firmware::PX4 : GeoZoneFenceWarning::Firmware::ArduPilot);
         QCOMPARE(warning->actionText(), px4 ? QStringLiteral("Warning only, no manoeuvre") : QStringLiteral("RTL or land"));
+        // The MockLink reports the modes of PX4 for both autopilots
+        QCOMPARE(warning->takeControlMode(), QStringLiteral("Position"));
+        QCOMPARE(warning->canDisableFence(), !px4);
         QVERIFY(!warning->enabled());
 
         // The fence uploaded from geozones, and the altitude and circle fences of ArduPilot's FENCE_TYPE 7
@@ -852,6 +855,32 @@ void GeoZoneFenceImportTest::_testFenceWarningVehicle()
         QCOMPARE(breach.boundary, px4 ? GeoZoneFencePrediction::Boundary::Polygon : GeoZoneFencePrediction::Boundary::MaxDistance);
         QCOMPARE(warningSpy.count(), 1);
         QVERIFY2(warning->text().startsWith(QStringLiteral("Geofence: %1 in ").arg(warning->actionText())), qPrintable(warning->text()));
+
+        // Taking control switches to the mode the pilot flies in, which overrides the fence action. ArduPilot gets
+        // MAV_CMD_DO_SET_MODE, which its MockLink refuses.
+        _mockLink->clearReceivedMavCommandCounts();
+        if (px4) {
+            vehicle->setFlightMode(QStringLiteral("Hold"));
+            QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Hold"));
+        }
+        warning->takeControl();
+        if (px4) {
+            QTRY_COMPARE_WITH_TIMEOUT(vehicle->flightMode(), warning->takeControlMode(), 5000);
+            QTRY_VERIFY(warning->commandText().contains(QStringLiteral("you have control")));
+        } else {
+            QTRY_COMPARE(_mockLink->receivedMavCommandCount(MAV_CMD_DO_SET_MODE), 1);
+            QTRY_COMPARE_WITH_TIMEOUT(warning->commandText(), QStringLiteral("The vehicle didn't switch to Position."), 5000);
+        }
+        // Disabling the fence is ArduPilot's, which the MockLink doesn't support
+        _mockLink->clearReceivedMavCommandCounts();
+        warning->disableFence();
+        if (px4) {
+            QCOMPARE(_mockLink->receivedMavCommandCount(MAV_CMD_DO_FENCE_ENABLE), 0);
+            QVERIFY(warning->commandText().contains(QStringLiteral("can't disable")));
+        } else {
+            QTRY_COMPARE(_mockLink->receivedMavCommandCount(MAV_CMD_DO_FENCE_ENABLE), 1);
+            QTRY_VERIFY2(warning->commandText().contains(QStringLiteral("doesn't support")), qPrintable(warning->commandText()));
+        }
 
         monitor.removeVehicle(vehicle);
         _disconnectMockLink();

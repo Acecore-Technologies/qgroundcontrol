@@ -25,7 +25,7 @@ import QGroundControl.GeoZone
 /// stays open while such a question is unanswered, otherwise it closes after a while. Other alerts are dismissed. The
 /// overflow menu holds, returns or climbs the active vehicle above the ceilings of the zones, each confirmed with the
 /// guided action slider of the Fly View, and on mobile devices mutes the alerts for a while. While the active vehicle is
-/// about to breach or breaches its own fence, GeoZoneFenceAlert tells what the autopilot does.
+/// about to breach or breaches its own fence, GeoZoneFenceAlert tells what the autopilot does and how to override it.
 Popup {
     id:             control
     // Below a guided action being confirmed, which the alerts don't hide
@@ -113,7 +113,8 @@ Popup {
         }
     }
 
-    // Closes by itself unless a question waits for an answer, or the active vehicle breaches its fence
+    // Closes by itself unless a question waits for an answer, or the active vehicle breaches its fence, whose action
+    // the pilot can override from the popup
     Timer {
         id:             closeTimer
         interval:       15000
@@ -220,7 +221,7 @@ Popup {
                 }
             }
 
-            // The fence of the active vehicle
+            // The fence of the active vehicle, and how to override its action
             GeoZoneFenceAlert {
                 id:                 fenceAlert
                 Layout.fillWidth:   true

@@ -990,7 +990,7 @@ void GeoZoneMonitorTest::_testFenceWarning()
         monitor.removeVehicle(&vehicle);
     }
 
-    // The manoeuvres of the fence actions
+    // The manoeuvres of the fence actions, and how the pilot overrides them
     using Warning = GeoZoneFenceWarning;
     QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Copter, 2), QStringLiteral("Hold"));
     QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Copter, 5), QStringLiteral("Land"));
@@ -1000,6 +1000,21 @@ void GeoZoneMonitorTest::_testFenceWarning()
     QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Rover, 2), QStringLiteral("Hold"));
     QVERIFY(Warning::isManoeuvre(Warning::Firmware::ArduPilot, 1) && !Warning::isManoeuvre(Warning::Firmware::ArduPilot, 0));
     QVERIFY(Warning::isManoeuvre(Warning::Firmware::PX4, 2) && !Warning::isManoeuvre(Warning::Firmware::PX4, 1));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("Stabilize"), QStringLiteral("Loiter") }), QStringLiteral("Loiter"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("RTL"), QStringLiteral("POSHOLD"), QStringLiteral("LOITER") }), QStringLiteral("LOITER"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Plane, { QStringLiteral("Manual"), QStringLiteral("FBW A") }), QStringLiteral("FBW A"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Copter, { QStringLiteral("Hold"), QStringLiteral("Position") }), QStringLiteral("Position"));
+    QVERIFY(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Copter, { QStringLiteral("Hold") }).isEmpty());
+    Warning::Config arduPilot;
+    arduPilot.firmware = Warning::Firmware::ArduPilot;
+    arduPilot.action = 1;
+    QVERIFY(Warning::overrideText(arduPilot).contains(QStringLiteral("10 s")));
+    arduPilot.modeChangeBlocked = true;
+    QVERIFY(Warning::overrideText(arduPilot).contains(QStringLiteral("disable the fence")));
+    Warning::Config px4;
+    px4.firmware = Warning::Firmware::PX4;
+    px4.action = 4;
+    QVERIFY(Warning::overrideText(px4).contains(QStringLiteral("can't be overridden")));
 }
 
 void GeoZoneMonitorTest::_testVehicleMonitors()

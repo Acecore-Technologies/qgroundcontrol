@@ -25,12 +25,16 @@
 
 class Vehicle;
 
-/// Warns the pilot before the vehicle's own fence makes it act (EN 4709-003 6.2.2). While the vehicle's fence is enabled, each position the vehicle reports (GLOBAL_POSITION_INT)
+/// Warns the pilot before the vehicle's own fence makes it act (EN 4709-003 6.2.2), and lets the pilot override the
+/// fence action (6.2.1). While the vehicle's fence is enabled, each position the vehicle reports (GLOBAL_POSITION_INT)
 /// is checked with its velocity against the fence the vehicle stores (its GeoFenceManager) and the circle around home
 /// and altitude limits of its parameters, see GeoZoneFencePrediction: when the vehicle would breach it within
 /// warningTime, the warning is active with the manoeuvre the autopilot then takes (PX4 GF_ACTION, ArduPilot
 /// FENCE_ACTION), the time and the distance to the fence along the velocity and where the vehicle reaches it.
 /// GeoZoneMonitor shows, speaks and logs it. One per vehicle, see GeoZoneVehicleMonitor::fenceWarning.
+///
+/// The pilot overrides the fence action by changing the flight mode, which takeControl() does with the mode the pilot
+/// flies in for the vehicle type, or on ArduPilot by disabling the fence (MAV_CMD_DO_FENCE_ENABLE).
 class GeoZoneFenceWarning : public QObject
 {
     Q_OBJECT
@@ -44,6 +48,11 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(QVariantList     path            READ path               NOTIFY warningChanged FINAL)    ///< From the vehicle to the intersection, empty when inactive
     Q_PROPERTY(bool             enabled         READ enabled            NOTIFY configChanged FINAL)     ///< The vehicle's fence is enabled and has boundaries
     Q_PROPERTY(QString          actionText      READ actionText         NOTIFY configChanged FINAL)     ///< Manoeuvre of the vehicle at a breach, like "RTL or land"
+    Q_PROPERTY(QString          overrideText    READ overrideText       NOTIFY configChanged FINAL)     ///< How the pilot overrides it
+    Q_PROPERTY(QString          takeControlMode READ takeControlMode    NOTIFY configChanged FINAL)     ///< Flight mode takeControl() switches to, empty when there is none
+    Q_PROPERTY(bool             canDisableFence READ canDisableFence    NOTIFY configChanged FINAL)     ///< The autopilot accepts disableFence()
+    Q_PROPERTY(QString          commandText     READ commandText        NOTIFY commandTextChanged FINAL)    ///< Result of the last override
+    Q_PROPERTY(bool             fenceDisabled   READ fenceDisabled      NOTIFY commandTextChanged FINAL)    ///< The vehicle accepted disableFence(), until it accepts enableFence()
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -77,6 +86,8 @@ public:
         Firmware firmware = Firmware::Other;
         VehicleClass vehicleClass = VehicleClass::Copter;
         int action = -1;            ///< GF_ACTION or FENCE_ACTION, -1 when unknown
+        bool modeChangeBlocked = false; ///< ArduPilot FENCE_OPTIONS bit 0: no mode change until the breach clears
+        QString takeControlMode;    ///< See takeControlMode
     };
 
     /// @param vehicle Whose fence and positions are followed, null for a config set with setConfig only
@@ -109,13 +120,28 @@ public:
     QVariantList path() const;
     bool enabled() const { return _config.enabled && !_config.fence.isEmpty(); }
     QString actionText() const { return actionText(_config.firmware, _config.vehicleClass, _config.action); }
+    QString overrideText() const { return overrideText(_config); }
+    QString takeControlMode() const { return _config.takeControlMode; }
+    bool canDisableFence() const { return _config.firmware == Firmware::ArduPilot; }
+    QString commandText() const { return _commandText; }
+    bool fenceDisabled() const { return _fenceDisabled; }
     /// Where the vehicle was when the warning was evaluated last
     QGeoCoordinate position() const { return _position; }
+
+    /// Overrides the fence action by switching to takeControlMode
+    Q_INVOKABLE void takeControl();
+    /// Disables the vehicle's fence until enabled again or rebooted (MAV_CMD_DO_FENCE_ENABLE), on ArduPilot
+    Q_INVOKABLE void disableFence();
+    Q_INVOKABLE void enableFence();
 
     /// @return The manoeuvre of the action, like "RTL or land", "Report only (no manoeuvre)"
     static QString actionText(Firmware firmware, VehicleClass vehicleClass, int action);
     /// @return true if the action makes the vehicle act, rather than only report the breach
     static bool isManoeuvre(Firmware firmware, int action);
+    /// @return How the pilot overrides the fence action
+    static QString overrideText(const Config &config);
+    /// @return The first of the flight modes the pilot flies the vehicle class in which the vehicle has
+    static QString takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes);
     /// @return Like "Geofence: RTL or land in 6 s, 42 m ahead"
     static QString warningText(const QString &action, double time, double distance);
 
@@ -125,11 +151,14 @@ signals:
     void warningStarted(const QString &text);
     void warningEnded();
     void configChanged();
+    void commandTextChanged();
 
 private:
     void _connectVehicle();
     void _updateConfig();
     void _setBreach(const std::optional<GeoZoneFencePrediction::Breach> &breach);
+    void _setCommandText(const QString &text);
+    void _sendFenceEnable(bool enable);
 
     QPointer<Vehicle> _vehicle;
     Clock _clock;
@@ -140,4 +169,6 @@ private:
     QGeoCoordinate _position;
     qint64 _evaluatedMSecs = -1;
     GeoZoneVelocityEstimator _estimator;
+    QString _commandText;
+    bool _fenceDisabled = false;
 };

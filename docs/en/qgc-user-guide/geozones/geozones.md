@@ -589,7 +589,7 @@ When an aircraft enters a zone, a low priority alert "Traffic ... entered geozon
 
 ### Vehicle Fence Breaches {#vehicle-fence-breaches}
 
-When a vehicle reports a breach of its own fence (MAVLink `FENCE_STATUS`), _QGroundControl_ shows it in the alert popup, the geozone indicator turns red and its page names the kind of breach (boundary, minimum or maximum altitude) and how many breaches the vehicle counted, until the vehicle reports the breach cleared. Below it, the popup and the indicator page name the fence action the autopilot takes; the popup stays open while the breach lasts. The breach is logged in the [alert log](#alert-log) (`fence_breached`). It isn't spoken by the geozone alerts: _QGroundControl_ already announces "boundary fence breached" and the flight mode the autopilot switches to, and ArduPilot sends its own "fence breached" message.
+When a vehicle reports a breach of its own fence (MAVLink `FENCE_STATUS`), _QGroundControl_ shows it in the alert popup, the geozone indicator turns red and its page names the kind of breach (boundary, minimum or maximum altitude) and how many breaches the vehicle counted, until the vehicle reports the breach cleared. Below it, the popup and the indicator page name the fence action the autopilot takes and how to [override it](#override-fence-action); the popup stays open while the breach lasts. The breach is logged in the [alert log](#alert-log) (`fence_breached`). It isn't spoken by the geozone alerts: _QGroundControl_ already announces "boundary fence breached" and the flight mode the autopilot switches to, and ArduPilot sends its own "fence breached" message.
 
 #### Geofence Warning {#geofence-warning}
 
@@ -602,9 +602,24 @@ When the vehicle would reach the fence within 8 seconds (a reaction time of 5 se
 
 - the **manoeuvre** the autopilot then takes, from `FENCE_ACTION` (ArduPilot Copter: report only, RTL or land, land, SmartRTL or RTL or land, brake or land, SmartRTL or land; Plane and Rover have their own actions) or `GF_ACTION` (PX4: none, warning, hold, return, flight termination, land);
 - the estimated **time** to the fence and the **distance** to it along the direction of travel, counting down;
-- the estimated **intersection point**, as coordinates and altitude above home in the popup, and as a red mark with a red line from the vehicle on the Fly View map.
+- the estimated **intersection point**, as coordinates and altitude above home in the popup, and as a red mark with a red line from the vehicle on the Fly View map;
+- how to [override](#override-fence-action) the manoeuvre.
 
 The warning is spoken once and logged in the [alert log](#alert-log) (`fence_warning`, with the boundary, the distance, the time to the fence and the fence action). It ends when the vehicle no longer heads for the fence within 10 seconds, or breaches it. The prediction assumes a straight path at the current velocity: turns, braking and wind change it.
+
+#### Overriding the Fence Action {#override-fence-action}
+
+The pilot can always take over from the fence action (EN 4709-003 §6.2.1). While the warning or a breach is shown, the alert popup and the geozone indicator page offer:
+
+- **Take Control (_mode_)** switches the flight mode to the one the pilot flies in: _Loiter_ (or _Position Hold_, _Altitude Hold_) for ArduPilot copters, _FBW A_ for planes, _Manual_ for rovers, _Position_ for PX4. Changing the flight mode with the RC mode switch or the flight mode menu does the same. The popup reports whether the vehicle switched.
+- **Disable Fence** (ArduPilot only, after a confirmation) sends `MAV_CMD_DO_FENCE_ENABLE` to disable the fence until **Enable Fence** or a reboot; the `FENCE_ENABLE` parameter isn't changed. An RC switch with the _Fence_ option (`RCx_OPTION` 11) does the same.
+
+How the autopilots treat the override:
+
+- **ArduPilot**: a flight mode change during a breach starts a _manual recovery_: the vehicle ignores the fence for 10 seconds, then acts only on a new breach (leaving the fence and breaching it again) or, for the altitude and circle fences, 20 m (100 m for Plane's circle) beyond where it breached. More than 100 m outside the fence, Copter lands. With `FENCE_OPTIONS` bit 0 (the default of Plane) the vehicle refuses mode changes until the breach clears, so disable the fence to take control.
+- **PX4**: switching the flight mode ends the Hold, Return or Land action of `GF_ACTION`; the vehicle acts again only after it leaves the breach and breaches the fence again. Moving the sticks overrides Return and Land only when `COM_RC_OVERRIDE`/`COM_FAIL_ACT_T` allow it, and never Hold. Flight termination can't be overridden. PX4 doesn't accept `MAV_CMD_DO_FENCE_ENABLE`, so **Disable Fence** isn't offered.
+
+_QGroundControl_ never commands a fence manoeuvre itself: Hold, Return and Climb in the alert popup are the pilot's actions, each confirmed.
 
 ### Conformance Monitoring {#conformance}
 

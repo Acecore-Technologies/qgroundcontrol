@@ -216,7 +216,7 @@ ToolIndicatorPage {
                     visible:            control._active?.fenceBreached === true
                 }
 
-                // The fence action, while the alert popup may be closed
+                // The fence action and how to override it, while the alert popup may be closed
                 GeoZoneFenceAlert {
                     Layout.fillWidth:   true
                     textColor:          qgcPal.text

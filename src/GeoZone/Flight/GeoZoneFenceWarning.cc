@@ -54,6 +54,12 @@ constexpr int kArduPilotCircleBit = 2;
 constexpr int kArduPilotAltMaxBit = 1;
 constexpr int kArduPilotAltMinBit = 8;
 
+/// Context of an override command until its result
+struct CommandContext {
+    QPointer<GeoZoneFenceWarning> warning;
+    bool enable = false;
+};
+
 } // namespace
 
 GeoZoneFenceWarning::GeoZoneFenceWarning(Vehicle *vehicle, const Clock &clock, QObject *parent)
@@ -83,6 +89,7 @@ void GeoZoneFenceWarning::_connectVehicle()
     }
     (void) connect(vehicle, &Vehicle::homePositionChanged, this, update);
     (void) connect(vehicle, &Vehicle::armedChanged, this, update);
+    (void) connect(vehicle, &Vehicle::flightModesChanged, this, update);
     (void) connect(vehicle, &Vehicle::vtolInFwdFlightChanged, this, update);
     if (ParameterManager *const parameters = vehicle->parameterManager()) {
         (void) connect(parameters, &ParameterManager::parametersReadyChanged, this, update);
@@ -172,11 +179,14 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle)
         const double horizontalMargin = _parameter(vehicle, QStringLiteral("FENCE_MARGIN_XY")).toDouble();
         fence.verticalMargin = margin;
         fence.horizontalMargin = (horizontalMargin > 0) ? horizontalMargin : margin;
-        fence.inclusionUnion = (_parameter(vehicle, QStringLiteral("FENCE_OPTIONS")).toInt() & 2) != 0;
+        const int options = _parameter(vehicle, QStringLiteral("FENCE_OPTIONS")).toInt();
+        config.modeChangeBlocked = (options & 1) != 0;
+        fence.inclusionUnion = (options & 2) != 0;
     }
     if (!fence.home.isValid()) {
         fence.maxDistance = qQNaN();
     }
+    config.takeControlMode = takeControlMode(config.firmware, config.vehicleClass, vehicle->flightModes());
     return config;
 }
 
@@ -406,4 +416,155 @@ QString GeoZoneFenceWarning::actionText(Firmware firmware, VehicleClass vehicleC
         }
     }
     return tr("Fence action %1").arg(action);
+}
+
+QString GeoZoneFenceWarning::overrideText(const Config &config)
+{
+    switch (config.firmware) {
+    case Firmware::PX4:
+        switch (config.action) {
+        case 0:
+        case 1:
+            return tr("The vehicle only warns, it takes no manoeuvre.");
+        case 2:
+            return tr("Switch the flight mode, with the RC mode switch or Take Control, to override the hold. Moving the sticks doesn't.");
+        case 4:
+            return tr("Flight termination can't be overridden.");
+        default:
+            return tr("Switch the flight mode, with the RC mode switch or Take Control, to override it. The vehicle acts again only after it leaves the breach and breaches the fence again.");
+        }
+    case Firmware::ArduPilot:
+        if (config.action == 0) {
+            return tr("The vehicle only reports the breach, it takes no manoeuvre.");
+        }
+        if (config.modeChangeBlocked) {
+            return tr("The vehicle refuses flight mode changes until the breach clears (FENCE_OPTIONS): disable the fence, with its RC switch or Disable Fence, to take control.");
+        }
+        return tr("Switch the flight mode, with the RC mode switch or Take Control, to override it: the vehicle then ignores breaches for 10 s and acts again only on a new breach, "
+                  "or 20 m beyond an altitude or circle fence. Disabling the fence, with its RC switch or Disable Fence, stops it altogether.");
+    case Firmware::Other:
+        break;
+    }
+    return tr("Switch the flight mode to override it.");
+}
+
+QString GeoZoneFenceWarning::takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes)
+{
+    // The names of QGroundControl's firmware plugins, then those of autopilots reporting their modes (AVAILABLE_MODES),
+    // like ArduPilot's "LOITER", compared without case
+    QStringList candidates;
+    if (firmware == Firmware::PX4) {
+        switch (vehicleClass) {
+        case VehicleClass::Copter:
+        case VehicleClass::Plane:
+            candidates = { QStringLiteral("Position"), QStringLiteral("Altitude"), QStringLiteral("Stabilized") };
+            break;
+        case VehicleClass::Rover:
+        case VehicleClass::Sub:
+            candidates = { QStringLiteral("Position"), QStringLiteral("Manual") };
+            break;
+        }
+    } else if (firmware == Firmware::ArduPilot) {
+        switch (vehicleClass) {
+        case VehicleClass::Copter:
+            candidates = { QStringLiteral("Loiter"), QStringLiteral("Position Hold"), QStringLiteral("PosHold"), QStringLiteral("QuadPlane Loiter"),
+                           QStringLiteral("QLoiter"), QStringLiteral("QuadPlane Hover"), QStringLiteral("QHover"), QStringLiteral("Altitude Hold"),
+                           QStringLiteral("AltHold") };
+            break;
+        case VehicleClass::Plane:
+            candidates = { QStringLiteral("FBW A"), QStringLiteral("FBWA"), QStringLiteral("Manual") };
+            break;
+        case VehicleClass::Rover:
+            candidates = { QStringLiteral("Manual") };
+            break;
+        case VehicleClass::Sub:
+            candidates = { QStringLiteral("Position Hold"), QStringLiteral("PosHold"), QStringLiteral("Manual") };
+            break;
+        }
+    }
+    // Generic standard modes, like those of simulators
+    candidates.append({ QStringLiteral("Position"), QStringLiteral("Manual") });
+    for (const QString &candidate : std::as_const(candidates)) {
+        for (const QString &mode : flightModes) {
+            if (mode.compare(candidate, Qt::CaseInsensitive) == 0) {
+                return mode;
+            }
+        }
+    }
+    return QString();
+}
+
+void GeoZoneFenceWarning::_setCommandText(const QString &text)
+{
+    if (text != _commandText) {
+        _commandText = text;
+        emit commandTextChanged();
+    }
+}
+
+void GeoZoneFenceWarning::takeControl()
+{
+    Vehicle *const vehicle = _vehicle;
+    const QString mode = _config.takeControlMode;
+    if (!vehicle || mode.isEmpty()) {
+        _setCommandText(tr("No flight mode to take control in."));
+        return;
+    }
+    qCInfo(GeoZoneMonitorLog) << "Pilot takes control from the fence action:" << mode;
+    _setCommandText(tr("Switching to %1\u2026").arg(mode));
+    vehicle->setFlightMode(mode);
+    // The vehicle reports the mode with its next heartbeat, or refuses it, like ArduPilot in fence recovery
+    QPointer<Vehicle> guard = vehicle;
+    QTimer::singleShot(3000, this, [this, guard, mode]() {
+        if (guard && (_commandText == tr("Switching to %1\u2026").arg(mode))) {
+            _setCommandText((guard->flightMode() == mode) ? tr("%1: you have control, the fence action is overridden.").arg(mode)
+                                                          : tr("The vehicle didn't switch to %1.").arg(mode));
+        }
+    });
+    (void) connect(vehicle, &Vehicle::flightModeChanged, this, [this, mode](const QString &flightMode) {
+        if ((flightMode == mode) && (_commandText == tr("Switching to %1\u2026").arg(mode))) {
+            _setCommandText(tr("%1: you have control, the fence action is overridden.").arg(mode));
+        }
+    }, Qt::SingleShotConnection);
+}
+
+void GeoZoneFenceWarning::disableFence()
+{
+    _sendFenceEnable(false);
+}
+
+void GeoZoneFenceWarning::enableFence()
+{
+    _sendFenceEnable(true);
+}
+
+void GeoZoneFenceWarning::_sendFenceEnable(bool enable)
+{
+    Vehicle *const vehicle = _vehicle;
+    if (!vehicle || !canDisableFence()) {
+        _setCommandText(tr("The vehicle can't disable its fence in flight."));
+        return;
+    }
+    qCInfo(GeoZoneMonitorLog) << "Pilot" << (enable ? "enables" : "disables") << "the fence";
+    _setCommandText(enable ? tr("Enabling the fence\u2026") : tr("Disabling the fence\u2026"));
+    static const auto result = [](void *data, int, const mavlink_command_ack_t &ack, Vehicle::MavCmdResultFailureCode_t failureCode) {
+        const std::unique_ptr<CommandContext> context(static_cast<CommandContext*>(data));
+        if (!context->warning) {
+            return;
+        }
+        QString text;
+        if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ack.result == MAV_RESULT_ACCEPTED)) {
+            text = context->enable ? tr("Fence enabled.") : tr("Fence disabled: the vehicle no longer acts on breaches until it is enabled again.");
+            context->warning->_fenceDisabled = !context->enable;
+        } else if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ack.result == MAV_RESULT_UNSUPPORTED)) {
+            text = tr("The vehicle doesn't support enabling or disabling its fence.");
+        } else if (failureCode == Vehicle::MavCmdResultCommandResultOnly) {
+            text = context->enable ? tr("The vehicle refused to enable the fence.") : tr("The vehicle refused to disable the fence.");
+        } else {
+            text = tr("The vehicle didn't answer the fence command.");
+        }
+        context->warning->_setCommandText(text);
+    };
+    const Vehicle::MavCmdAckHandlerInfo_t handlerInfo{ result, new CommandContext{ this, enable }, nullptr, nullptr };
+    vehicle->sendMavCommandWithHandler(&handlerInfo, vehicle->defaultComponentId(), MAV_CMD_DO_FENCE_ENABLE, enable ? 1.0f : 0.0f);
 }
