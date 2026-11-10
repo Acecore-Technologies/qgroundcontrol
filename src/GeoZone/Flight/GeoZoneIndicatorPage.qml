@@ -19,7 +19,8 @@ import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
-/// Drop-down page of GeoZoneIndicator: whether some geozone data may be outdated, the zones in or near which the active
+/// Drop-down page of GeoZoneIndicator: whether the active vehicle is on the ground inside a restricted zone, whether
+/// some geozone data may be outdated, the zones in or near which the active
 /// vehicle is, with a badge marking them stale while the vehicle's position is lost, the ADS-B and Remote ID traffic in or near zones when it is checked,
 /// the recent alerts, the map legend and the geozone options.
 ToolIndicatorPage {
@@ -39,11 +40,42 @@ ToolIndicatorPage {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
     }
 
+    /// @return Color of a GeoZoneIntendedLevel
+    function _levelColor(level) {
+        return level === GeoZoneIntendedLevel.Warning ? qgcPal.colorRed : (level === GeoZoneIntendedLevel.Caution ? qgcPal.colorOrange : qgcPal.colorGrey)
+    }
+
+    function _levelText(level) {
+        return level === GeoZoneIntendedLevel.Warning ? qsTr("WARNING") : (level === GeoZoneIntendedLevel.Caution ? qsTr("CAUTION") : qsTr("ADVISORY"))
+    }
+
     QGCPalette { id: qgcPal }
 
     contentComponent: Component {
         ColumnLayout {
             spacing: ScreenTools.defaultFontPixelHeight / 2
+
+            // The vehicle on the ground inside a restricted zone, like a pre-arm message
+            RowLayout {
+                Layout.preferredWidth:  control._pageWidth
+                spacing:                ScreenTools.defaultFontPixelWidth
+                visible:                control._monitor.monitoring && (control._active?.groundWarning ?? "") !== ""
+
+                GeoZoneBadge {
+                    Layout.alignment:   Qt.AlignTop
+                    text:               control._levelText(control._active?.groundLevel ?? 0)
+                    textColor:          "white"
+                    color:              control._levelColor(control._active?.groundLevel ?? 0)
+                }
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    wrapMode:           Text.WordWrap
+                    textFormat:         Text.PlainText
+                    font.bold:          (control._active?.groundLevel ?? 0) !== GeoZoneIntendedLevel.Advisory
+                    text:               control._active?.groundWarning ?? ""
+                }
+            }
 
             // When the data was last pulled, and whether it expired
             QGCLabel {

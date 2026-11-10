@@ -34,6 +34,7 @@ class Vehicle;
 /// and fence status, the approach and entry states of the zones around it (GeoZoneAlertTracker), where it would enter
 /// a zone at its velocity and the zones above and below it. A vehicle which reconnects gets a new monitor, so it
 /// starts clean even with the same system id. QML shows the monitor of the active vehicle, GeoZoneMonitor.activeVehicle.
+/// A connected vehicle which is disarmed is on the ground, which GeoZoneMonitor warns about inside restricted zones.
 class GeoZoneVehicleMonitor : public QObject
 {
     Q_OBJECT
@@ -64,6 +65,11 @@ class GeoZoneVehicleMonitor : public QObject
     Q_PROPERTY(bool             fenceBreached       READ fenceBreached      NOTIFY fenceStatusChanged FINAL)
     Q_PROPERTY(QString          fenceBreachText     READ fenceBreachText    NOTIFY fenceStatusChanged FINAL)
     Q_PROPERTY(bool             fenceStatusKnown    READ fenceStatusKnown   NOTIFY fenceStatusChanged FINAL)     ///< The vehicle sends FENCE_STATUS
+    Q_PROPERTY(bool             onGround            READ onGround           NOTIFY armedChanged FINAL)           ///< See onGround()
+    /// Why the vehicle on the ground mustn't take off, or needs a permission, like "On the ground inside prohibited
+    /// geozone P — take-off not allowed here", empty when it isn't on the ground inside a restricted zone
+    Q_PROPERTY(QString          groundWarning       READ groundWarning      NOTIFY groundStatusChanged FINAL)
+    Q_PROPERTY(int              groundLevel         READ groundLevel        NOTIFY groundStatusChanged FINAL)    ///< GeoZoneAwareness::Level of groundWarning
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -179,6 +185,21 @@ public:
     /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
     static QString fenceBreachText(int breachType, int breachCount);
 
+    /// Whether the vehicle is armed: that of a connected vehicle, or as set for positions passed to evaluate(). Unknown
+    /// for offline vehicles and positions without.
+    std::optional<bool> armed() const;
+    /// Sets whether the vehicle of the positions passed to evaluate() is armed, ignored for vehicles
+    void setArmed(bool armed);
+    /// The vehicle is known to be disarmed, so on the ground
+    bool onGround() const { return armed() == false; }
+    /// The vehicle is known to be armed, so flying or about to
+    bool inFlight() const { return armed() == true; }
+
+    QString groundWarning() const { return _groundWarning; }
+    int groundLevel() const { return _groundLevel; }
+    /// Set by GeoZoneMonitor after each evaluation
+    void setGroundStatus(const QString &warning, int level);
+
 signals:
     void nearbyChanged();
     void keptZonesChanged();
@@ -189,6 +210,10 @@ signals:
     void fenceStatusChanged();
     /// The vehicle started breaching its fence
     void fenceBreachStarted(const QString &text);
+    void armedChanged();
+    /// The vehicle on the ground acknowledged an arm command, whether or not it armed
+    void armingAttempted();
+    void groundStatusChanged();
 
 private:
     void _positionReceived(qint64 msecs);
@@ -219,4 +244,8 @@ private:
     bool _fenceBreached = false;
     int _fenceBreachType = FENCE_BREACH_NONE;
     int _fenceBreachCount = 0;
+
+    std::optional<bool> _armed;             ///< Of positions passed to evaluate()
+    QString _groundWarning;
+    int _groundLevel = 0;
 };

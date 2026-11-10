@@ -9,6 +9,7 @@
 
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionReader.h"
@@ -166,6 +167,15 @@ QString GeoZoneGuidedCheck::returnWarning(Vehicle *guidedVehicle, MissionControl
         subject[0] = subject[0].toUpper();
     }
     return pathsWarning(paths, subject);
+}
+
+QString GeoZoneGuidedCheck::groundWarning(Vehicle *vehicle) const
+{
+    const GeoZoneVehicleMonitor *const monitor = _monitor ? _monitor->vehicleMonitor(vehicle) : nullptr;
+    if (!monitor || !monitor->onGround() || (monitor->groundLevel() == GeoZoneIntendedLevel::Advisory)) {
+        return QString();
+    }
+    return monitor->groundWarning();
 }
 
 QString GeoZoneGuidedCheck::landWarning(Vehicle *guidedVehicle) const

@@ -56,6 +56,8 @@ class Vehicle;
 /// vehicle approaching or entering a restricted zone asks whether the pilot has the permission to fly there: confirming
 /// it (approveAlert()) acknowledges the alert and ends the alerts and repeats about the zone until the vehicle leaves
 /// the zone and its approach range.
+/// A vehicle on the ground (see GeoZoneVehicleMonitor::onGround) inside a restricted zone is alerted as such, like by a
+/// pre-arm check, and again when it tries to arm there, see AlertEvent::OnGround.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -94,6 +96,7 @@ public:
     static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
     static constexpr const char *permissionQuestion = "Do you have legal permission to fly here?";    ///< As logged, see approveAlert()
     static constexpr int maxTrafficAircraft = 100;          ///< Checked at a time, the closest to the active vehicle
+    static constexpr int armingAlertIntervalMSecs = 10000;  ///< Arming attempts within this are alerted once, see OnGround
     /// Meters around the active vehicle within which the traffic is checked
     static constexpr double trafficRadius() { return 10000; }
 
@@ -106,6 +109,7 @@ public:
             Traffic,                ///< An aircraft of the traffic entered the zone
             NonConformance,         ///< The vehicle left the volumes of its operational intent, see GeoZoneConformance: the zone
                                     ///< identifier is the GeoZoneConformance::stateCode, the name tells how far
+            OnGround,               ///< The vehicle is on the ground inside the zone, or tried to arm there when detail is "arming"
             // What the pilot was shown and answered, only logged
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
@@ -256,6 +260,10 @@ public:
     /// @return true when the alerts of a vehicle approaching or entering a zone of the restriction ask whether the pilot
     ///         has the permission to fly there
     static bool asksPermission(GeoZone::Restriction restriction);
+    /// @return GeoZoneIntendedLevel::Level of an alert about a vehicle on the ground inside a zone of the restriction:
+    ///         a warning for prohibited zones, a caution for the other restricted zones, and an advisory once the pilot
+    ///         confirmed the permission or for U-space airspace
+    static int groundLevel(GeoZone::Restriction restriction, bool permitted);
 
     GeoZoneManager *manager() const { return _manager; }
     /// Monitor of the active vehicle, or of the positions of activeVehicleId() without, null when not monitored
@@ -315,6 +323,10 @@ private:
     void _submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone);
     /// Suspends the breaches of a vehicle whose position is lost and alerts it once, or resumes them
     void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
+    /// A vehicle on the ground tried to arm, or armed: alerts the restricted zones it is in again, once per attempt
+    void _armingAttempted(GeoZoneVehicleMonitor *monitor);
+    /// Sets the ground warning of the vehicle from the restricted zones it is in while on the ground
+    void _updateGroundStatus(GeoZoneVehicleMonitor *monitor);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
     /// Adds an alert to the shown alerts, logging that the pilot was notified
@@ -360,6 +372,7 @@ private:
         bool asksPermission = false;
     };
     QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
+    QHash<int, qint64> _armingAlerts;           ///< When the arming attempts were alerted by vehicle key
     QTimer _evaluateTimer;
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty

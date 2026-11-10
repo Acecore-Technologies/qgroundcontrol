@@ -61,6 +61,10 @@ public:
     /// GeoZoneMissionCheck::warningText and GeoZoneMissionCheck::fenceText
     /// @param missionController The Fly View's, with the mission and the fence on the vehicle
     Q_INVOKABLE QString startWarning(MissionController *missionController) const;
+    /// Arming or taking off where the vehicle is: why it mustn't take off there or needs a permission, see
+    /// GeoZoneVehicleMonitor::groundWarning, empty when it isn't on the ground inside a restricted zone or the pilot
+    /// confirmed the permission
+    Q_INVOKABLE QString groundWarning(Vehicle *vehicle) const;
 
     static constexpr int maxListedZones = 4;
 

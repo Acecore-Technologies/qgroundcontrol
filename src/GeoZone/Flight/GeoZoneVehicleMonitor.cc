@@ -38,6 +38,7 @@ GeoZoneVehicleMonitor::GeoZoneVehicleMonitor(Vehicle *vehicle, int vehicleId, in
         (void) connect(vehicle, &Vehicle::mavlinkMessageReceived, this, [this](const mavlink_message_t &message) {
             handleMessage(message, _clock());
         });
+        (void) connect(vehicle, &Vehicle::armedChanged, this, &GeoZoneVehicleMonitor::armedChanged);
     }
 }
 
@@ -77,6 +78,15 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
     case MAVLINK_MSG_ID_HIGH_LATENCY2:
         _positionReceived(msecs);
         break;
+    case MAVLINK_MSG_ID_COMMAND_ACK: {
+        // The vehicle answers an arm command also when its pre-arm checks refuse it
+        mavlink_command_ack_t ack{};
+        mavlink_msg_command_ack_decode(&message, &ack);
+        if ((ack.command == MAV_CMD_COMPONENT_ARM_DISARM) && onGround()) {
+            emit armingAttempted();
+        }
+        break;
+    }
     case MAVLINK_MSG_ID_FENCE_STATUS: {
         mavlink_fence_status_t fenceStatus{};
         mavlink_msg_fence_status_decode(&message, &fenceStatus);
@@ -99,6 +109,37 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
     default:
         break;
     }
+}
+
+std::optional<bool> GeoZoneVehicleMonitor::armed() const
+{
+    if (_followsVehicle) {
+        const Vehicle *const vehicle = _vehicle;
+        if (!vehicle || vehicle->isOfflineEditingVehicle()) {
+            return std::nullopt;
+        }
+        return vehicle->armed();
+    }
+    return _armed;
+}
+
+void GeoZoneVehicleMonitor::setArmed(bool armed)
+{
+    if (_followsVehicle || (_armed == armed)) {
+        return;
+    }
+    _armed = armed;
+    emit armedChanged();
+}
+
+void GeoZoneVehicleMonitor::setGroundStatus(const QString &warning, int level)
+{
+    if ((warning == _groundWarning) && (level == _groundLevel)) {
+        return;
+    }
+    _groundWarning = warning;
+    _groundLevel = level;
+    emit groundStatusChanged();
 }
 
 QString GeoZoneVehicleMonitor::fenceBreachText() const

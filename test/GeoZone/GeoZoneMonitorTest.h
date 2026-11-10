@@ -33,4 +33,5 @@ private slots:
     void _testPositionLoss();
     void _testAlertActions();
     void _testTraffic();
+    void _testGroundAlerts();
 };

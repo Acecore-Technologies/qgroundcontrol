@@ -14,13 +14,16 @@
 #include "GeoZone.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionReader.h"
+#include "GeoZoneMonitor.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSourceRepository.h"
+#include "GeoZoneVehicleMonitor.h"
 #include "GeoZoneVertical.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
@@ -58,6 +61,7 @@ QVariantMap GeoZonePreflightCheck::Item::toMap() const
 GeoZonePreflightCheck::GeoZonePreflightCheck(QObject *parent)
     : GeoZonePreflightCheck(nullptr, parent)
 {
+    setMonitor(GeoZoneMonitor::instance());
 }
 
 GeoZonePreflightCheck::GeoZonePreflightCheck(GeoZoneManager *manager, QObject *parent)
@@ -127,6 +131,39 @@ void GeoZonePreflightCheck::_connectVehicle()
             (void) connect(fenceManager, &GeoFenceManager::sendComplete, _vehicleConnections, [this]() { _scheduleUpdate(); });
         }
     }
+    _connectMonitor();
+}
+
+void GeoZonePreflightCheck::setMonitor(GeoZoneMonitor *monitor)
+{
+    if (monitor == _monitor) {
+        return;
+    }
+    if (_monitor) {
+        (void) disconnect(_monitor, nullptr, this, nullptr);
+    }
+    _monitor = monitor;
+    if (_monitor) {
+        (void) connect(_monitor, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZonePreflightCheck::_connectMonitor);
+        (void) connect(_monitor, &GeoZoneMonitor::monitoringChanged, this, &GeoZonePreflightCheck::_connectMonitor);
+    }
+    _connectMonitor();
+}
+
+GeoZoneVehicleMonitor *GeoZonePreflightCheck::_vehicleMonitor() const
+{
+    return (_monitor && _vehicle) ? _monitor->vehicleMonitor(_vehicle) : nullptr;
+}
+
+void GeoZonePreflightCheck::_connectMonitor()
+{
+    delete _monitorConnections;
+    _monitorConnections = new QObject(this);
+    if (GeoZoneVehicleMonitor *const monitor = _vehicleMonitor()) {
+        for (const auto signal : { &GeoZoneVehicleMonitor::groundStatusChanged, &GeoZoneVehicleMonitor::armedChanged, &GeoZoneVehicleMonitor::positionUnavailableChanged }) {
+            (void) connect(monitor, signal, _monitorConnections, [this]() { _scheduleUpdate(); });
+        }
+    }
     _scheduleUpdate();
 }
 
@@ -173,7 +210,9 @@ void GeoZonePreflightCheck::update()
         remoteId = remoteIdItem(GeoZoneMissionCheck::zones(entries, GeoZoneMissionCheck::USpace), GeoZoneRemoteId::status(_vehicle));
     }
 
-    if ((data == _data) && (mission == _mission) && (fence == _fence) && (qnh == _qnh) && (remoteId == _remoteId)) {
+    const Item takeoff = takeoffItem(_vehicleMonitor());
+
+    if ((data == _data) && (mission == _mission) && (fence == _fence) && (qnh == _qnh) && (remoteId == _remoteId) && (takeoff == _takeoff)) {
         return;
     }
     _data = data;
@@ -181,6 +220,7 @@ void GeoZonePreflightCheck::update()
     _fence = fence;
     _qnh = qnh;
     _remoteId = remoteId;
+    _takeoff = takeoff;
     emit itemsChanged();
 }
 
@@ -275,6 +315,32 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::remoteIdItem(const QList<cons
         return { Warning, tr("The mission enters U-space airspace %1, which requires Remote ID. %2").arg(names(uSpace), problem) };
     }
     return { Passed, tr("Remote ID is ready for U-space airspace %1.").arg(names(uSpace)) };
+}
+
+GeoZonePreflightCheck::Item GeoZonePreflightCheck::takeoffItem(const GeoZoneVehicleMonitor *monitor)
+{
+    if (!monitor || !monitor->armed().has_value()) {
+        return { NotApplicable, tr("No vehicle connected.") };
+    }
+    if (!monitor->onGround()) {
+        return { NotApplicable, tr("The vehicle is armed.") };
+    }
+    if (monitor->positionUnavailable() || !monitor->position().coordinate.isValid()) {
+        return { Warning, tr("The vehicle sends no current position, so it can't be checked against the geozones.") };
+    }
+    const QString warning = monitor->groundWarning();
+    if (warning.isEmpty()) {
+        return { Passed, tr("The vehicle isn't inside a restricted geozone.") };
+    }
+    switch (monitor->groundLevel()) {
+    case GeoZoneIntendedLevel::Warning:
+        return { Failed, warning + QLatin1Char('.') };
+    case GeoZoneIntendedLevel::Caution:
+        return { Warning, warning + QLatin1Char('.') };
+    default:
+        break;
+    }
+    return { Passed, warning + QLatin1Char('.') };
 }
 
 QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path)

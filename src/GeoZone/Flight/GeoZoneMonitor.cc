@@ -16,6 +16,7 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneInfo.h"
+#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePolicy.h"
@@ -193,6 +194,14 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
         _positionAvailabilityChanged(monitor);
         _updateAlertActions();
     });
+    (void) connect(monitor, &GeoZoneVehicleMonitor::armingAttempted, this, [this, monitor]() { _armingAttempted(monitor); });
+    (void) connect(monitor, &GeoZoneVehicleMonitor::armedChanged, this, [this, monitor]() {
+        // Arming with the remote control or a script is an attempt too
+        if (monitor->inFlight()) {
+            _armingAttempted(monitor);
+        }
+        _updateGroundStatus(monitor);
+    });
     _resolveActive();
     return monitor;
 }
@@ -203,6 +212,7 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
         return;
     }
     (void) _monitors.removeOne(monitor);
+    (void) _armingAlerts.remove(monitor->key());
     const int approvalCount = _arbiter.approvalCount();
     _arbiter.removeVehicle(monitor->key());
     _approvalsChanged(approvalCount);
@@ -505,7 +515,8 @@ void GeoZoneMonitor::_evaluate(GeoZoneVehicleMonitor *monitor, const GeoZone::Po
 void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneAlertTracker::Alert> &alerts)
 {
     for (const GeoZoneAlertTracker::Alert &zoneAlert : alerts) {
-        const AlertEvent::Kind kind = zoneAlert.inside ? AlertEvent::Entry : AlertEvent::Approach;
+        // Like the pre-arm checks of the vehicle, a vehicle on the ground is told it is inside the zone
+        const AlertEvent::Kind kind = zoneAlert.inside ? (monitor->onGround() ? AlertEvent::OnGround : AlertEvent::Entry) : AlertEvent::Approach;
         _submit(monitor, _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId()), zoneAlert.zone);
     }
     // Breaches end when the vehicle leaves the zone, approvals when it leaves its approach range too. Without a
@@ -515,12 +526,13 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
         _arbiter.setZones(monitor->key(), monitor->insideZoneKeys(), monitor->nearbyZoneKeys());
         _approvalsChanged(approvalCount);
     }
+    _updateGroundStatus(monitor);
 }
 
 void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone)
 {
     const int severity = GeoZone::restrictionSeverity(event.restriction);
-    const bool asks = (event.kind == AlertEvent::Approach || event.kind == AlertEvent::Entry) && asksPermission(event.restriction);
+    const bool asks = (event.kind == AlertEvent::Approach || event.kind == AlertEvent::Entry || event.kind == AlertEvent::OnGround) && asksPermission(event.restriction);
     _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event, asks });
     (void) _alertSubjects.remove(event.id - maxActionAlerts);
     emit alertEvent(event);
@@ -539,7 +551,7 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &e
     announced.severity = severity;
     // A lost position is as urgent as an entry
     announced.inside = (event.kind != AlertEvent::Approach);
-    announced.breach = (event.kind == AlertEvent::Entry) && (event.restriction == GeoZone::Prohibited);
+    announced.breach = ((event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround)) && (event.restriction == GeoZone::Prohibited);
     announced.message = event.message;
     if (announced.breach) {
         announced.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())));
@@ -557,6 +569,66 @@ void GeoZoneMonitor::_positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor
     // The vehicle may still be where it was last seen: in or near the most restrictive zone around it
     const GeoZoneAlertTracker::Nearby &nearby = monitor->nearby().constFirst();
     _submit(monitor, _alertEvent(nearby.zone, AlertEvent::PositionLost, nearby.inside, nearby.inside ? 0 : nearby.distance, qQNaN(), monitor->position(), monitor->vehicleId()), nearby.zone);
+}
+
+void GeoZoneMonitor::_armingAttempted(GeoZoneVehicleMonitor *monitor)
+{
+    if (!settings().alertsEnabled || monitor->positionUnavailable()) {
+        return;
+    }
+    // The vehicle acknowledges the command before it reports being armed
+    const qint64 now = _now();
+    const auto last = _armingAlerts.constFind(monitor->key());
+    if ((last != _armingAlerts.cend()) && ((now - *last) < armingAlertIntervalMSecs)) {
+        return;
+    }
+    bool alerted = false;
+    for (const GeoZoneAlertTracker::Nearby &nearby : monitor->nearby()) {
+        if (!nearby.inside || !GeoZonePolicy::isRestricted(nearby.zone->restriction())) {
+            continue;
+        }
+        AlertEvent event = _alertEvent(nearby.zone, AlertEvent::OnGround, true, 0, qQNaN(), monitor->position(), monitor->vehicleId());
+        event.detail = QStringLiteral("arming");
+        event.message = _labelled(monitor->vehicleId(), alertMessage(event, nearby.zone->displayName(), GeoZoneText::restriction(nearby.zone->restriction())));
+        _submit(monitor, event, nearby.zone);
+        alerted = true;
+    }
+    if (alerted) {
+        _armingAlerts.insert(monitor->key(), now);
+        _announce();
+    }
+}
+
+int GeoZoneMonitor::groundLevel(GeoZone::Restriction restriction, bool permitted)
+{
+    if (permitted || !GeoZonePolicy::isRestricted(restriction)) {
+        return GeoZoneIntendedLevel::Advisory;
+    }
+    return (restriction == GeoZone::Prohibited) ? GeoZoneIntendedLevel::Warning : GeoZoneIntendedLevel::Caution;
+}
+
+void GeoZoneMonitor::_updateGroundStatus(GeoZoneVehicleMonitor *monitor)
+{
+    QString warning;
+    int level = GeoZoneIntendedLevel::Advisory;
+    if (monitor->onGround() && !monitor->positionUnavailable() && settings().alertsEnabled) {
+        // The most restrictive zone first
+        for (const GeoZoneAlertTracker::Nearby &nearby : monitor->nearby()) {
+            const GeoZone *const zone = nearby.zone;
+            if (!nearby.inside || !GeoZonePolicy::isRestricted(zone->restriction())) {
+                continue;
+            }
+            const bool permitted = _arbiter.zoneApproved(monitor->key(), zone->key());
+            AlertEvent event;
+            event.kind = AlertEvent::OnGround;
+            event.restriction = zone->restriction();
+            warning = permitted ? tr("On the ground inside geozone %1 (%2), permission confirmed").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())) :
+                                  alertMessage(event, zone->displayName(), GeoZoneText::restriction(zone->restriction()));
+            level = groundLevel(zone->restriction(), permitted);
+            break;
+        }
+    }
+    monitor->setGroundStatus(warning, level);
 }
 
 void GeoZoneMonitor::_announce()
@@ -758,6 +830,9 @@ QStringList GeoZoneMonitor::approvedZoneKeys() const
 void GeoZoneMonitor::_approvalsChanged(int previousCount)
 {
     if (_arbiter.approvalCount() != previousCount) {
+        for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
+            _updateGroundStatus(monitor);
+        }
         emit approvalsChanged();
     }
 }
@@ -855,6 +930,24 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
     switch (event.kind) {
     case AlertEvent::Entry:
         return tr("Entered geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::OnGround: {
+        const bool arming = (event.detail == QStringLiteral("arming"));
+        switch (event.restriction) {
+        case GeoZone::Prohibited:
+            return arming ? tr("Arming inside prohibited geozone %1 — take-off not allowed here").arg(zoneName) :
+                            tr("On the ground inside prohibited geozone %1 — take-off not allowed here").arg(zoneName);
+        case GeoZone::ReqAuthorisation:
+            return arming ? tr("Arming inside geozone %1 (%2) — take-off only with an authorisation").arg(zoneName, restrictionText) :
+                            tr("On the ground inside geozone %1 (%2) — take-off only with an authorisation").arg(zoneName, restrictionText);
+        case GeoZone::Conditional:
+        case GeoZone::Unknown:
+            return arming ? tr("Arming inside geozone %1 (%2) — check its conditions before take-off").arg(zoneName, restrictionText) :
+                            tr("On the ground inside geozone %1 (%2) — check its conditions before take-off").arg(zoneName, restrictionText);
+        default:
+            break;
+        }
+        return arming ? tr("Arming inside geozone %1 (%2)").arg(zoneName, restrictionText) : tr("On the ground inside geozone %1 (%2)").arg(zoneName, restrictionText);
+    }
     case AlertEvent::PositionLost:
         return event.inside ? tr("Position lost inside geozone %1 (%2)").arg(zoneName, restrictionText) :
                               tr("Position lost near geozone %1 (%2)").arg(zoneName, restrictionText);

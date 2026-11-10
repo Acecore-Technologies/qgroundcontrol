@@ -34,8 +34,8 @@ constexpr QLatin1StringView formulaStarts("=+-@\t\r");
 const QStringList &eventNames()
 {
     static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered"),
-                                       QStringLiteral("outside_volume"), QStringLiteral("notified"), QStringLiteral("approved"), QStringLiteral("dismissed"),
-                                       QStringLiteral("muted") };
+                                       QStringLiteral("outside_volume"), QStringLiteral("on_ground"), QStringLiteral("notified"), QStringLiteral("approved"),
+                                       QStringLiteral("dismissed"), QStringLiteral("muted") };
     return names;
 }
 
@@ -375,6 +375,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.position.terrainAMSL = numberValue(fields[5]);
     event.distance = numberValue(fields[7]);
     event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || (event.kind == GeoZoneMonitor::AlertEvent::Traffic) ||
+                   (event.kind == GeoZoneMonitor::AlertEvent::OnGround) ||
                    ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
     event.zoneIdentifier = fields[8];
     event.zoneName = fields[9];

@@ -19,6 +19,7 @@
 #include "GeoZoneFenceUpload.h"
 #include "GeoZoneFlightRecorder.h"
 #include "GeoZoneGuidedCheck.h"
+#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMapLayer.h"
 #include "GeoZoneMapModel.h"
@@ -101,6 +102,7 @@ void registerQmlTypes()
     installEnvironment();
 
     (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, kUri, 1, 0, "GeoZone", "Enums only");
+    (void) qmlRegisterUncreatableMetaObject(GeoZoneIntendedLevel::staticMetaObject, kUri, 1, 0, "GeoZoneIntendedLevel", "Enums only");
     (void) qmlRegisterSingletonType<GeoZoneManager>(kUri, 1, 0, "GeoZoneManager", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneManager::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneMonitor>(kUri, 1, 0, "GeoZoneMonitor", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneMonitor::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneConformance>(kUri, 1, 0, "GeoZoneConformance", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneConformance::instance()); });

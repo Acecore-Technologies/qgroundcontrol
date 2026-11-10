@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneMonitorTest.h"
+#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneNearbyModel.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
@@ -1574,6 +1575,114 @@ void GeoZoneMonitorTest::_testTraffic()
     QVERIFY(monitor.traffic().isEmpty());
     monitor.evaluateTraffic({ inP });
     QVERIFY(monitor.traffic().isEmpty());
+}
+
+void GeoZoneMonitorTest::_testGroundAlerts()
+{
+    ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate authorisationCenter = center.atDistanceAndAzimuth(3000, 90);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), authorisationCenter, 300),
+    }), errorString), qPrintable(errorString));
+
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+
+    // A vehicle on the ground, known to be disarmed, is told it is inside the prohibited zone like by a pre-arm check,
+    // asked for the permission and reminded
+    constexpr int vehicleId = 2;
+    monitor.evaluate({ center.atDistanceAndAzimuth(10000, 0), 400, 400 }, vehicleId);
+    GeoZoneVehicleMonitor *const vehicle = monitor.positionMonitor(vehicleId);
+    QVERIFY(vehicle && !vehicle->onGround() && !vehicle->inFlight());
+    vehicle->setArmed(false);
+    QVERIFY(vehicle->onGround());
+    const GeoZone::Position inside{ center, 400, 400 };
+    monitor.evaluate(inside, vehicleId);
+    const QString onGround = QStringLiteral("On the ground inside prohibited geozone P \u2014 take-off not allowed here");
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(alertSpy.last()[0].toString(), onGround);
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::Prohibited));
+    QCOMPARE(sink->spoken.last(), onGround);
+    const GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::OnGround);
+    QVERIFY(shownAlert(monitor, event.id)->question);
+    QCOMPARE(vehicle->groundWarning(), onGround);
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Warning));
+    QCOMPARE(monitor.arbiter().breachCount(), 1);
+
+    // Logged as such and read back
+    const QString line = GeoZoneAlertHistory::logLine(event);
+    QCOMPARE(line.section(QLatin1Char(','), 6, 6), QStringLiteral("on_ground"));
+    const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(line);
+    QVERIFY(read && read->inside);
+    QCOMPARE(read->message, onGround);
+
+    // Trying to arm alerts again, once for the acknowledged command and the arming which follows
+    mavlink_message_t ack{};
+    (void) mavlink_msg_command_ack_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &ack, MAV_CMD_COMPONENT_ARM_DISARM, MAV_RESULT_DENIED, 0, 0, 0, 0);
+    now += 1000;
+    vehicle->handleMessage(ack, now);
+    const QString arming = QStringLiteral("Arming inside prohibited geozone P \u2014 take-off not allowed here");
+    QCOMPARE(alertSpy.count(), 2);
+    QCOMPARE(alertSpy.last()[0].toString(), arming);
+    QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().detail, QStringLiteral("arming"));
+    QCOMPARE(GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>()))->message, arming);
+    QCOMPARE(monitor.alertModel()->count(), 1);
+    now += 1000;
+    vehicle->handleMessage(ack, now);
+    vehicle->setArmed(true);
+    QCOMPARE(alertSpy.count(), 2);
+    QVERIFY(vehicle->groundWarning().isEmpty());
+    // Disarmed and armed again later, like with the remote control, which sends no command
+    vehicle->setArmed(false);
+    QCOMPARE(vehicle->groundWarning(), onGround);
+    now += GeoZoneMonitor::armingAlertIntervalMSecs;
+    vehicle->setArmed(true);
+    QCOMPARE(alertSpy.count(), 3);
+    QCOMPARE(alertSpy.last()[0].toString(), arming);
+    // An armed vehicle sends no arming attempt
+    now += GeoZoneMonitor::armingAlertIntervalMSecs;
+    vehicle->handleMessage(ack, now);
+    QCOMPARE(alertSpy.count(), 3);
+
+    // The pilot confirming the permission ends the warning and the alerts, until the vehicle leaves the zone
+    vehicle->setArmed(false);
+    monitor.approveAlert(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().id);
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone P (Prohibited), permission confirmed"));
+    QCOMPARE(monitor.arbiter().breachCount(), 0);
+    now += GeoZoneMonitor::armingAlertIntervalMSecs;
+    vehicle->setArmed(true);
+    QCOMPARE(alertSpy.count(), 3);
+
+    // Inside a zone requiring an authorisation, a caution
+    vehicle->setArmed(false);
+    monitor.evaluate({ authorisationCenter, 400, 400 }, vehicleId);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("On the ground inside geozone A (Authorisation required) \u2014 take-off only with an authorisation"));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Caution));
+    QCOMPARE(GeoZoneMonitor::groundLevel(GeoZone::ReqAuthorisation, true), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(GeoZoneMonitor::groundLevel(GeoZone::USpace, false), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+
+    // A flying vehicle enters zones, and a vehicle whose armed state isn't known isn't on the ground
+    vehicle->setArmed(true);
+    monitor.evaluate({ center.atDistanceAndAzimuth(10000, 0), 400, 400 }, vehicleId);
+    monitor.evaluate({ center, 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone P (Prohibited)"));
+    QVERIFY(vehicle->groundWarning().isEmpty());
+    monitor.evaluate({ authorisationCenter, 400, 400 }, vehicleId + 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 3: Entered geozone A (Authorisation required)"));
 }
 
 GEOZONE_TEST(GeoZoneMonitorTest)

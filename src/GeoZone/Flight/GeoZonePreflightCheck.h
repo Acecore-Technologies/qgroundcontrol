@@ -24,6 +24,8 @@
 
 class GeoZone;
 class GeoZoneManager;
+class GeoZoneMonitor;
+class GeoZoneVehicleMonitor;
 class PlanMasterController;
 class Vehicle;
 
@@ -35,6 +37,8 @@ class Vehicle;
 ///   changed since, and it excludes the prohibited zones the mission enters, see GeoZoneFenceUpload::verification
 /// - QNH: set when limits published as flight levels are near the mission altitudes
 /// - Remote ID: ready, with the operator ID set, when the mission enters U-space airspace, see GeoZoneRemoteId
+/// - take-off position: the vehicle on the ground isn't inside a prohibited zone, or a restricted zone the pilot hasn't
+///   confirmed the permission for, see GeoZoneVehicleMonitor::groundWarning
 /// Each item is a map with its state and the text explaining it.
 class GeoZonePreflightCheck : public QObject
 {
@@ -47,8 +51,10 @@ class GeoZonePreflightCheck : public QObject
     Q_PROPERTY(QVariantMap  fenceItem       READ fenceItem      NOTIFY itemsChanged FINAL)
     Q_PROPERTY(QVariantMap  qnhItem         READ qnhItem        NOTIFY itemsChanged FINAL)
     Q_PROPERTY(QVariantMap  remoteIdItem    READ remoteIdItem   NOTIFY itemsChanged FINAL)
+    Q_PROPERTY(QVariantMap  takeoffItem     READ takeoffItem    NOTIFY itemsChanged FINAL)
 
 public:
+    /// Checks the vehicles of GeoZoneMonitor::instance()
     explicit GeoZonePreflightCheck(QObject *parent = nullptr);
     /// @param manager Zones and sources checked, GeoZoneManager::instance() when null
     explicit GeoZonePreflightCheck(GeoZoneManager *manager, QObject *parent = nullptr);
@@ -88,6 +94,11 @@ public:
     QVariantMap fenceItem() const { return _fence.toMap(); }
     QVariantMap qnhItem() const { return _qnh.toMap(); }
     QVariantMap remoteIdItem() const { return _remoteId.toMap(); }
+    const Item &takeoff() const { return _takeoff; }
+    QVariantMap takeoffItem() const { return _takeoff.toMap(); }
+
+    /// Monitor of the vehicle whose take-off position is checked, none by default
+    void setMonitor(GeoZoneMonitor *monitor);
 
     /// Checks again now instead of after the changes settle
     Q_INVOKABLE void update();
@@ -114,6 +125,9 @@ public:
     /// @param uSpace U-space airspaces the mission enters
     static Item remoteIdItem(const QList<const GeoZone*> &uSpace, const GeoZoneRemoteId::Status &status);
 
+    /// @param monitor Of the vehicle, null without
+    static Item takeoffItem(const GeoZoneVehicleMonitor *monitor);
+
     /// @return Zones with a flight level limit within qnhVerticalMargin of the altitudes of the mission path, any when
     ///         they are unknown, and within qnhHorizontalMargin of it
     static QList<const GeoZone*> flightLevelZonesNear(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path);
@@ -125,6 +139,9 @@ signals:
 private:
     void _connectPlan();
     void _connectVehicle();
+    /// Follows the monitor of the vehicle, which may be added after the vehicle
+    void _connectMonitor();
+    GeoZoneVehicleMonitor *_vehicleMonitor() const;
     void _scheduleUpdate();
 
     GeoZoneManager *_manager = nullptr;
@@ -132,6 +149,8 @@ private:
     QPointer<PlanMasterController> _planController;
     QPointer<Vehicle> _vehicle;
     QObject *_vehicleConnections = nullptr;     ///< Receiver of the vehicle's signals, replaced to disconnect them
+    QPointer<GeoZoneMonitor> _monitor;
+    QObject *_monitorConnections = nullptr;     ///< Receiver of the signals of the vehicle's monitor
     QTimer _updateTimer;
 
     Item _data;
@@ -139,4 +158,5 @@ private:
     Item _fence;
     Item _qnh;
     Item _remoteId;
+    Item _takeoff;
 };

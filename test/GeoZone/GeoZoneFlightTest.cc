@@ -17,6 +17,7 @@
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneConformance.h"
 #include "GeoZoneInfo.h"
+#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionReader.h"
@@ -971,6 +972,68 @@ void GeoZoneFlightTest::_testConformance()
     QCOMPARE(logged->message, QStringLiteral("Outside planned volume: outside its time window"));
     QCOMPARE(GeoZoneMonitor::alertMessage(*GeoZoneAlertHistory::parseLogLine(lines[1]), QStringLiteral("50 m beside it"), QString()),
              QStringLiteral("Outside planned volume: 50 m beside it"));
+}
+
+
+void GeoZoneFlightTest::_testGroundInsideZone()
+{
+    const ScopedEnvironment environment;
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    // A prohibited zone from the ground around the MockLink vehicles
+    QString errorString;
+    QVERIFY2(manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("ground.json"), QJsonArray{
+        _circleFeature(QStringLiteral("GROUND"), QStringLiteral("PROHIBITED"), kOrigin, 1000),
+    }), errorString), qPrintable(errorString));
+    GeoZoneSettings::instance()->audioAlerts()->setRawValue(false);
+    const QString onGround = QStringLiteral("On the ground inside prohibited geozone GROUND \u2014 take-off not allowed here");
+    const QString arming = QStringLiteral("Arming inside prohibited geozone GROUND \u2014 take-off not allowed here");
+
+    for (const MAV_AUTOPILOT autopilot : { MAV_AUTOPILOT_PX4, MAV_AUTOPILOT_ARDUPILOTMEGA }) {
+        GeoZoneMonitor monitor;
+        monitor.alertHistory()->startLog(dir.filePath(QStringLiteral("logs")));
+        QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+        _connectMockLink(autopilot);
+        Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+        QVERIFY(vehicle);
+
+        // Once its position is known, the disarmed vehicle is alerted like by a pre-arm check
+        QTRY_VERIFY_WITH_TIMEOUT(spiedAlerts(alertSpy).contains(onGround), 30000);
+        QVERIFY(!vehicle->armed());
+        QVERIFY(monitor.activeMonitor()->onGround());
+        QCOMPARE(monitor.activeMonitor()->groundWarning(), onGround);
+        QCOMPARE(monitor.activeMonitor()->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Warning));
+        QVERIFY(spiedAlerts(alertSpy).filter(QStringLiteral("Entered")).isEmpty());
+
+        // The checklist fails and arming from the Fly View warns
+        PlanMasterController masterController;
+        masterController.setFlyView(false);
+        masterController.start();
+        QTRY_COMPARE(masterController.managerVehicle(), vehicle);
+        GeoZonePreflightCheck check(manager);
+        check.setMonitor(&monitor);
+        check.setPlanController(&masterController);
+        QTRY_COMPARE(check.takeoff().state, GeoZonePreflightCheck::Failed);
+        QCOMPARE(check.takeoff().text, onGround + QLatin1Char('.'));
+        QCOMPARE(monitor.guidedCheck()->groundWarning(vehicle), onGround);
+
+        // Arming is alerted again, once for the acknowledged command and the armed vehicle
+        vehicle->setArmed(true, false /* showError */);
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->armed(), 10000);
+        QTRY_VERIFY(spiedAlerts(alertSpy).contains(arming));
+        QTest::qWait(GeoZoneMonitor::evaluateIntervalMSecs * 2);
+        QCOMPARE(spiedAlerts(alertSpy).filter(QStringLiteral("Arming inside")).count(), 1);
+        QTRY_COMPARE(check.takeoff().state, GeoZonePreflightCheck::NotApplicable);
+        QVERIFY(monitor.guidedCheck()->groundWarning(vehicle).isEmpty());
+
+        // Both are logged
+        monitor.alertHistory()->flushLog();
+        QFile log(monitor.alertHistory()->logFilePath(environment.now().date()));
+        QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(log.readAll()).count(QStringLiteral(",on_ground,")), autopilot == MAV_AUTOPILOT_PX4 ? 2 : 4);
+        _disconnectMockLink();
+    }
 }
 
 GEOZONE_TEST(GeoZoneFlightTest)

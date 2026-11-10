@@ -82,5 +82,10 @@ ColumnLayout {
             name:   qsTr("Remote ID")
             item:   geoZoneGroup.check.remoteIdItem
         }
+
+        GeoZonePreFlightCheckButton {
+            name:   qsTr("Take-off position")
+            item:   geoZoneGroup.check.takeoffItem
+        }
     }
 }

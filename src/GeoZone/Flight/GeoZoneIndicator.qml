@@ -20,7 +20,8 @@ import QGroundControl.Palette
 
 /// Toolbar icon showing whether the active vehicle is in or near restricted geozones, colored by the most restrictive
 /// zone, with badges counting the unacknowledged alerts, marking the nearby zones stale while the vehicle's position
-/// is lost and warning that some geozone data may be outdated. Clicking it opens GeoZoneIndicatorPage.
+/// is lost, warning that the vehicle is on the ground inside a restricted zone and that some geozone data may be
+/// outdated. Clicking it opens GeoZoneIndicatorPage.
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
@@ -34,6 +35,7 @@ Item {
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property bool _stale:          _monitor.monitoring && _active?.positionUnavailable === true
     readonly property bool _outdated:       GeoZoneManager.repository.validityWarning !== ""
+    readonly property int _groundLevel:     _monitor.monitoring && (_active?.groundWarning ?? "") !== "" ? _active.groundLevel : -1
 
     function _restrictionColor(restriction) {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
@@ -76,6 +78,17 @@ Item {
         textColor:      GeoZoneManager.repository.dataInvalid ? "white" : "black"
         color:          GeoZoneManager.repository.dataInvalid ? qgcPal.colorRed : qgcPal.colorYellow
         visible:        control._outdated || GeoZoneManager.repository.dataInvalid
+    }
+
+    // On the ground inside a prohibited zone (red), or a restricted zone without permission (orange), like a pre-arm
+    // message; the page says which
+    IconBadge {
+        anchors.top:    parent.top
+        anchors.left:   geoZoneIcon.left
+        text:           "\u2715"
+        textColor:      "white"
+        color:          control._groundLevel === GeoZoneIntendedLevel.Warning ? qgcPal.colorRed : qgcPal.colorOrange
+        visible:        control._groundLevel === GeoZoneIntendedLevel.Warning || control._groundLevel === GeoZoneIntendedLevel.Caution
     }
 
     // Alerts not acknowledged in the alert history
