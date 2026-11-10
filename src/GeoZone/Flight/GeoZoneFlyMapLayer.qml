@@ -96,7 +96,7 @@ GeoZoneMapVisuals {
                     color:              "white"
                     font.pointSize:     ScreenTools.smallFontPointSize
                     textFormat:         Text.PlainText
-                    text:               control._fenceWarningShown ? qsTr("Geofence: %1 in %2 s").arg(control._fenceWarning.actionText).arg(control._fenceWarning.timeToFence) : ""
+                    text:               control._fenceWarningShown ? qsTr("Geofence in %1 s: %2").arg(control._fenceWarning.timeToFence).arg(control._fenceWarning.actionText) : ""
                 }
             }
         }

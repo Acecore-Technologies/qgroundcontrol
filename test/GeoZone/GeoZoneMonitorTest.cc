@@ -10,6 +10,7 @@
 #include "GeoZoneMonitorTest.h"
 #include "GeoZoneAlertHistory.h"
 #include "GeoZoneFenceWarning.h"
+#include "GeoZoneFences.h"
 #include "GeoZoneIntendedLevel.h"
 #include "GeoZoneNearbyModel.h"
 #include "GeoZonePermits.h"
@@ -1015,6 +1016,107 @@ void GeoZoneMonitorTest::_testFenceWarning()
     px4.firmware = Warning::Firmware::PX4;
     px4.action = 4;
     QVERIFY(Warning::overrideText(px4).contains(QStringLiteral("can't be overridden")));
+}
+
+void GeoZoneMonitorTest::_testFenceAlertSequence()
+{
+    // An ArduCopter flying east at 10 m/s towards a prohibited zone whose exclusion fence it stores, with FENCE_ACTION
+    // RTL or land and a 2 m margin
+    const ScopedMetricUnits metricUnits;
+    const QGeoCoordinate origin(47, 8);
+    const auto local = [&origin](double east) { return origin.atDistanceAndAzimuth(east, 90); };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), local(700), 100) }), errorString), qPrintable(errorString));
+    QCOMPARE(manager.zoneCount(), 1);
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    GeoZoneMonitor::Settings settings;
+    settings.limits.distance = 100;
+    settings.limits.verticalDistance = 30;
+    settings.limits.time = 30;
+    monitor.setSettings(settings);
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+
+    Vehicle vehicle(MAV_AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_QUADROTOR);
+    GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(&vehicle);
+    monitor.setActiveVehicle(&vehicle);
+    GeoZoneFenceWarning::Config config;
+    config.enabled = true;
+    config.firmware = GeoZoneFenceWarning::Firmware::ArduPilot;
+    config.action = 1;
+    config.fence.horizontalMargin = 2;
+    const GeoZone *const zone = manager.catalog().zones().constFirst();
+    for (const QList<QGeoCoordinate> &polygon : GeoZoneFences::zoneFences(zone, 0, true).polygons) {
+        config.fence.polygons.append({ polygon, false });
+    }
+    vehicleMonitor->fenceWarning()->setConfig(config);
+
+    // Each second the zones are evaluated and the vehicle reports its position
+    const auto fly = [&](double east) {
+        now += 1000;
+        const GeoZone::Position position{ local(east), 600, 500 };
+        monitor.evaluate(&vehicle, position, GeoZoneMonitor::Velocity{ 0, 10, 0, true });
+        mavlink_message_t message{};
+        (void) mavlink_msg_global_position_int_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &message, 0, std::lround(position.coordinate.latitude() * 1e7),
+                                                    std::lround(position.coordinate.longitude() * 1e7), 600000, 100000, 0, 1000, 0, UINT16_MAX);
+        emit vehicle.mavlinkMessageReceived(message);
+    };
+    const auto kinds = [&eventSpy]() {
+        QList<GeoZoneMonitor::AlertEvent::Kind> list;
+        for (const QList<QVariant> &arguments : std::as_const(eventSpy)) {
+            list.append(arguments.first().value<GeoZoneMonitor::AlertEvent>().kind);
+        }
+        return list;
+    };
+
+    // The zone is approached first, about 30 s before its entry
+    for (double east = 0; east <= 330; east += 10) {
+        fly(east);
+    }
+    QCOMPARE(kinds(), (QList<GeoZoneMonitor::AlertEvent::Kind>{ GeoZoneMonitor::AlertEvent::Approach }));
+    QCOMPARE(sink->spoken.count(), 1);
+    QVERIFY(sink->spoken.first().startsWith(QStringLiteral("Approaching geozone P")));
+    QVERIFY(!vehicleMonitor->fenceWarning()->active());
+
+    // Then the fence warning, above the zone alert and spoken at once, more urgent than the last announcement
+    for (double east = 340; east <= 530; east += 10) {
+        fly(east);
+    }
+    QVERIFY(vehicleMonitor->fenceWarning()->active());
+    QCOMPARE(kinds(), (QList<GeoZoneMonitor::AlertEvent::Kind>{ GeoZoneMonitor::AlertEvent::Approach, GeoZoneMonitor::AlertEvent::FenceWarning }));
+    QCOMPARE(sink->spoken.count(), 2);
+    QVERIFY2(sink->spoken.last().startsWith(QStringLiteral("Geofence: RTL or land in ")), qPrintable(sink->spoken.last()));
+    QList<GeoZoneAlertModel::Alert> shown = monitor.alertModel()->alerts();
+    QCOMPARE(shown.count(), 2);
+    QVERIFY(shown[0].message.startsWith(QStringLiteral("Geofence: RTL or land in ")));
+    QVERIFY(shown[1].message.startsWith(QStringLiteral("Approaching geozone P")));
+
+    // The vehicle breaches the fence before the zone and reports it: the warning gives way to the breach, which the
+    // vehicle announces itself, and the vehicle turns back without entering the zone
+    fly(598);
+    mavlink_message_t fenceStatus{};
+    (void) mavlink_msg_fence_status_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &fenceStatus, 1, 1, FENCE_BREACH_BOUNDARY, 0, FENCE_MITIGATE_NONE);
+    emit vehicle.mavlinkMessageReceived(fenceStatus);
+    QVERIFY(!vehicleMonitor->fenceWarning()->active());
+    shown = monitor.alertModel()->alerts();
+    QCOMPARE(shown.count(), 2);
+    QCOMPARE(shown[0].message, QStringLiteral("Boundary fence breached"));
+    QVERIFY(shown[1].message.startsWith(QStringLiteral("Approaching geozone P")));
+    QCOMPARE(kinds(), (QList<GeoZoneMonitor::AlertEvent::Kind>{ GeoZoneMonitor::AlertEvent::Approach, GeoZoneMonitor::AlertEvent::FenceWarning,
+                                                                GeoZoneMonitor::AlertEvent::FenceBreach }));
+    QCOMPARE(sink->spoken.count(), 2);
+
+    // An action without manoeuvre, like ArduPilot's report only, is named after the time and distance
+    config.action = 0;
+    vehicleMonitor->fenceWarning()->setConfig(config);
+    QCOMPARE(GeoZoneFenceWarning::warningText(vehicleMonitor->fenceWarning()->actionText(), false, 6, 42), QStringLiteral("Geofence in 6 s, 42 m ahead: report only, no manoeuvre"));
 }
 
 void GeoZoneMonitorTest::_testVehicleMonitors()

@@ -281,16 +281,19 @@ void GeoZoneFenceWarning::_setBreach(const std::optional<GeoZoneFencePrediction:
     }
 }
 
-QString GeoZoneFenceWarning::warningText(const QString &action, double time, double distance)
+QString GeoZoneFenceWarning::warningText(const QString &action, bool manoeuvre, double time, double distance)
 {
     const QString units = FactMetaData::appSettingsHorizontalDistanceUnitsString();
     const QString distanceText = QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsHorizontalDistanceUnits(distance).toDouble())).arg(units);
+    if (!manoeuvre) {
+        return tr("Geofence in %1 s, %2 ahead: %3").arg(std::lround(time)).arg(distanceText, action.toLower());
+    }
     return tr("Geofence: %1 in %2 s, %3 ahead").arg(action).arg(std::lround(time)).arg(distanceText);
 }
 
 QString GeoZoneFenceWarning::text() const
 {
-    return _breach ? warningText(actionText(), _breach->time, _breach->distance) : QString();
+    return _breach ? warningText(actionText(), isManoeuvre(_config.firmware, _config.action), _breach->time, _breach->distance) : QString();
 }
 
 int GeoZoneFenceWarning::timeToFence() const

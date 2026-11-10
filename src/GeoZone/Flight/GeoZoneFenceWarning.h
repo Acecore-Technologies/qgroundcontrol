@@ -142,8 +142,9 @@ public:
     static QString overrideText(const Config &config);
     /// @return The first of the flight modes the pilot flies the vehicle class in which the vehicle has
     static QString takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes);
-    /// @return Like "Geofence: RTL or land in 6 s, 42 m ahead"
-    static QString warningText(const QString &action, double time, double distance);
+    /// @return Like "Geofence: RTL or land in 6 s, 42 m ahead", or "Geofence in 6 s, 42 m ahead: report only, no manoeuvre"
+    ///         for actions which aren't manoeuvres
+    static QString warningText(const QString &action, bool manoeuvre, double time, double distance);
 
 signals:
     void warningChanged();

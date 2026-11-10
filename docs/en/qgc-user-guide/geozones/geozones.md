@@ -591,6 +591,20 @@ When an aircraft enters a zone, a low priority alert "Traffic ... entered geozon
 
 When a vehicle reports a breach of its own fence (MAVLink `FENCE_STATUS`), _QGroundControl_ shows it in the alert popup, the geozone indicator turns red and its page names the kind of breach (boundary, minimum or maximum altitude) and how many breaches the vehicle counted, until the vehicle reports the breach cleared. Below it, the popup and the indicator page name the fence action the autopilot takes and how to [override it](#override-fence-action); the popup stays open while the breach lasts. The breach is logged in the [alert log](#alert-log) (`fence_breached`). It isn't spoken by the geozone alerts: _QGroundControl_ already announces "boundary fence breached" and the flight mode the autopilot switches to, and ArduPilot sends its own "fence breached" message.
 
+#### PX4 and ArduPilot Fences {#px4-and-ardupilot-fences}
+
+| | PX4 | ArduPilot (Copter 4.x) |
+|---|---|---|
+| Fence storage | 64 items, a firmware limit | Storage of the flight controller (estimated, 560 bytes for Copter on 16 KB boards) or the SD card (`BRD_SD_FENCE`), at most 255 vertices per polygon |
+| Fence types | Inclusion and exclusion polygons and circles (inclusions as their union), `GF_MAX_HOR_DIST` from home, `GF_MAX_VER_DIST` above home | `FENCE_TYPE`: inclusion and exclusion polygons and circles (inclusions as their intersection, or union with `FENCE_OPTIONS` bit 1), the `FENCE_RADIUS` circle around home, `FENCE_ALT_MAX`, `FENCE_ALT_MIN` |
+| Enabled | Unless `GF_ACTION` is None | `FENCE_ENABLE`, `FENCE_AUTOENABLE`, an RC switch or `MAV_CMD_DO_FENCE_ENABLE` |
+| Action at a breach | `GF_ACTION`: none, warning, hold, return, flight termination, land | `FENCE_ACTION`: report only, RTL or land, land, SmartRTL or RTL or land, brake or land, SmartRTL or land; land beyond 100 m outside; disarm when landed |
+| Margin | None | `FENCE_MARGIN` / `FENCE_MARGIN_XY`, counted by the geofence warning |
+| Override | Flight mode change (Hold: mode switch only); termination can't be overridden | Flight mode change (10 s manual recovery), unless `FENCE_OPTIONS` bit 0; disabling the fence |
+| In _QGroundControl_ | Fence import capacity 64 points; geofence warning; breach alert; **Take Control** (_Position_) | Fence import capacity estimated or from the SD card; geofence warning with the margin; breach alert; **Take Control** (_Loiter_), **Disable Fence** |
+
+In both cases a flight towards a fenced zone gives, in this order: the geozone approach alert (spoken, asking for the permission for restricted zones), the geofence warning about 8 seconds before the fence (red, above the geozone alerts, spoken), then the breach alert when the vehicle reports it, which replaces the warning. The vehicle stops at the fence, before the zone, so there is no entry alert. The breach is announced by _QGroundControl_ and the vehicle ("boundary fence breached", the new flight mode), not repeated by the geozone alerts.
+
 #### Geofence Warning {#geofence-warning}
 
 Before the vehicle's own fence makes it act, a dedicated **Geofence** warning tells the pilot what will happen (EN 4709-003 §6.2.2). While the vehicle's fence is enabled, each position the vehicle reports is checked with its velocity, horizontally and vertically, against the fence it stores (its inclusion and exclusion polygons and circles, read back after each upload or plan transfer), the circle around home and the altitude limits of its parameters:
