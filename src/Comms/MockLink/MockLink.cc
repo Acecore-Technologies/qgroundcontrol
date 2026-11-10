@@ -81,6 +81,11 @@ MockLink::MockLink(SharedLinkConfigurationPtr &config, QObject *parent)
         _adsbVehicles.append(vehicle);
     }
 
+    // ArduPilot vehicles start in their mode 0: Stabilize for copters and subs, Manual for planes and rovers
+    if (_firmwareType == MAV_AUTOPILOT_ARDUPILOTMEGA) {
+        _mavCustomMode = 0;
+    }
+
     (void) QObject::connect(this, &MockLink::writeBytesQueuedSignal, this, &MockLink::_writeBytesQueued, Qt::QueuedConnection);
 
     _loadParams();
@@ -1104,6 +1109,16 @@ void MockLink::_handleCommandLong(const mavlink_message_t &msg)
         _handleTakeoff(request);
         commandResult = MAV_RESULT_ACCEPTED;
         break;
+    case MAV_CMD_DO_SET_MODE:
+        // How ArduPilot vehicles change modes, see APMFirmwarePlugin::MAV_CMD_DO_SET_MODE_is_supported
+        if (static_cast<uint8_t>(request.param1) & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) {
+            _mavBaseMode |= MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
+            _mavCustomMode = static_cast<uint32_t>(request.param2);
+            commandResult = MAV_RESULT_ACCEPTED;
+        } else {
+            commandResult = MAV_RESULT_FAILED;
+        }
+        break;
     case MAV_CMD_MOCKLINK_ALWAYS_RESULT_ACCEPTED:
         // Test command which always returns MAV_RESULT_ACCEPTED
         commandResult = MAV_RESULT_ACCEPTED;
@@ -1756,6 +1771,10 @@ bool MockLink::_handleRequestMessage(const mavlink_command_long_t &request, bool
     }
     case MAVLINK_MSG_ID_AVAILABLE_MODES:
     {
+        // The modes are PX4's, other autopilots keep the modes of their firmware plugin
+        if (_firmwareType != MAV_AUTOPILOT_PX4) {
+            return false;
+        }
         if (request.param2 == 0) {
             // Request for available modes to be streamed out
             if (_availableModesWorkerNextModeIndex != 0) {
@@ -1956,6 +1975,10 @@ void MockLink::_availableModesWorker()
 
 void MockLink::_sendAvailableModesMonitor()
 {
+    if (_firmwareType != MAV_AUTOPILOT_PX4) {
+        return;
+    }
+
     mavlink_message_t msg{};
 
     (void) mavlink_msg_available_modes_monitor_pack_chan(

@@ -30,4 +30,5 @@ private slots:
     void _testConformance();
     void _testGroundInsideZone();
     void _testPreflightPermits();
+    void _testArduPilotTakeoff();
 };

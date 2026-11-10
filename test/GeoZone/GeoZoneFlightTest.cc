@@ -1087,5 +1087,40 @@ void GeoZoneFlightTest::_testPreflightPermits()
     QTRY_COMPARE(check.permit().state, Check::NotApplicable);
     manager.repository()->clear();
 }
+void GeoZoneFlightTest::_testArduPilotTakeoff()
+{
+    const ScopedEnvironment environment;
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    QString errorString;
+    QVERIFY2(manager->repository()->loadFile(kZonesFile, errorString), qPrintable(errorString));
+    GeoZoneSettings::instance()->audioAlerts()->setRawValue(false);
+    GeoZoneMonitor monitor;
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+
+    // The MockLink ArduCopter starts in Stabilize with the modes of the firmware plugin
+    _connectMockLink(MAV_AUTOPILOT_ARDUPILOTMEGA);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
+    QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Stabilize"));
+    QVERIFY(vehicle->flightModes().contains(QStringLiteral("Loiter")));
+
+    // A guided takeoff switches to Guided with MAV_CMD_DO_SET_MODE, arms and climbs into the CTRs, which are alerted
+    _mockLink->clearReceivedMavCommandCounts();
+    vehicle->guidedModeTakeoff(300);
+    QCOMPARE(_mockLink->receivedMavCommandCount(MAV_CMD_DO_SET_MODE), 1);
+    QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Guided"));
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->armed(), 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(vehicle->altitudeRelative()->rawValue().toInt(), 300, 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(monitor.activeMonitor()->inside(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(spiedAlerts(alertSpy).filter(QStringLiteral("Entered geozone CTR")).count(), 2, 5000);
+
+    // The pilot changes modes like with the flight mode menu
+    vehicle->setFlightMode(QStringLiteral("Loiter"));
+    QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Loiter"));
+    QVERIFY(vehicle->armed());
+    _disconnectMockLink();
+}
 
 GEOZONE_TEST(GeoZoneFlightTest)
