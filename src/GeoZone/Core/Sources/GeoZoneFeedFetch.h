@@ -76,6 +76,7 @@ public:
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, empty when the feed URL is the dataset
         QString errorString;
+        bool unreachable = false;   ///< The fetch failed because a server couldn't be reached, see GeoZoneDownloader::Result
         qint64 maxAgeSecs = -1;     ///< Shortest time the server said the feed or its dataset stays current, negative without
         QString requestUrl;         ///< URL requested, the URL template filled with the area and time of interest
         QString accessToken;        ///< OAuth2 token requested by the fetch, empty when it requested none
@@ -144,6 +145,7 @@ private:
     QString _requestUrl;
     QString _accessToken;
     bool _tokenRequested = false;
+    bool _lastUnreachable = false;  ///< The last download failed because its server couldn't be reached
 
     GeoZoneProviders::Paging _paging;
     int _nextPage = 1;      ///< 1 for the page after the first

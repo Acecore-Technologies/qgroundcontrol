@@ -796,6 +796,107 @@ void GeoZoneRepositoryTest::_testFeedCatalogueOverlays()
     }
 }
 
+void GeoZoneRepositoryTest::_testRefreshAfterOffline()
+{
+    using Network = GeoZoneRefreshScheduler::Network;
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const quint16 port = server.serverPort();
+    server.files.insert("/zones", server.body);
+    const QString url = server.url(QStringLiteral("/zones"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+
+    {
+        GeoZoneManager manager(storageDir.path());
+        GeoZoneSourceRepository *const repository = manager.repository();
+        const auto settle = [repository]() { return QTest::qWaitFor([repository]() { return !repository->busy(); }, 10000); };
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        repository->addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        QVERIFY(settle());
+        GeoZoneSource *const feed = repository->source(url);
+        GeoZoneRefreshScheduler *const scheduler = repository->scheduler();
+        QSignalSpy dueSpy(scheduler, &GeoZoneRefreshScheduler::refreshDue);
+        QCOMPARE(feed->nextCheck(), environment.now().addSecs(24 * 3600));
+        QVERIFY2(feed->nextCheckText().startsWith(QStringLiteral("next check ")), qPrintable(feed->nextCheckText()));
+
+        // The refresh falls due while no server can be reached: it fails, keeping the zones, and is retried later
+        server.close();
+        environment.addSecs(24 * 3600);
+        scheduler->check();
+        QCOMPARE(dueSpy.count(), 1);
+        QVERIFY(settle());
+        QVERIFY(!feed->errorString().isEmpty());
+        QVERIFY(scheduler->unreachable(url));
+        QCOMPARE(manager.zoneCount(), 3);
+        for (int failure = 2; failure <= 4; failure++) {
+            environment.setNow(scheduler->retryAt(url));
+            scheduler->check();
+            QVERIFY(settle());
+            QCOMPARE(dueSpy.count(), failure);
+        }
+        // Retried later and later, but at least every 15 minutes since the servers weren't reached
+        QVERIFY(environment.now().secsTo(scheduler->retryAt(url)) >= GeoZoneRefreshScheduler::maxUnreachableRetrySecs * 0.8);
+        QVERIFY(environment.now().secsTo(scheduler->retryAt(url)) <= GeoZoneRefreshScheduler::maxUnreachableRetrySecs * 1.2);
+
+        // Known to be offline, the refresh waits for the network instead of failing again
+        repository->setNetwork(Network::Offline);
+        QVERIFY(feed->nextCheckText().startsWith(QStringLiteral("next check ")));
+        environment.setNow(scheduler->retryAt(url).addSecs(60));
+        scheduler->check();
+        QCOMPARE(dueSpy.count(), 4);
+        QVERIFY(feed->waitingForNetwork());
+        QCOMPARE(feed->nextCheckText(), QStringLiteral("next check when online"));
+
+        // Back online, it is refreshed at once rather than at its next retry
+        QVERIFY(server.listen(QHostAddress::LocalHost, port));
+        environment.setNow(scheduler->retryAt(url).addSecs(-60));
+        repository->setNetwork(Network::Online);
+        QCOMPARE(dueSpy.count(), 5);
+        QVERIFY(settle());
+        QVERIFY2(feed->errorString().isEmpty(), qPrintable(feed->errorString()));
+        QVERIFY(!scheduler->unreachable(url));
+        QVERIFY(!scheduler->retryAt(url).isValid());
+        QCOMPARE(feed->checkedAt(), environment.now());
+        QVERIFY(!feed->waitingForNetwork());
+
+        // Server errors keep their retries when the network comes back
+        server.files.remove("/zones");
+        server.handler = [](const QByteArray &, QByteArray &status, QByteArray &, QByteArray &) { status = "503 Service Unavailable"; return true; };
+        environment.addSecs(24 * 3600);
+        scheduler->check();
+        QVERIFY(settle());
+        QCOMPARE(dueSpy.count(), 6);
+        QVERIFY(!scheduler->unreachable(url));
+        QVERIFY(scheduler->retryAt(url) > environment.now());
+        repository->setNetwork(Network::Offline);
+        repository->setNetwork(Network::Online);
+        QCOMPARE(dueSpy.count(), 6);
+        server.handler = nullptr;
+        server.files.insert("/zones", server.body);
+    }
+
+    // The next start finds the refresh overdue: offline, it waits for the network, then is refreshed once online
+    environment.addSecs(2 * 24 * 3600);
+    GeoZoneManager manager(storageDir.path());
+    GeoZoneSourceRepository *const repository = manager.repository();
+    const int requests = server.requestCount;
+    repository->setNetwork(Network::Offline);
+    repository->init();
+    QTRY_VERIFY(!repository->busy() && (manager.sources()->count() == 1));
+    GeoZoneSource *const feed = repository->source(url);
+    QTRY_VERIFY(feed->waitingForNetwork());
+    QCOMPARE(server.requestCount, requests);
+    QCOMPARE(feed->nextCheckText(), QStringLiteral("next check when online"));
+    repository->setNetwork(Network::Online);
+    QTRY_COMPARE(server.requestCount, requests + 1);
+    QTRY_VERIFY(!repository->busy());
+    QCOMPARE(feed->checkedAt(), environment.now());
+    QVERIFY(feed->errorString().isEmpty());
+}
+
 void GeoZoneRepositoryTest::_testReloadChanges()
 {
     const QGeoCoordinate center(47, 8);
@@ -1544,7 +1645,7 @@ void GeoZoneRepositoryTest::_testFeedDatasetLink()
                 QByteArray response;
                 if (path == "/page") {
                     response = conditional ? QByteArray("HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\n") :
-                                             ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + QByteArray::number(page.size()) + "\r\n");
+                                             ("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nCache-Control: max-age=60\r\nContent-Length: " + QByteArray::number(page.size()) + "\r\n");
                     response += "Connection: close\r\n\r\n" + (conditional ? QByteArray() : page);
                 } else {
                     const QByteArray etag = "\"" + path.right(16) + "\"";
@@ -1583,6 +1684,8 @@ void GeoZoneRepositoryTest::_testFeedDatasetLink()
         QVERIFY(feed);
         QVERIFY(feed->zoneCount() > 0);
         QVERIFY(feed->datasetUrl().endsWith(QStringLiteral("EG_FULL_20200101_XML.zip")));
+        // The page is current for a minute, which isn't how long the dataset is
+        QCOMPARE(manager.repository()->scheduler()->refreshIntervalSecs(*feed), 24 * 3600);
 
         // The page is read again without validators, the unchanged dataset is confirmed by its own
         const int zoneCount = manager.zoneCount();

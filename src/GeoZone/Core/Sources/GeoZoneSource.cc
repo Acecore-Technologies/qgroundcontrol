@@ -278,6 +278,31 @@ void GeoZoneSource::setStoredDates(const QDateTime &loadedAt, const QDateTime &f
     emit changed();
 }
 
+void GeoZoneSource::setNextCheck(const QDateTime &nextCheck, bool waitingForNetwork)
+{
+    if ((nextCheck == _nextCheck) && (waitingForNetwork == _waitingForNetwork)) {
+        return;
+    }
+    _nextCheck = nextCheck;
+    _waitingForNetwork = waitingForNetwork;
+    emit nextCheckChanged();
+}
+
+QString GeoZoneSource::nextCheckText() const
+{
+    if (!_isDownloaded()) {
+        return QString();
+    }
+    if (_waitingForNetwork) {
+        return tr("next check when online");
+    }
+    // A check due now is about to start, or running
+    if (!_nextCheck.isValid() || (_nextCheck <= GeoZoneEnvironment::currentDateTimeUtc())) {
+        return QString();
+    }
+    return tr("next check %1").arg(_formatDateTime(_nextCheck));
+}
+
 void GeoZoneSource::setCheckedAt(const QDateTime &checkedAt)
 {
     _checkedAt = checkedAt;

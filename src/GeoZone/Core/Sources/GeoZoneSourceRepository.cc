@@ -32,8 +32,13 @@ GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObj
     , _feedCatalogue(new GeoZoneFeedCatalogueLoader(storageDir, _downloader, this))
 {
     _downloader->setDirectory(_store.downloadDir());
-    // The catalogue file and the catalogue URL are checked with the feeds
-    (void) connect(_scheduler, &GeoZoneRefreshScheduler::checked, _feedCatalogue, [this]() { _feedCatalogue->check(); });
+    // The catalogue file and the catalogue URL are checked with the feeds, the next checks shown follow the settings
+    (void) connect(_scheduler, &GeoZoneRefreshScheduler::checked, this, [this]() {
+        _feedCatalogue->check();
+        _updateNextChecks();
+    });
+    (void) connect(_scheduler, &GeoZoneRefreshScheduler::networkChanged, this, &GeoZoneSourceRepository::_updateNextChecks);
+    (void) connect(_scheduler, &GeoZoneRefreshScheduler::networkRestored, _feedCatalogue, &GeoZoneFeedCatalogueLoader::retryUnreachable);
 
     (void) connect(_scheduler, &GeoZoneRefreshScheduler::refreshDue, this, [this](GeoZoneSource *source) {
         _download(source->url(), GeoZoneLoader::Request::Automatic);
@@ -280,6 +285,24 @@ void GeoZoneSourceRepository::_checkAreas()
     }
 }
 
+void GeoZoneSourceRepository::setNetwork(GeoZoneRefreshScheduler::Network network)
+{
+    _scheduler->setNetwork(network);
+}
+
+void GeoZoneSourceRepository::_updateNextCheck(GeoZoneSource *source)
+{
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    source->setNextCheck(_scheduler->nextRefresh(*source), _scheduler->waitingForNetwork(*source, now));
+}
+
+void GeoZoneSourceRepository::_updateNextChecks()
+{
+    for (GeoZoneSource *const source : std::as_const(_sources)) {
+        _updateNextCheck(source);
+    }
+}
+
 void GeoZoneSourceRepository::refreshFeeds()
 {
     _feedCatalogue->check(true);
@@ -389,6 +412,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         existing->setBusy(false);
         existing->setErrorString(QString());
         _scheduler->refreshSucceeded(url, result.maxAgeSecs);
+        _updateNextCheck(existing);
         if (_index.confirm(url, existing->etag(), existing->lastModified(), now, result.maxAgeSecs)) {
             _saveIndex();
         }
@@ -402,7 +426,8 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         existing->setBusy(false);
         existing->setErrorString(error);
         existing->setIntegrityFailed(result.integrity == GeoZoneProvenance::Integrity::Failed);
-        _scheduler->refreshFailed(*existing);
+        _scheduler->refreshFailed(*existing, result.unreachable);
+        _updateNextCheck(existing);
     }
     if (!existing) {
         // The service of a feed which couldn't be added is forgotten with its secret
@@ -498,6 +523,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         if (source) {
             source->setErrorString(loadResult.errorString);
             _scheduler->refreshFailed(*source);
+            _updateNextCheck(source);
         } else {
             _services.forget(job.key);
         }
@@ -543,6 +569,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     }
     source->setErrorString(QString());
     _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
+    _updateNextCheck(source);
     // Companions of the stored copy are reused for the next download
     if (!loadResult.result.companions.isEmpty()) {
         _companions.insert(job.key, loadResult.result.companions);

@@ -33,6 +33,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtNetwork/QNetworkInformation>
 
 #include <algorithm>
 
@@ -144,6 +145,33 @@ void GeoZoneManager::init()
     MultiVehicleManager *const vehicles = MultiVehicleManager::instance();
     (void) connect(vehicles, &MultiVehicleManager::activeVehicleChanged, this, &GeoZoneManager::_activeVehicleChanged);
     _activeVehicleChanged(vehicles->activeVehicle());
+}
+
+void GeoZoneManager::watchNetwork()
+{
+    if (!QNetworkInformation::instance() && !QNetworkInformation::loadBackendByFeatures(QNetworkInformation::Feature::Reachability)) {
+        qCDebug(GeoZoneManagerLog) << "No network information backend, feeds are refreshed whatever the network";
+        return;
+    }
+    QNetworkInformation *const information = QNetworkInformation::instance();
+    if (!information || !information->supports(QNetworkInformation::Feature::Reachability)) {
+        return;
+    }
+    // A local network only is like an unknown one: the refreshes are tried
+    const auto network = [](QNetworkInformation::Reachability reachability) {
+        switch (reachability) {
+        case QNetworkInformation::Reachability::Online:
+            return GeoZoneRefreshScheduler::Network::Online;
+        case QNetworkInformation::Reachability::Disconnected:
+            return GeoZoneRefreshScheduler::Network::Offline;
+        default:
+            return GeoZoneRefreshScheduler::Network::Unknown;
+        }
+    };
+    _repository->setNetwork(network(information->reachability()));
+    (void) connect(information, &QNetworkInformation::reachabilityChanged, _repository, [this, network](QNetworkInformation::Reachability reachability) {
+        _repository->setNetwork(network(reachability));
+    });
 }
 
 void GeoZoneManager::_activeVehicleChanged(Vehicle *vehicle)

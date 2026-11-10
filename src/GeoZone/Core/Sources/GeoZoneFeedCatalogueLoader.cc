@@ -125,6 +125,13 @@ void GeoZoneFeedCatalogueLoader::check(bool force)
     _download();
 }
 
+void GeoZoneFeedCatalogueLoader::retryUnreachable()
+{
+    if (_unreachable) {
+        check(true);
+    }
+}
+
 bool GeoZoneFeedCatalogueLoader::_readFile()
 {
     const QFileInfo info(filePath());
@@ -194,6 +201,7 @@ void GeoZoneFeedCatalogueLoader::_download()
 void GeoZoneFeedCatalogueLoader::_downloaded(const GeoZoneDownloader::Result &result)
 {
     _downloading = false;
+    _unreachable = result.unreachable;
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     if (result.status == GeoZoneDownloader::Result::Status::Failed) {
         if (!result.filePath.isEmpty()) {

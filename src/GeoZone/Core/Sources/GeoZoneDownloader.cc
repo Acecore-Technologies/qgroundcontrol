@@ -283,6 +283,10 @@ void GeoZoneDownloader::_finished(QNetworkReply *reply)
             result.sha256 = download.hash->result();
         }
     }
+    // Network and proxy errors have codes below 200, those of content, protocol and server errors come with a status
+    const bool networkError = (reply->error() != QNetworkReply::NoError) && (static_cast<int>(reply->error()) < 200);
+    result.unreachable = (result.status == Result::Status::Failed) && (statusCode == 0) && networkError && !download.aborted && redirectError.isEmpty() &&
+                         download.writeError.isEmpty() && !download.tooLarge;
     if (result.status != Result::Status::Ok) {
         (void) download.file->remove();
     }

@@ -45,6 +45,9 @@ public:
     /// Reads the catalogue file again when it changed and downloads the catalogue URL when due
     /// @param force Downloads the catalogue URL now, also after a failure
     void check(bool force = false);
+    /// Downloads the catalogue URL now when its last download failed because no server answered, for when the network
+    /// is back
+    void retryUnreachable();
 
     QString warning() const;
     QString statusText() const;
@@ -92,6 +95,7 @@ private:
     QString _urlError;          ///< Why the downloaded catalogue is ignored
     QString _downloadError;     ///< Why the last download failed
     bool _downloading = false;
+    bool _unreachable = false;  ///< The last download failed because no server answered
     int _failures = 0;
     QDateTime _retryAt;
     bool _initialized = false;

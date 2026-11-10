@@ -79,6 +79,9 @@ public:
     /// Loads the stored sources in the background, then downloads outdated feeds, warns about outdated data
     /// and refreshes feeds periodically
     void init();
+    /// Follows whether the network is up with QNetworkInformation, so that feeds missed while offline are refreshed as
+    /// soon as it is back, see GeoZoneSourceRepository::setNetwork. Without a backend telling it, refreshes are tried.
+    void watchNetwork();
 
     /// Downloads a feed from a service taking credentials, an ED-318 query or the area of interest, see
     /// GeoZoneSourceRepository::addService

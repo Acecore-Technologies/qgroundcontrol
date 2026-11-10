@@ -161,14 +161,16 @@ void GeoZoneFeedFetch::_get(const QString &url, const QString &etag, const QStri
             }
             return;
         }
+        fetch->_lastUnreachable = download.unreachable;
         handler(download);
     }, _tag, options);
 }
 
 void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
 {
-    _addMaxAge(GeoZoneRefreshScheduler::maxAgeSecsOf(download.headers));
+    const qint64 maxAgeSecs = GeoZoneRefreshScheduler::maxAgeSecsOf(download.headers);
     if (download.status == GeoZoneDownloader::Result::Status::NotModified) {
+        _addMaxAge(maxAgeSecs);
         _finish(Result::Status::NotModified);
         return;
     }
@@ -192,9 +194,11 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
     const QByteArray page = GeoZoneDownloader::readFile(download.filePath, maxPageBytes);
     const QString linkedUrl = GeoZoneProviders::datasetLink(_requestUrl, page, GeoZoneEnvironment::currentDateTimeUtc().date());
     if (linkedUrl.isEmpty()) {
+        _addMaxAge(maxAgeSecs);
         _documentReceived(download);
         return;
     }
+    // The lifetime of a download page, often a minute for the pages of a web site, isn't that of the dataset it links
 
     qCDebug(GeoZoneSourceLog) << "Downloading dataset" << linkedUrl << "linked from" << _request.url;
     (void) QFile::remove(download.filePath);
@@ -449,5 +453,6 @@ void GeoZoneFeedFetch::_finish(Result::Status status, const QString &errorString
     _stage = Stage::Finished;
     _result.status = status;
     _result.errorString = errorString;
+    _result.unreachable = (status == Result::Status::Failed) && _lastUnreachable;
     emit finished(_result);
 }

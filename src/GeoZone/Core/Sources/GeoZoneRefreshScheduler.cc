@@ -16,6 +16,7 @@
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 
 #include <algorithm>
 #include <cmath>
@@ -41,11 +42,43 @@ void GeoZoneRefreshScheduler::check()
     }
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     for (GeoZoneSource *const source : _sources()) {
-        if (!source->busy() && isDue(*source, now)) {
+        if (!source->busy() && isDue(*source, now) && !waitingForNetwork(*source, now)) {
             emit refreshDue(source);
         }
     }
     emit checked();
+}
+
+bool GeoZoneRefreshScheduler::_needsNetwork(const GeoZoneSource &source)
+{
+    return source.isFeed() && !QUrl(source.url()).isLocalFile();
+}
+
+bool GeoZoneRefreshScheduler::waitingForNetwork(const GeoZoneSource &source, const QDateTime &now) const
+{
+    return (_network == Network::Offline) && _needsNetwork(source) && isDue(source, now);
+}
+
+void GeoZoneRefreshScheduler::setNetwork(Network network)
+{
+    if (network == _network) {
+        return;
+    }
+    _network = network;
+    qCDebug(GeoZoneSourceLog) << "Network" << ((network == Network::Online) ? "online" : ((network == Network::Offline) ? "offline" : "unknown"));
+    if (network != Network::Online) {
+        emit networkChanged();
+        return;
+    }
+    // The refreshes which failed while the network was down don't wait for their retry
+    for (State &state : _states) {
+        if (state.unreachable) {
+            state.retryAt = QDateTime();
+        }
+    }
+    check();
+    emit networkChanged();
+    emit networkRestored();
 }
 
 int GeoZoneRefreshScheduler::refreshIntervalSecs(const GeoZoneSource &source) const
@@ -92,14 +125,16 @@ void GeoZoneRefreshScheduler::refreshSucceeded(const QString &key, qint64 maxAge
     state.failureCount = 0;
     state.retryAt = QDateTime();
     state.maxAgeSecs = maxAgeSecs;
+    state.unreachable = false;
 }
 
-void GeoZoneRefreshScheduler::refreshFailed(const GeoZoneSource &source)
+void GeoZoneRefreshScheduler::refreshFailed(const GeoZoneSource &source, bool unreachable)
 {
     // Failed refreshes are retried later and later, so an unavailable service isn't asked every few minutes
     State &state = _states[source.key()];
+    state.unreachable = unreachable;
     state.failureCount++;
-    const qint64 maxDelay = (std::max)(qint64{ minRetrySecs }, (std::min)(qint64{ maxRetrySecs }, qint64{ refreshIntervalSecs(source) }));
+    const qint64 maxDelay = (std::max)(qint64{ minRetrySecs }, (std::min)(qint64{ unreachable ? maxUnreachableRetrySecs : maxRetrySecs }, qint64{ refreshIntervalSecs(source) }));
     const qint64 delay = (std::min)(maxDelay, qint64{ minRetrySecs } << (std::min)(state.failureCount - 1, 16));
     const double jitter = 0.8 + (0.4 * QRandomGenerator::global()->generateDouble());
     state.retryAt = GeoZoneEnvironment::currentDateTimeUtc().addSecs(std::llround(delay * jitter));

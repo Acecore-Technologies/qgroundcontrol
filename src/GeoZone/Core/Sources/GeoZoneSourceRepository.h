@@ -25,12 +25,12 @@
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneLoader.h"
 #include "GeoZonePackSignature.h"
+#include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneService.h"
 #include "GeoZoneServiceRegistry.h"
 #include "GeoZoneSourceIndex.h"
 #include "GeoZoneStore.h"
 
-class GeoZoneRefreshScheduler;
 class GeoZoneSource;
 
 /// The geozone sources: adds, loads and removes them and reports outdated data. Coordinates the downloads of the
@@ -154,6 +154,9 @@ public:
     GeoZoneRefreshScheduler *scheduler() const { return _scheduler; }
     /// Reads the feed catalogues extending the built-in one, see GeoZoneFeedCatalogue
     GeoZoneFeedCatalogueLoader *feedCatalogue() const { return _feedCatalogue; }
+    /// Tells whether the network is up, from QNetworkInformation: refreshes wait for it while it is down, and those
+    /// which failed for lack of it are retried when it comes back, see GeoZoneRefreshScheduler::setNetwork
+    void setNetwork(GeoZoneRefreshScheduler::Network network);
 
     bool busy() const { return _pendingCount > 0; }
     double progress() const;
@@ -191,6 +194,9 @@ signals:
     void validityWarningChanged();  ///< Also when dataInvalid or the last pull changed
 
 private:
+    /// Shows when the feed is refreshed next, see GeoZoneSource::nextCheckText
+    void _updateNextCheck(GeoZoneSource *source);
+    void _updateNextChecks();
     void _prepareJob(GeoZoneLoader::Job &job) const;
     void _startLoad(GeoZoneLoader::Job job, LoadMode mode);
     void _applyLoad(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult);

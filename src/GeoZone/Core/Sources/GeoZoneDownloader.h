@@ -60,6 +60,9 @@ public:
         QString lastModified;
         QString errorString;
         int statusCode = 0;     ///< HTTP status of the last response, 0 without
+        /// No server answered: no network, an unknown host, a refused, interrupted or timed out connection, or a failed
+        /// secure connection (like a captive portal's). Such failures are retried once the network is back.
+        bool unreachable = false;
         QString finalUrl;       ///< URL which answered after the redirects, without secrets
         QStringList redirects;  ///< URLs which redirected, in order, without secrets
         QByteArray sha256;      ///< SHA-256 of the body received when Ok

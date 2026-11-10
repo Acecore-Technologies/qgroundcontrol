@@ -81,6 +81,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete or partly unreadable, empty when it is complete
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
+    Q_PROPERTY(QString      nextCheckText   READ nextCheckText  NOTIFY nextCheckChanged FINAL)    ///< When the feed is checked next, like "next check 14:05", empty for files
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
     Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
     Q_PROPERTY(QString      changesText     READ changesText    NOTIFY changed FINAL)               ///< Counts of the zones added, changed and removed by the last reload which changed them, empty without
@@ -116,6 +117,13 @@ public:
     /// @return When the data was last confirmed current: when the server answered a refresh with the same data or
     ///         304 Not Modified, otherwise when it was loaded
     QDateTime checkedAt() const { return _checkedAt; }
+    /// @return When the feed is refreshed next, invalid when unknown or for files
+    QDateTime nextCheck() const { return _nextCheck; }
+    bool waitingForNetwork() const { return _waitingForNetwork; }
+    QString nextCheckText() const;
+    /// Sets when the feed is refreshed next, see GeoZoneRefreshScheduler::nextRefresh
+    /// @param waitingForNetwork The refresh is due but waits for the network
+    void setNextCheck(const QDateTime &nextCheck, bool waitingForNetwork);
     QDateTime validFrom() const { return _validFrom; }
     QDateTime validTo() const { return _validTo; }
     QString detailsText() const;
@@ -218,6 +226,7 @@ signals:
     void errorStringChanged();
     void enabledChanged();
     void serviceChanged();
+    void nextCheckChanged();
 
 private:
     void _clearZones();
@@ -240,6 +249,8 @@ private:
     QDateTime _loadedAt;
     QDateTime _fileDate;
     QDateTime _checkedAt;
+    QDateTime _nextCheck;
+    bool _waitingForNetwork = false;
     QDateTime _issued;
     QDateTime _validFrom;
     QDateTime _validTo;

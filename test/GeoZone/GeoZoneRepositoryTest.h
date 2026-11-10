@@ -30,6 +30,7 @@ private slots:
     void _testFeedCancellation();
     void _testRefreshScheduler();
     void _testFeedCatalogueOverlays();
+    void _testRefreshAfterOffline();
     void _testReloadChanges();
     void _testAiracCycles_data();
     void _testAiracCycles();

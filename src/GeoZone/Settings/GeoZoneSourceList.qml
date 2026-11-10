@@ -119,7 +119,8 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.detailsText !== "" ? object.detailsText : (object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
+                text:               object.detailsText !== "" ? object.detailsText + (object.nextCheckText !== "" ? ", " + object.nextCheckText : "")
+                                                              : (object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
                 textFormat:         Text.PlainText
             }
 
