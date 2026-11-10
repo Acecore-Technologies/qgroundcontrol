@@ -35,7 +35,8 @@ class Vehicle;
 /// - data: no geozone source is outdated, and zones are loaded
 /// - mission: it enters no restricted zone, or only those authorised for the planned time, see GeoZoneMissionCheck
 /// - fence: the vehicle's fence is the one an upload from geozones verified, built from geozone data which hasn't
-///   changed since, and it excludes the prohibited zones the mission enters, see GeoZoneFenceUpload::verification
+///   changed since, and it excludes the prohibited zones the mission enters, see GeoZoneFenceUpload::verification. The
+///   zones its import left out are listed as a warning.
 /// - QNH: set when limits published as flight levels are near the mission altitudes
 /// - Remote ID: ready, with the operator ID set, when the mission enters U-space airspace, see GeoZoneRemoteId
 /// - take-off position: the vehicle on the ground isn't inside a prohibited zone, or a restricted zone the pilot hasn't

@@ -388,6 +388,17 @@ QList<const GeoZone*> Selection::selectedZones() const
     return zones;
 }
 
+QList<Choice> Selection::notFenced() const
+{
+    QList<Choice> result;
+    for (const Choice &choice : choices) {
+        if (!choice.fenced()) {
+            result.append(choice);
+        }
+    }
+    return result;
+}
+
 Selection select(const QList<Candidate> &candidates, const Capacity &capacity, const Usage &reserved, const QList<double> &simplifyTolerances)
 {
     return select(prepare(candidates, simplifyTolerances, !capacity.circles), capacity, reserved);

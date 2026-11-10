@@ -12,6 +12,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QDateTime>
 #include <QtCore/QJsonObject>
+#include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QString>
 
@@ -71,8 +72,8 @@ private:
 
 /// The fence tags for QML, as the GeoZoneFenceTags singleton, and in plan files. A plan file keeps the tag of a fence
 /// as the optional "name", "geoZone", "zoneKey", "contentHash" and "validTo" keys of the fence's entry, and the
-/// settings the fences from geozones were selected with as "geoZoneImport" of the GeoFence, which other ground stations
-/// ignore.
+/// settings the fences from geozones were selected with as "geoZoneImport" of the GeoFence, with the zones they left
+/// out ("notFenced"), which other ground stations ignore.
 class GeoZoneFenceTags : public QObject
 {
     Q_OBJECT
@@ -120,4 +121,26 @@ public:
     ///         GeoZoneFenceImporter::rebuild, empty without
     static QJsonObject importSettings(const GeoFenceController *geoFenceController);
     static void setImportSettings(GeoFenceController *geoFenceController, const QJsonObject &settings);
+
+    /// Zone which the last selection of fences from geozones left out, kept with the import settings
+    struct NotFenced {
+        QString name;
+        QString reason;     ///< See GeoZoneFences::statusText
+
+        friend bool operator==(const NotFenced &, const NotFenced &) = default;
+    };
+    static constexpr int maxStoredNotFenced = 100;  ///< Zones kept, the others are counted
+    static constexpr int maxListedNotFenced = 5;    ///< Zones named by notFencedText, the others are counted
+
+    /// Records the zones the last selection left out, count of them in all, with the fences from geozones it added
+    static void setNotFenced(GeoFenceController *geoFenceController, const QList<NotFenced> &zones, int count);
+    /// @return The zones the last selection left out, while the fences from geozones are the ones it added. Nothing once
+    ///         those changed, or without such a selection.
+    /// @param count Set to the number of zones left out, also those not kept
+    static QList<NotFenced> notFenced(GeoFenceController *geoFenceController, int *count = nullptr);
+    /// @return Like "3 geozones are not fenced: A (No room left in the vehicle fence), B (Left out by you) and 1 more.",
+    ///         empty without zones
+    static QString notFencedText(const QList<NotFenced> &zones, int count, int maxListed = maxListedNotFenced);
+    /// @return Identifies the polygons and circles from geozones of the controller, in their order
+    static QString geoZoneFencesFingerprint(GeoFenceController *geoFenceController);
 };

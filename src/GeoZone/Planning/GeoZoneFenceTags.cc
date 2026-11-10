@@ -11,8 +11,11 @@
 #include "GeoFenceController.h"
 #include "GeoZone.h"
 #include "PlanMasterController.h"
+#include "QGCFenceCircle.h"
+#include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QHash>
 #include <QtCore/QSet>
 
@@ -21,6 +24,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -38,6 +42,13 @@ constexpr const char *validToKey = "validTo";
 // Key of the GeoFence's import settings, and the controller property keeping them
 constexpr const char *importKey = "geoZoneImport";
 constexpr const char *importProperty = "_geoZoneFenceImport";
+
+// Keys of the zones the last selection left out, in the import settings
+constexpr const char *notFencedKey = "notFenced";
+constexpr const char *notFencedCountKey = "count";
+constexpr const char *notFencedZonesKey = "zones";
+constexpr const char *notFencedFingerprintKey = "fences";
+constexpr const char *notFencedReasonKey = "reason";
 
 /// Calls the function with each fence of the controller
 template <typename Function>
@@ -195,8 +206,10 @@ void GeoZoneFenceTags::save(GeoFenceController *geoFenceController, QJsonObject 
     saveTo(polygonsKey, geoFenceController->polygons());
     saveTo(circlesKey, geoFenceController->circles());
     const QJsonObject settings = importSettings(geoFenceController);
-    if (tagged && !settings.isEmpty()) {
+    // Also without fences from geozones, when the selection left out all zones
+    if (!settings.isEmpty() && (tagged || settings.contains(notFencedKey))) {
         fenceJson[importKey] = settings;
+        tagged = true;
     }
     if (tagged) {
         planJson[PlanMasterController::kJsonGeoFenceObjectKey] = fenceJson;
@@ -302,4 +315,99 @@ void GeoZoneFenceTags::setImportSettings(GeoFenceController *geoFenceController,
     if (geoFenceController) {
         (void) geoFenceController->setProperty(importProperty, settings);
     }
+}
+
+QString GeoZoneFenceTags::geoZoneFencesFingerprint(GeoFenceController *geoFenceController)
+{
+    if (!geoFenceController) {
+        return QString();
+    }
+    // Rounded like plan files keep them, to the centimeter
+    QCryptographicHash hash(QCryptographicHash::Sha1);
+    const auto add = [&hash](double value) {
+        const qint64 rounded = std::llround(value * 1e7);
+        hash.addData(QByteArrayView(reinterpret_cast<const char*>(&rounded), sizeof(rounded)));
+    };
+    QmlObjectListModel *const polygons = geoFenceController->polygons();
+    for (int i = 0; i < polygons->count(); i++) {
+        const QGCFencePolygon *const polygon = polygons->value<QGCFencePolygon*>(i);
+        if (!GeoZoneFenceTag::isGeoZone(polygon)) {
+            continue;
+        }
+        hash.addData(polygon->inclusion() ? "I" : "P");
+        for (const QGeoCoordinate &vertex : polygon->coordinateList()) {
+            add(vertex.latitude());
+            add(vertex.longitude());
+        }
+    }
+    QmlObjectListModel *const circles = geoFenceController->circles();
+    for (int i = 0; i < circles->count(); i++) {
+        QGCFenceCircle *const circle = circles->value<QGCFenceCircle*>(i);
+        if (!GeoZoneFenceTag::isGeoZone(circle)) {
+            continue;
+        }
+        hash.addData(circle->inclusion() ? "i" : "c");
+        add(circle->center().latitude());
+        add(circle->center().longitude());
+        add(circle->radius()->rawValue().toDouble() / 1e5);
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+void GeoZoneFenceTags::setNotFenced(GeoFenceController *geoFenceController, const QList<NotFenced> &zones, int count)
+{
+    if (!geoFenceController) {
+        return;
+    }
+    QJsonObject settings = importSettings(geoFenceController);
+    QJsonArray entries;
+    for (const NotFenced &zone : zones.first((std::min)(zones.count(), qsizetype{ maxStoredNotFenced }))) {
+        entries.append(QJsonObject{ { nameKey, zone.name }, { notFencedReasonKey, zone.reason } });
+    }
+    settings.insert(notFencedKey, QJsonObject{
+        { notFencedCountKey, (std::max)(count, static_cast<int>(zones.count())) },
+        { notFencedZonesKey, entries },
+        { notFencedFingerprintKey, geoZoneFencesFingerprint(geoFenceController) },
+    });
+    setImportSettings(geoFenceController, settings);
+}
+
+QList<GeoZoneFenceTags::NotFenced> GeoZoneFenceTags::notFenced(GeoFenceController *geoFenceController, int *count)
+{
+    if (count) {
+        *count = 0;
+    }
+    const QJsonObject record = importSettings(geoFenceController).value(notFencedKey).toObject();
+    if (record.isEmpty() || (record.value(notFencedFingerprintKey).toString() != geoZoneFencesFingerprint(geoFenceController))) {
+        return {};
+    }
+    QList<NotFenced> zones;
+    for (const QJsonValue &entry : record.value(notFencedZonesKey).toArray()) {
+        const QJsonObject zone = entry.toObject();
+        zones.append(NotFenced{ zone.value(nameKey).toString(), zone.value(notFencedReasonKey).toString() });
+    }
+    if (count) {
+        *count = (std::max)(record.value(notFencedCountKey).toInt(), static_cast<int>(zones.count()));
+    }
+    return zones;
+}
+
+QString GeoZoneFenceTags::notFencedText(const QList<NotFenced> &zones, int count, int maxListed)
+{
+    count = (std::max)(count, static_cast<int>(zones.count()));
+    if (count == 0) {
+        return QString();
+    }
+    QStringList names;
+    for (const NotFenced &zone : zones.first((std::min)(zones.count(), qsizetype{ maxListed }))) {
+        names.append(zone.reason.isEmpty() ? zone.name : tr("%1 (%2)").arg(zone.name, zone.reason));
+    }
+    if (names.isEmpty()) {
+        return tr("%n geozone(s) are not fenced.", nullptr, count);
+    }
+    if (count > names.count()) {
+        return tr("%n geozone(s) are not fenced: %1 and %2 more.", nullptr, count).arg(names.join(QStringLiteral(", ")))
+            .arg(count - names.count());
+    }
+    return tr("%n geozone(s) are not fenced: %1.", nullptr, count).arg(names.join(QStringLiteral(", ")));
 }

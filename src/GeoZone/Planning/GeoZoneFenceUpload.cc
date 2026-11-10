@@ -302,8 +302,14 @@ void GeoZoneFenceUpload::_readBack()
         for (const GeoZoneSource *const source : GeoZoneManager::instance()->repository()->sourceList()) {
             verification.sources.append(GeoZoneSourceVersion::fromSource(source));
         }
+        verification.notFenced = GeoZoneFenceTags::notFenced(_geoFenceController, &verification.notFencedCount);
         setVerification(_vehicle, verification);
-        (void) _transition(Verified, tr("Verified: the vehicle stores the fence of %1.").arg(_countText(_sentFence)));
+        QString message = tr("Verified: the vehicle stores the fence of %1.").arg(_countText(_sentFence));
+        const QString notFenced = GeoZoneFenceTags::notFencedText(verification.notFenced, verification.notFencedCount);
+        if (!notFenced.isEmpty()) {
+            message += QLatin1Char(' ') + notFenced;
+        }
+        (void) _transition(Verified, message);
     } else {
         (void) _transition(Mismatch, tr("The fence read back differs from the plan. %1").arg(differences));
     }

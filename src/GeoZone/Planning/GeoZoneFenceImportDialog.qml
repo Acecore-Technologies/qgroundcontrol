@@ -205,7 +205,7 @@ QGCPopupDialog {
             wrapMode:               Text.WordWrap
             font.pointSize:         ScreenTools.smallFontPointSize
             visible:                helpButton.checked
-            text:                   qsTr("Replaces the fences added from geozones with exclusion fences for the zones which fit into the vehicle's fence, those the flight enters or passes near first. Altitude limits and polygon holes are not transferred to the fence.")
+            text:                   qsTr("Replaces the fences added from geozones with exclusion fences for the zones which fit into the vehicle's fence, those the flight enters or passes near first. Altitude limits and polygon holes are not transferred to the fence. The number of fence points is a limit of the autopilot: zones which don't fit are not fenced, the vehicle doesn't stop at them. QGroundControl still alerts about them.")
         }
 
         GridLayout {
@@ -358,7 +358,7 @@ QGCPopupDialog {
             delegate:               choiceDelegate
         }
 
-        // Collapsed, the zones which don't fit can be many
+        // The zones the vehicle won't stop at stand out, those covered by the fence of a zone with the same area don't
         RowLayout {
             Layout.preferredWidth:  _contentWidth
             spacing:                _margin
@@ -366,10 +366,21 @@ QGCPopupDialog {
 
             QGCLabel {
                 Layout.fillWidth:   true
-                text:               importer.leftOutCount > leftOutList.count ?
-                                        qsTr("%1 left out, the first %2 listed").arg(importer.leftOutCount).arg(leftOutList.count) :
-                                        qsTr("%1 left out").arg(importer.leftOutCount)
-                elide:              Text.ElideRight
+                text: {
+                    const parts = []
+                    if (importer.notFencedCount > 0) {
+                        parts.push(qsTr("%n geozone(s) NOT fenced", "", importer.notFencedCount))
+                    }
+                    if (importer.leftOutCount > importer.notFencedCount) {
+                        parts.push(qsTr("%n covered by other fences", "", importer.leftOutCount - importer.notFencedCount))
+                    }
+                    if (importer.leftOutCount > leftOutList.count) {
+                        parts.push(qsTr("the first %1 listed").arg(leftOutList.count))
+                    }
+                    return parts.join(", ")
+                }
+                color:              importer.notFencedCount > 0 ? qgcPal.warningText : qgcPal.text
+                wrapMode:           Text.WordWrap
                 font.bold:          true
             }
 
@@ -377,6 +388,7 @@ QGCPopupDialog {
                 id:         leftOutButton
                 text:       checked ? qsTr("Hide") : qsTr("Show")
                 checkable:  true
+                checked:    true
             }
         }
 
@@ -403,7 +415,16 @@ QGCPopupDialog {
                         selectionTimer.stop()
                         control._updateSelection()
                     }
-                    importer.uploadToVehicle()
+                    // The zones the vehicle won't stop at are confirmed
+                    if (importer.notFencedCount > 0) {
+                        mainWindow.showMessageDialog(qsTr("Upload Fence"),
+                                                     qsTr("%1\n\nThe vehicle doesn't stop at zones which are not fenced, QGroundControl only alerts about them. Click 'Ok' to upload the fence anyway.")
+                                                        .arg(importer.notFencedText.replace(/</g, "\u2039").replace(/>/g, "\u203A")),
+                                                     Dialog.Ok | Dialog.Cancel,
+                                                     function() { importer.uploadToVehicle() })
+                    } else {
+                        importer.uploadToVehicle()
+                    }
                 }
             }
 

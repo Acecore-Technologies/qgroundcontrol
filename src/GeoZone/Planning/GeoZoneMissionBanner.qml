@@ -36,7 +36,7 @@ Rectangle {
     color:          qgcPal.window
     border.color:   _dataInvalid ? qgcPal.colorRed : (_attention ? qgcPal.warningText : qgcPal.text)
     z:              QGroundControl.zOrderWidgets
-    visible:        _checkedMission || check.zones.length > 0 || _outdatedText !== "" || _pendingAuthorisations.length > 0 || check.auditText !== ""
+    visible:        _checkedMission || check.zones.length > 0 || _outdatedText !== "" || _pendingAuthorisations.length > 0 || check.auditText !== "" || fenceImporter.fenceNoteCount > 0
 
     required property var   missionController
     required property var   map                 ///< Fitted to the crossed zones when the banner is clicked
@@ -116,6 +116,7 @@ Rectangle {
         addRestricted(GeoZone.Conditional, qsTr("%n conditional", "", _restricted(GeoZone.Conditional).length))
         addRestricted(GeoZone.Unknown, qsTr("%n unknown restriction", "", _restricted(GeoZone.Unknown).length))
         add(count(GeoZoneMissionCheck.Unfenced), qsTr("%n not fenced", "", count(GeoZoneMissionCheck.Unfenced)), "")
+        add(fenceImporter.fenceNoteCount, qsTr("%n left out of the fence", "", fenceImporter.fenceNoteCount), "")
         add(count(GeoZoneMissionCheck.Contingency), qsTr("returns enter %n zone(s)", "", count(GeoZoneMissionCheck.Contingency)), "")
         add(check.auditText !== "" ? 1 : 0, qsTr("data changed"), "")
         add(_outdatedText !== "" && !_dataInvalid ? 1 : 0, qsTr("data may be outdated"), "")
@@ -143,6 +144,10 @@ Rectangle {
         // Outdated data can miss zones, the mission check already gives expired data as a reason
         if (_outdatedText !== "" && !_dataInvalid) {
             reasons.push(_outdatedText)
+        }
+        // The vehicle doesn't stop at the zones the fence import left out
+        if (fenceImporter.fenceNote !== "") {
+            reasons.push(fenceImporter.fenceNote)
         }
         if (reasons.length === 0) {
             uploadFunction()
@@ -325,7 +330,7 @@ Rectangle {
                 id:         detailsButton
                 text:       qsTr("Details") + (checked ? " \u25B4" : " \u25BE")
                 checkable:  true
-                visible:    check.zones.length > 0 || control._outdatedText !== "" || control._pendingAuthorisations.length > 0 || check.auditText !== ""
+                visible:    check.zones.length > 0 || control._outdatedText !== "" || control._pendingAuthorisations.length > 0 || check.auditText !== "" || fenceImporter.fenceNoteCount > 0
             }
         }
 
@@ -387,6 +392,14 @@ Rectangle {
                     title:      qsTr("Not excluded by the GeoFence")
                     warning:    true
                     text:       control._names(control._entries(GeoZoneMissionCheck.Unfenced))
+                }
+
+                // The zones the fence import left out, until the fences from geozones change
+                Category {
+                    width:      parent.width
+                    title:      qsTr("Left out of the fence")
+                    warning:    true
+                    text:       fenceImporter.fenceNoteZones.join("; ")
                 }
 
                 // One line per zone the returns from along the mission enter, with the returns and the items they start from

@@ -19,6 +19,7 @@
 
 #include <optional>
 
+#include "GeoZoneFenceTags.h"
 #include "GeoZoneSourceVersion.h"
 
 class GeoFenceController;
@@ -115,6 +116,8 @@ public:
         QDateTime time;                         ///< UTC
         int geoZoneFences = 0;                  ///< Polygons and circles added from geozones, see GeoZoneFenceTag
         QList<GeoZoneSourceVersion> sources;    ///< Of the geozone data when it was verified
+        QList<GeoZoneFenceTags::NotFenced> notFenced;   ///< Zones the import of the fences left out, see GeoZoneFenceTags::notFenced
+        int notFencedCount = 0;                         ///< Also those not kept
     };
     /// @return The last fence verified on the vehicle, nothing without
     static std::optional<Verification> verification(const Vehicle *vehicle);

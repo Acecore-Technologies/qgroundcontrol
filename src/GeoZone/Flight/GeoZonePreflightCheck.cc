@@ -300,9 +300,17 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::fenceItem(const FenceInput &i
     const bool vehicleFence = !input.vehicleFence.polygons.isEmpty() || !input.vehicleFence.circles.isEmpty();
     if (input.verification) {
         const GeoZoneFenceUpload::Verification &verification = *input.verification;
-        if (!GeoZoneFenceUpload::compareFences(verification.fence, input.vehicleFence).isEmpty()) {
+        const bool changedSince = !GeoZoneFenceUpload::compareFences(verification.fence, input.vehicleFence).isEmpty();
+        if (changedSince) {
             problems.append(tr("The vehicle's fence changed since it was verified at %1.").arg(timeText(verification.time)));
-        } else if (verification.geoZoneFences > 0) {
+        } else {
+            // The zones the import of the fence left out, which the vehicle doesn't stop at
+            const QString notFenced = GeoZoneFenceTags::notFencedText(verification.notFenced, verification.notFencedCount);
+            if (!notFenced.isEmpty()) {
+                problems.append(notFenced);
+            }
+        }
+        if (!changedSince && (verification.geoZoneFences > 0)) {
             QStringList changed;
             for (const GeoZoneSourceVersion &used : verification.sources) {
                 const auto current = std::find_if(input.sources.cbegin(), input.sources.cend(), [&used](const GeoZoneSourceVersion &source) { return source.key == used.key; });

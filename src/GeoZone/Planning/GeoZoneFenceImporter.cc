@@ -40,6 +40,9 @@ GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
     , _choices(new GeoZoneFenceChoiceModel(this))
     , _upload(new GeoZoneFenceUpload(this))
 {
+    _fenceNoteTimer.setSingleShot(true);
+    _fenceNoteTimer.setInterval(0);
+    (void) connect(&_fenceNoteTimer, &QTimer::timeout, this, &GeoZoneFenceImporter::_updateFenceNote);
     (void) connect(GeoZoneManager::instance(), &GeoZoneManager::zonesChanged, this, [this]() {
         // The zones of the last selection may be gone
         _worker->invalidate();
@@ -48,6 +51,7 @@ GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
         _prepared = Prepared();
         _selection = GeoZoneFences::Selection();
         _selectedCount = 0;
+        _notFenced.clear();
         _choices->setRows({});
         emit selectionChanged();
         _updateStale();
@@ -71,10 +75,18 @@ void GeoZoneFenceImporter::setGeoFenceController(GeoFenceController *geoFenceCon
         if (_geoFenceController) {
             // Plans set the tags of their fences after loading them
             for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
-                (void) connect(fences, &QmlObjectListModel::countChanged, _fenceConnections, [this]() { _updateStale(); }, Qt::QueuedConnection);
+                (void) connect(fences, &QmlObjectListModel::countChanged, _fenceConnections, [this]() {
+                    _updateStale();
+                    _connectFenceEdits();
+                    _updateFenceNote();
+                }, Qt::QueuedConnection);
             }
+            // Like loading a plan, which sets the import settings after the fences
+            (void) connect(_geoFenceController, &GeoFenceController::dirtyChanged, _fenceConnections, [this]() { _fenceNoteTimer.start(); });
         }
         _updateStale();
+        _connectFenceEdits();
+        _updateFenceNote();
         // The proximity of the zones depends on the plan's mission
         if (_query || !_zones.isEmpty()) {
             _prepareSelection(!_query);
@@ -329,6 +341,11 @@ void GeoZoneFenceImporter::_select()
     _capacity = vehicleCapacity(_vehicle());
     _selection = GeoZoneFences::select(_prepared.fences, _capacity, keptUsage(_geoFenceController));
 
+    _notFenced.clear();
+    for (const GeoZoneFences::Choice &choice : _selection.notFenced()) {
+        _notFenced.append(GeoZoneFenceTags::NotFenced{ choice.candidate.zone->displayName(), GeoZoneFences::statusText(choice) });
+    }
+
     QList<GeoZoneFenceChoiceModel::Row> rows;
     _selectedCount = 0;
     int leftOutListed = 0;
@@ -401,7 +418,10 @@ int GeoZoneFenceImporter::applySelection()
         settings.insert(QStringLiteral("included"), included);
     }
     GeoZoneFenceTags::setImportSettings(_geoFenceController, settings);
+    // Kept with the fences added, so the plan tells which zones aren't fenced until they change
+    GeoZoneFenceTags::setNotFenced(_geoFenceController, _notFenced, static_cast<int>(_notFenced.count()));
     _updateStale();
+    _updateFenceNote();
     return added;
 }
 
@@ -412,7 +432,7 @@ int GeoZoneFenceImporter::rebuild()
     }
     const QJsonObject settings = GeoZoneFenceTags::importSettings(_geoFenceController);
     _included.clear();
-    if (settings.isEmpty()) {
+    if (!settings.contains(QStringLiteral("restrictions"))) {
         // Plans saved before the settings were kept: the zones of their fences still loaded
         QSet<QString> keys;
         for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
@@ -458,6 +478,57 @@ void GeoZoneFenceImporter::_updateStale()
     }
 }
 
+void GeoZoneFenceImporter::_connectFenceEdits()
+{
+    delete _fenceEditConnections;
+    _fenceEditConnections = new QObject(this);
+    if (!_geoFenceController) {
+        return;
+    }
+    // Fences from geozones are few, the vehicle stores them
+    const auto edited = [this]() { _fenceNoteTimer.start(); };
+    QmlObjectListModel *const polygons = _geoFenceController->polygons();
+    for (int i = 0; i < polygons->count(); i++) {
+        QGCFencePolygon *const polygon = polygons->value<QGCFencePolygon*>(i);
+        if (GeoZoneFenceTag::isGeoZone(polygon)) {
+            (void) connect(polygon, &QGCMapPolygon::pathChanged, _fenceEditConnections, edited);
+        }
+    }
+    QmlObjectListModel *const circles = _geoFenceController->circles();
+    for (int i = 0; i < circles->count(); i++) {
+        QGCFenceCircle *const circle = circles->value<QGCFenceCircle*>(i);
+        if (GeoZoneFenceTag::isGeoZone(circle)) {
+            (void) connect(circle, &QGCMapCircle::centerChanged, _fenceEditConnections, edited);
+            (void) connect(circle->radius(), &Fact::rawValueChanged, _fenceEditConnections, edited);
+        }
+    }
+}
+
+void GeoZoneFenceImporter::_updateFenceNote()
+{
+    int count = 0;
+    const QList<GeoZoneFenceTags::NotFenced> zones = GeoZoneFenceTags::notFenced(_geoFenceController, &count);
+    QStringList zoneTexts;
+    for (const GeoZoneFenceTags::NotFenced &zone : zones) {
+        zoneTexts.append(zone.reason.isEmpty() ? zone.name : tr("%1: %2").arg(zone.name, zone.reason));
+    }
+    if (count > zoneTexts.count()) {
+        zoneTexts.append(tr("%n more", nullptr, count - static_cast<int>(zoneTexts.count())));
+    }
+    const QString note = GeoZoneFenceTags::notFencedText(zones, count);
+    if ((note != _fenceNote) || (count != _fenceNoteCount) || (zoneTexts != _fenceNoteZones)) {
+        _fenceNote = note;
+        _fenceNoteCount = count;
+        _fenceNoteZones = zoneTexts;
+        emit fenceNoteChanged();
+    }
+}
+
+QString GeoZoneFenceImporter::notFencedText() const
+{
+    return GeoZoneFenceTags::notFencedText(_notFenced, static_cast<int>(_notFenced.count()));
+}
+
 QString GeoZoneFenceImporter::_capacityNote() const
 {
     const Vehicle *const vehicle = _vehicle();
@@ -468,13 +539,13 @@ QString GeoZoneFenceImporter::_capacityNote() const
         return tr("No vehicle connected: limits PX4 and ArduPilot copters both meet, with circles as polygons.");
     }
     if (vehicle->px4Firmware()) {
-        return tr("PX4 stores %1 fence points.").arg(GeoZoneFences::Capacity::px4MaxItems);
+        return tr("PX4 stores at most %1 fence points, a firmware limit: it rejects larger fences.").arg(GeoZoneFences::Capacity::px4MaxItems);
     }
     if (vehicle->apmFirmware()) {
         if (!_capacity.estimated) {
-            return tr("ArduPilot fence stored on the SD card (BRD_SD_FENCE).");
+            return tr("ArduPilot fence stored on the SD card (BRD_SD_FENCE), a firmware limit: it rejects larger fences.");
         }
-        return tr("Estimated for ArduPilot flight controllers with 16 KB storage, others store fewer points. A rejected upload is reported.");
+        return tr("Estimated for ArduPilot flight controllers with 16 KB storage, others store fewer points. ArduPilot rejects a fence which doesn't fit, the upload then reports it.");
     }
     return tr("Estimated, the autopilot doesn't report its fence storage. Circles are added as polygons.");
 }

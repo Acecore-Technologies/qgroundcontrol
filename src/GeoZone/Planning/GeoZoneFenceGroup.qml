@@ -17,8 +17,8 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
 /// Geozone part of GeoFenceEditor.qml, beside its lists of polygon and circular fences: the button adding fences from
-/// geozones, the fence points the vehicle stores and the fences added from geozones, named after their zones (see
-/// GeoZoneFenceTags), which can be selected for editing and deleted together
+/// geozones, the fence points the vehicle stores, the zones the import left out and the fences added from geozones,
+/// named after their zones (see GeoZoneFenceTags), which can be selected for editing and deleted together
 Column {
     id:         control
     spacing:    _margin
@@ -99,6 +99,24 @@ Column {
         text:       qsTr("Rebuild Geozone Fences")
         visible:    staleImporter.staleText !== ""
         onClicked:  staleImporter.rebuild()
+    }
+
+    // The zones the last import from geozones left out, until its fences change
+    QGCLabel {
+        width:      parent.width
+        wrapMode:   Text.WordWrap
+        color:      qgcPal.warningText
+        text:       staleImporter.fenceNote
+        textFormat: Text.PlainText
+        visible:    text !== ""
+    }
+
+    QGCButton {
+        text:       qsTr("Not Fenced...")
+        visible:    staleImporter.fenceNoteCount > 0
+        onClicked:  mainWindow.showMessageDialog(qsTr("Geozones Not Fenced"),
+                                                 qsTr("The vehicle doesn't stop at these geozones, QGroundControl only alerts about them:\n\n%1")
+                                                    .arg(staleImporter.fenceNoteZones.map(zone => "\u2022 " + zone.replace(/</g, "\u2039").replace(/>/g, "\u203A")).join("\n")))
     }
 
     SectionHeader {

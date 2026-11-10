@@ -441,13 +441,15 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 1. Select how far fences may be simplified to fit (**Simplify up to**). Fences are only simplified as far as needed, the most important zones the least. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
 1. Check the zones selected and, with **Show**, those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
 
-**Help** shows the explanations of the dialog. The selected zones are listed first; the zones left out are collapsed to a line like _193 left out_ and listed in gray, except prohibited zones the planned flight enters, which stay red.
+**Help** shows the explanations of the dialog. The selected zones are listed first, then the zones left out under a line like _193 geozones NOT fenced, 2 covered by other fences_ in the warning color, listed in gray except prohibited zones the planned flight enters, which stay red. **Hide** collapses that list.
 
 The dialog shows how much of the vehicle's fence the selection uses, like _Vehicle fence: 52 of 64 points_:
 
 - **PX4** stores 64 fence items: one per polygon vertex, circle and breach return point.
 - **ArduPilot** (4.0 and later) stores the fence in a storage area of the flight controller: each polygon takes 2 bytes plus 8 bytes per vertex, each circle 13 bytes and the return point 9 bytes, and a polygon has at most 255 vertices. On flight controllers with 16 KB of storage, like the Pixhawk and Cube, Copter (and Heli) has 560 bytes (70 items) and Plane, Rover and Sub have 672 bytes (84 items). Flight controllers with less storage hold fewer points; a rejected upload is reported. When `BRD_SD_FENCE` stores the fence on the SD card, its size is used instead. `FENCE_TOTAL` only counts the points of the last upload and is not a limit.
 - Without a connected vehicle the fence is fitted to what both PX4 and ArduPilot copters store (64 points, 560 bytes) and circles are added as polygons enclosing them.
+
+The fence budget is a hard limit of the autopilot, not of _QGroundControl_: PX4 rejects a fence of more than 64 items (`MAV_MISSION_NO_SPACE`), ArduPilot rejects more items than its storage holds (`MAV_MISSION_NO_SPACE`, "Only N items are supported") and fences which need more bytes than its storage has (`MAV_MISSION_ERROR`, "Fence exceeds storage size"). PX4's limit is fixed in its firmware (`DM_KEY_FENCE_POINTS_MAX`); ArduPilot's depends on the flight controller and isn't reported, so _QGroundControl_ estimates it unless the fence is on the SD card. When the vehicle rejects an upload, the dialog says why, the fence on the vehicle stays as it was and the plan's fence stays marked as changed: leave out zones or allow more simplification and upload again.
 
 The panel warns when the vehicle won't enforce exclusion fences: ArduPilot with `FENCE_TYPE` lacking polygon fences or `FENCE_ENABLE` at 0, PX4 with `GF_ACTION` set to None.
 
@@ -456,6 +458,16 @@ Zones are selected in priority order until the fence is full: prohibited zones f
 The checkbox of a zone means _include it if it fits_. Checked zones are included in priority order while they fit, so a checked zone can be left out when there is no room for it. Unchecked zones are left out by you. Uncheck a zone to leave it out, which makes room for the zones after it, or check a zone left out by you to include it again in its place in the priority order. The lists change as soon as you click: a zone moves between **Selected zones** and **Left out**, and zones after it may follow when the room changes. Zones without a fence of their own can't be checked: those without an area, those when the vehicle doesn't support exclusion fences, and those with the same area as a zone before them in priority, which follow that zone: they are covered by its fence when it is selected and left out with it otherwise, so unchecking a zone leaves out its area. Hover over a row to see its whole name and reason when they don't fit.
 
 Zones the flight only passes above or below are left out unless you check them, since their exclusion fence would stop the vehicle there.
+
+#### Zones Not Fenced {#zones-not-fenced}
+
+The vehicle doesn't stop at a zone which is not fenced; _QGroundControl_ still [alerts](#flight-alerts) about it. The zones not fenced are all those left out except the zones with the same area as a selected zone, which its fence covers. They are named, with why, wherever the fence is used:
+
+- in the dialog, in the warning color above the list of zones left out;
+- before **Upload to Vehicle**, which asks for confirmation listing them;
+- in the GeoFence panel of the Plan View, like "3 geozones are not fenced: A (No room left in the vehicle fence), B (Left out by you) and 1 more.", with **Not Fenced...** listing all of them, and in the mission banner (_N left out of the fence_, listed under **Details**). The plan file keeps the list (up to 100 zones and their count), so it is shown again when the plan is opened. It is shown until the fences from geozones change: editing or deleting them, or applying another selection, which then gives its own list;
+- when uploading the plan, whose confirmation lists them;
+- in the message of a verified upload, and in the **Fence** item of the [pre-flight checklist](#pre-flight-checklist), as a warning to accept.
 
 **Upload to Vehicle** adds the selected fences to the plan and uploads the plan's fence (not the mission) like a plan upload, then reads the fence back from the vehicle and compares it with the plan: the number of polygons and circles, each vertex and circle center within 0.5 m, the circle radii and the breach return point. The dialog shows whether the vehicle stores the fence as planned, the differences, or why the vehicle rejected it, for example when it has no room for it.
 
@@ -478,7 +490,7 @@ With the pre-flight checklist turned on (_Application Settings > Fly View > Use 
 
 - **Geozone data**: zones are loaded and no source is [outdated](#managing-sources), or expired when outdated data is treated as invalid.
 - **Mission**: the mission on the vehicle enters no restricted zone, or only zones with an [authorisation](#authorisations) covering the [planned start](#flight-time) (at any time without one). A prohibited zone fails the check.
-- **Fence**: the vehicle's fence is the one an upload of the [fence import](#add-geozones-to-the-geofence) verified, its fences from geozones were made from data which hasn't changed since, and it excludes the prohibited zones the mission enters. A fence uploaded otherwise is reported as not verified.
+- **Fence**: the vehicle's fence is the one an upload of the [fence import](#add-geozones-to-the-geofence) verified, its fences from geozones were made from data which hasn't changed since, and it excludes the prohibited zones the mission enters. A fence uploaded otherwise is reported as not verified. The [zones the import left out](#zones-not-fenced) are listed as a warning.
 - **QNH**: limits published as flight levels within 1 km of the mission and 300 m of its altitudes are converted with a [QNH](#settings-reference) other than the standard pressure.
 - **Remote ID**: when the mission enters U-space airspace, the operator ID is set (and valid in the EU) in _Application Settings > Remote ID_ and the vehicle's Remote ID reports it is ready to arm.
 - **Take-off position**: the vehicle on the ground isn't inside a restricted zone (see [On the Ground Inside a Zone](#on-the-ground)). Inside a prohibited zone the item fails; inside another restricted zone it warns until you confirm the permission to fly there.

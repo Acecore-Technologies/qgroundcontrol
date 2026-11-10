@@ -73,10 +73,13 @@ struct Usage {
     friend bool operator==(const Usage &, const Usage &) = default;
 };
 
-/// What the fence storage of a vehicle holds. ArduPilot limits the items to its fence storage size divided by 8 and
-/// stores each polygon as a type and vertex count byte plus 8 bytes per vertex, each circle in 13 bytes and the return
-/// point in 9 bytes, after a 4 byte header and before an end marker (AC_PolyFence_loader). PX4 stores 64 items in its
-/// dataman (DM_KEY_FENCE_POINTS_MAX).
+/// What the fence storage of a vehicle holds. These are firmware limits which the vehicle enforces when a fence is
+/// uploaded: PX4 stores 64 items in its dataman (DM_KEY_FENCE_POINTS_MAX) and rejects more with MAV_MISSION_NO_SPACE.
+/// ArduPilot limits the items to its fence storage size divided by 8 (MAV_MISSION_NO_SPACE beyond) and stores each
+/// polygon as a type and vertex count byte plus 8 bytes per vertex, each circle in 13 bytes and the return point in 9
+/// bytes, after a 4 byte header and before an end marker (AC_PolyFence_loader), rejecting fences which need more bytes
+/// with MAV_MISSION_ERROR ("Fence exceeds storage size"). Its storage size depends on the board and vehicle type and
+/// isn't reported, so it is estimated unless the fence is stored on the SD card (BRD_SD_FENCE).
 struct Capacity {
     int maxItems = 0;               ///< Fence items, 0 without limit
     int storageBytes = 0;           ///< ArduPilot fence storage, 0 when only the items are limited
@@ -153,6 +156,8 @@ struct Choice {
     ///         has no area, has the same area as a zone before it, which it follows, or the vehicle stores no
     ///         exclusion fences
     bool includable() const { return (status != Status::NoShape) && (status != Status::Duplicate) && (status != Status::Unsupported); }
+    /// @return true if the fence excludes the zone: it is selected, or a duplicate of a selected zone
+    bool fenced() const { return (status == Status::Selected) || ((status == Status::Duplicate) && duplicateSelected); }
 };
 
 struct Selection {
@@ -161,6 +166,8 @@ struct Selection {
     Usage reserved;
 
     QList<const GeoZone*> selectedZones() const;
+    /// @return The choices whose zones the fence doesn't exclude, see Choice::fenced, in priority order
+    QList<Choice> notFenced() const;
 };
 
 /// @return The candidates in priority order: prohibited zones, other restricted ones (GeoZonePolicy::isRestricted),

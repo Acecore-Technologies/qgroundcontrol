@@ -660,6 +660,10 @@ void GeoZoneGeometryTest::_testFenceSelection()
         QCOMPARE(choice.fences.isEmpty(), choice.status != Status::Selected);
     }
     QVERIFY(statusText(choiceOf(duplicate)).contains(QStringLiteral("Prohibited far, covered by its fence")));
+    // The zones not fenced are those left out, except the copy whose area the fence of the zone it copies excludes
+    QVERIFY(choiceOf(duplicate).fenced());
+    QVERIFY(choiceOf(farProhibited).fenced());
+    QCOMPARE(names(selection.notFenced(), choiceZone), QStringList({ QStringLiteral("Overflown"), QStringLiteral("Conditional near"), QStringLiteral("U-space") }));
 
     // Leaving out a zone leaves out the zones with its area, which follow it instead of taking its place
     QList<Candidate> withoutFar = candidateList;
@@ -671,6 +675,8 @@ void GeoZoneGeometryTest::_testFenceSelection()
     QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
     QVERIFY(!choiceOf(duplicate).duplicateSelected);
     QVERIFY(statusText(choiceOf(duplicate)).contains(QStringLiteral("which is left out")));
+    QVERIFY(!choiceOf(duplicate).fenced());
+    QVERIFY(names(selection.notFenced(), choiceZone).contains(QStringLiteral("Prohibited far copy")));
 
     // Kept fences take room, and fences which don't fit even alone are too large
     Usage kept;

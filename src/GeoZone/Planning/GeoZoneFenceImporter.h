@@ -14,6 +14,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QStringList>
+#include <QtCore/QTimer>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtPositioning/QGeoCircle>
@@ -26,6 +27,7 @@
 #include "GeoZoneBox.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneFenceChoiceModel.h"
+#include "GeoZoneFenceTags.h"
 #include "GeoZoneFenceUpload.h"
 #include "GeoZoneFences.h"
 #include "GeoZonePolicy.h"
@@ -50,6 +52,15 @@ class GeoZoneFenceImporter : public QObject
     Q_PROPERTY(GeoZoneFenceChoiceModel* choices         READ choices            CONSTANT FINAL)                 ///< The selected zones and the first maxListedChoices zones left out, in priority order
     Q_PROPERTY(int                      selectedCount   READ selectedCount      NOTIFY selectionChanged FINAL)
     Q_PROPERTY(int                      leftOutCount    READ leftOutCount       NOTIFY selectionChanged FINAL)  ///< All zones left out, also those not listed
+    /// Zones the selection doesn't fence, see GeoZoneFences::Choice::fenced: those left out except the duplicates of
+    /// selected zones, which their fences cover
+    Q_PROPERTY(int                      notFencedCount  READ notFencedCount     NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(QString                  notFencedText   READ notFencedText      NOTIFY selectionChanged FINAL)  ///< Of the selection, see GeoZoneFenceTags::notFencedText
+    /// The zones the plan's last import left out, like "3 geozones are not fenced: A (...), ...", while its fences from
+    /// geozones are unchanged, see GeoZoneFenceTags::notFenced. Empty otherwise.
+    Q_PROPERTY(QString                  fenceNote       READ fenceNote          NOTIFY fenceNoteChanged FINAL)
+    Q_PROPERTY(int                      fenceNoteCount  READ fenceNoteCount     NOTIFY fenceNoteChanged FINAL)  ///< Zones of the fence note
+    Q_PROPERTY(QStringList              fenceNoteZones  READ fenceNoteZones     NOTIFY fenceNoteChanged FINAL)  ///< Each zone of the fence note kept with the plan and why
     Q_PROPERTY(bool                     busy            READ busy               NOTIFY busyChanged FINAL)       ///< While zones are prepared for updateSelection
     Q_PROPERTY(GeoZoneFenceUpload*      upload          READ upload             CONSTANT FINAL)                 ///< Of the plan's fence to its vehicle
     Q_PROPERTY(QString                  staleText       READ staleText          NOTIFY staleChanged FINAL)      ///< Why the plan's fences from geozones are outdated, empty when they aren't, see GeoZoneFenceTags::staleZones
@@ -100,6 +111,13 @@ public:
     const GeoZoneFences::Capacity &capacity() const { return _capacity; }
     int selectedCount() const { return _selectedCount; }
     int leftOutCount() const { return static_cast<int>(_selection.choices.count()) - _selectedCount; }
+    int notFencedCount() const { return static_cast<int>(_notFenced.count()); }
+    QString notFencedText() const;
+    /// @return The zones of the selection which aren't fenced, see notFencedCount, with why
+    const QList<GeoZoneFenceTags::NotFenced> &notFenced() const { return _notFenced; }
+    QString fenceNote() const { return _fenceNote; }
+    int fenceNoteCount() const { return _fenceNoteCount; }
+    QStringList fenceNoteZones() const { return _fenceNoteZones; }
     bool busy() const { return _busy; }
     GeoZoneFenceChoiceModel *choices() const { return _choices; }
 
@@ -133,6 +151,7 @@ signals:
     void selectionChanged();
     void busyChanged();
     void staleChanged();
+    void fenceNoteChanged();
 
 private:
     /// Fences for the zones which don't already exist in the fence, with their zones
@@ -188,6 +207,10 @@ private:
     void _connectVehicle();
     /// Checks the fences from geozones against the zones, see GeoZoneFenceTags::staleZones
     void _updateStale();
+    /// Reads the zones the plan's last import left out, see fenceNote
+    void _updateFenceNote();
+    /// Follows the edits of the fences from geozones, which end the fence note
+    void _connectFenceEdits();
 
     QPointer<GeoFenceController> _geoFenceController;
     std::optional<AreaQuery> _query;                    ///< Of the last updateSelection
@@ -201,8 +224,14 @@ private:
     bool _busy = false;
     QObject *_vehicleConnections = nullptr;
     QObject *_fenceConnections = nullptr;
+    QObject *_fenceEditConnections = nullptr;           ///< Receiver of the edits of the fences from geozones, replaced to disconnect them
+    QTimer _fenceNoteTimer;                             ///< Updates the fence note once after edits
     QJsonObject _settings;                              ///< Of the last updateSelection, see GeoZoneFenceTags::importSettings
     QString _staleText;
+    QList<GeoZoneFenceTags::NotFenced> _notFenced;      ///< Of the selection
+    QString _fenceNote;
+    int _fenceNoteCount = 0;
+    QStringList _fenceNoteZones;
     GeoZoneMissionWorker *const _worker = nullptr;
     GeoZoneFenceChoiceModel *const _choices = nullptr;
     GeoZoneFenceUpload *const _upload = nullptr;
