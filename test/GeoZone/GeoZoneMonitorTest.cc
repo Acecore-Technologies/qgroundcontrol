@@ -10,6 +10,7 @@
 #include "GeoZoneMonitorTest.h"
 #include "GeoZoneIntendedLevel.h"
 #include "GeoZoneNearbyModel.h"
+#include "GeoZonePermits.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "Vehicle.h"
@@ -1862,6 +1863,151 @@ void GeoZoneMonitorTest::_testAwareness()
     QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(Awareness::Unavailable));
     QVERIFY(monitor.awareness()->reasons().contains(QStringLiteral("no current vehicle position")));
     QCOMPARE(awarenessAlerts().count(), count);
+}
+
+
+void GeoZoneMonitorTest::_testPermits()
+{
+    ScopedEnvironment environment;
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
+    settings->logAlerts()->setRawValue(true);
+
+    // A zone requiring an authorisation, one requiring a notification and a prohibited zone
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate notificationCenter = center.atDistanceAndAzimuth(3000, 90);
+    const QGeoCoordinate prohibitedCenter = center.atDistanceAndAzimuth(3000, 270);
+    QJsonObject notification = _circleFeature(QStringLiteral("N"), QStringLiteral("CONDITIONAL"), notificationCenter, 300);
+    notification[QStringLiteral("zoneAuthority")] = QJsonArray{ QJsonObject{ { "name", "Tower" }, { "purpose", "NOTIFICATION" }, { "intervalBefore", "P1D" } } };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+        notification,
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), prohibitedCenter, 300),
+    }), errorString), qPrintable(errorString));
+    const auto zone = [&manager](const QString &identifier) -> const GeoZone* {
+        for (const GeoZone *candidate : manager.zoneList()) {
+            if (candidate->identifier() == identifier) {
+                return candidate;
+            }
+        }
+        return nullptr;
+    };
+    QVERIFY(zone(QStringLiteral("N")) && (zone(QStringLiteral("N"))->data().notificationLeadSecs >= 0));
+    QVERIFY(GeoZonePermits::applies(zone(QStringLiteral("A"))));
+    QVERIFY(GeoZonePermits::applies(zone(QStringLiteral("N"))));
+    QVERIFY(!GeoZonePermits::applies(zone(QStringLiteral("P"))));
+
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    GeoZoneAlertHistory &log = *monitor.alertHistory();
+    log.startLog(dir.filePath(QStringLiteral("logs")));
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    GeoZonePermits *const permits = monitor.permits();
+
+    // Acknowledged before the flight in the zone details, without vehicle, a permit stops the approach and entry
+    // alerts: the approach is logged only, the entry shown as an advisory, neither spoken
+    constexpr int vehicleId = 1;
+    monitor.setActiveVehicleId(vehicleId);
+    QVERIFY(permits->acknowledge(QVariant::fromValue(GeoZoneInfo(zone(QStringLiteral("A")))), GeoZonePermits::ZoneDetails));
+    QVERIFY(!permits->acknowledge(zone(QStringLiteral("A")), GeoZonePermits::Checklist, vehicleId));
+    QVERIFY(!permits->acknowledge(zone(QStringLiteral("P")), GeoZonePermits::Checklist, vehicleId));
+    QCOMPARE(permits->count(), 1);
+    QCOMPARE(permits->permits().first().vehicleId, GeoZoneMonitor::noVehicle);
+    QVERIFY(permits->permitted(QVariant::fromValue(GeoZoneInfo(zone(QStringLiteral("A"))))));
+    monitor.evaluate({ center.atDistanceAndAzimuth(10000, 0), 450, 400 }, vehicleId);
+    GeoZoneVehicleMonitor *const vehicle = monitor.positionMonitor(vehicleId);
+    vehicle->setArmed(false);
+    vehicle->setArmed(true);
+    monitor.evaluate({ center.atDistanceAndAzimuth(380, 0), 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.count(), 0);
+    monitor.evaluate({ center, 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.count(), 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone A (Authorisation required) \u2014 permit acknowledged"));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneIntendedLevel::severity(GeoZoneIntendedLevel::Advisory));
+    QVERIFY(!shownAlert(monitor, monitor.alertModel()->alerts().first().alertId)->question);
+    QVERIFY(sink->spoken.isEmpty());
+    QCOMPARE(log.unacknowledgedCount(), 0);
+
+    // In flight, "I do" for a zone requiring a notification is its permit, the prohibited zone keeps the approval
+    monitor.evaluate({ notificationCenter, 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone N (Conditional)"));
+    const int notificationAlert = monitor.alertModel()->alerts().first().alertId;
+    QVERIFY(shownAlert(monitor, notificationAlert)->question);
+    monitor.approveAlert(notificationAlert);
+    QCOMPARE(permits->count(), 2);
+    QCOMPARE(permits->permits().last().origin, GeoZonePermits::AlertPopup);
+    QCOMPARE(permits->permits().last().vehicleId, vehicleId);
+    QVERIFY(monitor.approvedZoneKeys().isEmpty());
+    monitor.evaluate({ prohibitedCenter, 450, 400 }, vehicleId);
+    monitor.approveAlert(monitor.alertModel()->alerts().first().alertId);
+    QCOMPARE(permits->count(), 2);
+    QCOMPARE(monitor.approvedZoneKeys(), QStringList{ zone(QStringLiteral("P"))->key() });
+    // Coming back to the zone needs no new answer
+    const qsizetype count = alertSpy.count();
+    monitor.evaluate({ notificationCenter.atDistanceAndAzimuth(380, 0), 450, 400 }, vehicleId);
+    monitor.evaluate({ notificationCenter, 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.count(), count + 1);
+    QVERIFY(alertSpy.last()[0].toString().endsWith(QStringLiteral("permit acknowledged")));
+
+    // Withdrawn, the zone the vehicle is in alerts again
+    permits->withdraw(GeoZonePermits::key(zone(QStringLiteral("N"))));
+    QCOMPARE(permits->count(), 1);
+    monitor.evaluate({ notificationCenter, 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone N (Conditional)"));
+    QVERIFY(shownAlert(monitor, monitor.alertModel()->alerts().first().alertId)->question);
+
+    // The flight ends when the vehicle disarms after having been armed, which ends the permits
+    monitor.evaluate({ center, 450, 400 }, vehicleId);
+    vehicle->setArmed(false);
+    QCOMPARE(permits->count(), 0);
+    QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone A (Authorisation required) \u2014 take-off only with an authorisation"));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Caution));
+
+    // With a permit for the next flight, from the checklist, take-off is allowed
+    QVERIFY(permits->acknowledge(zone(QStringLiteral("A")), GeoZonePermits::Checklist, vehicleId));
+    QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone A (Authorisation required) \u2014 permit acknowledged"));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    vehicle->setArmed(true);
+    QCOMPARE(permits->count(), 1);
+
+    // A permit ends when its vehicle disconnects
+    Vehicle offline(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    QVERIFY(permits->acknowledge(zone(QStringLiteral("N")), GeoZonePermits::Checklist, offline.id()));
+    monitor.addVehicle(&offline);
+    monitor.removeVehicle(&offline);
+    QCOMPARE(permits->count(), 1);
+
+    // Logged with the time, vehicle, zone and where they were acknowledged, or why they ended
+    log.flushLog();
+    QFile file(log.logFilePath(environment.now().date()));
+    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
+    QStringList rows;
+    for (const QString &line : QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        const QStringList fields = GeoZoneAlertHistory::logFields(line);
+        if (fields[6].startsWith(QStringLiteral("permit"))) {
+            QCOMPARE(QDateTime::fromString(fields[0], Qt::ISODateWithMs), environment.now());
+            rows.append(QStringList{ fields[1], fields[6], fields[8], fields[15] }.join(QLatin1Char(' ')).trimmed());
+        }
+    }
+    QCOMPARE(rows, (QStringList{
+        QStringLiteral("permit A zone details"),
+        QStringLiteral("1 permit N alert popup"),
+        QStringLiteral("1 permit_ended N withdrawn"),
+        QStringLiteral("1 permit_ended A flight ended"),
+        QStringLiteral("1 permit A pre-flight checklist"),
+        QStringLiteral("%1 permit N pre-flight checklist").arg(offline.id()),
+        QStringLiteral("%1 permit_ended N vehicle disconnected").arg(offline.id()),
+    }));
+    // The entry with the permit is logged as such
+    QCOMPARE(GeoZoneAlertHistory::parseLogLine(QStringLiteral("2026-06-15T10:00:00.000Z,1,47,8,450,400,entered,0,A,,ReqAuthorisation,,,,5,permit"))->message,
+             QStringLiteral("Entered geozone A (Authorisation required) \u2014 permit acknowledged"));
 }
 
 GEOZONE_TEST(GeoZoneMonitorTest)

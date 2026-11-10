@@ -16,6 +16,7 @@
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtCore/QVariantList>
@@ -27,6 +28,7 @@
 #include "GeoZoneAlertModel.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneAwareness.h"
+#include "GeoZonePermits.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneVehicleMonitor.h"
 
@@ -61,6 +63,8 @@ class Vehicle;
 /// pre-arm check, and again when it tries to arm there, see AlertEvent::OnGround.
 /// Whether geo-awareness is available for the active vehicle is published as awareness(), and the changes of state of
 /// flying vehicles are alerted, see AlertEvent::Awareness.
+/// Zones requiring an authorisation or a notification take a permit for the flight instead of an approval, see
+/// permits(): acknowledged before the flight or by answering the question, it stops their alerts until the flight ends.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -79,6 +83,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(QVariantList     traffic             READ traffic            NOTIFY trafficChanged FINAL)
     Q_PROPERTY(double           trafficRadius       READ trafficRadius      CONSTANT FINAL)
     Q_PROPERTY(GeoZoneAwareness *awareness          READ awareness          CONSTANT FINAL)    ///< Of the active vehicle, or of the data without
+    Q_PROPERTY(GeoZonePermits   *permits            READ permits            CONSTANT FINAL)    ///< Permits to enter zones for this flight
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
@@ -116,11 +121,13 @@ public:
             OnGround,               ///< The vehicle is on the ground inside the zone, or tried to arm there when detail is "arming"
             Awareness,              ///< The geo-awareness of the flying vehicle changed state: the zone identifier is the
                                     ///< GeoZoneAwareness::stateCode, the name has the reasons
-            // What the pilot was shown and answered, only logged
+            // What the pilot was shown and answered, only logged. Keep them last, see pilotEvent().
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
             Dismissed,              ///< The pilot dismissed the alert, or closed the popup
             Muted,                  ///< The pilot muted the alerts while the alert was shown
+            Permit,                 ///< The pilot acknowledged the permit to enter the zone, detail tells where, see GeoZonePermits
+            PermitEnded,            ///< The permit ended, detail tells why: "flight ended", "vehicle disconnected" or "withdrawn"
         };
 
         /// @return true for what the pilot was shown and answered
@@ -252,7 +259,7 @@ public:
     /// The pilot confirmed the permission to fly in the zone of the alert, and of the alerts it replaced (see
     /// GeoZoneAlertModel::show()): acknowledges the alerts about the zones and approves them for the vehicle, whose
     /// alerts about them are neither shown, spoken nor repeated until it leaves them and their approach range. They are
-    /// still logged.
+    /// still logged. Zones requiring an authorisation or a notification get a permit for the flight instead.
     Q_INVOKABLE void approveAlert(int alertId);
     /// The pilot dismissed a shown alert: acknowledges it and removes it from the shown alerts
     Q_INVOKABLE void dismissAlert(int alertId);
@@ -273,6 +280,7 @@ public:
 
     GeoZoneManager *manager() const { return _manager; }
     GeoZoneAwareness *awareness() const { return _awareness; }
+    GeoZonePermits *permits() const { return _permits; }
     /// @return Geo-awareness of the vehicle, of the data alone without
     GeoZoneAwareness::Status awarenessStatus(const GeoZoneVehicleMonitor *monitor) const;
     /// Monitor of the active vehicle, or of the positions of activeVehicleId() without, null when not monitored
@@ -339,6 +347,10 @@ private:
     /// Publishes the geo-awareness of the active vehicle and alerts the changes of state of the flying vehicles
     void _updateAwareness();
     void _raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change);
+    /// Logs a permit acknowledged or ended
+    void _logPermit(const GeoZonePermits::Permit &permit, AlertEvent::Kind kind, const QString &detail);
+    /// Updates the questions and ground warnings after the permits changed, and alerts a withdrawn permit's zones again
+    void _permitsChanged(const QString &withdrawnKey);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
     /// Adds an alert to the shown alerts, logging that the pilot was notified
@@ -382,12 +394,15 @@ private:
         int vehicleKey = 0;         ///< 0 for traffic
         AlertEvent event;
         bool asksPermission = false;
+        QString permitKey;          ///< GeoZonePermits::key of a zone a permit applies to, empty for others
     };
     QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
     QHash<int, qint64> _armingAlerts;           ///< When the arming attempts were alerted by vehicle key
     GeoZoneAwareness *_awareness = nullptr;
     QHash<int, GeoZoneAwareness::Tracker> _awarenessTrackers;  ///< By vehicle key
     QTimer _awarenessTimer;                     ///< Updates the geo-awareness while the vehicles aren't evaluated
+    GeoZonePermits *_permits = nullptr;
+    QSet<int> _flying;                          ///< Keys of the vehicles armed since they were on the ground
     QTimer _evaluateTimer;
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty

@@ -22,6 +22,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionReader.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZonePermits.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePreflightCheck.h"
 #include "GeoZoneOperationalIntent.h"
@@ -1042,6 +1043,54 @@ void GeoZoneFlightTest::_testGroundInsideZone()
         QCOMPARE(QString::fromUtf8(log.readAll()).count(QStringLiteral(",on_ground,")), autopilot == MAV_AUTOPILOT_PX4 ? 2 : 4);
         _disconnectMockLink();
     }
+}
+
+
+void GeoZoneFlightTest::_testPreflightPermits()
+{
+    using Check = GeoZonePreflightCheck;
+    const ScopedEnvironment environment;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    const QGeoCoordinate center(47, 8);
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(Check::permitItem({}).state, Check::NotApplicable);
+
+    // A mission through the zone needs a permit for the flight, which the checklist acknowledges
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    for (const QGeoCoordinate &coordinate : { center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->setAltitudeMode(QGroundControlQmlGlobal::AltitudeModeAbsolute);
+        item->altitude()->setRawValue(500);
+    }
+    GeoZoneMonitor monitor(&manager);
+    Check check(&manager);
+    check.setMonitor(&monitor);
+    check.setPlanController(&masterController);
+    QTRY_COMPARE(check.permit().state, Check::Warning);
+    QCOMPARE(check.permit().text, QStringLiteral("Acknowledge your permission to enter A for this flight."));
+    QCOMPARE(check.permitZones().count(), 1);
+    const QVariantMap row = check.permitZones().constFirst().toMap();
+    QCOMPARE(row.value(QStringLiteral("name")).toString(), QStringLiteral("A"));
+    QVERIFY(!row.value(QStringLiteral("atVehicle")).toBool());
+    QVERIFY(!row.value(QStringLiteral("permitted")).toBool());
+    QVERIFY(monitor.permits()->acknowledge(row.value(QStringLiteral("zone")), GeoZonePermits::Checklist));
+    QTRY_COMPARE(check.permit().state, Check::Passed);
+    QCOMPARE(check.permit().text, QStringLiteral("Permits acknowledged for this flight: A."));
+    QVERIFY(check.permitZones().constFirst().toMap().value(QStringLiteral("permitted")).toBool());
+
+    // An authorised zone needs none
+    QVERIFY(manager.planning()->authorisations()->authorise(row.value(QStringLiteral("zone")), QStringLiteral("A-1"), QString(), QString()).isEmpty());
+    QTRY_COMPARE(check.permit().state, Check::NotApplicable);
+    manager.repository()->clear();
 }
 
 GEOZONE_TEST(GeoZoneFlightTest)

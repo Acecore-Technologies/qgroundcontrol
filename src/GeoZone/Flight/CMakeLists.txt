@@ -19,6 +19,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneIntendedLevel.h
         GeoZoneMonitor.cc
         GeoZoneMonitor.h
+        GeoZonePermits.cc
+        GeoZonePermits.h
         GeoZonePreflightCheck.cc
         GeoZonePreflightCheck.h
         GeoZoneRemoteId.cc

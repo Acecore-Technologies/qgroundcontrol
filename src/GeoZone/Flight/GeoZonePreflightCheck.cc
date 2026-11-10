@@ -14,15 +14,18 @@
 #include "GeoZone.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneIntendedLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionReader.h"
 #include "GeoZoneMonitor.h"
+#include "GeoZonePermits.h"
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSourceRepository.h"
+#include "GeoZoneText.h"
 #include "GeoZoneVehicleMonitor.h"
 #include "GeoZoneVertical.h"
 #include "MissionController.h"
@@ -147,6 +150,7 @@ void GeoZonePreflightCheck::setMonitor(GeoZoneMonitor *monitor)
         (void) connect(_monitor, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZonePreflightCheck::_connectMonitor);
         (void) connect(_monitor, &GeoZoneMonitor::monitoringChanged, this, &GeoZonePreflightCheck::_connectMonitor);
         (void) connect(_monitor->awareness(), &GeoZoneAwareness::changed, this, &GeoZonePreflightCheck::_scheduleUpdate);
+        (void) connect(_monitor->permits(), &GeoZonePermits::countChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     }
     _connectMonitor();
 }
@@ -161,7 +165,8 @@ void GeoZonePreflightCheck::_connectMonitor()
     delete _monitorConnections;
     _monitorConnections = new QObject(this);
     if (GeoZoneVehicleMonitor *const monitor = _vehicleMonitor()) {
-        for (const auto signal : { &GeoZoneVehicleMonitor::groundStatusChanged, &GeoZoneVehicleMonitor::armedChanged, &GeoZoneVehicleMonitor::positionUnavailableChanged }) {
+        for (const auto signal : { &GeoZoneVehicleMonitor::groundStatusChanged, &GeoZoneVehicleMonitor::armedChanged, &GeoZoneVehicleMonitor::positionUnavailableChanged,
+                                   &GeoZoneVehicleMonitor::nearbyChanged }) {
             (void) connect(monitor, signal, _monitorConnections, [this]() { _scheduleUpdate(); });
         }
     }
@@ -184,6 +189,23 @@ void GeoZonePreflightCheck::update()
     Item fence = mission;
     Item qnh = mission;
     Item remoteId = mission;
+
+    // The zones requiring a permit which the vehicle is in, then those the mission enters
+    QList<PermitZone> permitZones;
+    const GeoZonePermits *const permits = _monitor ? _monitor->permits() : nullptr;
+    const auto addPermitZone = [&permitZones, permits](const GeoZone *zone, bool atVehicle) {
+        const QString key = GeoZonePermits::key(zone);
+        if (GeoZonePermits::applies(zone) && std::none_of(permitZones.cbegin(), permitZones.cend(), [&key](const PermitZone &added) { return GeoZonePermits::key(added.zone) == key; })) {
+            permitZones.append(PermitZone{ zone, atVehicle, permits && permits->covers(zone) });
+        }
+    };
+    if (const GeoZoneVehicleMonitor *const vehicleMonitor = _vehicleMonitor(); vehicleMonitor && !vehicleMonitor->positionUnavailable()) {
+        for (const GeoZoneAlertTracker::Nearby &nearby : vehicleMonitor->nearby()) {
+            if (nearby.inside) {
+                addPermitZone(nearby.zone, true);
+            }
+        }
+    }
     MissionController *const missionController = _planController ? _planController->missionController() : nullptr;
     // The mission check may not have checked the current mission yet
     if (missionController && !_missionCheck->settled()) {
@@ -208,14 +230,21 @@ void GeoZonePreflightCheck::update()
         fence = fenceItem(fenceInput);
 
         qnh = qnhItem(flightLevelZonesNear(_manager->catalog(), path), GeoZoneSettings::instance()->qnhHPa()->rawValue().toDouble());
+        for (const GeoZoneMissionCheck::Entry &entry : entries) {
+            if ((entry.kinds & (GeoZoneMissionCheck::Crossed | GeoZoneMissionCheck::Permitted)) && !(entry.kinds & GeoZoneMissionCheck::Authorised)) {
+                addPermitZone(entry.zone, false);
+            }
+        }
         remoteId = remoteIdItem(GeoZoneMissionCheck::zones(entries, GeoZoneMissionCheck::USpace), GeoZoneRemoteId::status(_vehicle));
     }
 
     const Item takeoff = takeoffItem(_vehicleMonitor());
     const Item awareness = awarenessItem(_monitor ? _monitor->awarenessStatus(_vehicleMonitor()) : GeoZoneAwareness::evaluate(GeoZoneAwareness::dataInput(_manager)));
 
+    const Item permit = permitItem(permitZones);
+
     if ((data == _data) && (mission == _mission) && (fence == _fence) && (qnh == _qnh) && (remoteId == _remoteId) && (takeoff == _takeoff) &&
-        (awareness == _awareness)) {
+        (awareness == _awareness) && (permit == _permit) && (permitZones == _permitZones)) {
         return;
     }
     _data = data;
@@ -225,6 +254,8 @@ void GeoZonePreflightCheck::update()
     _remoteId = remoteId;
     _takeoff = takeoff;
     _awareness = awareness;
+    _permit = permit;
+    _permitZones = permitZones;
     emit itemsChanged();
 }
 
@@ -353,6 +384,37 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::awarenessItem(const GeoZoneAw
         return { Passed, tr("Geo-awareness is available.") };
     }
     return { Warning, status.summary() + QLatin1Char('.') };
+}
+
+GeoZonePreflightCheck::Item GeoZonePreflightCheck::permitItem(const QList<PermitZone> &zones)
+{
+    if (zones.isEmpty()) {
+        return { NotApplicable, tr("No zone requiring an authorisation or a notification at the vehicle or along the mission.") };
+    }
+    QList<const GeoZone*> missing;
+    QList<const GeoZone*> permitted;
+    for (const PermitZone &zone : zones) {
+        (zone.permitted ? permitted : missing).append(zone.zone);
+    }
+    if (!missing.isEmpty()) {
+        return { Warning, tr("Acknowledge your permission to enter %1 for this flight.").arg(names(missing)) };
+    }
+    return { Passed, tr("Permits acknowledged for this flight: %1.").arg(names(permitted)) };
+}
+
+QVariantList GeoZonePreflightCheck::permitZones() const
+{
+    QVariantList zones;
+    for (const PermitZone &zone : _permitZones) {
+        zones.append(QVariantMap{
+            { QStringLiteral("zone"), QVariant::fromValue(GeoZoneInfo(zone.zone)) },
+            { QStringLiteral("name"), zone.zone->displayName() },
+            { QStringLiteral("restrictionText"), GeoZoneText::restriction(zone.zone->restriction()) },
+            { QStringLiteral("atVehicle"), zone.atVehicle },
+            { QStringLiteral("permitted"), zone.permitted },
+        });
+    }
+    return zones;
 }
 
 QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path)

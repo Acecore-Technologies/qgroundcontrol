@@ -20,7 +20,8 @@ import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
 /// Drop-down page of GeoZoneIndicator: whether geo-awareness is available for the active vehicle and why not, whether
-/// it is on the ground inside a restricted zone, whether some geozone data may be outdated, the zones in or near which the active
+/// it is on the ground inside a restricted zone, the permits of this flight, whether some geozone data may be outdated,
+/// the zones in or near which the active
 /// vehicle is, with a badge marking them stale while the vehicle's position is lost, the ADS-B and Remote ID traffic in or near zones when it is checked,
 /// the recent alerts, the map legend and the geozone options.
 ToolIndicatorPage {
@@ -115,6 +116,47 @@ ToolIndicatorPage {
                     textFormat:         Text.PlainText
                     font.bold:          (control._active?.groundLevel ?? 0) !== GeoZoneIntendedLevel.Advisory
                     text:               control._active?.groundWarning ?? ""
+                }
+            }
+
+            // Permits acknowledged for this flight, which end when the vehicle disarms or disconnects
+            SettingsGroupLayout {
+                Layout.preferredWidth:  control._pageWidth
+                heading:                qsTr("Permits This Flight")
+                headingDescription:     qsTr("Zones you confirmed the permission to enter. Their alerts stop until the vehicle disarms after the flight or disconnects.")
+                visible:                control._monitor.permits.count > 0
+
+                Repeater {
+                    model: control._monitor.permits
+
+                    RowLayout {
+                        id:                 permitRow
+                        Layout.fillWidth:   true
+                        spacing:            ScreenTools.defaultFontPixelWidth
+
+                        required property string    key
+                        required property string    zoneName
+                        required property string    restrictionText
+                        required property date      time
+                        required property string    originText
+
+                        QGCLabel {
+                            Layout.fillWidth:   true
+                            wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
+                            textFormat:         Text.PlainText
+                            text:               qsTr("%1 (%2)").arg(permitRow.zoneName).arg(permitRow.restrictionText)
+                        }
+
+                        QGCLabel {
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            text:           Qt.formatTime(permitRow.time, "HH:mm") + "\n" + permitRow.originText
+                        }
+
+                        QGCButton {
+                            text:       qsTr("Withdraw")
+                            onClicked:  control._monitor.permits.withdraw(permitRow.key)
+                        }
+                    }
                 }
             }
 
@@ -255,6 +297,13 @@ ToolIndicatorPage {
                             color:          qgcPal.warningText
                             font.pointSize: ScreenTools.smallFontPointSize
                             visible:        control._monitor.approvedZoneKeys.indexOf(nearbyRow.zone.key) >= 0
+                        }
+
+                        QGCLabel {
+                            text:           qsTr("Permit")
+                            color:          qgcPal.warningText
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            visible:        (control._monitor.permits.count, control._monitor.permits.permitted(nearbyRow.zone))
                         }
 
                         QGCLabel {

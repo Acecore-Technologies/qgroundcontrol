@@ -35,4 +35,5 @@ private slots:
     void _testTraffic();
     void _testGroundAlerts();
     void _testAwareness();
+    void _testPermits();
 };

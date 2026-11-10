@@ -29,4 +29,5 @@ private slots:
     void _testRemoteId();
     void _testConformance();
     void _testGroundInsideZone();
+    void _testPreflightPermits();
 };

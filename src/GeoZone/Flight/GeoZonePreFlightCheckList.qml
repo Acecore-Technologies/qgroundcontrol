@@ -92,5 +92,53 @@ ColumnLayout {
             name:   qsTr("Geo-awareness")
             item:   geoZoneGroup.check.awarenessItem
         }
+
+        GeoZonePreFlightCheckButton {
+            name:   qsTr("Permits")
+            item:   geoZoneGroup.check.permitItem
+        }
+
+        // The zones of the permits, acknowledged here for this flight. The group counts the children which haven't
+        // passed, so the list passes.
+        Column {
+            width:      40 * ScreenTools.defaultFontPixelWidth
+            spacing:    ScreenTools.defaultFontPixelHeight / 4
+            visible:    geoZoneGroup.check.permitZones.length > 0
+
+            property bool passed: true
+            property bool failed: false
+            function reset() { }
+
+            Repeater {
+                model: geoZoneGroup.check.permitZones
+
+                RowLayout {
+                    id:         permitRow
+                    width:      parent.width
+                    spacing:    ScreenTools.defaultFontPixelWidth
+
+                    required property var modelData
+
+                    QGCLabel {
+                        Layout.fillWidth:   true
+                        wrapMode:           Text.WordWrap
+                        textFormat:         Text.PlainText
+                        text:               (permitRow.modelData.atVehicle ? qsTr("%1 (%2), at the vehicle") : qsTr("%1 (%2), on the mission"))
+                                                .arg(permitRow.modelData.name).arg(permitRow.modelData.restrictionText)
+                    }
+
+                    QGCButton {
+                        text:       qsTr("I Have Permission")
+                        visible:    !permitRow.modelData.permitted
+                        onClicked:  GeoZoneMonitor.permits.acknowledge(permitRow.modelData.zone, GeoZonePermits.Checklist)
+                    }
+
+                    QGCLabel {
+                        text:       qsTr("Acknowledged")
+                        visible:    permitRow.modelData.permitted
+                    }
+                }
+            }
+        }
     }
 }

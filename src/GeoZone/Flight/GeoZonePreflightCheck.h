@@ -41,6 +41,8 @@ class Vehicle;
 /// - take-off position: the vehicle on the ground isn't inside a prohibited zone, or a restricted zone the pilot hasn't
 ///   confirmed the permission for, see GeoZoneVehicleMonitor::groundWarning
 /// - geo-awareness: available for the vehicle, see GeoZoneAwareness
+/// - permits: the pilot acknowledged the permits of the zones requiring an authorisation or a notification which the
+///   mission enters or the vehicle is in, see GeoZonePermits and permitZones
 /// Each item is a map with its state and the text explaining it.
 class GeoZonePreflightCheck : public QObject
 {
@@ -55,6 +57,10 @@ class GeoZonePreflightCheck : public QObject
     Q_PROPERTY(QVariantMap  remoteIdItem    READ remoteIdItem   NOTIFY itemsChanged FINAL)
     Q_PROPERTY(QVariantMap  takeoffItem     READ takeoffItem    NOTIFY itemsChanged FINAL)
     Q_PROPERTY(QVariantMap  awarenessItem   READ awarenessItem  NOTIFY itemsChanged FINAL)
+    Q_PROPERTY(QVariantMap  permitItem      READ permitItem     NOTIFY itemsChanged FINAL)
+    /// Zones of the permit item, as maps with zone (GeoZoneInfo), name, restrictionText, atVehicle (the vehicle is in
+    /// it, otherwise the mission enters it) and permitted
+    Q_PROPERTY(QVariantList permitZones     READ permitZones    NOTIFY itemsChanged FINAL)
 
 public:
     /// Checks the vehicles of GeoZoneMonitor::instance()
@@ -101,6 +107,9 @@ public:
     QVariantMap takeoffItem() const { return _takeoff.toMap(); }
     const Item &awareness() const { return _awareness; }
     QVariantMap awarenessItem() const { return _awareness.toMap(); }
+    const Item &permit() const { return _permit; }
+    QVariantMap permitItem() const { return _permit.toMap(); }
+    QVariantList permitZones() const;
 
     /// Monitor of the vehicle whose take-off position is checked, none by default
     void setMonitor(GeoZoneMonitor *monitor);
@@ -133,6 +142,15 @@ public:
     /// @param monitor Of the vehicle, null without
     static Item takeoffItem(const GeoZoneVehicleMonitor *monitor);
     static Item awarenessItem(const GeoZoneAwareness::Status &status);
+    /// Zone of the permit item
+    struct PermitZone {
+        const GeoZone *zone = nullptr;
+        bool atVehicle = false;
+        bool permitted = false;
+
+        friend bool operator==(const PermitZone &, const PermitZone &) = default;
+    };
+    static Item permitItem(const QList<PermitZone> &zones);
 
     /// @return Zones with a flight level limit within qnhVerticalMargin of the altitudes of the mission path, any when
     ///         they are unknown, and within qnhHorizontalMargin of it
@@ -166,4 +184,6 @@ private:
     Item _remoteId;
     Item _takeoff;
     Item _awareness;
+    Item _permit;
+    QList<PermitZone> _permitZones;
 };

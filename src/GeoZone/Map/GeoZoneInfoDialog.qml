@@ -21,7 +21,8 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 
 /// Details of a GeoZone loaded from an ED-269 / ED-318 file, with the zones to choose from as chips where several
-/// overlap, and the operator's authorisation for it, added and edited in place.
+/// overlap, the operator's authorisation for it, added and edited in place, and the pilot's permit to enter it for this
+/// flight, see GeoZonePermits.
 /// Closed when the zones are reloaded or removed. Texts from the files are shown as plain text.
 QGCPopupDialog {
     id:         root
@@ -44,6 +45,9 @@ QGCPopupDialog {
     readonly property bool _notified: _notification.zoneKey !== undefined
     readonly property string _notificationRequirement: geoZone ? _authorisations.notificationRequirement(geoZone) : ""
     property bool _notificationForm: false  ///< The form records a notification of the zone's authority rather than an authorisation
+    readonly property var  _permits:        GeoZoneMonitor.permits
+    readonly property bool _permitApplies:  geoZone ? _permits.applies(geoZone) : false
+    readonly property bool _permitted:      (_permits.count, geoZone ? _permits.permitted(geoZone) : false)
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
@@ -193,6 +197,15 @@ QGCPopupDialog {
                 valueWidth: root._valueWidth
             }
 
+            // The pilot's acknowledgement for this flight, which ends after the flight
+            InfoRow {
+                label:      qsTr("Permit")
+                value:      root._permitted ? qsTr("Acknowledged for this flight") : qsTr("Not acknowledged for this flight")
+                labelWidth: root._labelWidth
+                valueWidth: root._valueWidth
+                visible:    root._permitApplies
+            }
+
             // The notice the zone's authority needs, until the notification is recorded
             InfoRow {
                 label:      qsTr("Notification")
@@ -249,6 +262,18 @@ QGCPopupDialog {
                     text:       qsTr("Remove Notification")
                     visible:    root._notified
                     onClicked:  root._authorisations.revoke(root._notification.zoneKey, true)
+                }
+
+                QGCButton {
+                    text:       root._permitted ? qsTr("Withdraw Permit") : qsTr("I Have Permission to Enter")
+                    visible:    root._permitApplies
+                    onClicked: {
+                        if (root._permitted) {
+                            root._permits.withdrawZone(root.geoZone)
+                        } else {
+                            root._permits.acknowledge(root.geoZone, GeoZonePermits.ZoneDetails)
+                        }
+                    }
                 }
             }
 
