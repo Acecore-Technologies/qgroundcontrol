@@ -1,9 +1,9 @@
 name: Geozone
 
 # The geozone tests, which parse untrusted files and feeds, with AddressSanitizer and UndefinedBehaviorSanitizer, the
-# fuzzers of the parsers, and the headless core tests built with MSVC, weekly and on demand. The application tests of
-# the module run with the other unit tests of the Linux workflow. The tests are those test/GeoZone/CMakeLists.txt
-# labels geozone, see the Testing section of docs/en/qgc-dev-guide/geozones.md.
+# fuzzers of the parsers, the headless core tests built with MSVC and a build without the module, weekly and on demand.
+# The application tests of the module run with the other unit tests of the Linux workflow. The tests are those
+# test/GeoZone/CMakeLists.txt labels geozone, see the Testing section of docs/en/qgc-dev-guide/geozones.md.
 
 on:
   schedule:
@@ -228,3 +228,74 @@ jobs:
       - name: Run core tests
         working-directory: ${{ runner.temp }}\shadow_build_dir
         run: ctest --test-dir test --no-tests=error --output-on-failure -L core -C Debug
+
+  # Builds QGroundControl without the module (-DQGC_DISABLE_GEOZONE=ON) like a release, see Building Without Geozones
+  # in docs/en/qgc-dev-guide/geozones.md, and checks that the binary has none of the module's classes. GeoZoneStubCheck,
+  # the check of the stub QML module these builds use, runs here and with the tests of the other jobs.
+  without-geozones:
+    runs-on: ubuntu-22.04
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      QT_VERSION: 6.8.3
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Initial Setup
+        uses: ./.github/actions/common
+
+      - name: Install Dependencies
+        run: |
+          chmod a+x ./tools/setup/install-dependencies-debian.sh
+          sudo ./tools/setup/install-dependencies-debian.sh
+
+      - name: Setup Caching
+        uses: ./.github/actions/cache
+        with:
+          host: linux
+          target: linux_gcc_64
+          build-type: WithoutGeozones
+          cpm-modules: ${{ runner.temp }}/shadow_build_dir/cpm_modules
+
+      - name: Install Qt for Linux (x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          dir: ${{ runner.temp }}
+          modules: qtcharts qtlocation qtpositioning qtspeech qt5compat qtmultimedia qtserialport qtimageformats qtshadertools qtconnectivity qtquick3d qtsensors
+          cache: true
+
+      - name: Check the stub QML module
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P test/GeoZone/GeoZoneStubCheck.cmake
+
+      - name: Configure
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: ${{ env.QT_ROOT_DIR }}/bin/qt-cmake -S ${{ github.workspace }} -B . -G Ninja
+              -DCMAKE_BUILD_TYPE=Release
+              -DQGC_DISABLE_GEOZONE=ON
+
+      - name: Build
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: cmake --build . --target QGroundControl --config Release
+
+      - name: Check the binary
+        working-directory: ${{ runner.temp }}/shadow_build_dir
+        run: |
+          # Class names of the module's C++, of which builds with geozones have thousands
+          count=$(strings Release/QGroundControl | grep -c -E "GeoZone(Catalog|Parser|Monitor|FenceImporter)" || true)
+          if [ "$count" -ne 0 ]; then
+            echo "::error::The build without geozones has $count strings of the module's classes"
+            exit 1
+          fi

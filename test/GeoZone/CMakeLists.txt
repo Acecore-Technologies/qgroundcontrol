@@ -1,4 +1,8 @@
-# Builds without geozones (QGC_DISABLE_GEOZONE) have none of the tests of the module
+# Builds without geozones (QGC_DISABLE_GEOZONE) use the stub of the QML module, which must declare what the QML of
+# QGroundControl uses of the module: checked in all builds, so that a new hook can't break only those builds. They have
+# none of the other tests of the module.
+add_test(NAME GeoZoneStubCheck COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneStubCheck.cmake)
+set_tests_properties(GeoZoneStubCheck PROPERTIES LABELS "geozone;core")
 if(QGC_DISABLE_GEOZONE)
     return()
 endif()

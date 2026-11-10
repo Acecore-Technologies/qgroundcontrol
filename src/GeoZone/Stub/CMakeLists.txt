@@ -1,7 +1,8 @@
 # Builds without geozones (-DQGC_DISABLE_GEOZONE=ON) leave out the module and use this stub of its QML module instead,
 # so that the QML of QGroundControl importing QGroundControl.GeoZone loads unchanged: the types placed in its views,
 # hidden and doing nothing, and the GeoZoneManager singleton hiding the Geozones settings page, whose hidden button still
-# loads the module's icon.
+# loads the module's icon. The GeoZoneStubCheck test (test/GeoZone/GeoZoneStubCheck.cmake) checks that the stubs declare
+# what that QML uses.
 qt_add_library(GeoZoneStubModule STATIC)
 
 set_source_files_properties(GeoZoneManager.qml PROPERTIES
