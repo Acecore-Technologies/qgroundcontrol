@@ -50,6 +50,10 @@ const QList<Field> &fields()
         { "verticalSafetyMargin", &Profile::verticalSafetyMargin, 0, false },
         { "minDistance", &Profile::minDistance, 0, false },
         { "minVerticalDistance", &Profile::minVerticalDistance, 0, false },
+        { "fenceWarningMargin", &Profile::fenceWarningMargin, 0, false },
+        { "minSatellites", &Profile::minSatellites, 0, false },
+        { "maxHdop", &Profile::maxHdop, 0, true },
+        { "maxHorizontalAccuracy", &Profile::maxHorizontalAccuracy, 0, true },
     };
     return list;
 }

@@ -78,7 +78,7 @@ Item {
         anchors.left:   geoZoneIcon.left
         text:           "!"
         textColor:      _red ? "white" : "black"
-        color:          _red ? qgcPal.colorRed : qgcPal.colorOrange
+        color:          _red ? GeoZoneStyle.warningColor : GeoZoneStyle.cautionColor
         visible:        control._awareness !== GeoZoneAwareness.Available || control._outdated
     }
 
@@ -88,9 +88,9 @@ Item {
         anchors.top:    parent.top
         anchors.left:   geoZoneIcon.left
         text:           "\u2715"
-        textColor:      "white"
-        color:          control._groundLevel === GeoZoneIntendedLevel.Warning ? qgcPal.colorRed : qgcPal.colorOrange
-        visible:        control._groundLevel === GeoZoneIntendedLevel.Warning || control._groundLevel === GeoZoneIntendedLevel.Caution
+        textColor:      control._groundLevel === GeoZoneAlertLevel.Warning ? "white" : "black"
+        color:          GeoZoneStyle.levelColor(control._groundLevel)
+        visible:        control._groundLevel === GeoZoneAlertLevel.Warning || control._groundLevel === GeoZoneAlertLevel.Caution
     }
 
     // Alerts not acknowledged in the alert history

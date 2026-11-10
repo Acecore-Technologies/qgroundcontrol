@@ -73,6 +73,11 @@ public:
         double verticalSafetyMargin = 10;       ///< Meters vertically
         double minDistance = 100;               ///< Meters, the smallest horizontal distance threshold
         double minVerticalDistance = 30;        ///< Meters, the smallest vertical distance threshold
+        double fenceWarningMargin = 3;          ///< Seconds the geofence warning comes before the pilot reaction time
+        // GNSS quality below which geo-awareness is degraded, see GeoZoneAwareness
+        double minSatellites = 6;
+        double maxHdop = 5;
+        double maxHorizontalAccuracy = 5;       ///< Meters, as reported by the receiver
     };
 
     /// What the vehicle reports

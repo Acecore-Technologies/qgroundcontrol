@@ -245,6 +245,10 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::update(const Context &c
         return {};
     }
     _thresholds.setVehicleClass(GeoZoneVehicleThresholds::vehicleClass(vehicle->vehicleType()));
+    if (_fenceWarning) {
+        const GeoZoneAlertThresholds::Profile profile = GeoZoneAlertThresholds::profile(_thresholds.vehicleClass());
+        _fenceWarning->setWarningTime(profile.pilotReactionTime + profile.fenceWarningMargin);
+    }
     TerrainSource terrainSource = TerrainSource::Unknown;
     const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate(), &terrainSource);
     if (terrainSource != _terrainSource) {

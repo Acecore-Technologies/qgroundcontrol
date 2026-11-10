@@ -627,6 +627,11 @@ void GeoZoneEvaluatorTest::_testAlertThresholds()
     QCOMPARE(multirotor.positionErrorFactor, 2.0);
     QCOMPARE(multirotor.pilotReactionTime, 5.0);
     QCOMPARE(multirotor.automaticReactionTime, 3.0);
+    // The fence warning and the GNSS quality of geo-awareness are the manufacturer's too
+    QCOMPARE(multirotor.fenceWarningMargin, 3.0);
+    QCOMPARE(multirotor.minSatellites, 6.0);
+    QCOMPARE(multirotor.maxHdop, 5.0);
+    QCOMPARE(multirotor.maxHorizontalAccuracy, 5.0);
     QVERIFY(Thresholds::profile(QStringLiteral("fixedwing")).manoeuvre == Thresholds::Manoeuvre::Turn);
     QCOMPARE(Thresholds::profile(QStringLiteral("rover")).name, QStringLiteral("Generic vehicle"));
 
@@ -691,13 +696,16 @@ void GeoZoneEvaluatorTest::_testAlertThresholds()
     // Profiles of custom builds: the classes start from the default class, invalid values reject the file
     QString errorString;
     const QHash<QString, Thresholds::Profile> custom = Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": {
-        "default": { "name": "Ours", "pilotReactionTime": 6, "minDistance": 200 },
+        "default": { "name": "Ours", "pilotReactionTime": 6, "minDistance": 200, "maxHdop": 3, "fenceWarningMargin": 4 },
         "multirotor": { "deceleration": 4, "manoeuvre": "brake" } } })", &errorString);
     QVERIFY2(errorString.isEmpty(), qPrintable(errorString));
     QCOMPARE(custom.count(), 2);
     QCOMPARE(custom[QStringLiteral("multirotor")].pilotReactionTime, 6.0);
     QCOMPARE(custom[QStringLiteral("multirotor")].minDistance, 200.0);
     QCOMPARE(custom[QStringLiteral("multirotor")].deceleration, 4.0);
+    QCOMPARE(custom[QStringLiteral("multirotor")].maxHdop, 3.0);
+    QCOMPARE(custom[QStringLiteral("multirotor")].fenceWarningMargin, 4.0);
+    QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": { "default": { "maxHdop": 0 } } })").isEmpty());
     QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": { "multirotor": { "deceleration": 0 } } })", &errorString).isEmpty());
     QVERIFY(errorString.contains(QStringLiteral("deceleration")));
     QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": { "default": { "safetyMargin": -1 } } })").isEmpty());

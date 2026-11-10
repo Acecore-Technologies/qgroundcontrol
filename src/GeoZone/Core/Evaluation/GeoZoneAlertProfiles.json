@@ -20,7 +20,11 @@
             "safetyMargin": 20,
             "verticalSafetyMargin": 10,
             "minDistance": 100,
-            "minVerticalDistance": 30
+            "minVerticalDistance": 30,
+            "fenceWarningMargin": 3,
+            "minSatellites": 6,
+            "maxHdop": 5,
+            "maxHorizontalAccuracy": 5
         },
         "multirotor": {
             "name": "Multirotor",

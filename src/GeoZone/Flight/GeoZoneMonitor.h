@@ -296,10 +296,10 @@ public:
     /// @return true when the alerts of a vehicle approaching or entering a zone of the restriction ask whether the pilot
     ///         has the permission to fly there
     static bool asksPermission(GeoZone::Restriction restriction);
-    /// @return GeoZoneIntendedLevel::Level of an alert about a vehicle on the ground inside a zone of the restriction:
+    /// @return Level of an alert about a vehicle on the ground inside a zone of the restriction:
     ///         a warning for prohibited zones, a caution for the other restricted zones, and an advisory once the pilot
     ///         confirmed the permission or for U-space airspace
-    static int groundLevel(GeoZone::Restriction restriction, bool permitted);
+    static GeoZoneAlertLevel::Level groundLevel(GeoZone::Restriction restriction, bool permitted);
     /// @return Level of a vehicle in or near a zone, after EN 4709-003 Annex D: Warning inside a zone asking for the
     ///         permission (asksPermission() except conditional zones) or entering it imminently, Caution near it and in
     ///         or near U-space airspace, Advisory for conditional zones and zones approved or authorised for the vehicle

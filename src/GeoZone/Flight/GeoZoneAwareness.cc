@@ -8,7 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneAwareness.h"
-#include "GeoZoneIntendedLevel.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
@@ -108,17 +108,18 @@ GeoZoneAwareness::Status GeoZoneAwareness::evaluate(const Input &input)
 
     if (input.vehicle && !input.linkLost && input.gnss.known && (input.gnss.fixType >= 2)) {
         const Gnss &gnss = input.gnss;
+        const GnssLimits &limits = input.gnssLimits;
         QStringList poor;
         if (gnss.fixType < GnssLimits::minFixType) {
             poor.append(tr("2D fix"));
         }
-        if ((gnss.satellites >= 0) && (gnss.satellites < GnssLimits::minSatellites)) {
+        if ((gnss.satellites >= 0) && (gnss.satellites < limits.minSatellites)) {
             poor.append(tr("%n satellite(s)", nullptr, gnss.satellites));
         }
-        if (!std::isnan(gnss.hdop) && (gnss.hdop > GnssLimits::maxHdop)) {
+        if (!std::isnan(gnss.hdop) && (gnss.hdop > limits.maxHdop)) {
             poor.append(tr("HDOP %1").arg(gnss.hdop, 0, 'f', 1));
         }
-        if (!std::isnan(gnss.horizontalAccuracy) && (gnss.horizontalAccuracy > GnssLimits::maxHorizontalAccuracy)) {
+        if (!std::isnan(gnss.horizontalAccuracy) && (gnss.horizontalAccuracy > limits.maxHorizontalAccuracy)) {
             poor.append(tr("accuracy %1 m").arg(gnss.horizontalAccuracy, 0, 'f', 1));
         }
         if (!poor.isEmpty()) {
@@ -226,15 +227,15 @@ QString GeoZoneAwareness::alertMessage(State state, const QString &reasons)
     return tr("Geo-awareness available again");
 }
 
-int GeoZoneAwareness::alertLevel(State to)
+GeoZoneAlertLevel::Level GeoZoneAwareness::alertLevel(State to)
 {
     switch (to) {
     case Unavailable:
-        return GeoZoneIntendedLevel::Warning;
+        return GeoZoneAlertLevel::Warning;
     case Degraded:
-        return GeoZoneIntendedLevel::Caution;
+        return GeoZoneAlertLevel::Caution;
     case Available:
         break;
     }
-    return GeoZoneIntendedLevel::Advisory;
+    return GeoZoneAlertLevel::Advisory;
 }

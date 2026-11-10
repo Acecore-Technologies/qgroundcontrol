@@ -40,13 +40,13 @@ ToolIndicatorPage {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
     }
 
-    /// @return Color of a GeoZoneIntendedLevel
+    /// @return Color of a GeoZoneAlertLevel
     function _levelColor(level) {
-        return level === GeoZoneIntendedLevel.Warning ? qgcPal.colorRed : (level === GeoZoneIntendedLevel.Caution ? qgcPal.colorOrange : qgcPal.colorGrey)
+        return GeoZoneStyle.levelColor(level, qgcPal.colorGrey)
     }
 
     function _levelText(level) {
-        return level === GeoZoneIntendedLevel.Warning ? qsTr("WARNING") : (level === GeoZoneIntendedLevel.Caution ? qsTr("CAUTION") : qsTr("ADVISORY"))
+        return level === GeoZoneAlertLevel.Warning ? qsTr("WARNING") : (level === GeoZoneAlertLevel.Caution ? qsTr("CAUTION") : qsTr("ADVISORY"))
     }
 
     /// @return The alert thresholds of the active vehicle at its current speed, see GeoZoneVehicleMonitor.alertThresholds
@@ -84,8 +84,8 @@ ToolIndicatorPage {
                     Layout.alignment:   Qt.AlignTop
                     text:               control._monitor.awareness.stateText
                     textColor:          parent._state === GeoZoneAwareness.Degraded ? "black" : "white"
-                    color:              parent._state === GeoZoneAwareness.Unavailable ? qgcPal.colorRed :
-                                            (parent._state === GeoZoneAwareness.Degraded ? qgcPal.colorOrange : qgcPal.colorGreen)
+                    color:              parent._state === GeoZoneAwareness.Unavailable ? GeoZoneStyle.warningColor :
+                                            (parent._state === GeoZoneAwareness.Degraded ? GeoZoneStyle.cautionColor : qgcPal.colorGreen)
                 }
 
                 ColumnLayout {
@@ -122,16 +122,16 @@ ToolIndicatorPage {
 
                 GeoZoneBadge {
                     Layout.alignment:   Qt.AlignTop
-                    text:               control._levelText(control._active?.groundLevel ?? 0)
+                    text:               control._levelText(control._active?.groundLevel ?? GeoZoneAlertLevel.Advisory)
                     textColor:          "white"
-                    color:              control._levelColor(control._active?.groundLevel ?? 0)
+                    color:              control._levelColor(control._active?.groundLevel ?? GeoZoneAlertLevel.Advisory)
                 }
 
                 QGCLabel {
                     Layout.fillWidth:   true
                     wrapMode:           Text.WordWrap
                     textFormat:         Text.PlainText
-                    font.bold:          (control._active?.groundLevel ?? 0) !== GeoZoneIntendedLevel.Advisory
+                    font.bold:          (control._active?.groundLevel ?? GeoZoneAlertLevel.Advisory) !== GeoZoneAlertLevel.Advisory
                     text:               control._active?.groundWarning ?? ""
                 }
             }

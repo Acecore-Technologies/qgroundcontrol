@@ -15,7 +15,7 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneInfo.h"
-#include "GeoZoneIntendedLevel.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionReader.h"
 #include "GeoZoneMonitor.h"
@@ -376,9 +376,9 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::takeoffItem(const GeoZoneVehi
         return { Passed, tr("The vehicle isn't inside a restricted geozone.") };
     }
     switch (monitor->groundLevel()) {
-    case GeoZoneIntendedLevel::Warning:
+    case GeoZoneAlertLevel::Warning:
         return { Failed, warning + QLatin1Char('.') };
-    case GeoZoneIntendedLevel::Caution:
+    case GeoZoneAlertLevel::Caution:
         return { Warning, warning + QLatin1Char('.') };
     default:
         break;

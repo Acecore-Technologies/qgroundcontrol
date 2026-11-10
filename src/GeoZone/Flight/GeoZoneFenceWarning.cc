@@ -261,7 +261,7 @@ void GeoZoneFenceWarning::evaluate(const QGeoCoordinate &coordinate, double alti
         fence.minAltitude = qQNaN();
     }
     // Ends a little after it would start, so that it doesn't flicker
-    _setBreach(GeoZoneFencePrediction::predict(fence, coordinate, altitude, velocity, active() ? (warningTime + endDelay) : warningTime));
+    _setBreach(GeoZoneFencePrediction::predict(fence, coordinate, altitude, velocity, active() ? (_warningTime + endDelay) : _warningTime));
 }
 
 void GeoZoneFenceWarning::_setBreach(const std::optional<GeoZoneFencePrediction::Breach> &breach)

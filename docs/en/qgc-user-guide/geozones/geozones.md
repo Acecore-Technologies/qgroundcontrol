@@ -557,7 +557,7 @@ Geo-awareness only works with current zone data and a good position of the vehic
 | The last update of a source failed, like a feed download | Degraded |
 | No source has zones around the vehicle position (by the bounds of its zones, or the area of a service) | Degraded |
 
-The GNSS limits are set by the manufacturer (`GeoZoneAwareness::GnssLimits`); the vehicle's own GNSS checks apply as well. When geo-awareness isn't available, the geozone indicator shows a **!** badge, orange when degraded and red when unavailable, and is dimmed when unavailable; the indicator is shown whenever a vehicle is connected, also without zones. The [pre-flight checklist](#pre-flight-checklist) has a **Geo-awareness** item.
+The GNSS limits are set by the manufacturer for each vehicle type in the [alert profiles](#alert-thresholds) (`minSatellites`, `maxHdop`, `maxHorizontalAccuracy`); the vehicle's own GNSS checks apply as well. When geo-awareness isn't available, the geozone indicator shows a **!** badge, orange when degraded and red when unavailable, and is dimmed when unavailable; the indicator is shown whenever a vehicle is connected, also without zones. The [pre-flight checklist](#pre-flight-checklist) has a **Geo-awareness** item.
 
 While a vehicle is armed, a change of state that lasts (2 seconds, 5 seconds when it gets better) is alerted once, shown, spoken and logged (event `geo_awareness`, with the state as the zone identifier and the reasons as its name): a warning when it becomes unavailable ("Geo-awareness unavailable: telemetry link lost"), a caution when it is degraded ("Geo-awareness degraded: GNSS poor (2D fix)"), and an advisory when it is available again ("Geo-awareness available again"). Arming without geo-awareness is alerted the same way. On the ground only the indicator and the checklist show it.
 
@@ -584,6 +584,8 @@ The default profiles, which are conservative:
 | Wind / vertical wind | 10 / 1 m/s | 8 / 1 m/s | 12 / 2 m/s | 10 / 1 m/s |
 | Safety margin, horizontal / vertical | 20 m / 10 m | 10 m / 10 m | 20 m / 10 m | 20 m / 10 m |
 | Minimum distance, horizontal / vertical | 100 m / 30 m | 100 m / 30 m | 150 m / 30 m | 100 m / 30 m |
+| Geofence warning margin (`fenceWarningMargin`, added to the pilot reaction time, see [Vehicle Fence Breaches](#vehicle-fence-breaches)) | 3 s | 3 s | 3 s | 3 s |
+| GNSS quality for [geo-awareness](#geo-awareness): satellites / HDOP / accuracy (`minSatellites`, `maxHdop`, `maxHorizontalAccuracy`) | 6 / 5 / 5 m | 6 / 5 / 5 m | 6 / 5 / 5 m | 6 / 5 / 5 m |
 
 For example a multirotor at 15 m/s without reported accuracy is warned 253 m or 20 s ahead, and when hovering 100 m away or 45 m below or above a zone. The geozone indicator page shows the current thresholds of the active vehicle, like "Warning 253 m / 20 s ahead at 15 m/s, 45 m above or below (Multirotor, 5 s reaction)", and the [alert log](#alert-log) records them with each alert.
 
@@ -651,7 +653,7 @@ When a vehicle reports a breach of its own fence (MAVLink `FENCE_STATUS`), _QGro
 | Override | Flight mode change (Hold: mode switch only); termination can't be overridden | Flight mode change (10 s manual recovery), unless `FENCE_OPTIONS` bit 0; disabling the fence |
 | In _QGroundControl_ | Fence import capacity 64 points; geofence warning; breach alert; **Take Control** (_Position_) | Fence import capacity estimated or from the SD card; geofence warning with the margin; breach alert; **Take Control** (_Loiter_), **Disable Fence** |
 
-In both cases a flight towards a fenced zone gives, in this order: the geozone approach alert (spoken, asking for the permission for restricted zones), the geofence warning about 8 seconds before the fence (red, above the geozone alerts, spoken), then the breach alert when the vehicle reports it, which replaces the warning. The vehicle stops at the fence, before the zone, so there is no entry alert. The breach is announced by _QGroundControl_ and the vehicle ("boundary fence breached", the new flight mode), not repeated by the geozone alerts.
+In both cases a flight towards a fenced zone gives, in this order: the geozone approach alert (spoken, asking for the permission for restricted zones), the geofence warning about 8 seconds before the fence (with the default profile) (red, above the geozone alerts, spoken), then the breach alert when the vehicle reports it, which replaces the warning. The vehicle stops at the fence, before the zone, so there is no entry alert. The breach is announced by _QGroundControl_ and the vehicle ("boundary fence breached", the new flight mode), not repeated by the geozone alerts.
 
 #### Geofence Warning {#geofence-warning}
 
@@ -660,7 +662,7 @@ Before the vehicle's own fence makes it act, a dedicated **Geofence** warning te
 - **ArduPilot**: the fences of `FENCE_TYPE` (polygons and circles, the `FENCE_RADIUS` circle around home, `FENCE_ALT_MAX` and `FENCE_ALT_MIN` above home), counting `FENCE_MARGIN` (or `FENCE_MARGIN_XY` horizontally) as part of the fence, and inclusion fences as their intersection, or their union with `FENCE_OPTIONS` bit 1. The fence is enabled with `FENCE_ENABLE`, or `FENCE_AUTOENABLE` once armed.
 - **PX4**: the polygons and circles, inclusion fences as their union, `GF_MAX_HOR_DIST` from home and `GF_MAX_VER_DIST` above home, unless `GF_ACTION` is None.
 
-When the vehicle would reach the fence within 8 seconds (a reaction time of 5 seconds, EN 4709-003 Annex A, plus 3 seconds to act), the alert popup shows the warning above the geozone alerts, like "Geofence: RTL or land in 6 s, 42 m ahead", with:
+When the vehicle would reach the fence within the pilot reaction time of its [alert profile](#alert-thresholds) plus its `fenceWarningMargin` (8 seconds by default: a reaction time of 5 seconds, EN 4709-003 Annex A, plus 3 seconds to act), the alert popup shows the warning above the geozone alerts, like "Geofence: RTL or land in 6 s, 42 m ahead", with:
 
 - the **manoeuvre** the autopilot then takes, from `FENCE_ACTION` (ArduPilot Copter: report only, RTL or land, land, SmartRTL or RTL or land, brake or land, SmartRTL or land; Plane and Rover have their own actions) or `GF_ACTION` (PX4: none, warning, hold, return, flight termination, land);
 - the estimated **time** to the fence and the **distance** to it along the direction of travel, counting down;

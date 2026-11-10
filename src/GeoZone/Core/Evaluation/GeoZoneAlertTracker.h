@@ -100,10 +100,13 @@ public:
     void reset()
     {
         _states.clear();
+        _entries.clear();
         _previousPosition = GeoZone::Position();
     }
-    /// Forgets the states of zones by GeoZone::key, like zones whose data changed, so that they alert again
-    void forget(const QSet<QString> &zoneKeys);
+    /// Forgets the states of zones by GeoZone::key, like zones whose data changed, so that they alert again. With
+    /// asEntry, like for a withdrawn permit, a vehicle inside them is alerted as having entered them, not as their
+    /// activation.
+    void forget(const QSet<QString> &zoneKeys, bool asEntry = false);
 
     /// @return Straight path from the position at the velocity for the seconds, with the terrain along it from
     ///         GeoZoneTerrain where it is loaded, unknown elsewhere
@@ -122,6 +125,7 @@ private:
     };
 
     QHash<QString, State> _states;  ///< Zones which are not Away by GeoZone::key
+    QSet<QString> _entries;         ///< Zones forgotten to alert as entries until the next update, see forget()
     GeoZone::Position _previousPosition;    ///< Of the previous update, invalid before
 };
 

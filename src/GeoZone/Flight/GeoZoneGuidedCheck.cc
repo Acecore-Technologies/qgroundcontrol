@@ -9,7 +9,7 @@
 
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneEnvironment.h"
-#include "GeoZoneIntendedLevel.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionReader.h"
@@ -172,7 +172,7 @@ QString GeoZoneGuidedCheck::returnWarning(Vehicle *guidedVehicle, MissionControl
 QString GeoZoneGuidedCheck::groundWarning(Vehicle *vehicle) const
 {
     const GeoZoneVehicleMonitor *const monitor = _monitor ? _monitor->vehicleMonitor(vehicle) : nullptr;
-    if (!monitor || !monitor->onGround() || (monitor->groundLevel() == GeoZoneIntendedLevel::Advisory)) {
+    if (!monitor || !monitor->onGround() || (monitor->groundLevel() == GeoZoneAlertLevel::Advisory)) {
         return QString();
     }
     return monitor->groundWarning();

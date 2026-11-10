@@ -73,7 +73,7 @@ class GeoZoneVehicleMonitor : public QObject
     /// Why the vehicle on the ground mustn't take off, or needs a permission, like "On the ground inside prohibited
     /// geozone P — take-off not allowed here", empty when it isn't on the ground inside a restricted zone
     Q_PROPERTY(QString          groundWarning       READ groundWarning      NOTIFY groundStatusChanged FINAL)
-    Q_PROPERTY(int              groundLevel         READ groundLevel        NOTIFY groundStatusChanged FINAL)    ///< GeoZoneAwareness::Level of groundWarning
+    Q_PROPERTY(int              groundLevel         READ groundLevel        NOTIFY groundStatusChanged FINAL)    ///< GeoZoneAlertLevel::Level of groundWarning
     /// Warns before the vehicle breaches its own fence, null for positions passed to evaluate()
     Q_PROPERTY(GeoZoneFenceWarning *fenceWarning    READ fenceWarning       CONSTANT FINAL)
     /// Alert thresholds of the last evaluation, see GeoZoneVehicleThresholds::toVariantMap, empty while the limits are fixed
@@ -193,7 +193,7 @@ public:
     /// Forgets the zones of a source which are about to be deleted, keeping their alert states
     void forgetZones(const QString &sourceKey);
     /// Forgets the alert states of zones by GeoZone::key, like zones whose data changed, so that they alert again
-    void forgetStates(const QSet<QString> &zoneKeys) { _alerts.forget(zoneKeys); }
+    void forgetStates(const QSet<QString> &zoneKeys, bool asEntry = false) { _alerts.forget(zoneKeys, asEntry); }
 
     /// @return Position of the vehicle with its altitude above mean sea level and the terrain elevation from its
     ///         altitude above terrain or GeoZoneTerrain, which is unknown without terrain data
@@ -274,5 +274,5 @@ private:
     GeoZoneAwareness::Gnss _gnss;
     qint64 _gnssMSecs = -1;                 ///< Last GPS_RAW_INT, -1 without
     QString _groundWarning;
-    int _groundLevel = 0;
+    int _groundLevel = GeoZoneAlertLevel::Advisory;
 };

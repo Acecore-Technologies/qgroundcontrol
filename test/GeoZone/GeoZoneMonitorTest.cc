@@ -9,9 +9,9 @@
 
 #include "GeoZoneMonitorTest.h"
 #include "GeoZoneAlertHistory.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneFenceWarning.h"
 #include "GeoZoneFences.h"
-#include "GeoZoneIntendedLevel.h"
 #include "GeoZoneNearbyModel.h"
 #include "GeoZonePermits.h"
 #include "GeoZoneTestBase.h"
@@ -958,7 +958,8 @@ void GeoZoneMonitorTest::_testFenceWarning()
         const GeoZoneAlertModel::Alert shown = monitor.alertModel()->alerts().first();
         QCOMPARE(shown.message, text);
         QCOMPARE(shown.severity, -1);
-        QCOMPARE(sink->spoken, QStringList({ text }));
+        QCOMPARE(shown.level, GeoZoneAlertLevel::Warning);
+        QCOMPARE(sink->spoken, QStringList({ QStringLiteral("Warning: ") + text }));
         QCOMPARE(eventSpy.count(), 1);
         const GeoZoneMonitor::AlertEvent event = eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>();
         QCOMPARE(event.kind, GeoZoneMonitor::AlertEvent::FenceWarning);
@@ -1061,9 +1062,7 @@ void GeoZoneMonitorTest::_testFenceAlertSequence()
     qint64 now = 0;
     monitor.setClock([&now]() { return now; });
     GeoZoneMonitor::Settings settings;
-    settings.limits.distance = 100;
-    settings.limits.verticalDistance = 30;
-    settings.limits.time = 30;
+    settings.limits = GeoZoneAlertTracker::Limits{ 100, 30, 30 };
     monitor.setSettings(settings);
     const auto sink = std::make_shared<RecordingAudioSink>();
     monitor.setAudioSink(sink);
@@ -1107,7 +1106,7 @@ void GeoZoneMonitorTest::_testFenceAlertSequence()
     }
     QCOMPARE(kinds(), (QList<GeoZoneMonitor::AlertEvent::Kind>{ GeoZoneMonitor::AlertEvent::Approach }));
     QCOMPARE(sink->spoken.count(), 1);
-    QVERIFY(sink->spoken.first().startsWith(QStringLiteral("Approaching geozone P")));
+    QVERIFY(sink->spoken.first().startsWith(QStringLiteral("Caution: Approaching geozone P")));
     QVERIFY(!vehicleMonitor->fenceWarning()->active());
 
     // Then the fence warning, above the zone alert and spoken at once, more urgent than the last announcement
@@ -1117,7 +1116,7 @@ void GeoZoneMonitorTest::_testFenceAlertSequence()
     QVERIFY(vehicleMonitor->fenceWarning()->active());
     QCOMPARE(kinds(), (QList<GeoZoneMonitor::AlertEvent::Kind>{ GeoZoneMonitor::AlertEvent::Approach, GeoZoneMonitor::AlertEvent::FenceWarning }));
     QCOMPARE(sink->spoken.count(), 2);
-    QVERIFY2(sink->spoken.last().startsWith(QStringLiteral("Geofence: RTL or land in ")), qPrintable(sink->spoken.last()));
+    QVERIFY2(sink->spoken.last().startsWith(QStringLiteral("Warning: Geofence: RTL or land in ")), qPrintable(sink->spoken.last()));
     QList<GeoZoneAlertModel::Alert> shown = monitor.alertModel()->alerts();
     QCOMPARE(shown.count(), 2);
     QVERIFY(shown[0].message.startsWith(QStringLiteral("Geofence: RTL or land in ")));
@@ -1917,13 +1916,13 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     const QString onGround = QStringLiteral("On the ground inside prohibited geozone P \u2014 take-off not allowed here");
     QCOMPARE(alertSpy.count(), 1);
     QCOMPARE(alertSpy.last()[0].toString(), onGround);
-    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::Prohibited));
-    QCOMPARE(sink->spoken.last(), onGround);
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneAlertLevel::severity(GeoZoneAlertLevel::Warning, GeoZone::restrictionSeverity(GeoZone::Prohibited)));
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Warning: ") + onGround);
     const GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::OnGround);
     QVERIFY(shownAlert(monitor, event.id)->question);
     QCOMPARE(vehicle->groundWarning(), onGround);
-    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Warning));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
     QCOMPARE(monitor.arbiter().breachCount(), 1);
 
     // Logged as such and read back
@@ -1964,7 +1963,7 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     // The pilot confirming the permission ends the warning and the alerts, until the vehicle leaves the zone
     vehicle->setArmed(false);
     monitor.approveAlert(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().id);
-    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
     QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone P (Prohibited), permission confirmed"));
     QCOMPARE(monitor.arbiter().breachCount(), 0);
     now += GeoZoneMonitor::armingAlertIntervalMSecs;
@@ -1975,10 +1974,10 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     vehicle->setArmed(false);
     monitor.evaluate({ authorisationCenter, 400, 400 }, vehicleId);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("On the ground inside geozone A (Authorisation required) \u2014 take-off only with an authorisation"));
-    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
-    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Caution));
-    QCOMPARE(GeoZoneMonitor::groundLevel(GeoZone::ReqAuthorisation, true), static_cast<int>(GeoZoneIntendedLevel::Advisory));
-    QCOMPARE(GeoZoneMonitor::groundLevel(GeoZone::USpace, false), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneAlertLevel::severity(GeoZoneAlertLevel::Caution, GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation)));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Caution));
+    QCOMPARE(GeoZoneMonitor::groundLevel(GeoZone::ReqAuthorisation, true), static_cast<int>(GeoZoneAlertLevel::Advisory));
+    QCOMPARE(GeoZoneMonitor::groundLevel(GeoZone::USpace, false), static_cast<int>(GeoZoneAlertLevel::Advisory));
 
     // A flying vehicle enters zones, and a vehicle whose armed state isn't known isn't on the ground
     vehicle->setArmed(true);
@@ -2015,6 +2014,8 @@ void GeoZoneMonitorTest::_testAwareness()
     QVERIFY(check([](Awareness::Input &in) { in.gnss.fixType = 2; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (2D fix)")));
     QVERIFY(check([](Awareness::Input &in) { in.gnss.satellites = 4; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (4 satellite(s))")));
     QVERIFY(check([](Awareness::Input &in) { in.gnss.hdop = 6.5; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (HDOP 6.5)")));
+    // The manufacturer's profile sets the limits
+    QVERIFY(check([](Awareness::Input &in) { in.gnss.hdop = 6.5; in.gnssLimits.maxHdop = 8; }, Awareness::Available, QStringLiteral("Geo-awareness available")));
     QVERIFY(check([](Awareness::Input &in) { in.gnss.horizontalAccuracy = 8; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (accuracy 8.0 m)")));
     QVERIFY(check([](Awareness::Input &in) { in.gnss.fixType = 1; }, Awareness::Unavailable, QStringLiteral("Geo-awareness unavailable: GNSS lost (no fix)")));
     QVERIFY(check([](Awareness::Input &in) { in.positionUnavailable = true; }, Awareness::Unavailable, QStringLiteral("Geo-awareness unavailable: no current vehicle position")));
@@ -2049,9 +2050,9 @@ void GeoZoneMonitorTest::_testAwareness()
     QVERIFY(!tracker.update(Awareness::Status(), true, 23000 + Awareness::Tracker::betterSettleMSecs - 1));
     change = tracker.update(Awareness::Status(), true, 23000 + Awareness::Tracker::betterSettleMSecs);
     QVERIFY(change && (change->to == Awareness::Available));
-    QCOMPARE(Awareness::alertLevel(Awareness::Unavailable), static_cast<int>(GeoZoneIntendedLevel::Warning));
-    QCOMPARE(Awareness::alertLevel(Awareness::Degraded), static_cast<int>(GeoZoneIntendedLevel::Caution));
-    QCOMPARE(Awareness::alertLevel(Awareness::Available), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(Awareness::alertLevel(Awareness::Unavailable), static_cast<int>(GeoZoneAlertLevel::Warning));
+    QCOMPARE(Awareness::alertLevel(Awareness::Degraded), static_cast<int>(GeoZoneAlertLevel::Caution));
+    QCOMPARE(Awareness::alertLevel(Awareness::Available), static_cast<int>(GeoZoneAlertLevel::Advisory));
 
     // A flying vehicle near the zones of a feed, current a day after it was issued
     ScopedEnvironment environment;
@@ -2116,8 +2117,8 @@ void GeoZoneMonitorTest::_testAwareness()
     step(Awareness::Tracker::worseSettleMSecs);
     const QString lost = QStringLiteral("Geo-awareness unavailable: GNSS lost (no fix)");
     QCOMPARE(awarenessAlerts(), QStringList{ lost });
-    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::Prohibited));
-    QCOMPARE(sink->spoken.last(), lost);
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneAlertLevel::severity(GeoZoneAlertLevel::Warning, 0));
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Warning: ") + lost);
     const GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Awareness);
     const QString line = GeoZoneAlertHistory::logLine(event);
@@ -2133,7 +2134,7 @@ void GeoZoneMonitorTest::_testAwareness()
     step(1000);
     step(Awareness::Tracker::betterSettleMSecs);
     QCOMPARE(awarenessAlerts().last(), QStringLiteral("Geo-awareness available again"));
-    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::NoRestriction));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneAlertLevel::severity(GeoZoneAlertLevel::Advisory, 0));
 
     // A refresh of the feed which fails degrades it, a caution
     server.okPathStatus = "503 Service Unavailable";
@@ -2143,7 +2144,7 @@ void GeoZoneMonitorTest::_testAwareness()
     step(1000);
     step(Awareness::Tracker::worseSettleMSecs);
     QCOMPARE(awarenessAlerts().last(), QStringLiteral("Geo-awareness degraded: update of %1 failed").arg(feed->name()));
-    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneAlertLevel::severity(GeoZoneAlertLevel::Caution, 0));
     QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(Awareness::Degraded));
 
     // On the ground nothing is alerted, the state is still published
@@ -2164,10 +2165,6 @@ void GeoZoneMonitorTest::_testAwareness()
 void GeoZoneMonitorTest::_testPermits()
 {
     ScopedEnvironment environment;
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
-    settings->logAlerts()->setRawValue(true);
-
     // A zone requiring an authorisation, one requiring a notification and a prohibited zone
     const QGeoCoordinate center(47, 8);
     const QGeoCoordinate notificationCenter = center.atDistanceAndAzimuth(3000, 90);
@@ -2225,7 +2222,7 @@ void GeoZoneMonitorTest::_testPermits()
     monitor.evaluate({ center, 450, 400 }, vehicleId);
     QCOMPARE(alertSpy.count(), 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone A (Authorisation required) \u2014 permit acknowledged"));
-    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneIntendedLevel::severity(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZoneAlertLevel::severity(GeoZoneAlertLevel::Advisory, GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation)));
     QVERIFY(!shownAlert(monitor, monitor.alertModel()->alerts().first().alertId)->question);
     QVERIFY(sink->spoken.isEmpty());
     QCOMPARE(log.unacknowledgedCount(), 0);
@@ -2233,7 +2230,7 @@ void GeoZoneMonitorTest::_testPermits()
     // In flight, "I do" for a zone requiring a notification is its permit, the prohibited zone keeps the approval
     monitor.evaluate({ notificationCenter, 450, 400 }, vehicleId);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone N (Conditional)"));
-    const int notificationAlert = monitor.alertModel()->alerts().first().alertId;
+    const int notificationAlert = alertSpy.last()[2].toInt();
     QVERIFY(shownAlert(monitor, notificationAlert)->question);
     monitor.approveAlert(notificationAlert);
     QCOMPARE(permits->count(), 2);
@@ -2256,19 +2253,19 @@ void GeoZoneMonitorTest::_testPermits()
     QCOMPARE(permits->count(), 1);
     monitor.evaluate({ notificationCenter, 450, 400 }, vehicleId);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Entered geozone N (Conditional)"));
-    QVERIFY(shownAlert(monitor, monitor.alertModel()->alerts().first().alertId)->question);
+    QVERIFY(shownAlert(monitor, alertSpy.last()[2].toInt())->question);
 
     // The flight ends when the vehicle disarms after having been armed, which ends the permits
     monitor.evaluate({ center, 450, 400 }, vehicleId);
     vehicle->setArmed(false);
     QCOMPARE(permits->count(), 0);
     QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone A (Authorisation required) \u2014 take-off only with an authorisation"));
-    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Caution));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Caution));
 
     // With a permit for the next flight, from the checklist, take-off is allowed
     QVERIFY(permits->acknowledge(zone(QStringLiteral("A")), GeoZonePermits::Checklist, vehicleId));
     QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone A (Authorisation required) \u2014 permit acknowledged"));
-    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
     vehicle->setArmed(true);
     QCOMPARE(permits->count(), 1);
 

@@ -29,7 +29,7 @@ class Vehicle;
 /// fence action (6.2.1). While the vehicle's fence is enabled, each position the vehicle reports (GLOBAL_POSITION_INT)
 /// is checked with its velocity against the fence the vehicle stores (its GeoFenceManager) and the circle around home
 /// and altitude limits of its parameters, see GeoZoneFencePrediction: when the vehicle would breach it within
-/// warningTime, the warning is active with the manoeuvre the autopilot then takes (PX4 GF_ACTION, ArduPilot
+/// warningTime(), the warning is active with the manoeuvre the autopilot then takes (PX4 GF_ACTION, ArduPilot
 /// FENCE_ACTION), the time and the distance to the fence along the velocity and where the vehicle reaches it.
 /// GeoZoneMonitor shows, speaks and logs it. One per vehicle, see GeoZoneVehicleMonitor::fenceWarning.
 ///
@@ -39,7 +39,7 @@ class GeoZoneFenceWarning : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(bool             active          READ active             NOTIFY warningChanged FINAL)    ///< A breach is predicted within warningTime
+    Q_PROPERTY(bool             active          READ active             NOTIFY warningChanged FINAL)    ///< A breach is predicted within warningTime()
     Q_PROPERTY(QString          text            READ text               NOTIFY warningChanged FINAL)    ///< Like "Geofence: RTL or land in 6 s, 42 m ahead", empty when inactive
     Q_PROPERTY(int              timeToFence     READ timeToFence        NOTIFY warningChanged FINAL)    ///< Seconds, -1 when inactive
     Q_PROPERTY(double           distanceToFence READ distanceToFence    NOTIFY warningChanged FINAL)    ///< Meters along the velocity, NaN when inactive
@@ -59,10 +59,8 @@ public:
     /// @return Monotonic milliseconds
     using Clock = std::function<qint64()>;
 
-    static constexpr double reactionTime = 5;       ///< Seconds a pilot takes to react, EN 4709-003 Annex A
-    static constexpr double warningMargin = 3;      ///< Seconds the pilot has more to act on the warning
-    static constexpr double warningTime = reactionTime + warningMargin;    ///< Before the predicted breach
-    static constexpr double endDelay = 2;           ///< Seconds after warningTime an active warning ends, so it doesn't flicker
+    static constexpr double defaultWarningTime = 8; ///< Seconds, the default profile's pilot reaction time and fence warning margin
+    static constexpr double endDelay = 2;           ///< Seconds after warningTime() an active warning ends, so it doesn't flicker
     static constexpr int minEvaluateIntervalMSecs = 250;    ///< Between the positions evaluated
 
     enum class Firmware {
@@ -102,6 +100,11 @@ public:
     /// Uses the config instead of the vehicle's, like tests do
     void setConfig(const Config &config);
     const Config &config() const { return _config; }
+
+    /// Seconds before the predicted breach the warning comes: the pilot reaction time of the vehicle's alert profile
+    /// (EN 4709-003 Annex A) and its fence warning margin, see GeoZoneAlertThresholds::Profile
+    double warningTime() const { return _warningTime; }
+    void setWarningTime(double seconds) { _warningTime = seconds; }
 
     /// Evaluates the position of GLOBAL_POSITION_INT messages, at most every minEvaluateIntervalMSecs, with the
     /// velocity the vehicle reports or, when it reports none, estimated from its positions
@@ -148,7 +151,7 @@ public:
 
 signals:
     void warningChanged();
-    /// A breach became predicted within warningTime
+    /// A breach became predicted within warningTime()
     void warningStarted(const QString &text);
     void warningEnded();
     void configChanged();
@@ -164,6 +167,7 @@ private:
     QPointer<Vehicle> _vehicle;
     Clock _clock;
     Config _config;
+    double _warningTime = defaultWarningTime;
     bool _fixedConfig = false;
     QObject *_parameterConnections = nullptr;   ///< Receiver of the fence parameters' changes, replaced to disconnect them
     std::optional<GeoZoneFencePrediction::Breach> _breach;

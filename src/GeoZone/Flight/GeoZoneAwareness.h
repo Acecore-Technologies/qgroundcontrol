@@ -18,6 +18,9 @@
 
 #include <optional>
 
+#include "GeoZoneAlertLevel.h"
+#include "GeoZoneAlertThresholds.h"
+
 class GeoZoneManager;
 
 /// Whether geo-awareness is available for a vehicle (EN 4709-003 §5.2.3): zones are loaded, current, updated and cover
@@ -53,12 +56,19 @@ public:
         NotCovered,     ///< No source has zones around the vehicle position
     };
 
-    /// GNSS fix below which geo-awareness is degraded, set by the manufacturer
+    /// GNSS fix below which geo-awareness is degraded, set by the manufacturer in the alert profile of the vehicle
+    /// class, see GeoZoneAlertThresholds::Profile
     struct GnssLimits {
-        static constexpr int minFixType = 3;                    ///< GPS_FIX_TYPE_3D_FIX
-        static constexpr int minSatellites = 6;
-        static constexpr double maxHdop = 5;                    ///< Worse than "moderate"
-        static constexpr double maxHorizontalAccuracy = 5;      ///< Meters, as reported by the receiver
+        static constexpr int minFixType = 3;    ///< GPS_FIX_TYPE_3D_FIX
+        double minSatellites = 6;
+        double maxHdop = 5;                     ///< Worse than "moderate"
+        double maxHorizontalAccuracy = 5;       ///< Meters, as reported by the receiver
+
+        /// @return The limits of the profile
+        static GnssLimits fromProfile(const GeoZoneAlertThresholds::Profile &profile)
+        {
+            return GnssLimits{ profile.minSatellites, profile.maxHdop, profile.maxHorizontalAccuracy };
+        }
     };
 
     /// GNSS status the vehicle reports with GPS_RAW_INT
@@ -81,6 +91,7 @@ public:
         bool positionUnavailable = false;
         std::optional<bool> covered;    ///< A source covers the vehicle position, unknown without position or zones
         Gnss gnss;
+        GnssLimits gnssLimits;          ///< Of the vehicle's profile
     };
 
     struct Issue {
@@ -145,9 +156,9 @@ public:
     ///         link lost", or "Geo-awareness available again"
     /// @param reasons Of the state, joined
     static QString alertMessage(State state, const QString &reasons);
-    /// @return GeoZoneIntendedLevel::Level of the alert of a change of state: a warning when it becomes unavailable, a
+    /// @return Level of the alert of a change of state: a warning when it becomes unavailable, a
     ///         caution when it is degraded, an advisory when it is available again
-    static int alertLevel(State to);
+    static GeoZoneAlertLevel::Level alertLevel(State to);
 
     const Status &status() const { return _status; }
     /// Publishes the status, of the active vehicle

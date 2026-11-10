@@ -85,7 +85,8 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         update.nearby.append(Nearby{ zone, inside, static_cast<int>(std::lround(distance)), std::isnan(entryTime) ? -1 : static_cast<int>(std::lround(entryTime)) });
         if (state > previous) {
             // Inside at the previous position, where the zone didn't apply
-            const bool activated = inside && (previous == State::Away) && _previousPosition.coordinate.isValid() && zone->contains(_previousPosition);
+            const bool activated = inside && (previous == State::Away) && _previousPosition.coordinate.isValid() && zone->contains(_previousPosition) &&
+                                   !_entries.contains(key);
             update.alerts.append(Alert{ zone, inside, !inside && (state == State::Imminent), activated, inside ? 0 : distance, entryTime });
         }
     }
@@ -95,6 +96,7 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         it = nearbyZones.contains(it.key()) ? std::next(it) : _states.erase(it);
     }
     _previousPosition = position;
+    _entries.clear();
 
     std::stable_sort(update.alerts.begin(), update.alerts.end(), [](const Alert &a, const Alert &b) {
         const int severityA = GeoZone::restrictionSeverity(a.zone->restriction());
@@ -118,10 +120,13 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     return update;
 }
 
-void GeoZoneAlertTracker::forget(const QSet<QString> &zoneKeys)
+void GeoZoneAlertTracker::forget(const QSet<QString> &zoneKeys, bool asEntry)
 {
     for (const QString &zoneKey : zoneKeys) {
         (void) _states.remove(zoneKey);
+    }
+    if (asEntry) {
+        _entries.unite(zoneKeys);
     }
 }
 

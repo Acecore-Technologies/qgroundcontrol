@@ -17,7 +17,7 @@
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneConformance.h"
 #include "GeoZoneInfo.h"
-#include "GeoZoneIntendedLevel.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionReader.h"
@@ -1007,7 +1007,7 @@ void GeoZoneFlightTest::_testGroundInsideZone()
         QVERIFY(!vehicle->armed());
         QVERIFY(monitor.activeMonitor()->onGround());
         QCOMPARE(monitor.activeMonitor()->groundWarning(), onGround);
-        QCOMPARE(monitor.activeMonitor()->groundLevel(), static_cast<int>(GeoZoneIntendedLevel::Warning));
+        QCOMPARE(monitor.activeMonitor()->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
         QVERIFY(spiedAlerts(alertSpy).filter(QStringLiteral("Entered")).isEmpty());
 
         // The checklist fails and arming from the Fly View warns
