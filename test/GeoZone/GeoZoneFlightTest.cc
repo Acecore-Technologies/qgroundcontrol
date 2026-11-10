@@ -219,8 +219,11 @@ void GeoZoneFlightTest::_testFlightAlertSequence()
         alertText(manager, QStringLiteral("Entered"), QStringLiteral("LSZH001")),
     };
     QCOMPARE(spiedAlerts(alertSpy), expected);
-    QCOMPARE(nearbyIdentifiers(monitor), QStringList{ QStringLiteral("LSZH001") });
+    // CTR ZURICH 60 m above stays near: within the vertical alert threshold of 45 m without velocity, and the
+    // hysteresis of the zone just left
+    QCOMPARE(nearbyIdentifiers(monitor), (QStringList{ QStringLiteral("CTR0015"), QStringLiteral("LSZH001") }));
     QVERIFY(monitor.activeMonitor()->inside());
+    QVERIFY(!monitor.activeMonitor()->insideZoneKeys().contains(findZone(manager, QStringLiteral("CTR0015"))->key()));
 
     // Without terrain data the height above ground is unknown, so the CTRs above count as entered
     alertSpy.clear();

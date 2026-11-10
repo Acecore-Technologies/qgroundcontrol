@@ -129,7 +129,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     });
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachDistance(), settings->approachTime(),
+    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachExtraDistance(), settings->approachExtraTime(),
                               settings->trafficEnabled() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMonitor::_applicationSettingsChanged);
     }
@@ -146,10 +146,8 @@ GeoZoneMonitor::Settings GeoZoneMonitor::Settings::fromApplication()
     Settings result;
     result.alertsEnabled = settings->alertsEnabled()->rawValue().toBool();
     result.audioAlerts = settings->audioAlerts()->rawValue().toBool();
-    result.limits.distance = settings->approachDistance()->rawValue().toDouble();
-    result.limits.verticalDistance = approachVerticalDistance;
-    // Stored before the minimum was raised
-    result.limits.time = (std::max)(settings->approachTime()->rawValue().toDouble(), GeoZoneAlertTracker::minWarningTime);
+    result.extras.distance = settings->approachExtraDistance()->rawValue().toDouble();
+    result.extras.time = settings->approachExtraTime()->rawValue().toDouble();
     result.trafficEnabled = settings->trafficEnabled()->rawValue().toBool();
     return result;
 }
@@ -207,7 +205,7 @@ GeoZoneVehicleMonitor::Context GeoZoneMonitor::_context() const
         // Authorised zones don't alert while the authorisation is valid
         _policy = GeoZonePolicy::alerts().excludingAuthorised(_manager->planning()->authorisations());
     }
-    return GeoZoneVehicleMonitor::Context{ &_manager->catalog(), *_policy, settings().limits };
+    return GeoZoneVehicleMonitor::Context{ &_manager->catalog(), *_policy, settings().extras, settings().limits };
 }
 
 GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehicleId)
@@ -424,7 +422,10 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
             const double heading = qDegreesToRadians(plane->heading);
             velocity = GeoZoneAlertTracker::Velocity{ plane->speed * std::cos(heading), plane->speed * std::sin(heading), plane->verticalSpeed, true };
         }
-        const GeoZoneAlertTracker::Update update = tracker.update(*context.catalog, context.policy, position, velocity, context.limits);
+        // The thresholds of the default profile at the aircraft's velocity
+        const GeoZoneAlertTracker::Limits limits = context.limits.value_or(
+            GeoZoneAlertThresholds::compute(GeoZoneAlertThresholds::profile(QString::fromLatin1(GeoZoneAlertThresholds::defaultClass)), { velocity }).limits());
+        const GeoZoneAlertTracker::Update update = tracker.update(*context.catalog, context.policy, position, velocity, limits);
         for (const GeoZoneAlertTracker::Alert &zoneAlert : update.alerts) {
             if (zoneAlert.inside && settings().alertsEnabled) {
                 entries.append(_alertEvent(zoneAlert.zone, AlertEvent::Traffic, true, 0, qQNaN(), position, noVehicle, plane->label()));
@@ -566,7 +567,17 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
     for (const GeoZoneAlertTracker::Alert &zoneAlert : alerts) {
         // Like the pre-arm checks of the vehicle, a vehicle on the ground is told it is inside the zone
         const AlertEvent::Kind kind = zoneAlert.inside ? (monitor->onGround() ? AlertEvent::OnGround : AlertEvent::Entry) : AlertEvent::Approach;
-        _submit(monitor, _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId()), zoneAlert.zone);
+        AlertEvent event = _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId());
+        // The thresholds which raised it, logged with it
+        if (!settings().limits) {
+            const GeoZoneAlertThresholds::Result &thresholds = monitor->thresholds().result();
+            event.warningDistance = thresholds.distance;
+            event.warningVerticalDistance = thresholds.verticalDistance;
+            event.warningTime = thresholds.time;
+            event.groundSpeed = thresholds.groundSpeed;
+            event.verticalSpeed = thresholds.verticalSpeed;
+        }
+        _submit(monitor, event, zoneAlert.zone);
     }
     // Breaches end when the vehicle leaves the zone, approvals when it leaves its approach range too. Without a
     // current position the zones it is in aren't known, the nearby zones are those of its last position.
@@ -891,6 +902,12 @@ void GeoZoneMonitor::_logPilotEvent(int alertId, AlertEvent::Kind kind, const QS
     event.kind = kind;
     event.detail = detail;
     event.timeToEntry = qQNaN();
+    // The thresholds belong to the alert
+    event.warningDistance = qQNaN();
+    event.warningVerticalDistance = qQNaN();
+    event.warningTime = qQNaN();
+    event.groundSpeed = qQNaN();
+    event.verticalSpeed = qQNaN();
     if (const GeoZoneVehicleMonitor *const monitor = (subject->vehicleKey > 0) ? _monitorByKey(subject->vehicleKey) : nullptr) {
         event.position = monitor->position();
         const QList<GeoZoneAlertTracker::Nearby> &nearby = monitor->nearby();

@@ -62,6 +62,7 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
     if (_fenceWarning) {
         _fenceWarning->handleMessage(message, msecs);
     }
+    _thresholds.handleMessage(message, msecs);
     switch (message.msgid) {
     case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
         mavlink_global_position_int_t globalPosition{};
@@ -243,6 +244,7 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::update(const Context &c
     if (unavailable) {
         return {};
     }
+    _thresholds.setVehicleClass(GeoZoneVehicleThresholds::vehicleClass(vehicle->vehicleType()));
     TerrainSource terrainSource = TerrainSource::Unknown;
     const GeoZone::Position position = vehiclePosition(vehicle, vehicle->coordinate(), &terrainSource);
     if (terrainSource != _terrainSource) {
@@ -259,7 +261,15 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::evaluate(const GeoZone:
     }
     _position = position;
 
-    const GeoZoneAlertTracker::Update update = _alerts.update(*context.catalog, context.policy, position, velocity, context.limits);
+    // The thresholds at the current velocity, unless fixed
+    const QVariantMap previousThresholds = alertThresholds();
+    const GeoZoneAlertTracker::Limits limits = context.limits.value_or(_thresholds.update(_clock(), velocity, context.extras).limits());
+    _fixedLimits = context.limits.has_value();
+    if (alertThresholds() != previousThresholds) {
+        emit alertThresholdsChanged();
+    }
+
+    const GeoZoneAlertTracker::Update update = _alerts.update(*context.catalog, context.policy, position, velocity, limits);
     if (update.nearby != _nearby) {
         _nearby = update.nearby;
         emit nearbyChanged();

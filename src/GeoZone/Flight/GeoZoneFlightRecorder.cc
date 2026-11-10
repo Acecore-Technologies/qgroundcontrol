@@ -307,7 +307,9 @@ int GeoZoneFlightRecorder::removeOldRecords(const QDate &today, int days)
 QJsonObject GeoZoneFlightRecorder::alertJson(const QStringList &header, const QStringList &fields)
 {
     static const QStringList numbers = { QStringLiteral("vehicle"), QStringLiteral("latitude"), QStringLiteral("longitude"), QStringLiteral("altitude_amsl_m"),
-                                         QStringLiteral("terrain_amsl_m"), QStringLiteral("distance_m"), QStringLiteral("time_to_entry_s") };
+                                         QStringLiteral("terrain_amsl_m"), QStringLiteral("distance_m"), QStringLiteral("time_to_entry_s"),
+                                         QStringLiteral("warning_distance_m"), QStringLiteral("warning_vertical_m"), QStringLiteral("warning_time_s"),
+                                         QStringLiteral("ground_speed_mps"), QStringLiteral("vertical_speed_mps") };
     QJsonObject json;
     for (qsizetype i = 0; i < header.count(); i++) {
         const QString value = fields.value(i);

@@ -26,6 +26,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAlertArbiter.h"
 #include "GeoZoneAlertModel.h"
+#include "GeoZoneAlertThresholds.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneAwareness.h"
 #include "GeoZonePermits.h"
@@ -52,7 +53,9 @@ class Vehicle;
 /// object so that a vehicle reconnecting with the same system id starts clean. The monitor publishes the monitor of
 /// the active vehicle, with its nearby zones, vertical bands, predicted entry and fence status, shows and logs the
 /// alerts of all vehicles, and lets a GeoZoneAlertArbiter decide which are announced and repeated. The
-/// announcements are spoken when spoken alerts are on. Alerts and the approach distances are set in GeoZoneSettings.
+/// announcements are spoken when spoken alerts are on. A vehicle comes near a zone within its alert thresholds, which
+/// the manufacturer's profile of its vehicle class defines at its speed and position accuracy (GeoZoneAlertThresholds)
+/// and the pilot can only widen in GeoZoneSettings.
 /// The ADS-B and Remote ID traffic around the active vehicle is checked against the zones too, with a
 /// GeoZoneAlertTracker per aircraft, so the pilot sees which aircraft are in or near zones.
 /// The alerts shown to the pilot are kept in a GeoZoneAlertModel with what can be done about them. An alert of a
@@ -99,7 +102,6 @@ public:
     static constexpr int evaluateIntervalMSecs = 1000;
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
     static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see GeoZoneAlertModel
-    static constexpr double approachVerticalDistance = 30;  ///< Meters below the floor or above the ceiling of a zone within which it is near
     static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
     static constexpr int maxMuteSecs = 24 * 60 * 60;        ///< Longest mute, see muteAlerts()
     static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
@@ -152,6 +154,13 @@ public:
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
         QString traffic;            ///< Callsign or ICAO address of the aircraft of a Traffic alert
         QString detail;             ///< Of pilot events: the question asked, or the button pressed
+        /// Alert thresholds of the vehicle when it approached or entered the zone, NaN when not known, see
+        /// GeoZoneAlertThresholds::Result
+        double warningDistance = qQNaN();
+        double warningVerticalDistance = qQNaN();
+        double warningTime = qQNaN();
+        double groundSpeed = qQNaN();
+        double verticalSpeed = qQNaN();
     };
 
     /// Speaks the announcements of the alerts, like AudioOutput
@@ -166,7 +175,8 @@ public:
     struct Settings {
         bool alertsEnabled = true;
         bool audioAlerts = true;
-        GeoZoneAlertTracker::Limits limits;
+        GeoZoneAlertThresholds::Extras extras;              ///< The pilot's extra warning time and distance
+        std::optional<GeoZoneAlertTracker::Limits> limits;  ///< Instead of the thresholds of the vehicles, like tests use
         bool trafficEnabled = false;
 
         /// @return The settings of GeoZoneSettings::instance()

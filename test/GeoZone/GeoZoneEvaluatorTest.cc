@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneEvaluatorTest.h"
+#include "GeoZoneAlertThresholds.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneBriefing.h"
@@ -610,6 +611,179 @@ void GeoZoneEvaluatorTest::_testAntimeridianQueries()
     QCOMPARE(update.alerts[0].zone->identifier(), QStringLiteral("WIDE"));
     QVERIFY(!update.alerts[0].inside);
     QVERIFY(qAbs(update.alerts[0].distance - nearEastEnd.distanceTo(QGeoCoordinate(0, -160))) < 1);
+}
+
+void GeoZoneEvaluatorTest::_testAlertThresholds()
+{
+    using Thresholds = GeoZoneAlertThresholds;
+
+    // The manufacturer's profiles are compiled in, the classes complete theirs from the default class
+    const QHash<QString, Thresholds::Profile> &profiles = Thresholds::profiles();
+    QCOMPARE(QSet<QString>(profiles.keyBegin(), profiles.keyEnd()), QSet<QString>({ QStringLiteral("default"), QStringLiteral("multirotor"), QStringLiteral("fixedwing"), QStringLiteral("vtol") }));
+    const Thresholds::Profile multirotor = Thresholds::profile(QStringLiteral("multirotor"));
+    QCOMPARE(multirotor.name, QStringLiteral("Multirotor"));
+    QCOMPARE(multirotor.deceleration, 2.5);
+    QCOMPARE(multirotor.positionErrorFactor, 2.0);
+    QCOMPARE(multirotor.pilotReactionTime, 5.0);
+    QCOMPARE(multirotor.automaticReactionTime, 3.0);
+    QVERIFY(Thresholds::profile(QStringLiteral("fixedwing")).manoeuvre == Thresholds::Manoeuvre::Turn);
+    QCOMPARE(Thresholds::profile(QStringLiteral("rover")).name, QStringLiteral("Generic vehicle"));
+
+    // The default profile at 15 m/s without a known accuracy: 2 x 10 m of position error, 5 s of reaction and 1 s
+    // between evaluations, braking at 2 m/s² over 56 m in 7.5 s, 10 m/s of wind over 12.5 s and 20 m of margin
+    const Thresholds::Profile generic = Thresholds::profile(QStringLiteral("default"));
+    Thresholds::Input input;
+    input.velocity = GeoZoneAlertTracker::Velocity{ 15, 0, 0, true };
+    Thresholds::Result result = Thresholds::compute(generic, input);
+    QVERIFY(_near(result.positionError, 20, 0.01));
+    QVERIFY(_near(result.manoeuvreSpan, 56.25, 0.01));
+    QVERIFY(_near(result.manoeuvreTime, 7.5, 0.01));
+    QVERIFY(_near(result.windDrift, 125, 0.01));
+    QVERIFY(_near(result.distance, 20 + 90 + 56.25 + 125 + 20, 0.01));
+    QVERIFY(_near(result.verticalDistance, 30 + 5 + 10, 0.01));
+    QVERIFY(_near(result.time, 5 + 7.5 + 1 + (165.0 / 15), 0.01));
+    QCOMPARE(result.limits().distance, result.distance);
+
+    // Hovering, the minimum distances apply
+    input.velocity = GeoZoneAlertTracker::Velocity{ 0, 0, 0, true };
+    result = Thresholds::compute(generic, input);
+    QCOMPARE(result.distance, generic.minDistance);
+    QVERIFY(_near(result.verticalDistance, 45, 0.01));
+
+    // Fixed wing aircraft turn away at 30 degrees of bank: a turn radius of 71 m at 20 m/s, a quarter turn in 5.5 s
+    input.velocity = GeoZoneAlertTracker::Velocity{ 0, 20, 0, true };
+    result = Thresholds::compute(Thresholds::profile(QStringLiteral("fixedwing")), input);
+    QVERIFY(_near(result.manoeuvreSpan, 70.6, 0.1));
+    QVERIFY(_near(result.manoeuvreTime, 5.55, 0.01));
+
+    // Poor GNSS widens the thresholds: the accuracy the vehicle reports, else its HDOP times the range error
+    input.velocity = GeoZoneAlertTracker::Velocity{ 15, 0, 0, true };
+    input.horizontalAccuracy = 1;
+    const Thresholds::Result accurate = Thresholds::compute(multirotor, input);
+    QVERIFY(_near(accurate.positionError, 2, 0.01));
+    QVERIFY(_near(accurate.verticalPositionError, 3, 0.01));
+    input.horizontalAccuracy = qQNaN();
+    input.hdop = 5;
+    const Thresholds::Result poor = Thresholds::compute(multirotor, input);
+    QVERIFY(_near(poor.positionError, 50, 0.01));
+    QVERIFY(_near(poor.distance - accurate.distance, 48, 0.01));
+    QVERIFY(poor.verticalDistance > accurate.verticalDistance);
+    QVERIFY(poor.time > accurate.time);
+    input.verticalAccuracy = 4;
+    QVERIFY(_near(Thresholds::compute(multirotor, input).verticalPositionError, 8, 0.01));
+
+    // An automatic reaction is quicker
+    const Thresholds::Result automatic = Thresholds::compute(multirotor, input, {}, Thresholds::Reaction::Automatic);
+    QCOMPARE(automatic.reactionTime, 3.0);
+    QVERIFY(automatic.distance < poor.distance);
+
+    // The pilot can only add to the manufacturer's thresholds
+    const Thresholds::Result extra = Thresholds::compute(multirotor, input, Thresholds::Extras{ 10, 50 });
+    QVERIFY(_near(extra.time - poor.time, 10, 0.01));
+    QVERIFY(_near(extra.distance - poor.distance, 50 + 150, 0.01));
+    const Thresholds::Result reduced = Thresholds::compute(multirotor, input, Thresholds::Extras{ -10, -500 });
+    QCOMPARE(reduced.distance, poor.distance);
+    QCOMPARE(reduced.time, poor.time);
+    input.velocity = GeoZoneAlertTracker::Velocity();
+    QCOMPARE(Thresholds::compute(multirotor, input, Thresholds::Extras{ -10, -500 }).distance, multirotor.minDistance);
+
+    // Profiles of custom builds: the classes start from the default class, invalid values reject the file
+    QString errorString;
+    const QHash<QString, Thresholds::Profile> custom = Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": {
+        "default": { "name": "Ours", "pilotReactionTime": 6, "minDistance": 200 },
+        "multirotor": { "deceleration": 4, "manoeuvre": "brake" } } })", &errorString);
+    QVERIFY2(errorString.isEmpty(), qPrintable(errorString));
+    QCOMPARE(custom.count(), 2);
+    QCOMPARE(custom[QStringLiteral("multirotor")].pilotReactionTime, 6.0);
+    QCOMPARE(custom[QStringLiteral("multirotor")].minDistance, 200.0);
+    QCOMPARE(custom[QStringLiteral("multirotor")].deceleration, 4.0);
+    QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": { "multirotor": { "deceleration": 0 } } })", &errorString).isEmpty());
+    QVERIFY(errorString.contains(QStringLiteral("deceleration")));
+    QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "profiles": { "default": { "safetyMargin": -1 } } })").isEmpty());
+    QVERIFY(Thresholds::parseProfiles(R"({ "profiles": {} })").isEmpty());
+}
+
+void GeoZoneEvaluatorTest::_testThresholdWarningTimes()
+{
+    // A zone 300 m around the center, one from 500 m AMSL above it and one up to 300 m AMSL below it
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate high = center.atDistanceAndAzimuth(20000, 90);
+    const QGeoCoordinate low = center.atDistanceAndAzimuth(20000, 270);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _withLimits(_circleFeature(QStringLiteral("HIGH"), QStringLiteral("PROHIBITED"), high, 1000), 500, QStringLiteral("AMSL"), 2000, QStringLiteral("AMSL")),
+        _withLimits(_circleFeature(QStringLiteral("LOW"), QStringLiteral("PROHIBITED"), low, 1000), 0, QStringLiteral("AMSL"), 300, QStringLiteral("AMSL")),
+    }), errorString), qPrintable(errorString));
+    const GeoZonePolicy policy = GeoZonePolicy::alerts();
+    const GeoZoneAlertThresholds::Profile multirotor = GeoZoneAlertThresholds::profile(QStringLiteral("multirotor"));
+
+    // Flies straight at constant speed, evaluated every second with the thresholds at its speed, from a start offset
+    // within the second, and returns the seconds from the approach alert to the entry, and the alert's thresholds
+    struct Warning {
+        double seconds = -1;
+        GeoZoneAlertThresholds::Result thresholds;
+    };
+    const auto fly = [&](const std::function<GeoZone::Position(double)> &at, double entryTime, const GeoZoneAlertTracker::Velocity &velocity,
+                         GeoZoneAlertThresholds::Reaction reaction, double accuracy) {
+        Warning warning;
+        GeoZoneAlertTracker tracker;
+        GeoZoneAlertThresholds::Input input{ velocity, accuracy };
+        for (double time = 0; time < entryTime; time += GeoZoneAlertThresholds::evaluationInterval) {
+            const GeoZoneAlertThresholds::Result thresholds = GeoZoneAlertThresholds::compute(multirotor, input, {}, reaction);
+            const GeoZoneAlertTracker::Update update = tracker.update(zones.catalog(), policy, at(time), velocity, thresholds.limits());
+            if (!update.alerts.isEmpty()) {
+                if (update.alerts.constFirst().inside) {
+                    break;
+                }
+                warning = Warning{ entryTime - time, thresholds };
+                break;
+            }
+        }
+        return warning;
+    };
+
+    using Reaction = GeoZoneAlertThresholds::Reaction;
+    for (const Reaction reaction : { Reaction::Pilot, Reaction::Automatic }) {
+        for (const double offset : { 0.0, 0.5 }) {
+            // Horizontally towards the zone from 3 km
+            for (const double speed : { 5.0, 15.0, 50.0 }) {
+                const double entryTime = (3000 + (offset * speed)) / speed;
+                const Warning warning = fly([&](double time) {
+                    return GeoZone::Position{ center.atDistanceAndAzimuth(300 + 3000 + (offset * speed) - (speed * time), 180) };
+                }, entryTime, { speed, 0, 0, true }, reaction, qQNaN());
+                const QString text = QStringLiteral("%1 m/s: %2 s of warning, %3 s needed").arg(speed).arg(warning.seconds).arg(warning.thresholds.minWarningTime());
+                QVERIFY2(warning.seconds >= (warning.thresholds.reactionTime + warning.thresholds.manoeuvreTime), qPrintable(text));
+                QVERIFY2(warning.seconds >= (warning.thresholds.time - GeoZoneAlertThresholds::evaluationInterval), qPrintable(text));
+                QCOMPARE(warning.thresholds.reactionTime, (reaction == Reaction::Pilot) ? 5.0 : 3.0);
+
+                // Poor GNSS warns earlier
+                const Warning poor = fly([&](double time) {
+                    return GeoZone::Position{ center.atDistanceAndAzimuth(300 + 3000 + (offset * speed) - (speed * time), 180) };
+                }, entryTime, { speed, 0, 0, true }, reaction, 100);
+                QVERIFY2(poor.seconds > warning.seconds, qPrintable(QStringLiteral("%1 m/s: %2 s with poor GNSS, %3 s").arg(speed).arg(poor.seconds).arg(warning.seconds)));
+            }
+
+            // Climbing into the floor of the zone above, and descending into the zone below, from 400 m
+            for (const double rate : { 2.0, 5.0, 10.0 }) {
+                const double entryTime = (400 + (offset * rate)) / rate;
+                const Warning climb = fly([&](double time) {
+                    return GeoZone::Position{ high, 100 - (offset * rate) + (rate * time) };
+                }, entryTime, { 0, 0, rate, true }, reaction, qQNaN());
+                QVERIFY2(climb.seconds >= (climb.thresholds.reactionTime + climb.thresholds.manoeuvreTime),
+                         qPrintable(QStringLiteral("Climbing at %1 m/s: %2 s").arg(rate).arg(climb.seconds)));
+                const Warning descent = fly([&](double time) {
+                    return GeoZone::Position{ low, 700 + (offset * rate) - (rate * time) };
+                }, entryTime, { 0, 0, -rate, true }, reaction, qQNaN());
+                QVERIFY2(descent.seconds >= (descent.thresholds.reactionTime + descent.thresholds.manoeuvreTime),
+                         qPrintable(QStringLiteral("Descending at %1 m/s: %2 s").arg(rate).arg(descent.seconds)));
+                QVERIFY(_near(descent.thresholds.manoeuvreTime, rate / multirotor.verticalDeceleration, 0.01));
+            }
+        }
+    }
 }
 
 GEOZONE_TEST(GeoZoneEvaluatorTest)

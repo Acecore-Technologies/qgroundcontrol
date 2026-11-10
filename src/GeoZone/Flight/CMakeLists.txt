@@ -29,6 +29,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneRemoteId.h
         GeoZoneVehicleMonitor.cc
         GeoZoneVehicleMonitor.h
+        GeoZoneVehicleThresholds.cc
+        GeoZoneVehicleThresholds.h
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

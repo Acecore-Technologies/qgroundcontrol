@@ -94,7 +94,7 @@ SettingsPage {
             Layout.fillWidth:        true
             textFieldPreferredWidth: _fieldWidth
             label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.approachDistance
+            fact:                    _geoZoneSettings.approachExtraTime
             visible:                 fact.visible
             enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
@@ -103,9 +103,16 @@ SettingsPage {
             Layout.fillWidth:        true
             textFieldPreferredWidth: _fieldWidth
             label:                   fact.shortDescription
-            fact:                    _geoZoneSettings.approachTime
+            fact:                    _geoZoneSettings.approachExtraDistance
             visible:                 fact.visible
             enabled:                 _geoZoneSettings.alertsEnabled.rawValue
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               qsTr("The manufacturer's alert thresholds for the vehicle type set when a vehicle is warned, from its speed, position accuracy, the reaction time, its braking or turning distance, the wind and a safety margin. The extra time and distance only make the alerts earlier.")
         }
     }
 

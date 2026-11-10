@@ -20,6 +20,7 @@
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneAwareness.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneVehicleThresholds.h"
 #include "QGCMAVLink.h"
 
 #include <functional>
@@ -75,6 +76,8 @@ class GeoZoneVehicleMonitor : public QObject
     Q_PROPERTY(int              groundLevel         READ groundLevel        NOTIFY groundStatusChanged FINAL)    ///< GeoZoneAwareness::Level of groundWarning
     /// Warns before the vehicle breaches its own fence, null for positions passed to evaluate()
     Q_PROPERTY(GeoZoneFenceWarning *fenceWarning    READ fenceWarning       CONSTANT FINAL)
+    /// Alert thresholds of the last evaluation, see GeoZoneVehicleThresholds::toVariantMap, empty while the limits are fixed
+    Q_PROPERTY(QVariantMap      alertThresholds     READ alertThresholds    NOTIFY alertThresholdsChanged FINAL)
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -98,7 +101,8 @@ public:
     struct Context {
         const GeoZoneCatalog *catalog = nullptr;
         GeoZonePolicy policy;
-        GeoZoneAlertTracker::Limits limits;
+        GeoZoneAlertThresholds::Extras extras;              ///< Added to the thresholds of the vehicle
+        std::optional<GeoZoneAlertTracker::Limits> limits;  ///< Instead of the thresholds of the vehicle, like tests use
     };
 
     /// @param vehicle Vehicle whose messages and position are followed, null for positions passed to evaluate()
@@ -131,8 +135,16 @@ public:
     QList<GeoZoneAlertTracker::Alert> update(const Context &context);
 
     /// Evaluates a position of the vehicle. Unknown altitudes are inside all vertical limits. With a valid velocity,
-    /// zones the vehicle would enter within the approach time are near too.
+    /// zones the vehicle would enter within the approach time are near too. The approach distances and time are the
+    /// alert thresholds of the vehicle at its velocity, see thresholds().
     QList<GeoZoneAlertTracker::Alert> evaluate(const GeoZone::Position &position, const Velocity &velocity, const Context &context);
+
+    /// Alert thresholds of the vehicle, of its last evaluation
+    const GeoZoneVehicleThresholds &thresholds() const { return _thresholds; }
+    /// Profile class of the manufacturer's thresholds, see GeoZoneVehicleThresholds::vehicleClass. That of a vehicle
+    /// follows its type.
+    void setVehicleClass(const QString &vehicleClass) { _thresholds.setVehicleClass(vehicleClass); }
+    QVariantMap alertThresholds() const { return _fixedLimits ? QVariantMap() : _thresholds.toVariantMap(); }
 
     /// Zones near or around the vehicle, the most restrictive first
     const QList<Nearby> &nearby() const { return _nearby; }
@@ -217,6 +229,7 @@ signals:
     void positionUnavailableChanged();
     void terrainSourceChanged();
     void fenceStatusChanged();
+    void alertThresholdsChanged();
     /// The vehicle started breaching its fence
     void fenceBreachStarted(const QString &text);
     void armedChanged();
@@ -240,6 +253,8 @@ private:
     GeoZone::Position _position;
     GeoZone::Position _bandsPosition;
     std::optional<Entry> _entry;
+    GeoZoneVehicleThresholds _thresholds;
+    bool _fixedLimits = false;              ///< Of the last evaluation
 
     qint64 _positionMSecs = -1;             ///< Last position message, -1 without
     qint64 _positionIntervalMSecs = 0;      ///< Between the last two position messages

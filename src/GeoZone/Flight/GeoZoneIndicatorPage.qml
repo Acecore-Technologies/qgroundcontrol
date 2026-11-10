@@ -50,6 +50,24 @@ ToolIndicatorPage {
         return level === GeoZoneIntendedLevel.Warning ? qsTr("WARNING") : (level === GeoZoneIntendedLevel.Caution ? qsTr("CAUTION") : qsTr("ADVISORY"))
     }
 
+    /// @return The alert thresholds of the active vehicle at its current speed, see GeoZoneVehicleMonitor.alertThresholds
+    function _thresholdsText(thresholds) {
+        if (!thresholds || thresholds.distance === undefined) {
+            return ""
+        }
+        const units = QGroundControl.unitsConversion
+        // The warning time applies to entries predicted along the velocity
+        if (thresholds.groundSpeed < 0.5 && Math.abs(thresholds.verticalSpeed) < 0.5) {
+            return qsTr("Warning %1 around, %2 above or below while hovering (%3, %4 s reaction).")
+                .arg(GeoZoneStyle.horizontalText(thresholds.distance)).arg(GeoZoneStyle.verticalText(thresholds.verticalDistance))
+                .arg(thresholds.profileName).arg(thresholds.reactionTime)
+        }
+        const speed = Math.round(units.metersSecondToAppSettingsSpeedUnits(thresholds.groundSpeed)) + " " + units.appSettingsSpeedUnitsString
+        return qsTr("Warning %1 / %2 s ahead at %3, %4 above or below (%5, %6 s reaction).")
+            .arg(GeoZoneStyle.horizontalText(thresholds.distance)).arg(Math.round(thresholds.time)).arg(speed)
+            .arg(GeoZoneStyle.verticalText(thresholds.verticalDistance)).arg(thresholds.profileName).arg(thresholds.reactionTime)
+    }
+
     QGCPalette { id: qgcPal }
 
     contentComponent: Component {
@@ -199,7 +217,15 @@ ToolIndicatorPage {
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth
                 heading:            qsTr("Nearby Geozones")
-                headingDescription: qsTr("Active restricted and U-space zones within %1 of the active vehicle, or reached within %2 s at its velocity.").arg(GeoZoneStyle.horizontalText(control._geoZoneSettings.approachDistance.rawValue)).arg(control._geoZoneSettings.approachTime.rawValue)
+                headingDescription: qsTr("Active restricted and U-space zones within the alert thresholds of the active vehicle, by distance or by the time to reach them at its velocity.")
+
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    wrapMode:           Text.WordWrap
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    text:               control._thresholdsText(control._active?.alertThresholds)
+                    visible:            control._monitor.monitoring && text !== ""
+                }
 
                 QGCLabel {
                     text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
@@ -512,7 +538,7 @@ ToolIndicatorPage {
                 LabelledFactTextField {
                     Layout.fillWidth:   true
                     label:              fact.shortDescription
-                    fact:               control._geoZoneSettings.approachDistance
+                    fact:               control._geoZoneSettings.approachExtraTime
                     visible:            fact.visible
                     enabled:            control._alertsEnabled
                 }
@@ -520,7 +546,7 @@ ToolIndicatorPage {
                 LabelledFactTextField {
                     Layout.fillWidth:   true
                     label:              fact.shortDescription
-                    fact:               control._geoZoneSettings.approachTime
+                    fact:               control._geoZoneSettings.approachExtraDistance
                     visible:            fact.visible
                     enabled:            control._alertsEnabled
                 }

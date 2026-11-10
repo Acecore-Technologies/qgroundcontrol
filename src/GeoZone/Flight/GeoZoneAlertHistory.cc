@@ -237,7 +237,7 @@ QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
 
 QString GeoZoneAlertHistory::logHeader()
 {
-    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic,alert_id,detail");
+    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic,alert_id,detail,warning_distance_m,warning_vertical_m,warning_time_s,ground_speed_mps,vertical_speed_mps");
 }
 
 QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
@@ -260,6 +260,11 @@ QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
         csvField(event.traffic),
         (event.id > 0) ? QString::number(event.id) : QString(),
         csvField(event.detail),
+        numberText(event.warningDistance, 0),
+        numberText(event.warningVerticalDistance, 0),
+        numberText(event.warningTime, 0),
+        numberText(event.groundSpeed, 1),
+        numberText(event.verticalSpeed, 1),
     }.join(QLatin1Char(','));
 }
 
@@ -388,6 +393,11 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.timeToEntry = (fields.count() > 12) ? numberValue(fields[12]) : qQNaN();
     event.traffic = (fields.count() > 13) ? fields[13] : QString();
     event.detail = (fields.count() > 15) ? fields[15] : QString();
+    event.warningDistance = (fields.count() > 16) ? numberValue(fields[16]) : qQNaN();
+    event.warningVerticalDistance = (fields.count() > 17) ? numberValue(fields[17]) : qQNaN();
+    event.warningTime = (fields.count() > 18) ? numberValue(fields[18]) : qQNaN();
+    event.groundSpeed = (fields.count() > 19) ? numberValue(fields[19]) : qQNaN();
+    event.verticalSpeed = (fields.count() > 20) ? numberValue(fields[20]) : qQNaN();
 
     // The messages of the monitor
     const QString name = event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName;

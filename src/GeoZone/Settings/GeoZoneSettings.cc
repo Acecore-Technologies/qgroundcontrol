@@ -33,6 +33,24 @@ DECLARE_SETTINGGROUP(GeoZone, "GeoZoneManager")
         }
         settings.remove(legacyVisibleKey);
     }
+
+    // The approach distance and time the pilot could set freely, now the manufacturer's thresholds which the pilot can
+    // only widen: what was set above the former defaults is kept as extra
+    struct Legacy {
+        const char *key;
+        const char *extraKey;
+        double formerDefault;
+    };
+    for (const Legacy &legacy : { Legacy{ "approachDistance", approachExtraDistanceName, 100 }, Legacy{ "approachTime", approachExtraTimeName, 30 } }) {
+        if (!settings.contains(legacy.key)) {
+            continue;
+        }
+        const double extra = settings.value(legacy.key).toDouble() - legacy.formerDefault;
+        if ((extra > 0) && !settings.contains(legacy.extraKey)) {
+            settings.setValue(legacy.extraKey, extra);
+        }
+        settings.remove(legacy.key);
+    }
 }
 
 DECLARE_SETTINGSFACT(GeoZoneSettings, showZones)
@@ -45,8 +63,8 @@ DECLARE_SETTINGSFACT(GeoZoneSettings, audioAlerts)
 DECLARE_SETTINGSFACT(GeoZoneSettings, logAlerts)
 DECLARE_SETTINGSFACT(GeoZoneSettings, recordRetention)
 DECLARE_SETTINGSFACT(GeoZoneSettings, includeOperatorDetails)
-DECLARE_SETTINGSFACT(GeoZoneSettings, approachDistance)
-DECLARE_SETTINGSFACT(GeoZoneSettings, approachTime)
+DECLARE_SETTINGSFACT(GeoZoneSettings, approachExtraDistance)
+DECLARE_SETTINGSFACT(GeoZoneSettings, approachExtraTime)
 DECLARE_SETTINGSFACT(GeoZoneSettings, trafficEnabled)
 DECLARE_SETTINGSFACT(GeoZoneSettings, qnhHPa)
 DECLARE_SETTINGSFACT(GeoZoneSettings, feedRefreshHours)

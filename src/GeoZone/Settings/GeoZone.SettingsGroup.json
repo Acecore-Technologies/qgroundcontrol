@@ -76,25 +76,25 @@
     "default":      false
 },
 {
-    "name":         "approachDistance",
-    "shortDesc":    "Approach alert distance",
-    "longDesc":     "Horizontal distance from a geozone at which the vehicle is alerted that it approaches the zone. Vertically, it approaches a zone within 30 m below its floor or above its ceiling.",
+    "name":         "approachExtraDistance",
+    "shortDesc":    "Extra approach distance",
+    "longDesc":     "Meters added to the horizontal distance at which the vehicle is alerted that it approaches a geozone. The manufacturer's alert thresholds for the vehicle type set that distance from its speed, position accuracy, the reaction time, its braking or turning distance, the wind and a safety margin; this only makes the alerts earlier.",
     "type":         "double",
     "units":        "m",
-    "min":          10,
+    "min":          0,
     "max":          5000,
     "decimalPlaces": 0,
-    "default":      100
+    "default":      0
 },
 {
-    "name":         "approachTime",
-    "shortDesc":    "Approach alert time",
-    "longDesc":     "Seconds before the vehicle would enter a geozone at its current speed, direction and climb rate at which it is alerted. At least 6 s: 5 s of warning and 1 s between the checks. The approach distance also covers at least 6 s at the current speed.",
+    "name":         "approachExtraTime",
+    "shortDesc":    "Extra warning time",
+    "longDesc":     "Seconds added to the time before a predicted entry into a geozone at which the vehicle is alerted, and to the approach distances at the current speed and climb rate. The manufacturer's alert thresholds for the vehicle type set the warning time; this only makes the alerts earlier.",
     "type":         "uint32",
     "units":        "s",
-    "min":          6,
-    "max":          600,
-    "default":      30
+    "min":          0,
+    "max":          120,
+    "default":      0
 },
 {
     "name":         "trafficEnabled",

@@ -26,4 +26,6 @@ private slots:
     void _testApproximations();
     void _testSchedules();
     void _testAntimeridianQueries();
+    void _testAlertThresholds();
+    void _testThresholdWarningTimes();
 };

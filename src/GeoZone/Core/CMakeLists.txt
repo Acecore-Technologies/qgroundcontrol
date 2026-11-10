@@ -107,6 +107,8 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneAlertTracker.h
     Evaluation/GeoZoneFencePrediction.cc
     Evaluation/GeoZoneFencePrediction.h
+    Evaluation/GeoZoneAlertThresholds.cc
+    Evaluation/GeoZoneAlertThresholds.h
     Evaluation/GeoZoneFences.cc
     Evaluation/GeoZoneFences.h
     Evaluation/GeoZoneMissionItem.h
@@ -195,6 +197,13 @@ elseif(GEOZONE_PACK_SIGNING)
 else()
     message(STATUS "GeoZone: signing offline packs is off (GEOZONE_PACK_SIGNING)")
 endif()
+
+# The manufacturer's alert thresholds per vehicle class, which custom builds replace, see GeoZoneAlertThresholds
+qt_add_resources(GeoZoneCore "geozone_alert_profiles"
+    PREFIX "/geozone"
+    BASE Evaluation
+    FILES Evaluation/GeoZoneAlertProfiles.json
+)
 
 # The EGM96 geoid for heights above the WGS84 ellipsoid
 qt_add_resources(GeoZoneCore "geozone_geoid"

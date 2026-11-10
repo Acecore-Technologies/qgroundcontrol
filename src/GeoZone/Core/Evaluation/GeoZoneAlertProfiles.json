@@ -1,0 +1,47 @@
+{
+    "fileType": "GeoZoneAlertProfiles",
+    "version": 1,
+    "description": "Manufacturer alert thresholds per vehicle class after EN 4709-003 Annex A, see GeoZoneAlertThresholds. Classes: default, multirotor, fixedwing, vtol; missing values come from the default class. Units: meters, seconds, meters per second, meters per second squared, degrees. Custom builds replace this file with :/Custom/GeoZone/GeoZoneAlertProfiles.json.",
+    "profiles": {
+        "default": {
+            "name": "Generic vehicle",
+            "positionErrorFactor": 2,
+            "uere": 5,
+            "defaultPositionError": 10,
+            "verticalErrorFactor": 1.5,
+            "pilotReactionTime": 5,
+            "automaticReactionTime": 3,
+            "manoeuvre": "brake",
+            "deceleration": 2,
+            "bankAngle": 30,
+            "verticalDeceleration": 1.5,
+            "maxWind": 10,
+            "maxVerticalWind": 1,
+            "safetyMargin": 20,
+            "verticalSafetyMargin": 10,
+            "minDistance": 100,
+            "minVerticalDistance": 30
+        },
+        "multirotor": {
+            "name": "Multirotor",
+            "manoeuvre": "brake",
+            "deceleration": 2.5,
+            "verticalDeceleration": 2,
+            "maxWind": 8,
+            "safetyMargin": 10
+        },
+        "fixedwing": {
+            "name": "Fixed wing",
+            "manoeuvre": "turn",
+            "bankAngle": 30,
+            "maxWind": 12,
+            "maxVerticalWind": 2,
+            "minDistance": 150
+        },
+        "vtol": {
+            "name": "VTOL",
+            "manoeuvre": "brake",
+            "deceleration": 1.5
+        }
+    }
+}

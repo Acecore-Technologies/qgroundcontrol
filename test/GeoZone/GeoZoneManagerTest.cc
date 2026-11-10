@@ -72,7 +72,7 @@ void GeoZoneManagerTest::_testSettings()
     QCOMPARE(GeoZoneEnvironment::qnhHPa(), GeoZoneEnvironment::kStandardPressureHPa);
 
     const ScopedEnvironment environment;
-    const QList<Fact*> facts = { settings->showZones(), settings->approachDistance(), settings->staleDays(), settings->outdatedInvalid(),
+    const QList<Fact*> facts = { settings->showZones(), settings->approachExtraDistance(), settings->approachExtraTime(), settings->staleDays(), settings->outdatedInvalid(),
                                  settings->feedRefreshHours(), settings->liveFeedRefreshMinutes(), settings->qnhHPa() };
     const auto restoreDefaults = qScopeGuard([&facts]() {
         for (Fact *fact : facts) {
@@ -90,6 +90,19 @@ void GeoZoneManagerTest::_testSettings()
     QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/visible")));
     QCOMPARE(qSettings.value(QStringLiteral("GeoZoneManager/showZones")), QVariant(false));
     qSettings.remove(QStringLiteral("GeoZoneManager/showZones"));
+
+    // The approach distance and time set freely before are what the pilot adds to the manufacturer's thresholds: what
+    // was above the former defaults of 100 m and 30 s, never less
+    qSettings.setValue(QStringLiteral("GeoZoneManager/approachDistance"), 250);
+    qSettings.setValue(QStringLiteral("GeoZoneManager/approachTime"), 20);
+    {
+        const GeoZoneSettings migrated;
+    }
+    QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/approachDistance")));
+    QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/approachTime")));
+    QCOMPARE(qSettings.value(QStringLiteral("GeoZoneManager/approachExtraDistance")).toDouble(), 150.0);
+    QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/approachExtraTime")));
+    qSettings.remove(QStringLiteral("GeoZoneManager/approachExtraDistance"));
 
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -138,12 +151,12 @@ void GeoZoneManagerTest::_testSettings()
     settings->liveFeedRefreshMinutes()->setRawValue(30);
     QCOMPARE(scheduler.refreshIntervalSecs(feed), 30 * 60);
 
-    // Approach alerts at the configured distance
+    // Approach alerts at the manufacturer's distance of 100 m without velocity, with the pilot's extra distance
     GeoZoneMonitor monitor(&manager);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
     monitor.evaluate({ center.atDistanceAndAzimuth(500, 0) });
     QCOMPARE(alertSpy.count(), 0);
-    settings->approachDistance()->setRawValue(250);
+    settings->approachExtraDistance()->setRawValue(150);
     monitor.evaluate({ center.atDistanceAndAzimuth(500, 0) });
     QCOMPARE(alertSpy.count(), 1);
     QVERIFY(alertSpy.last()[0].toString().startsWith(QStringLiteral("Approaching geozone P")));

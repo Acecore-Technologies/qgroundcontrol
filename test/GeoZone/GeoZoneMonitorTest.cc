@@ -40,6 +40,14 @@ mavlink_message_t gpsMessage(int vehicleId, uint8_t fixType, uint8_t satellites,
     return message;
 }
 
+mavlink_message_t gpsRawIntMessage(int vehicleId, uint16_t hdop, uint32_t horizontalAccuracyMM, uint32_t verticalAccuracyMM)
+{
+    mavlink_message_t message{};
+    (void) mavlink_msg_gps_raw_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, GPS_FIX_TYPE_3D_FIX, 470000000, 80000000, 500000, hdop, UINT16_MAX,
+                                        UINT16_MAX, UINT16_MAX, 10, 0, horizontalAccuracyMM, verticalAccuracyMM, 0, 0, 0);
+    return message;
+}
+
 /// Keeps what would be spoken
 class RecordingAudioSink : public GeoZoneMonitor::AudioSink
 {
@@ -223,9 +231,10 @@ void GeoZoneMonitorTest::_testMonitorAlertOrder()
 
 void GeoZoneMonitorTest::_testMonitorTimeToEntry()
 {
+    // The thresholds of the default profile at 25 m/s warn 27 s ahead, the pilot adds 5 s
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restoreDefault = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
-    settings->approachTime()->setRawValue(30);
+    const auto restoreDefault = qScopeGuard([settings]() { settings->approachExtraTime()->setRawValue(settings->approachExtraTime()->rawDefaultValue()); });
+    settings->approachExtraTime()->setRawValue(5);
 
     const QGeoCoordinate center(47, 8);
     const QGeoCoordinate above(47.1, 8);
@@ -259,7 +268,7 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
     QCOMPARE(monitor.activeMonitor()->predictedEntryTime(), -1);
     QVERIFY(monitor.activeMonitor()->predictedPath().isEmpty());
 
-    // At 25 m/s the boundary 700 m ahead is reached in 28 s, within the approach time
+    // At 25 m/s the boundary 700 m ahead is reached in 28 s, within the warning time of 32 s
     QSignalSpy predictionSpy(monitor.activeMonitor(), &GeoZoneVehicleMonitor::predictionChanged);
     monitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
     QCOMPARE(alertSpy.count(), 1);
@@ -311,21 +320,22 @@ void GeoZoneMonitorTest::_testMonitorTimeToEntry()
     climbMonitor.evaluate({ center.atDistanceAndAzimuth(5000, 270), 400, 300 });
     QVERIFY(climbMonitor.activeMonitor()->verticalBands().isEmpty());
 
-    // An approach time stored below the minimum, like 0 s which turned it off, is the minimum warning time
-    settings->approachTime()->setRawValue(0);
+    // Without the extra time, the entry in 28 s is beyond the manufacturer's warning time, which the vehicle monitor
+    // publishes with the profile
+    settings->approachExtraTime()->setRawValue(0);
     GeoZoneMonitor shortMonitor(&manager);
-    QCOMPARE(shortMonitor.settings().limits.time, GeoZoneAlertTracker::minWarningTime);
     QSignalSpy shortSpy(&shortMonitor, &GeoZoneMonitor::alert);
     shortMonitor.evaluate(start, GeoZoneMonitor::noVehicle, north);
     QCOMPARE(shortSpy.count(), 0);
+    const QVariantMap thresholds = shortMonitor.activeMonitor()->alertThresholds();
+    QVERIFY2(_near(thresholds[QStringLiteral("time")].toDouble(), 27.1, 0.1), qPrintable(thresholds[QStringLiteral("time")].toString()));
+    QVERIFY(_near(thresholds[QStringLiteral("distance")].toDouble(), 521, 1));
+    QCOMPARE(thresholds[QStringLiteral("groundSpeed")].toDouble(), 25.0);
+    QCOMPARE(thresholds[QStringLiteral("profileName")].toString(), QStringLiteral("Generic vehicle"));
 }
 
 void GeoZoneMonitorTest::_testMinimumWarningTime()
 {
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restoreDefault = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
-    settings->approachTime()->setRawValue(0);
-
     const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -335,16 +345,15 @@ void GeoZoneMonitorTest::_testMinimumWarningTime()
         QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
 
     // At 50 m/s straight towards the zone, evaluated every second, the vehicle is alerted at least 5 s and 250 m before
-    // it enters the zone: by the approach distance alone, without predicting entries, and with the approach time of the
-    // application settings, which is at least 6 s
+    // it enters the zone: by a fixed approach distance alone, without predicting entries, and with the thresholds of the
+    // vehicle
     const GeoZoneMonitor::Velocity north{ 50, 0, 0, true };
     for (const bool predicted : { false, true }) {
         for (const double offset : { 5.0, 20.0, 35.0, 49.0 }) {
             GeoZoneMonitor monitor(&manager);
             if (!predicted) {
                 GeoZoneMonitor::Settings distanceOnly;
-                distanceOnly.limits.distance = 100;
-                distanceOnly.limits.verticalDistance = GeoZoneMonitor::approachVerticalDistance;
+                distanceOnly.limits = GeoZoneAlertTracker::Limits{ 100, 30, 0 };
                 monitor.setSettings(distanceOnly);
             }
             QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
@@ -372,10 +381,11 @@ void GeoZoneMonitorTest::_testMinimumWarningTime()
 
 void GeoZoneMonitorTest::_testTerrainAhead()
 {
+    // The pilot's extra time warns 48 s ahead at 40 m/s
     ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restore = qScopeGuard([settings]() { settings->approachTime()->setRawValue(settings->approachTime()->rawDefaultValue()); });
-    settings->approachTime()->setRawValue(60);
+    const auto restore = qScopeGuard([settings]() { settings->approachExtraTime()->setRawValue(settings->approachExtraTime()->rawDefaultValue()); });
+    settings->approachExtraTime()->setRawValue(15);
 
     // A plateau 300 m above the valley from 47.01 north, with a zone up to 120 m above the ground
     const QGeoCoordinate valley(47, 8);
@@ -487,6 +497,28 @@ void GeoZoneMonitorTest::_testVehicleTelemetry()
     QVERIFY(std::isnan(position.altitudeAMSL) && std::isnan(position.terrainAMSL));
     QVERIFY(source == TerrainSource::Unknown);
     QVERIFY(!monitor.altitudeDegraded());
+
+    // The vehicle type picks the manufacturer's profile of the alert thresholds
+    QCOMPARE(GeoZoneVehicleThresholds::vehicleClass(MAV_TYPE_QUADROTOR), QStringLiteral("multirotor"));
+    QCOMPARE(GeoZoneVehicleThresholds::vehicleClass(MAV_TYPE_HEXAROTOR), QStringLiteral("multirotor"));
+    QCOMPARE(GeoZoneVehicleThresholds::vehicleClass(MAV_TYPE_FIXED_WING), QStringLiteral("fixedwing"));
+    QCOMPARE(GeoZoneVehicleThresholds::vehicleClass(MAV_TYPE_VTOL_TILTROTOR), QStringLiteral("vtol"));
+    QCOMPARE(GeoZoneVehicleThresholds::vehicleClass(MAV_TYPE_GROUND_ROVER), QStringLiteral("default"));
+
+    // The GNSS accuracy the vehicle reports widens them, else its HDOP, until it is older than the maximum age
+    GeoZoneVehicleThresholds thresholds;
+    thresholds.setVehicleClass(QStringLiteral("multirotor"));
+    const GeoZoneAlertTracker::Velocity hover{ 0, 0, 0, true };
+    QCOMPARE(thresholds.update(0, hover, {}).positionError, 20.0);
+    thresholds.handleMessage(gpsRawIntMessage(vehicleId, 120, 1500, 3000), 1000);
+    QCOMPARE(thresholds.update(1000, hover, {}).positionError, 3.0);
+    QCOMPARE(thresholds.result().verticalPositionError, 6.0);
+    QCOMPARE(thresholds.result().profileName, QStringLiteral("Multirotor"));
+    thresholds.handleMessage(gpsRawIntMessage(vehicleId, 120, 0, 0), 2000);
+    QCOMPARE(thresholds.update(2000, hover, {}).positionError, 12.0);
+    QCOMPARE(thresholds.result().verticalPositionError, 18.0);
+    QCOMPARE(thresholds.update(2000 + GeoZoneVehicleThresholds::accuracyMaxAgeMSecs + 1, hover, {}).positionError, 20.0);
+    QCOMPARE(thresholds.toVariantMap()[QStringLiteral("distance")].toDouble(), 100.0);
 }
 
 void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
@@ -591,7 +623,15 @@ void GeoZoneMonitorTest::_testAlertLog()
     // Quoted name with a comma and quotes, then the restriction and source
     QVERIFY(lines[1].contains(QStringLiteral(",\"Prison \"\"West\"\", Zurich\",Prohibited,")));
     QVERIFY(lines[1].contains(QStringLiteral("zones.json")));
+    // With the alert thresholds of the vehicle: those of the default profile without velocity
+    const QStringList approachFields = GeoZoneAlertHistory::logFields(lines[1]);
+    QCOMPARE(approachFields.mid(16), QStringList({ QStringLiteral("100"), QStringLiteral("45"), QStringLiteral("96"), QStringLiteral("0.0"), QStringLiteral("0.0") }));
+    const std::optional<GeoZoneMonitor::AlertEvent> parsed = GeoZoneAlertHistory::parseLogLine(lines[1]);
+    QVERIFY(parsed);
+    QCOMPARE(parsed->warningDistance, 100.0);
+    QCOMPARE(parsed->warningTime, 96.0);
     QCOMPARE(lines[2].section(QLatin1Char(','), 6, 6), QStringLiteral("notified"));
+    QVERIFY(GeoZoneAlertHistory::logFields(lines[2]).mid(16).join(QString()).isEmpty());
     fields = lines[3].split(QLatin1Char(','));
     QCOMPARE(fields[4], QString());
     QCOMPARE(fields[6], QStringLiteral("entered"));
@@ -691,7 +731,7 @@ void GeoZoneMonitorTest::_testPilotEventLog()
     QStringList sequence;
     for (const QString &line : lines.mid(1)) {
         const QStringList fields = line.split(QLatin1Char(','));
-        QCOMPARE(fields.count(), 16);
+        QCOMPARE(fields.count(), 21);
         sequence.append(QStringList{ fields[6], fields[8], fields[14], fields[15] }.join(QLatin1Char(' ')).trimmed());
     }
     const QString approach = QString::number(approachId);
@@ -1365,8 +1405,7 @@ void GeoZoneMonitorTest::_testSpokenAlerts()
     const auto sink = std::make_shared<RecordingAudioSink>();
     monitor.setAudioSink(sink);
     GeoZoneMonitor::Settings settings;
-    settings.limits.distance = 100;
-    settings.limits.verticalDistance = 30;
+    settings.limits = GeoZoneAlertTracker::Limits{ 100, 30, 0 };
     monitor.setSettings(settings);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
     QSignalSpy repeatSpy(&monitor, &GeoZoneMonitor::alertRepeated);
@@ -1770,8 +1809,7 @@ void GeoZoneMonitorTest::_testTraffic()
     const auto sink = std::make_shared<RecordingAudioSink>();
     monitor.setAudioSink(sink);
     GeoZoneMonitor::Settings settings;
-    settings.limits.distance = 100;
-    settings.limits.verticalDistance = 30;
+    settings.limits = GeoZoneAlertTracker::Limits{ 100, 30, 0 };
     settings.trafficEnabled = true;
     monitor.setSettings(settings);
     QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
