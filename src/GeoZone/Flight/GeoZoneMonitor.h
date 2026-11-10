@@ -132,6 +132,7 @@ public:
             FenceWarning,           ///< The vehicle is about to breach its own fence, see GeoZoneFenceWarning: the zone name is the
                                     ///< boundary, the detail the fence action
             FenceBreach,            ///< The vehicle reports a breach of its own fence (FENCE_STATUS)
+            Activated,              ///< The zone became active, or was loaded, while the vehicle was inside it
             // What the pilot was shown and answered, only logged. Keep them last, see pilotEvent().
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()

@@ -71,6 +71,9 @@ public:
         const GeoZone *zone = nullptr;
         bool inside = false;            ///< Entered, otherwise approached
         bool imminent = false;          ///< Approached with its entry predicted within Limits::imminentTime
+        /// Entered without crossing its boundary: the vehicle was inside it at the previous update already, when the
+        /// zone didn't apply yet, so it became active, was loaded or changed, or its authorisation ended
+        bool activated = false;
         double distance = 0;            ///< Meters to the zone, 0 inside
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach, NaN when not predicted
     };
@@ -93,8 +96,12 @@ public:
     /// within the approach time are near too.
     Update update(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position, const Velocity &velocity, const Limits &limits);
 
-    /// Forgets the states, so that the alerts repeat
-    void reset() { _states.clear(); }
+    /// Forgets the states and the previous position, so that the alerts repeat
+    void reset()
+    {
+        _states.clear();
+        _previousPosition = GeoZone::Position();
+    }
     /// Forgets the states of zones by GeoZone::key, like zones whose data changed, so that they alert again
     void forget(const QSet<QString> &zoneKeys);
 
@@ -115,6 +122,7 @@ private:
     };
 
     QHash<QString, State> _states;  ///< Zones which are not Away by GeoZone::key
+    GeoZone::Position _previousPosition;    ///< Of the previous update, invalid before
 };
 
 /// Velocity of a vehicle estimated from its recent positions

@@ -35,9 +35,9 @@ const QStringList &eventNames()
 {
     static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered"),
                                        QStringLiteral("outside_volume"), QStringLiteral("on_ground"), QStringLiteral("geo_awareness"),
-                                       QStringLiteral("fence_warning"), QStringLiteral("fence_breached"), QStringLiteral("notified"),
-                                       QStringLiteral("approved"), QStringLiteral("dismissed"), QStringLiteral("muted"), QStringLiteral("permit"),
-                                       QStringLiteral("permit_ended") };
+                                       QStringLiteral("fence_warning"), QStringLiteral("fence_breached"), QStringLiteral("activated"),
+                                       QStringLiteral("notified"), QStringLiteral("approved"), QStringLiteral("dismissed"), QStringLiteral("muted"),
+                                       QStringLiteral("permit"), QStringLiteral("permit_ended") };
     return names;
 }
 
@@ -387,6 +387,7 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.distance = numberValue(fields[7]);
     event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || (event.kind == GeoZoneMonitor::AlertEvent::Traffic) ||
                    (event.kind == GeoZoneMonitor::AlertEvent::OnGround) ||
+                   (event.kind == GeoZoneMonitor::AlertEvent::Activated) ||
                    ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
     event.zoneIdentifier = fields[8];
     event.zoneName = fields[9];

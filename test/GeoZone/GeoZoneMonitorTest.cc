@@ -2390,3 +2390,83 @@ void GeoZoneMonitorTest::_testAlertLevels()
     QCOMPARE(shown->level(), static_cast<int>(GeoZoneAlertLevel::Warning));
     QCOMPARE(shown->alerts().constFirst().message, QStringLiteral("Boundary fence breached"));
 }
+
+void GeoZoneMonitorTest::_testZoneActivation()
+{
+    // A prohibited zone from 12:00 to 13:00 UTC, and one which is always active
+    ScopedEnvironment environment;
+    const QDate day(2027, 3, 1);
+    environment.setNow(_utc(day, QTime(11, 59, 30)));
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate always = center.atDistanceAndAzimuth(5000, 90);
+    QJsonObject scheduled = _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), center, 300);
+    scheduled[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-03-01T12:00:00Z" }, { "endDateTime", "2027-03-01T13:00:00Z" } } };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ scheduled, _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), always, 300) });
+    QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
+    const auto updateActive = [&manager]() { QVERIFY(QMetaObject::invokeMethod(&manager, "_updateActive")); };
+
+    GeoZoneMonitor monitor(&manager);
+    monitor.setActiveVehicleId(1);
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    const GeoZone::Position inside{ center.atDistanceAndAzimuth(100, 0), 500, 450 };
+
+    // Hovering inside the zone before it applies, nothing is alerted
+    monitor.evaluate(inside, 1);
+    monitor.evaluate(inside, 1);
+    QVERIFY(eventSpy.isEmpty());
+
+    // Once it applies, a warning tells the pilot to leave or land, without a manoeuvre from QGroundControl
+    environment.setNow(_utc(day, QTime(12, 0, 30)));
+    updateActive();
+    monitor.evaluate(inside, 1);
+    QCOMPARE(eventSpy.count(), 1);
+    GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Activated);
+    QVERIFY(event.inside);
+    QCOMPARE(event.level, GeoZoneAlertLevel::Warning);
+    const QString message = QStringLiteral("Geozone S (Prohibited) is now active \u2014 you are inside it. Leave or land as soon as possible.");
+    QCOMPARE(event.message, message);
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Warning: ") + message);
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
+    const std::optional<GeoZoneAlertModel::Alert> shown = shownAlert(monitor, event.id);
+    QVERIFY(shown && shown->question && shown->inside);
+    // Logged as such, and repeated like an entry into a prohibited zone
+    const std::optional<GeoZoneMonitor::AlertEvent> logged = GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(event));
+    QVERIFY(logged && (logged->kind == GeoZoneMonitor::AlertEvent::Activated) && logged->inside);
+    QCOMPARE(logged->message, message);
+    QCOMPARE(monitor.arbiter().breachCount(), 1);
+
+    // Leaving it ends the warning, flying back in is an entry
+    monitor.evaluate({ center.atDistanceAndAzimuth(2000, 0), 500, 450 }, 1);
+    QCOMPARE(monitor.arbiter().breachCount(), 0);
+    monitor.evaluate({ center.atDistanceAndAzimuth(400, 0), 500, 450 }, 1);
+    monitor.evaluate(inside, 1);
+    QVERIFY(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().kind == GeoZoneMonitor::AlertEvent::Entry);
+
+    // Starting inside an active zone, like taking off in it, is an entry too
+    eventSpy.clear();
+    monitor.evaluate({ always, 500, 450 }, 2);
+    QCOMPARE(eventSpy.count(), 1);
+    QVERIFY(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().kind == GeoZoneMonitor::AlertEvent::Entry);
+
+    // A zone loaded around a vehicle in flight is active around it, so it is too
+    eventSpy.clear();
+    const GeoZone::Position elsewhere{ center.atDistanceAndAzimuth(9000, 180), 500, 450 };
+    monitor.evaluate(elsewhere, 3);
+    QVERIFY(eventSpy.isEmpty());
+    (void) _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ scheduled, _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), always, 300),
+                                                                         _circleFeature(QStringLiteral("NEW"), QStringLiteral("REQ_AUTHORISATION"), elsewhere.coordinate, 300) });
+    QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
+    monitor.evaluate(elsewhere, 3);
+    QCOMPARE(eventSpy.count(), 1);
+    event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Activated);
+    QCOMPARE(event.message, QStringLiteral("Vehicle 3: Geozone NEW (Authorisation required) is now active \u2014 you are inside it. Leave or land as soon as possible."));
+    QCOMPARE(event.level, GeoZoneAlertLevel::Warning);
+}

@@ -566,7 +566,9 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
 {
     for (const GeoZoneAlertTracker::Alert &zoneAlert : alerts) {
         // Like the pre-arm checks of the vehicle, a vehicle on the ground is told it is inside the zone
-        const AlertEvent::Kind kind = zoneAlert.inside ? (monitor->onGround() ? AlertEvent::OnGround : AlertEvent::Entry) : AlertEvent::Approach;
+        const AlertEvent::Kind kind = !zoneAlert.inside ? AlertEvent::Approach
+                                                        : (monitor->onGround() ? AlertEvent::OnGround
+                                                                               : (zoneAlert.activated ? AlertEvent::Activated : AlertEvent::Entry));
         AlertEvent event = _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId());
         event.level = alertLevel(event, zoneAlert.imminent);
         // The thresholds which raised it, logged with it
@@ -593,7 +595,8 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
 void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &raised, const GeoZone *zone)
 {
     AlertEvent event = raised;
-    const bool zoneAlert = (event.kind == AlertEvent::Approach) || (event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround);
+    const bool zoneAlert = (event.kind == AlertEvent::Approach) || (event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround) ||
+                           (event.kind == AlertEvent::Activated);
     // With a permit for the flight, the alerts are logged and an entry is shown as an advisory, not spoken
     const bool permitted = zoneAlert && _permits->covers(zone);
     if (permitted) {
@@ -634,7 +637,8 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
     announced.level = event.level;
     // A lost position is as urgent as an entry
     announced.inside = (event.kind != AlertEvent::Approach);
-    announced.breach = ((event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround)) && (event.restriction == GeoZone::Prohibited);
+    announced.breach = ((event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround) || (event.kind == AlertEvent::Activated)) &&
+                       (event.restriction == GeoZone::Prohibited);
     announced.message = event.message;
     if (announced.breach) {
         announced.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())));
@@ -1006,6 +1010,7 @@ GeoZoneAlertLevel::Level GeoZoneMonitor::alertLevel(const AlertEvent &event, boo
     switch (event.kind) {
     case AlertEvent::Approach:
     case AlertEvent::Entry:
+    case AlertEvent::Activated:
         return zoneLevel(event.restriction, event.inside, imminent);
     case AlertEvent::Traffic:
         return GeoZoneAlertLevel::Advisory;
@@ -1310,6 +1315,8 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         return tr("Geofence ahead: %1").arg(zoneName);
     case AlertEvent::FenceBreach:
         return zoneName;
+    case AlertEvent::Activated:
+        return tr("Geozone %1 (%2) is now active \u2014 you are inside it. Leave or land as soon as possible.").arg(zoneName, restrictionText);
     case AlertEvent::Notified:
         return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approved:
