@@ -24,6 +24,7 @@ private slots:
     void _testParseED318();
     void _testParseFaaTfr();
     void _testParseNationalFormats();
+    void _testParseNationalVariants();
     void _testParseFaaAirspace();
     void _testParseOpenAip();
     void _testEd318Writer();

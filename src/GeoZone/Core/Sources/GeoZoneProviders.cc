@@ -94,6 +94,35 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
     nats.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\""));
     nats.airac = true;
 
+    // ENAIRE publishes the Spanish zones as ED-318 downloads, updated on AIRAC dates, and its many infrastructure
+    // zones (mostly railways) by area through the feature service of its AIS
+    Service enaireAero = feed(QStringLiteral("enaire-aero"), tr("Spain aeronautical zones (ENAIRE)"), QStringLiteral("enaire.es"), Format::ED318,
+                              QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Aero.zip"));
+    enaireAero.path = QStringLiteral("/recursos/descargas/ZGUAS/");
+    Service enaireUrban = feed(QStringLiteral("enaire-urban"), tr("Spain urban zones (ENAIRE)"), QStringLiteral("enaire.es"), Format::ED318,
+                               QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Urbano.zip"));
+    enaireUrban.path = enaireAero.path;
+    Service enaireInfra = feed(QStringLiteral("enaire-infra"), tr("Spain infrastructure zones (ENAIRE)"), QStringLiteral("enaire.es"), Format::ED318, QString());
+    enaireInfra.path = QStringLiteral("/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/");
+    enaireInfra.coverage = QGeoRectangle(QGeoCoordinate(44.0, -18.5), QGeoCoordinate(27.5, 4.5));
+    enaireInfra.areaUrl = [](const QGeoRectangle &area) {
+        return QStringLiteral("https://servais.enaire.es/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/FeatureServer/0/query?where=1%3D1&geometry=%1"
+                              "&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&geometryPrecision=6"
+                              "&f=geojson&resultRecordCount=2000&resultOffset=0").arg(_bboxQuery(area));
+    };
+
+    // The ministry IenW links the current ED-269 file of the Dutch zones from its page on drones
+    Service netherlands = feed(QStringLiteral("ienw"), tr("Netherlands (IenW)"), QStringLiteral("luchtvaartindetoekomst.nl"), Format::ED269,
+                               QStringLiteral("https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart"));
+    netherlands.datasetLinkPattern = QRegularExpression(QStringLiteral("<a\\b(?=[^>]*JSON)[^>]*href=\"(https://www\\.nieuwsienw\\.nl/api/documents/downloadfile\\?[^\"]+)\""));
+
+    // Austro Control lists its ED-269 datasets with the date each takes effect, the test datasets aside
+    Service austria = feed(QStringLiteral("austro-control"), tr("Austria (Austro Control)"), QStringLiteral("austrocontrol.at"), Format::ED269,
+                           QStringLiteral("https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen"));
+    austria.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*/UASZones-ACG-\\d{8}-\\d{6}-full(?![^\"]*test)[^\"]*\\.(?:zip|json))\""
+                                                                   "(?:(?!</tr>)[\\s\\S])*?<td[^>]*>\\s*(?:<span[^>]*>)?\\s*(\\d{1,2}\\.\\d{1,2}\\.\\d{4})"));
+    austria.datasetDateFormat = QStringLiteral("d.M.yyyy");
+
     const QStringList faaNames = {
         tr("United States UAS facility maps (FAA)"), tr("United States national security UAS restrictions (FAA)"),
         tr("United States controlled airspace (FAA)"), tr("United States special use airspace (FAA)"),
@@ -125,8 +154,13 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
              QStringLiteral("https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json")),
         dipulAviation,
         nats,
+        enaireAero,
+        enaireUrban,
+        netherlands,
+        austria,
         dipulAll,
         france,
+        enaireInfra,
     } + faa;
 }
 
@@ -381,6 +415,18 @@ QString GeoZoneProviders::serviceId(const QString &url)
     return id;
 }
 
+QString GeoZoneProviders::serviceName(const QString &url)
+{
+    // Other URLs of a service's server needn't be its data
+    const QString id = feedArea(url).isValid() ? serviceId(url) : QString();
+    for (const Service &service : services()) {
+        if ((!service.feedUrl.isEmpty() && (service.feedUrl == url)) || (!id.isEmpty() && (service.id == id) && service.areaUrl)) {
+            return service.name;
+        }
+    }
+    return QString();
+}
+
 QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data, const QDate &today)
 {
     const QByteArray start = data.left(1024).trimmed().toLower();
@@ -393,6 +439,17 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
         if (!service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {
             continue;
         }
+        // Links in HTML attributes escape their ampersands
+        const auto resolved = [&url](const QString &link) {
+            return QUrl(url).resolved(QUrl(QString(link).replace(QStringLiteral("&amp;"), QStringLiteral("&")))).toString();
+        };
+        if (service.datasetLinkPattern.captureCount() < 2) {
+            const QRegularExpressionMatch match = service.datasetLinkPattern.match(page);
+            if (match.hasMatch() && !match.captured(1).isEmpty()) {
+                return resolved(match.captured(1));
+            }
+            continue;
+        }
         QString link;
         QDate linkDate;
         QString earliestLink;
@@ -400,7 +457,7 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
         QRegularExpressionMatchIterator it = service.datasetLinkPattern.globalMatch(page);
         while (it.hasNext()) {
             const QRegularExpressionMatch match = it.next();
-            const QDate date = QDate::fromString(match.captured(2), QStringLiteral("yyyyMMdd"));
+            const QDate date = QDate::fromString(match.captured(2), service.datasetDateFormat);
             if (!date.isValid()) {
                 continue;
             }
@@ -417,7 +474,7 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
             link = earliestLink;
         }
         if (!link.isEmpty()) {
-            return QUrl(url).resolved(QUrl(link)).toString();
+            return resolved(link);
         }
     }
     return QString();
@@ -436,7 +493,7 @@ QDate GeoZoneProviders::airacDatasetDate(const QString &datasetUrl)
         }
         const QRegularExpressionMatch match = service.datasetLinkPattern.match(link);
         if (match.hasMatch()) {
-            return QDate::fromString(match.captured(2), QStringLiteral("yyyyMMdd"));
+            return QDate::fromString(match.captured(2), service.datasetDateFormat);
         }
     }
     return QDate();

@@ -62,10 +62,13 @@ foreach(test IN LISTS GEOZONE_SHARED_TESTS GEOZONE_APP_TESTS)
 endforeach()
 
 set(GEOZONE_TEST_DATA
+    data/at_ed269_test.json
     data/ch_zurich_ed269.json
     data/dipul_test.json
     data/ed269_test.json
     data/ed318_test.json
+    data/es_enaire_ed318_test.json
+    data/es_servais_ed318_test.json
     data/faa_airspace_test.json
     data/faa_tfr_test.json
     data/france_uas_test.json

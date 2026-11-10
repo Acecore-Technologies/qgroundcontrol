@@ -221,6 +221,48 @@ QStringList _stringList(const QJsonValue &value)
     return list;
 }
 
+QString _plainText(const QString &text)
+{
+    static const QRegularExpression tag(QStringLiteral("<\\s*(/?)\\s*([a-zA-Z][a-zA-Z0-9]*)[^>]*>"));
+    if (!tag.match(text).hasMatch()) {
+        return text;
+    }
+
+    QString plain;
+    plain.reserve(text.size());
+    qsizetype position = 0;
+    QRegularExpressionMatchIterator it = tag.globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch match = it.next();
+        plain += QStringView(text).mid(position, match.capturedStart() - position);
+        position = match.capturedEnd();
+        const QString name = match.captured(2).toLower();
+        if ((name == QStringLiteral("br")) || (name == QStringLiteral("p")) || (name == QStringLiteral("li")) || (name == QStringLiteral("div"))) {
+            plain += QLatin1Char('\n');
+        }
+    }
+    plain += QStringView(text).mid(position);
+
+    static const QList<std::pair<QString, QString>> entities = {
+        { QStringLiteral("&nbsp;"), QStringLiteral(" ") }, { QStringLiteral("&lt;"), QStringLiteral("<") }, { QStringLiteral("&gt;"), QStringLiteral(">") },
+        { QStringLiteral("&quot;"), QStringLiteral("\"") }, { QStringLiteral("&#39;"), QStringLiteral("'") }, { QStringLiteral("&apos;"), QStringLiteral("'") },
+        { QStringLiteral("&amp;"), QStringLiteral("&") },
+    };
+    for (const auto &[entity, character] : entities) {
+        (void) plain.replace(entity, character, Qt::CaseInsensitive);
+    }
+
+    // One space between words and no empty lines, whatever the markup's whitespace
+    QStringList lines;
+    for (const QString &line : plain.split(QLatin1Char('\n'))) {
+        const QString simplified = line.simplified();
+        if (!simplified.isEmpty()) {
+            lines.append(simplified);
+        }
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
 double _number(const QJsonValue &value)
 {
     double number = qQNaN();
@@ -662,8 +704,13 @@ void _commonProperties(const QJsonObject &object, const QString &restrictionKey,
 {
     zone.uSpaceClass = _text(object.value(QStringLiteral("uSpaceClass")));
     zone.regulationExemption = _text(object.value(QStringLiteral("regulationExemption")));
-    const QJsonObject extended = object.value(QStringLiteral("extendedProperties")).toObject();
+    const QJsonValue extendedValue = object.value(QStringLiteral("extendedProperties"));
+    const QJsonObject extended = extendedValue.toObject();
+    static const QString localizedMessagesKey = QStringLiteral("localizedMessages");
     for (auto it = extended.constBegin(); it != extended.constEnd(); ++it) {
+        if (it.key() == localizedMessagesKey) {
+            continue;
+        }
         const QJsonValue &value = it.value();
         const QString text = (value.isObject() || value.isArray()) ?
                                  QString::fromUtf8(value.isObject() ? QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact) : QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact)) :
@@ -672,6 +719,10 @@ void _commonProperties(const QJsonObject &object, const QString &restrictionKey,
             zone.extendedProperties.append(QStringLiteral("%1: %2").arg(it.key(), text));
         }
     }
+    // Some publishers give a description of the zone as text
+    if (const QString text = extendedValue.isString() ? extendedValue.toString().trimmed() : QString(); !text.isEmpty()) {
+        zone.extendedProperties.append(text);
+    }
 
     zone.identifier = _text(object.value(QStringLiteral("identifier")));
     zone.country = _text(object.value(QStringLiteral("country")));
@@ -679,8 +730,31 @@ void _commonProperties(const QJsonObject &object, const QString &restrictionKey,
     zone.restrictionCode = _text(object.value(restrictionKey));
     zone.restriction = GeoZone::restrictionFromString(zone.restrictionCode);
     zone.reasons = _stringList(object.value(QStringLiteral("reason")));
+    if (zone.reasons.isEmpty()) {
+        zone.reasons = _stringList(object.value(QStringLiteral("reasons")));
+    }
     zone.otherReasonInfo = _text(object.value(QStringLiteral("otherReasonInfo")));
     zone.message = _text(object.value(QStringLiteral("message")));
+    QString localizedMessage;
+    QString englishMessage;
+    for (const QJsonValue &value : extended.value(localizedMessagesKey).toArray()) {
+        const QJsonObject localized = value.toObject();
+        const QString text = _text(localized.value(QStringLiteral("message")));
+        const QString messageLanguage = localized.value(QStringLiteral("language")).toString().left(2).toLower();
+        if (localizedMessage.isEmpty() && !language().isEmpty() && (messageLanguage == language())) {
+            localizedMessage = text;
+        }
+        if (englishMessage.isEmpty() && (messageLanguage == QStringLiteral("en"))) {
+            englishMessage = text;
+        }
+    }
+    if (localizedMessage.isEmpty()) {
+        localizedMessage = englishMessage;
+    }
+    if (!localizedMessage.isEmpty()) {
+        zone.message = localizedMessage;
+    }
+    zone.message = _plainText(zone.message);
     zone.authorities = _authorities(object.value(QStringLiteral("zoneAuthority")));
     _notification(object.value(QStringLiteral("zoneAuthority")), zone);
 

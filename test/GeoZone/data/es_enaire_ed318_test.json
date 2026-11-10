@@ -1,0 +1,320 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -1.70369231199993,
+       39.137055184000076
+      ],
+      [
+       -1.6452821649999692,
+       39.11817951200004
+      ],
+      [
+       -1.6851512899999648,
+       39.043304110000065
+      ],
+      [
+       -1.7435456809999437,
+       39.06217150200007
+      ],
+      [
+       -1.8019400549999318,
+       39.08103383900004
+      ],
+      [
+       -1.7621113949999767,
+       39.15592869300008
+      ],
+      [
+       -1.7037038749999738,
+       39.13705892100006
+      ],
+      [
+       -1.70369231199993,
+       39.137055184000076
+      ]
+     ],
+     [
+      [
+       -1.7740753729999597,
+       39.08669001000004
+      ],
+      [
+       -1.6998791209999808,
+       39.062687555000025
+      ],
+      [
+       -1.6732612889999245,
+       39.112592832000075
+      ],
+      [
+       -1.747500850999927,
+       39.13661201200006
+      ],
+      [
+       -1.7740753729999597,
+       39.08669001000004
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "SHAPE_Area": "94340149.6329476",
+    "limitedApplicability": [
+     {
+      "startDateTime": "",
+      "endDateTime": "",
+      "schedule": [
+       {
+        "day": "ANY",
+        "startTime": "",
+        "startEvent": "",
+        "endTime": "",
+        "endEvent": ""
+       }
+      ]
+     }
+    ],
+    "UASZone": {
+     "identifier": "LETY45",
+     "country": "ESP",
+     "name": "TINAJEROS",
+     "type": "REQ_AUTHORIZATION",
+     "variant": "COMMON",
+     "restrictionConditions": "",
+     "region": "0",
+     "reasons": "AIR_TRAFFIC",
+     "otherReasonInfo": "",
+     "regulationExemption": "No",
+     "message": "Se encuentra en la Zona geográfica de UAS General por razón de la seguridad operacional de <elem>TINAJEROS </elem>, LETY.<p> Por debajo de 45m medidos desde el punto de referencia del aeródromo (680m), no es necesario coordinar la operación. <p><font color=\"#dc143c\"> Por encima de 45m, medidos desde el punto de referencia del aeródromo (680m), NO permitido el vuelo a drones excepto coordinación con el Aeródromo.</font></p><p> <b>Contacto:</b>   URL: <font color=\"#009fda\"><a href='https://www.aeroclubdealbacete.com' target='_blank'>Enlace </a></font>; TEL: <font color=\"#009fda\">+34-627 445 922</font> ; TEL: <font color=\"#009fda\">+34-630 925 742</font> ; TEL: <font color=\"#009fda\">+34-666 163 200</font> ;Email: <font color=\"#009fda\">presidente@aeroclubdealbacete.com</font>  </p>",
+     "extendedProperties": "Aeródromo"
+    },
+    "zoneAuthority": [
+     {
+      "purpose": "AUTHORIZATION",
+      "intervalBefore": "",
+      "name": "",
+      "service": "",
+      "contactName": "",
+      "siteURL": "https://www.aeroclubdealbacete.com",
+      "email": "presidente@aeroclubdealbacete.com",
+      "phone": "+34-627 445 922;+34-630 925 742;+34-666 163 200"
+     }
+    ],
+    "dataSource": {
+     "creationDateTime": "2025-10-01T12:13:45",
+     "updateDateTime": "2026-06-08T10:30:47",
+     "originator": ""
+    },
+    "verticalLayer": {
+     "upper": 900,
+     "upperReference": "AGL",
+     "lower": 45,
+     "lowerReference": "AGL",
+     "UOM": "M"
+    },
+    "datasetMetadata": {
+     "provider": "",
+     "issued": "",
+     "validFrom": "",
+     "validTo": "",
+     "description": "",
+     "otherGeoid": "",
+     "technicalLimitation": ""
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -13.399999999999977,
+       29.083333330000073
+      ],
+      [
+       -13.566666669999961,
+       29.083333330000073
+      ],
+      [
+       -13.566666669999961,
+       29.16666667000004
+      ],
+      [
+       -13.399999999999977,
+       29.16666667000004
+      ],
+      [
+       -13.399999999999977,
+       29.083333330000073
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "SHAPE_Area": "197023180.250072",
+    "limitedApplicability": [
+     {
+      "startDateTime": "",
+      "endDateTime": "",
+      "schedule": [
+       {
+        "day": "ANY",
+        "startTime": "",
+        "startEvent": "",
+        "endTime": "",
+        "endEvent": ""
+       }
+      ]
+     }
+    ],
+    "UASZone": {
+     "identifier": "1080-4",
+     "country": "ESP",
+     "name": "",
+     "type": "REQ_AUTHORIZATION",
+     "variant": "COMMON",
+     "restrictionConditions": "",
+     "region": "0",
+     "reasons": "PRIVACY",
+     "otherReasonInfo": "",
+     "regulationExemption": "No",
+     "message": "Se encuentra en una zona geográficas de UAS <font color='#d2691e'> restringida al vuelo fotográfico.</font> Nombre: Haría, Hoja: 1080-4.<p>Solicite los condicionantes técnicos para cada trabajo de fotografía o captación de datos desde plataformas aéreas o aeronaves, al Centro Cartográfico y Fotográfico del Ejército del Aire (CECAF) en el email: <font color=\"#009fda\"><a href = \"mailto: cecaf@ea.mde.es\"> cecaf@ea.mde.es </a></font></p><p>(Más información en: <font color='#009fda'><a href='https://aip.enaire.es/AIP/contenido_AIC/N/LE_Circ_2026_N_01_es.html' target='_blank'>AIC_NTL_01/26</a></font>)</p>",
+     "extendedProperties": "RVF"
+    },
+    "zoneAuthority": [
+     {
+      "purpose": "AUTHORIZATION",
+      "intervalBefore": "",
+      "name": "",
+      "service": "",
+      "contactName": "",
+      "siteURL": "",
+      "email": "",
+      "phone": ""
+     }
+    ],
+    "dataSource": {
+     "creationDateTime": "2024-08-05T09:23:55",
+     "updateDateTime": "2026-06-08T10:30:47",
+     "originator": ""
+    },
+    "verticalLayer": {
+     "upper": 3000,
+     "upperReference": "AGL",
+     "lower": 0,
+     "lowerReference": "AGL",
+     "UOM": "FT"
+    },
+    "datasetMetadata": {
+     "provider": "",
+     "issued": "",
+     "validFrom": "",
+     "validTo": "",
+     "description": "",
+     "otherGeoid": "",
+     "technicalLimitation": ""
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -9.008444439999948,
+       42.43941667000007
+      ],
+      [
+       -9.066333329999964,
+       42.51605556000004
+      ],
+      [
+       -8.983444439999971,
+       42.50352778000007
+      ],
+      [
+       -9.008444439999948,
+       42.43941667000007
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "SHAPE_Area": "47271340.5887305",
+    "limitedApplicability": [
+     {
+      "startDateTime": "",
+      "endDateTime": "",
+      "schedule": [
+       {
+        "day": "ANY",
+        "startTime": "",
+        "startEvent": "",
+        "endTime": "",
+        "endEvent": ""
+       }
+      ]
+     }
+    ],
+    "UASZone": {
+     "identifier": "LER158",
+     "country": "ESP",
+     "name": "P.N. ISLAS ATLÁNTICAS. SALVORA Y OTROS ISLOTES",
+     "type": "REQ_AUTHORIZATION",
+     "variant": "COMMON",
+     "restrictionConditions": "",
+     "region": "0",
+     "reasons": "AIR_TRAFFIC",
+     "otherReasonInfo": "",
+     "regulationExemption": "No",
+     "message": "Se encuentra en una <font color=\"#d2691e\">zona geográfica de UAS restringida</font>: <elem>LER158 P.N. ISLAS ATLÁNTICAS. SALVORA Y OTROS ISLOTES.</elem><p>Nivel inferior: SFC</p><p>Nivel superior: 4000ft ALT</p><p>Notas: Parque Nacional. Prohibido el sobrevuelo, excepto aeronaves de estado y vuelos para la conservación del Parque autorizados por el Gestor del Parque Nacional. // National Park. Overflight is prohibited, except for State aircraft and flights for Park preservation authorised by the National Park Manager. Gestor//Manager: Edificio Cambón, Rúa Oliva 3. 36202 Casco Vello-Vigo (Pontevedra). TEL: +34-886 218 090. E-mail: iatlanticas@xunta.gal.</p><p>Tenga en cuenta que las altitudes referidas a AMSL son respecto al nivel medio del mar, no respecto al suelo. Debe tener en cuenta la altitud del terreno en el punto que vaya a volar, para saber si esta zona le aplica.</p><p>Información publicada en la AIP apartado <font color=\"#009fda\"><a href='https://aip.enaire.es/AIP/contenido_AIP/ENR/LE_ENR_5_1_en.pdf' target='_blank'>ENR 5.1</a></font>.</p>(Más información en: <font color='#009fda'><a href='https://aip.enaire.es/AIP/contenido_AIC/N/LE_Circ_2026_N_01_es.html' target='_blank'>AIC_NTL_01/26</a></font>)",
+     "extendedProperties": "R-Restringida"
+    },
+    "zoneAuthority": [
+     {
+      "purpose": "AUTHORIZATION",
+      "intervalBefore": "",
+      "name": "",
+      "service": "",
+      "contactName": "",
+      "siteURL": "",
+      "email": "",
+      "phone": ""
+     }
+    ],
+    "dataSource": {
+     "creationDateTime": "2024-08-05T09:23:57",
+     "updateDateTime": "2026-06-08T10:30:47",
+     "originator": ""
+    },
+    "verticalLayer": {
+     "upper": 4938,
+     "upperReference": "AMSL",
+     "lower": 0,
+     "lowerReference": "AGL",
+     "UOM": "M"
+    },
+    "datasetMetadata": {
+     "provider": "",
+     "issued": "",
+     "validFrom": "",
+     "validTo": "",
+     "description": "",
+     "otherGeoid": "",
+     "technicalLimitation": ""
+    }
+   }
+  }
+ ]
+}

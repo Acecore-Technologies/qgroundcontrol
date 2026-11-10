@@ -1,0 +1,208 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": 106,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.692657,
+       40.254245
+      ],
+      [
+       -3.671963,
+       40.269976
+      ],
+      [
+       -3.621876,
+       40.308052
+      ],
+      [
+       -3.663321,
+       40.34001
+      ],
+      [
+       -3.704805,
+       40.371953
+      ],
+      [
+       -3.754856,
+       40.33387
+      ],
+      [
+       -3.754881,
+       40.333851
+      ],
+      [
+       -3.7755,
+       40.318162
+      ],
+      [
+       -3.775525,
+       40.318143
+      ],
+      [
+       -3.825556,
+       40.280075
+      ],
+      [
+       -3.784121,
+       40.248137
+      ],
+      [
+       -3.742725,
+       40.216184
+      ],
+      [
+       -3.692657,
+       40.254245
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "identifier": "LEGT0",
+    "country": "ESP",
+    "regulationExemption": "No",
+    "type": "REQ_AUTHORIZATION",
+    "name": "MADRID/Getafe",
+    "reasons": "AIR_TRAFFIC",
+    "message": "Se encuentra en la Zona geográfica de UAS General por razón de seguridad operacional de <elem>MADRID/Getafe </elem>, LEGT.<p><font color=\"#dc143c\">NO permitido el vuelo a drones excepto coordinación con el Aeródromo.</font></p><p> <b>Contacto:</b> Email: <font color=\"#009fda\">RPAS_LEGT@mde.es</font>  </p>",
+    "variant": "COMMON",
+    "otherReasonInfo": "",
+    "restrictionConditions": "",
+    "region": "0",
+    "extendedProperties": "Aeródromo",
+    "issued": "",
+    "validFrom": "",
+    "validTo": "",
+    "provider": "",
+    "description": "",
+    "otherGeoid": "",
+    "technicalLimitation": "",
+    "originator": "",
+    "purpose": "AUTHORIZATION",
+    "intervalBefore": null,
+    "service": "",
+    "contactName": "",
+    "siteURL": "",
+    "email": "RPAS_LEGT@mde.es",
+    "phone": "",
+    "lower": 0,
+    "lowerReference": "AGL",
+    "upper": 900,
+    "upperReference": "AGL",
+    "uom": "M",
+    "creationDateTime": "2025-10-01T12:13:44",
+    "updateDateTime": "2026-06-08T10:30:47",
+    "startDateTime": "",
+    "endDateTime": "",
+    "day": "ANY",
+    "startTime": "",
+    "startEvent": "",
+    "endTime": "",
+    "endEvent": "",
+    "name_authority": "",
+    "GFID": "10F44DAD-5774-4B93-A965-9D60B0824303",
+    "limitedApplicability": "",
+    "OBJECTID": 106,
+    "Shape__Area": 0.015333166788753658,
+    "Shape__Length": 0.5128376226029043
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 2113,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.680588607999937,
+       40.499210066000046
+      ],
+      [
+       -3.678297506999968,
+       40.49964288700005
+      ],
+      [
+       -3.67905368199996,
+       40.501975497000046
+      ],
+      [
+       -3.6818212099999528,
+       40.512177966000024
+      ],
+      [
+       -3.6841328209999347,
+       40.51181261500005
+      ],
+      [
+       -3.6813603599999283,
+       40.50159324300006
+      ],
+      [
+       -3.6813503089999244,
+       40.501559472000054
+      ],
+      [
+       -3.680588607999937,
+       40.499210066000046
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "identifier": "INF0224",
+    "country": "ESP",
+    "regulationExemption": "SI",
+    "type": "CONDITIONAL",
+    "name": null,
+    "reasons": "OTHER",
+    "message": "Se encuentra en una <b>Zona Geográfica de UAS </b>de protección de las infraestructuras ferroviarias, gestionada por <b>ADIF/ ADIF AV</b>.<p><font color=\"#dc143c\"><b>Categoría Abierta:</b></font> Toda la zona es una Zona Geográfica Particular, que afecta a los vuelos en categoría abierta. <b>Compruebe, para vuelos por debajo de 120m</b> respecto al suelo, si su operación está en zona declarativa o requiere autorización previa de <b>ADIF/ ADIF AV</b> y conozca las condiciones de vuelo en la web <font color=\"#009fda\"><a href='https://www.adif.es/solicitud-de-actuaciones-en-zona-de-afeccion-del-ferrocarril'  target='_blank'>ADIF</a></font>. No se requiere aprobación por <font color=\"#009fda\"><a href='https://www.seguridadaerea.gob.es/es/ambitos/drones/operaciones-con-uas-drones/operaciones-con-uas-drones---categoria-abierta-subcategorias-a1-a2-y-a3' target='_blank'>AESA</a></font>.</p><p>En las zonas donde el ferrocarril discurra en túnel, sólo se debe tener en cuenta aquellas instalaciones asociadas al túnel que pudiesen estar en la vertical de la traza representada, a la hora de realizar las operaciones.</p><p><font color=\"#dc143c\"><b>Categoría Específica:</b></font> Zona Geográfica General, de menores dimensiones que la particular. La zona horizontalmente se extenderá 25m medidos desde los extremos exteriores de sus laterales en infraestructuras lineales y 10m en las no lineales. Verticalmente, a una <b>altura mínima de 50m sobre el punto más elevado</b> de la infraestructura o instalación afectada. Se requiere permiso del titular <font color=\"#009fda\"><a href='https://www.adif.es/solicitud-de-actuaciones-en-zona-de-afeccion-del-ferrocarril'  target='_blank'>ADIF</a></font>.</p>",
+    "variant": "CUSTOMIZED",
+    "otherReasonInfo": "Protección Infraestructura Ferroviaria",
+    "restrictionConditions": null,
+    "region": null,
+    "extendedProperties": null,
+    "issued": null,
+    "validFrom": null,
+    "validTo": null,
+    "provider": "ADIF",
+    "description": null,
+    "otherGeoid": null,
+    "technicalLimitation": null,
+    "originator": "",
+    "purpose": "NOTIFICATION",
+    "intervalBefore": "P20D",
+    "service": null,
+    "contactName": "",
+    "siteURL": "https://www.adif.es/solicitud-de-actuaciones-en-zona-de-afeccion-del-ferrocarril",
+    "email": "autorizacioneszonadeafeccion@adif.es",
+    "phone": null,
+    "lower": 0,
+    "lowerReference": "AGL",
+    "upper": 120,
+    "upperReference": "AGL",
+    "uom": "M",
+    "creationDateTime": "2026-09-25T12:11:33",
+    "updateDateTime": "2026-09-25T21:11:29",
+    "startDateTime": "",
+    "endDateTime": "",
+    "day": "ANY",
+    "startTime": "",
+    "startEvent": "",
+    "endTime": "",
+    "endEvent": "",
+    "name_authority": "ADIF",
+    "GFID": "{A92CA74B-6644-4758-813E-B07DB2589513}",
+    "OBJECTID": 2113,
+    "Shape__Area": 3.0346856928130506e-05,
+    "Shape__Length": 0.030789017928589967
+   }
+  }
+ ]
+}

@@ -38,9 +38,11 @@ public:
         /// URL of the zones in the area, null for services without area downloads
         std::function<QString(const QGeoRectangle &area)> areaUrl;
         QGeoRectangle coverage;             ///< Area served by areaUrl
-        /// Links to the current dataset on a download page, with the dataset's effective date (yyyyMMdd) as the
-        /// second capture. Empty when the feed URL is the dataset.
+        /// Links to the current dataset on a download page, with the dataset's effective date as the second capture in
+        /// datasetDateFormat. Without a second capture, the first link is the current dataset. Empty when the feed URL
+        /// is the dataset.
         QRegularExpression datasetLinkPattern;
+        QString datasetDateFormat = QStringLiteral("yyyyMMdd");
         bool airac = false;     ///< The datasets take effect by AIRAC cycle, see GeoZoneAirac
     };
 
@@ -85,6 +87,8 @@ public:
     static GeoZoneParser::Format formatHint(const QString &url);
     /// @return Service::id of the service of a URL, empty for URLs of unknown services
     static QString serviceId(const QString &url);
+    /// @return Service::name of the service whose feed or area URL this is, empty for other URLs
+    static QString serviceName(const QString &url);
 
     /// @return URL of the current dataset linked from a download page, like the AIRAC datasets of NATS, or an empty
     ///         string when the data isn't such a page. The latest dataset effective today or earlier is chosen.

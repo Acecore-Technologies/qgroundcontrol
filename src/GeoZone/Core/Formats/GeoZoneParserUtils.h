@@ -52,6 +52,10 @@ bool cancelled();
 /// Returns text from either a plain string or an ED-318 localized text array ([{ "text": "...", "lang": "en-GB" }])
 QString _text(const QJsonValue &value);
 
+/// @return The text of HTML markup, which some publishers put in their messages: paragraphs and line breaks become
+///         new lines, other tags are dropped and entities are decoded. Text without markup is returned unchanged.
+QString _plainText(const QString &text);
+
 QStringList _stringList(const QJsonValue &value);
 
 double _number(const QJsonValue &value);
@@ -113,6 +117,9 @@ bool _normalizeVolumes(GeoZone::Data &zone);
 /// Adds the volumes described by a GeoJSON-like horizontal geometry. Vertical limits are copied from volumeTemplate.
 void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes);
 
+/// Reads the zone properties ED-269 and ED-318 share. The reasons may also be given as "reasons", and the extended
+/// properties as text. A message in localizedMessages of the extended properties (Austro Control) in the preferred
+/// language or English replaces the message, which ED-269 limits to 200 characters.
 void _commonProperties(const QJsonObject &object, const QString &restrictionKey, GeoZone::Data &zone);
 
 } // namespace GeoZoneParserUtils

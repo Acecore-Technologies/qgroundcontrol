@@ -1,0 +1,501 @@
+﻿[
+ {
+  "zoneId": "85de466d-a619-4bcf-a626-26466aa4989c",
+  "identifier": "acg_600",
+  "country": "AUT",
+  "name": "CTR LOWG",
+  "type": "COMMON",
+  "restriction": "CONDITIONAL",
+  "region": 6,
+  "reason": [
+   "AIR_TRAFFIC"
+  ],
+  "regulationExemption": "YES",
+  "message": "Kontrollzone Flughafen Graz (LOWG)",
+  "extendedProperties": {
+   "legalBasis": "Luftverkehrsregeln 2014 i.d.g.F., § 18b Abs.4",
+   "legalBasisURL": "https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=20008992",
+   "localizedMessages": [
+    {
+     "language": "de-AT",
+     "message": "Kontrollzone Flughafen Graz (LOWG): Zustimmungspflichtig - Während der Betriebszeiten des Flughafens ist ein Flug nur mit Zustimmung der Flugverkehrskontrollstelle Graz zulässig. Diese können Sie nach Abgabe des Flugplans über Austro Control Dronespace erlangen. Beachten Sie auch während des Betriebes etwaige Nachrichten oder Anrufe, die Sie von der Flugverkehrskontrollstelle bekommen. Informationen zu Betriebszeiten sind in der AIP ersichtlich."
+    },
+    {
+     "language": "en",
+     "message": "Control Zone Graz Airport (LOWG): Air traffic control approval required - Flights within the hours of applicability are only permitted with prior approval from the air traffic control unit at Graz Airport, which you can obtain after submitting your flight plan through Austro Control Dronespace. Pay attention to any messages or calls you receive from the air traffic control unit during your operation. Information regarding hours of applicability is provided in the AIP. "
+    }
+   ],
+   "authorityRequirementConditions": [
+    {
+     "authority": "Austro Control GmbH - Flugverkehrskontrolle",
+     "condition": "EXCLUDED/LOS=VLOS/ALTITUDE_AGL_MAX=30/MTOM_G_MAX=249"
+    }
+   ]
+  },
+  "geometry": [
+   {
+    "upperLimit": 1113,
+    "lowerLimit": 0,
+    "uomDimensions": "M",
+    "upperVerticalReference": "AGL",
+    "lowerVerticalReference": "AGL",
+    "horizontalProjection": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        15.24888889,
+        47.09777778
+       ],
+       [
+        15.25346065,
+        47.08162767
+       ],
+       [
+        15.25802965,
+        47.06547733
+       ],
+       [
+        15.26259589,
+        47.04932676
+       ],
+       [
+        15.26715938,
+        47.03317597
+       ],
+       [
+        15.27172011,
+        47.01702495
+       ],
+       [
+        15.2762781,
+        47.0008737
+       ],
+       [
+        15.28083333,
+        46.98472222
+       ],
+       [
+        15.28805874,
+        46.95903034
+       ],
+       [
+        15.29527723,
+        46.93333788
+       ],
+       [
+        15.30248882,
+        46.90764486
+       ],
+       [
+        15.30969352,
+        46.88195126
+       ],
+       [
+        15.31689135,
+        46.8562571
+       ],
+       [
+        15.32408231,
+        46.83056237
+       ],
+       [
+        15.33126642,
+        46.80486707
+       ],
+       [
+        15.3384437,
+        46.7791712
+       ],
+       [
+        15.34561414,
+        46.75347477
+       ],
+       [
+        15.35277778,
+        46.72777778
+       ],
+       [
+        15.38483881,
+        46.73198492
+       ],
+       [
+        15.41690481,
+        46.73618307
+       ],
+       [
+        15.4489758,
+        46.74037223
+       ],
+       [
+        15.48105174,
+        46.7445524
+       ],
+       [
+        15.51313264,
+        46.74872358
+       ],
+       [
+        15.54521848,
+        46.75288576
+       ],
+       [
+        15.57730926,
+        46.75703894
+       ],
+       [
+        15.60940496,
+        46.76118311
+       ],
+       [
+        15.64150558,
+        46.76531828
+       ],
+       [
+        15.67361111,
+        46.76944444
+       ],
+       [
+        15.6639187,
+        46.80481027
+       ],
+       [
+        15.65421358,
+        46.84017505
+       ],
+       [
+        15.64449572,
+        46.87553878
+       ],
+       [
+        15.63476508,
+        46.91090148
+       ],
+       [
+        15.62502163,
+        46.94626312
+       ],
+       [
+        15.61526534,
+        46.98162372
+       ],
+       [
+        15.60549617,
+        47.01698326
+       ],
+       [
+        15.5957141,
+        47.05234175
+       ],
+       [
+        15.58591909,
+        47.08769918
+       ],
+       [
+        15.57611111,
+        47.12305556
+       ],
+       [
+        15.55500236,
+        47.12902973
+       ],
+       [
+        15.53388889,
+        47.135
+       ],
+       [
+        15.51416569,
+        47.13236281
+       ],
+       [
+        15.49444444,
+        47.12972222
+       ],
+       [
+        15.46957282,
+        47.12651195
+       ],
+       [
+        15.44470419,
+        47.12329628
+       ],
+       [
+        15.41983856,
+        47.12007521
+       ],
+       [
+        15.39497594,
+        47.11684874
+       ],
+       [
+        15.37011632,
+        47.11361687
+       ],
+       [
+        15.34525971,
+        47.1103796
+       ],
+       [
+        15.32040612,
+        47.10713694
+       ],
+       [
+        15.29555556,
+        47.10388889
+       ],
+       [
+        15.27222089,
+        47.10083571
+       ],
+       [
+        15.24888889,
+        47.09777778
+       ]
+      ]
+     ]
+    }
+   }
+  ],
+  "applicability": [
+   {
+    "permanent": "YES"
+   }
+  ],
+  "zoneAuthority": [
+   {
+    "name": "Austro Control GmbH - Flugverkehrskontrolle",
+    "siteURL": "https://www.austrocontrol.at",
+    "purpose": "AUTHORIZATION"
+   }
+  ]
+ },
+ {
+  "zoneId": "b8456cdf-73ac-4408-9633-2d8b0a50f148",
+  "identifier": "acg_620",
+  "country": "AUT",
+  "name": "LO R 2B",
+  "type": "COMMON",
+  "restriction": "REQ_AUTHORISATION",
+  "region": 3,
+  "reason": [
+   "AIR_TRAFFIC"
+  ],
+  "regulationExemption": "YES",
+  "message": "Militärisches Flugbeschränkungsgebiet Felixdorf (LO R 2B)",
+  "extendedProperties": {
+   "legalBasis": "Luftverkehrsregeln 2014 i.d.g.F., § 18b Abs.6",
+   "legalBasisURL": "https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=20008992",
+   "localizedMessages": [
+    {
+     "language": "de-AT",
+     "message": "Militärisches Flugbeschränkungsgebiet Felixdorf (LO R 2B): Bescheidpflichtig - Holen Sie eine Bewilligung des Bundesministers für Landesverteidigung ein."
+    },
+    {
+     "language": "en",
+     "message": "Military Restricted Area Felixdorf (LO R 2B): Authorization required - You need to obtain an operational authorization for your flight from the Minister of Defense."
+    }
+   ]
+  },
+  "geometry": [
+   {
+    "upperLimit": 5882,
+    "lowerLimit": 0,
+    "uomDimensions": "M",
+    "upperVerticalReference": "AGL",
+    "lowerVerticalReference": "AGL",
+    "horizontalProjection": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        16.32527778,
+        47.93138889
+       ],
+       [
+        16.31055347,
+        47.92402873
+       ],
+       [
+        16.29583333,
+        47.91666667
+       ],
+       [
+        16.28374851,
+        47.91027842
+       ],
+       [
+        16.27166667,
+        47.90388889
+       ],
+       [
+        16.28027778,
+        47.89138889
+       ],
+       [
+        16.30305361,
+        47.89583559
+       ],
+       [
+        16.32583333,
+        47.90027778
+       ],
+       [
+        16.34888889,
+        47.90472222
+       ],
+       [
+        16.35819285,
+        47.91361149
+       ],
+       [
+        16.3675,
+        47.9225
+       ],
+       [
+        16.35277896,
+        47.92666761
+       ],
+       [
+        16.33805556,
+        47.93083333
+       ],
+       [
+        16.32527778,
+        47.93138889
+       ]
+      ]
+     ]
+    }
+   }
+  ],
+  "applicability": [
+   {
+    "startDateTime": "2026-10-25T01:00:00Z",
+    "endDateTime": "2027-03-28T00:59:59Z",
+    "permanent": "NO",
+    "schedule": [
+     {
+      "day": [
+       "MON",
+       "TUE",
+       "WED",
+       "THU",
+       "FRI"
+      ],
+      "startTime": "07:00:00Z",
+      "endTime": "16:00:00Z"
+     }
+    ]
+   },
+   {
+    "startDateTime": "2027-03-28T01:00:00Z",
+    "endDateTime": "2027-10-31T00:59:59Z",
+    "permanent": "NO",
+    "schedule": [
+     {
+      "day": [
+       "MON",
+       "TUE",
+       "WED",
+       "THU",
+       "FRI"
+      ],
+      "startTime": "06:00:00Z",
+      "endTime": "15:00:00Z"
+     }
+    ]
+   }
+  ],
+  "zoneAuthority": [
+   {
+    "name": "Bundesministerium für Landesverteidigung",
+    "siteURL": "https://www.bundesheer.at/organisation/",
+    "email": "kdolusk.amc.mil@bmlv.gv.at",
+    "purpose": "AUTHORIZATION"
+   },
+   {
+    "name": "Austro Control GmbH - Drone Competence Center",
+    "siteURL": "https://www.dronespace.at",
+    "email": "dronespace@austrocontrol.at",
+    "purpose": "AUTHORIZATION"
+   }
+  ]
+ },
+ {
+  "zoneId": "c03209ae-4c7b-4914-8950-6a043d1070e6",
+  "identifier": "acg_300",
+  "country": "AUT",
+  "name": "MFC Fraham",
+  "type": "COMMON",
+  "restriction": "NO_RESTRICTION",
+  "region": 4,
+  "reason": [
+   "AIR_TRAFFIC"
+  ],
+  "regulationExemption": "YES",
+  "message": "Modellfluggebiet",
+  "extendedProperties": {
+   "legalBasis": "Luftverkehrsregeln 2014 i.d.g.F., § 18b Abs.1",
+   "legalBasisURL": "https://www.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=20008992",
+   "localizedMessages": [
+    {
+     "language": "de-AT",
+     "message": "Modellfluggebiet: Es ist mit erhöhtem Aufkommen unbemannter Luftfahrzeuge zu rechnen."
+    },
+    {
+     "language": "en",
+     "message": "Model flying area: Expect an increased number of unmanned aerial systems operations in this area."
+    }
+   ]
+  },
+  "geometry": [
+   {
+    "upperLimit": 150,
+    "lowerLimit": 0,
+    "uomDimensions": "M",
+    "upperVerticalReference": "AGL",
+    "lowerVerticalReference": "AGL",
+    "horizontalProjection": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        14.03246667,
+        48.278525
+       ],
+       [
+        14.04516389,
+        48.27894722
+       ],
+       [
+        14.04805556,
+        48.27416667
+       ],
+       [
+        14.03861111,
+        48.27277778
+       ],
+       [
+        14.03246667,
+        48.278525
+       ]
+      ]
+     ]
+    }
+   }
+  ],
+  "applicability": [
+   {
+    "permanent": "YES"
+   }
+  ],
+  "zoneAuthority": [
+   {
+    "name": "Austro Control GmbH - Drone Competence Center",
+    "siteURL": "https://www.dronespace.at",
+    "email": "dronespace@austrocontrol.at",
+    "purpose": "NOTIFICATION"
+   }
+  ]
+ }
+]

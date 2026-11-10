@@ -11,6 +11,7 @@
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneEd318Writer.h"
 #include "GeoZoneFormat.h"
+#include "GeoZoneParserUtils.h"
 #include "GeoZoneText.h"
 #include "GeoZoneZip.h"
 
@@ -181,7 +182,7 @@ constexpr int _fieldCount()
 }
 
 /// GeoZoneParser::version the hashes of the fixtures' results in _testParseFixtures_data were recorded for
-constexpr quint16 kResultHashVersion = 11;
+constexpr quint16 kResultHashVersion = 12;
 
 /// @return Hash of a serialized result, with the vertices rounded to 1e-7 degrees, which the differences of the math
 ///         libraries computing arcs and geodesics don't change
@@ -297,6 +298,9 @@ void GeoZoneParserTest::_testParseFixtures_data()
     row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "e2d4b0d264592f37");
     row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "3c0d3f716763a061");
     row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "bb11ebfc2907b643");
+    row("es_enaire_ed318_test.json", Format::ED318, Format::ED318, 3, 0, 0, "1ba7cfe75dd69cce");
+    row("es_servais_ed318_test.json", Format::ED318, Format::ED318, 2, 0, 0, "4ca8ded0a0427a73");
+    row("at_ed269_test.json", Format::ED269, Format::ED269, 3, 0, 0, "5a0999bafe784557");
     row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 1, 0, "60bb56a4e18bf1b8");
     row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
     row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
@@ -601,6 +605,90 @@ void GeoZoneParserTest::_testParseED318()
     QCOMPARE(result.zones[0].notificationAuthority, QStringLiteral("Tower"));
     QCOMPARE(result.zones[0].notificationLeadSecs, qint64{ (2 * 24 + 12) * 3600 });
     QVERIFY(result.zones[0].authorities[1].contains(QStringLiteral("notice P2DT12H")));
+}
+
+void GeoZoneParserTest::_testParseNationalVariants()
+{
+    QString errorString;
+
+    // ENAIRE's downloads: the zone's members in UASZone, its limits in verticalLayer, schedules of any day without
+    // times which restrict nothing, and messages in HTML
+    GeoZoneParser::Result enaire;
+    QFile enaireFile(QStringLiteral(":/unittest/es_enaire_ed318_test.json"));
+    QVERIFY(enaireFile.open(QIODevice::ReadOnly));
+    QVERIFY2(GeoZoneParser::parse(enaireFile.readAll(), enaire, errorString), qPrintable(errorString));
+    QCOMPARE(enaire.format, GeoZoneParser::Format::ED318);
+    QCOMPARE(enaire.zones.count(), 3);
+    const GeoZone::Data &aerodrome = enaire.zones[0];
+    QCOMPARE(aerodrome.identifier, QStringLiteral("LETY45"));
+    QCOMPARE(aerodrome.name, QStringLiteral("TINAJEROS"));
+    QCOMPARE(aerodrome.country, QStringLiteral("ESP"));
+    QCOMPARE(aerodrome.restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(aerodrome.reasons, QStringList(QStringLiteral("AIR_TRAFFIC")));
+    QCOMPARE(aerodrome.volumes[0].lowerLimit, 45.0);
+    QCOMPARE(aerodrome.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
+    QCOMPARE(aerodrome.volumes[0].upperLimit, 900.0);
+    QCOMPARE(aerodrome.volumes[0].upperReference, GeoZone::VerticalReference::Ground);
+    QVERIFY(aerodrome.applicability.isEmpty());
+    QVERIFY2(!aerodrome.message.contains(QLatin1Char('<')) && aerodrome.message.contains(QStringLiteral("TINAJEROS")), qPrintable(aerodrome.message));
+    QVERIFY(aerodrome.extendedProperties.contains(QStringLiteral("Aeródromo")));
+    QVERIFY2(!aerodrome.authorities.isEmpty() && aerodrome.authorities[0].startsWith(QStringLiteral("Authorisation: ")), qPrintable(aerodrome.authorities.join(QLatin1Char('|'))));
+    const GeoZone::Data &photography = enaire.zones[1];
+    QCOMPARE(photography.reasons, QStringList(QStringLiteral("PRIVACY")));
+    QVERIFY(photography.volumes[0].feet);
+    QCOMPARE(photography.volumes[0].upperLimit, 3000.0);
+    QCOMPARE(enaire.zones[2].volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
+    QCOMPARE(enaire.zones[2].volumes[0].upperLimit, 4938.0);
+
+    // Its feature service has the same members as attributes of the features
+    GeoZoneParser::Result servais;
+    QFile servaisFile(QStringLiteral(":/unittest/es_servais_ed318_test.json"));
+    QVERIFY(servaisFile.open(QIODevice::ReadOnly));
+    QVERIFY2(GeoZoneParser::parse(servaisFile.readAll(), servais, errorString, GeoZoneParser::Format::ED318), qPrintable(errorString));
+    QCOMPARE(servais.zones.count(), 2);
+    QCOMPARE(servais.zones[0].identifier, QStringLiteral("LEGT0"));
+    QCOMPARE(servais.zones[0].restriction, GeoZone::ReqAuthorisation);
+    QCOMPARE(servais.zones[0].volumes[0].upperLimit, 900.0);
+    QVERIFY(servais.zones[0].applicability.isEmpty());
+    const GeoZone::Data &railway = servais.zones[1];
+    QCOMPARE(railway.restriction, GeoZone::Conditional);
+    QCOMPARE(railway.otherReasonInfo, QStringLiteral("Protección Infraestructura Ferroviaria"));
+    QCOMPARE(railway.volumes[0].upperLimit, 120.0);
+    QCOMPARE(railway.notificationLeadSecs, qint64{ 20 * 24 * 3600 });
+    QCOMPARE(railway.notificationAuthority, QStringLiteral("ADIF"));
+    QVERIFY(railway.authorities.constFirst().contains(QStringLiteral("autorizacioneszonadeafeccion@adif.es")));
+    // Untitled downloads are named after their service
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 11, 10), QTime(12, 0)));
+    GeoZoneSource areaSource(QStringLiteral("enaire"), GeoZoneProviders::areaFeedUrl(QStringLiteral("enaire-infra"), QGeoRectangle(QGeoCoordinate(40.5, -3.8), QGeoCoordinate(40.3, -3.6))));
+    areaSource.setResult(servais, environment.now(), environment.now());
+    QCOMPARE(areaSource.name(), QStringLiteral("Spain infrastructure zones (ENAIRE), area around 40.40, -3.70"));
+    QCOMPARE(GeoZoneProviders::serviceName(QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Aero.zip")), QStringLiteral("Spain aeronautical zones (ENAIRE)"));
+    QVERIFY(GeoZoneProviders::serviceName(QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/other.zip")).isEmpty());
+
+    // Austro Control's ED-269 zones are a list, their full messages are in the localized messages
+    QFile austriaFile(QStringLiteral(":/unittest/at_ed269_test.json"));
+    QVERIFY(austriaFile.open(QIODevice::ReadOnly));
+    const QByteArray austriaBytes = austriaFile.readAll();
+    GeoZoneParser::Result austria;
+    QVERIFY2(GeoZoneParser::parse(austriaBytes, austria, errorString), qPrintable(errorString));
+    QCOMPARE(austria.format, GeoZoneParser::Format::ED269);
+    QCOMPARE(austria.zones.count(), 3);
+    const GeoZone::Data &ctr = austria.zones[0];
+    QCOMPARE(ctr.restriction, GeoZone::Conditional);
+    QVERIFY2(ctr.message.startsWith(QStringLiteral("Control Zone Graz Airport (LOWG)")), qPrintable(ctr.message));
+    QVERIFY(std::none_of(ctr.extendedProperties.cbegin(), ctr.extendedProperties.cend(), [](const QString &line) { return line.startsWith(QStringLiteral("localizedMessages")); }));
+    QVERIFY(!ctr.extendedProperties.isEmpty());
+    QCOMPARE(austria.zones[1].applicability.count(), 2);
+    QCOMPARE(austria.zones[1].applicability[0].schedule.count(), 1);
+    QCOMPARE(austria.zones[2].restriction, GeoZone::NoRestriction);
+    GeoZoneParser::Result german;
+    QVERIFY2(GeoZoneParser::parse(austriaBytes, german, errorString, GeoZoneParser::Format::Unknown, QStringLiteral("de")), qPrintable(errorString));
+    QVERIFY(german.zones[0].message.startsWith(QStringLiteral("Kontrollzone Flughafen Graz (LOWG)")));
+
+    // Markup in messages
+    QCOMPARE(GeoZoneParserUtils::_plainText(QStringLiteral("<p>Zone <b>A</b> &amp; B<br/>see <a href='x'>here</a></p><p></p>")), QStringLiteral("Zone A & B\nsee here"));
+    QCOMPARE(GeoZoneParserUtils::_plainText(QStringLiteral("Altitude < 120 m")), QStringLiteral("Altitude < 120 m"));
 }
 
 void GeoZoneParserTest::_testParseFaaAirspace()
@@ -1051,6 +1139,40 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(GeoZoneProviders::datasetLink(pageUrl, page, QDate(2026, 1, 1)).endsWith(QStringLiteral("FULL_20261029_XML.zip")));
     QVERIFY(GeoZoneProviders::datasetLink(pageUrl, aixmBytes, QDate(2026, 11, 1)).isEmpty());
 
+    // Austro Control lists its datasets with the dates they take effect, the dataset in effect is taken but not a
+    // test dataset
+    const QByteArray austriaPage = "<!DOCTYPE html><html><body><table><tbody>"
+        "<tr class=\"avtext\"><td class=\"avtext\"><a href=\"/jart/prj3/ac/releases/de/upload/Dronespace/UASZones-ACG-20260826-131201-full-production_LOR57_LOR20.zip\" class=\"avtext\">"
+        "<span class=\"avtext\">Geografische UAS-Gebiete</span></a></td><td class=\"avtext\"><span class=\"avtext\">01.09.2026</span></td>"
+        "<td class=\"avtext\"><span class=\"avtext\">09.09.2026</span></td><td class=\"avtext\"><span class=\"avtext\">21.0</span></td></tr>"
+        "<tr class=\"avtext\"><td class=\"avtext\"><a href=\"/jart/prj3/ac/releases/de/upload/Dronespace/UASZones-ACG-20261001-082127-full-production.zip\" class=\"avtext\">"
+        "<span class=\"avtext\">Geografische UAS-Gebiete</span></a></td><td class=\"avtext\"><span class=\"avtext\">1.10.2026</span></td>"
+        "<td class=\"avtext\"><span class=\"avtext\">24.10.2026</span></td><td class=\"avtext\"><span class=\"avtext\">25.0</span></td></tr>"
+        "<tr class=\"avtext\"><td class=\"avtext\"><a href=\"/jart/prj3/ac/releases/de/upload/Dronespace/UASZones-ACG-20261021-130632-full-production.zip\" class=\"avtext\">"
+        "<span class=\"avtext\">Geografische UAS-Gebiete</span></a></td><td class=\"avtext\"><span class=\"avtext\">25.10.2026</span></td>"
+        "<td class=\"avtext\"><span class=\"avtext\">bis auf Weiteres</span></td><td class=\"avtext\"><span class=\"avtext\">26.0</span></td></tr>"
+        "<tr class=\"avtext\"><td class=\"avtext\"><a href=\"/jart/prj3/ac/releases/de/upload/Dronespace/UASZones-ACG-20261030-082738-full-test_DCC.zip\" class=\"avtext\">"
+        "<span class=\"avtext\">Geografische UAS-Gebiete</span></a></td><td class=\"avtext\"><span class=\"avtext\">01.11.2026</span></td>"
+        "<td class=\"avtext\"><span class=\"avtext\">02.11.2026</span></td><td class=\"avtext\"><span class=\"avtext\">27.0</span></td></tr>"
+        "</tbody></table></body></html>";
+    const QString austriaUrl = QStringLiteral("https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen");
+    QCOMPARE(GeoZoneProviders::datasetLink(austriaUrl, austriaPage, QDate(2026, 9, 5)),
+             QStringLiteral("https://www.austrocontrol.at/jart/prj3/ac/releases/de/upload/Dronespace/UASZones-ACG-20260826-131201-full-production_LOR57_LOR20.zip"));
+    QVERIFY(GeoZoneProviders::datasetLink(austriaUrl, austriaPage, QDate(2026, 10, 24)).endsWith(QStringLiteral("UASZones-ACG-20261001-082127-full-production.zip")));
+    QVERIFY(GeoZoneProviders::datasetLink(austriaUrl, austriaPage, QDate(2026, 10, 25)).endsWith(QStringLiteral("UASZones-ACG-20261021-130632-full-production.zip")));
+    QVERIFY(GeoZoneProviders::datasetLink(austriaUrl, austriaPage, QDate(2026, 11, 10)).endsWith(QStringLiteral("UASZones-ACG-20261021-130632-full-production.zip")));
+    QCOMPARE(GeoZoneProviders::formatHint(austriaUrl), GeoZoneParser::Format::ED269);
+
+    // The ministry's page links the current file of the Dutch zones, without a date
+    const QByteArray netherlandsPage = "<!DOCTYPE html><html lang=\"nl\"><body><p>Deze geografische zones zijn ook te downloaden via een "
+        "<a aria-label=\"JSON-bestand (externe website)\" class=\"link-with-icon\" rel=\"external\" "
+        "href=\"https://www.nieuwsienw.nl/api/documents/downloadfile?sectionid=178144&amp;fileid=1794622&amp;forcedownload=true\">JSON-bestand</a> "
+        "(versie februari 2026).</p></body></html>";
+    const QString netherlandsUrl = QStringLiteral("https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart");
+    QCOMPARE(GeoZoneProviders::datasetLink(netherlandsUrl, netherlandsPage, QDate(2026, 11, 10)),
+             QStringLiteral("https://www.nieuwsienw.nl/api/documents/downloadfile?sectionid=178144&fileid=1794622&forcedownload=true"));
+    QCOMPARE(GeoZoneProviders::formatHint(netherlandsUrl), GeoZoneParser::Format::ED269);
+
     // Area feeds of providers serving zones by area
     const QGeoRectangle frankfurt(QGeoCoordinate(50.15, 8.55), QGeoCoordinate(50.0, 8.75));
     const QString dipulUrl = GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), frankfurt);
@@ -1060,6 +1182,17 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("france"), frankfurt).contains(QStringLiteral("BBOX=8.55000,50.00000,8.75000,50.15000,EPSG:4326")));
     QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))).isEmpty());
     QVERIFY(GeoZoneProviders::areaFeedUrl(QStringLiteral("unknown"), frankfurt).isEmpty());
+    // ENAIRE's infrastructure zones from the feature service of its AIS, in pages, read as ED-318
+    const QGeoRectangle madrid(QGeoCoordinate(40.5, -3.8), QGeoCoordinate(40.3, -3.6));
+    const QString enaireUrl = GeoZoneProviders::areaFeedUrl(QStringLiteral("enaire-infra"), madrid);
+    QVERIFY2(enaireUrl.startsWith(QStringLiteral("https://servais.enaire.es/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/FeatureServer/0/query?")) &&
+             enaireUrl.contains(QStringLiteral("geometry=-3.80000,40.30000,-3.60000,40.50000")), qPrintable(enaireUrl));
+    QCOMPARE(GeoZoneProviders::formatHint(enaireUrl), GeoZoneParser::Format::ED318);
+    QCOMPARE(GeoZoneProviders::serviceId(enaireUrl), QStringLiteral("enaire-infra"));
+    QCOMPARE(GeoZoneProviders::feedArea(enaireUrl), madrid);
+    QCOMPARE(GeoZoneProviders::paging(enaireUrl, R"({"type":"FeatureCollection","features":[)", R"(],"exceededTransferLimit":true,"properties":{"exceededTransferLimit":true}})").scheme,
+             GeoZoneProviders::Paging::Scheme::ArcGisOffset);
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Aero.zip")), GeoZoneParser::Format::ED318);
 
     // Downloading an area adds nothing when a feed of the provider covers it, whatever the rounding of its bounds
     QCOMPARE(GeoZoneProviders::feedArea(dipulUrl), frankfurt);

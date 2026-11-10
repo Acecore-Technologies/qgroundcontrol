@@ -146,7 +146,14 @@ QString GeoZoneSource::name() const
     if (!_service.name.isEmpty()) {
         return _service.name;
     }
-    QString name = _title.isEmpty() ? (isFeed() ? QUrl(_url).host() : QFileInfo(_key).fileName()) : _title;
+    // Feeds without a title are named after their known service, or their server
+    QString name = _title;
+    if (name.isEmpty() && isFeed()) {
+        name = GeoZoneProviders::serviceName(_url);
+    }
+    if (name.isEmpty()) {
+        name = isFeed() ? QUrl(_url).host() : QFileInfo(_key).fileName();
+    }
 
     // Feeds of an area, like the map area downloaded from a WFS or an ArcGIS service, are told apart by where they are
     if (const QGeoRectangle area = GeoZoneProviders::feedArea(_url); area.isValid()) {

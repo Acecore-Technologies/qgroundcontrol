@@ -168,6 +168,10 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     }
 
     QJsonObject root = document.object();
+    // Some publishers, like Austro Control, give the ED-269 zones as a list without their UASZoneVersion
+    if (document.isArray()) {
+        root.insert(QStringLiteral("features"), document.array());
+    }
     // Composite documents carry the companions of the feed's document
     if (root.contains(QLatin1String(kCompositeKey))) {
         const QJsonObject companions = root.value(QStringLiteral("companions")).toObject();
@@ -185,7 +189,7 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         errorString = tr("The server reported an error: %1").arg(QStringList(QStringList{ message } + details).join(QLatin1Char(' ')).trimmed());
         return false;
     }
-    if (!document.isObject() || !featuresValue.isArray()) {
+    if (!featuresValue.isArray()) {
         errorString = tr("Not a geozone file. EUROCAE ED-269 and ED-318 files, AIXM 5.1 airspaces, the FAA, DiPUL and IGN GeoJSON and OpenAIP airspaces are supported.");
         return false;
     }
