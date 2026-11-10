@@ -425,15 +425,15 @@ ToolIndicatorPage {
                         required property int       index
                         required property date      time
                         required property string    message
-                        required property int       restriction
+                        required property int       level
                         required property bool      acknowledged
                         required property bool      earlier
 
+                        // The level of the alert, like the popup
                         Rectangle {
-                            Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.75
-                            Layout.preferredHeight: Layout.preferredWidth
-                            radius:                 width / 2
-                            color:                  control._restrictionColor(alertRow.restriction)
+                            Layout.preferredWidth:  ScreenTools.defaultFontPixelHeight * 0.3
+                            Layout.fillHeight:      true
+                            color:                  GeoZoneStyle.levelColor(alertRow.level)
                         }
 
                         QGCLabel {

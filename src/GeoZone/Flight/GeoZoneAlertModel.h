@@ -15,9 +15,11 @@
 #include <QtCore/QStringList>
 #include <QtCore/QtNumeric>
 
+#include "GeoZoneAlertLevel.h"
+
 #include <functional>
 
-/// Alerts shown by the alert popup, the most severe first, with what can be done about them. GeoZoneMonitor adds the
+/// Alerts shown by the alert popup, the most severe first, with their GeoZoneAlertLevel and what can be done about them. GeoZoneMonitor adds the
 /// alerts it shows and repeats, and updates their actions after each evaluation. Rows are notified only when their
 /// values change, so the popup keeps its delegates.
 class GeoZoneAlertModel : public QAbstractListModel
@@ -25,6 +27,7 @@ class GeoZoneAlertModel : public QAbstractListModel
     Q_OBJECT
 
     Q_PROPERTY(int  count               READ count                  NOTIFY countChanged FINAL)
+    Q_PROPERTY(int  level               READ level                  NOTIFY levelChanged FINAL)                  ///< Highest GeoZoneAlertLevel shown, -1 without
     Q_PROPERTY(int  questionCount       READ questionCount          NOTIFY questionCountChanged FINAL)          ///< Alerts asking for permission, unanswered
     Q_PROPERTY(bool activeVehicleAlerts READ activeVehicleAlerts    NOTIFY activeVehicleAlertsChanged FINAL)    ///< Some alert is about the active vehicle
     /// Meters the active vehicle climbs to be above the ceilings of the zones of its alerts which have one, NaN without
@@ -34,7 +37,8 @@ public:
     struct Alert {
         int alertId = 0;            ///< Unique for the session, see GeoZoneMonitor::AlertEvent::id
         QString message;
-        int severity = 0;           ///< Lower is more severe
+        int severity = 0;           ///< Lower is more severe, see GeoZoneAlertLevel::severity
+        GeoZoneAlertLevel::Level level = GeoZoneAlertLevel::Caution;
         int vehicleKey = 0;         ///< GeoZoneVehicleMonitor::key of the vehicle, 0 for traffic and fence breaches
         QString zoneKey;            ///< GeoZone::key, empty for fence breaches
         QStringList zoneKeys;       ///< Zones of the vehicle's alerts the alert replaced, with zoneKey, which answering it covers
@@ -59,6 +63,8 @@ public:
         ActiveVehicleRole,
         InsideRole,
         ClimbHeightRole,
+        LevelRole,          ///< GeoZoneAlertLevel::Level
+        LevelTextRole,      ///< GeoZoneAlertLevel::text
     };
 
     static constexpr int maxAlerts = 4;
@@ -71,6 +77,7 @@ public:
 
     int count() const { return static_cast<int>(_alerts.count()); }
     int questionCount() const { return _questionCount; }
+    int level() const { return _level; }
     const QList<Alert> &alerts() const { return _alerts; }
     bool activeVehicleAlerts() const { return _activeVehicleAlerts; }
     double climbHeight() const { return _climbHeight; }
@@ -91,6 +98,7 @@ public:
 
 signals:
     void countChanged();
+    void levelChanged();
     void questionCountChanged();
     void activeVehicleAlertsChanged();
     void climbHeightChanged();
@@ -103,6 +111,7 @@ private:
 
     QList<Alert> _alerts;
     int _questionCount = 0;
+    int _level = -1;
     bool _activeVehicleAlerts = false;
     double _climbHeight = qQNaN();
 };

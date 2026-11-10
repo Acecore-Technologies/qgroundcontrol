@@ -176,10 +176,15 @@ GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
     }
 
     QStringList parts;
+    int spokenLevel = -1;
     for (const Candidate &candidate : std::as_const(candidates)) {
         const Alert &alert = candidate.alert;
         if (parts.count() < maxSpokenAlerts) {
-            parts.append((candidate.repeat && !alert.repeatMessage.isEmpty()) ? alert.repeatMessage : alert.message);
+            const QString message = (candidate.repeat && !alert.repeatMessage.isEmpty()) ? alert.repeatMessage : alert.message;
+            // The word of a level once, before its first alert
+            const QString prefix = GeoZoneAlertLevel::spokenPrefix(alert.level);
+            parts.append((prefix.isEmpty() || (alert.level == spokenLevel)) ? message : QStringLiteral("%1: %2").arg(prefix, message));
+            spokenLevel = alert.level;
         }
         announcement.alerts.append(alert);
         if (candidate.repeat) {

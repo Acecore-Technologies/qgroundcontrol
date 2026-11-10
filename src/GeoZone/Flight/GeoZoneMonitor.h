@@ -25,6 +25,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneAlertArbiter.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneAlertModel.h"
 #include "GeoZoneAlertThresholds.h"
 #include "GeoZoneAlertTracker.h"
@@ -87,6 +88,11 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(double           trafficRadius       READ trafficRadius      CONSTANT FINAL)
     Q_PROPERTY(GeoZoneAwareness *awareness          READ awareness          CONSTANT FINAL)    ///< Of the active vehicle, or of the data without
     Q_PROPERTY(GeoZonePermits   *permits            READ permits            CONSTANT FINAL)    ///< Permits to enter zones for this flight
+    /// GeoZoneAlertLevel of the active vehicle where it is now, -1 without zones near it: see zoneLevel(), Warning for
+    /// a breach of its fence
+    Q_PROPERTY(int              activeLevel         READ activeLevel        NOTIFY activeLevelChanged FINAL)
+    /// GeoZoneAlertLevel of the predicted entry of the active vehicle, -1 without
+    Q_PROPERTY(int              predictionLevel     READ predictionLevel    NOTIFY activeLevelChanged FINAL)
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
@@ -154,6 +160,7 @@ public:
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
         QString traffic;            ///< Callsign or ICAO address of the aircraft of a Traffic alert
         QString detail;             ///< Of pilot events: the question asked, or the button pressed
+        GeoZoneAlertLevel::Level level = GeoZoneAlertLevel::Caution;   ///< Of the alert, also for its pilot events
         /// Alert thresholds of the vehicle when it approached or entered the zone, NaN when not known, see
         /// GeoZoneAlertThresholds::Result
         double warningDistance = qQNaN();
@@ -259,12 +266,12 @@ public:
     const GeoZoneAlertArbiter &arbiter() const { return _arbiter; }
 
     /// Shows, logs and announces an alert of a vehicle which isn't about a zone of the catalog, like the
-    /// NonConformance alerts of GeoZoneConformance, as urgent as an entry into a zone requiring an authorisation. It
+    /// NonConformance alerts of GeoZoneConformance, as urgent as a zone requiring an authorisation at its level. It
     /// isn't repeated.
     /// @param identifier,name Of the zone column of the log, the name also ends the message
-    /// @return The alert, with id 0 when not raised
+    /// @return The alert
     AlertEvent raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance, const QString &identifier,
-                                 const QString &name);
+                                 const QString &name, GeoZoneAlertLevel::Level level = GeoZoneAlertLevel::Caution);
 
     /// Acknowledges an alert in the history and stops repeating it
     void acknowledgeAlert(int alertId);
@@ -289,6 +296,13 @@ public:
     ///         a warning for prohibited zones, a caution for the other restricted zones, and an advisory once the pilot
     ///         confirmed the permission or for U-space airspace
     static int groundLevel(GeoZone::Restriction restriction, bool permitted);
+    /// @return Level of a vehicle in or near a zone, after EN 4709-003 Annex D: Warning inside a zone asking for the
+    ///         permission (asksPermission() except conditional zones) or entering it imminently, Caution near it and in
+    ///         or near U-space airspace, Advisory for conditional zones and zones approved or authorised for the vehicle
+    static GeoZoneAlertLevel::Level zoneLevel(GeoZone::Restriction restriction, bool inside, bool imminent, bool approved = false);
+    /// @return Level of an alert of a vehicle about a zone: see zoneLevel(), Caution for lost positions, Advisory for
+    ///         traffic
+    static GeoZoneAlertLevel::Level alertLevel(const AlertEvent &event, bool imminent = false);
 
     GeoZoneManager *manager() const { return _manager; }
     GeoZoneAwareness *awareness() const { return _awareness; }
@@ -309,13 +323,15 @@ public:
 
     bool monitoring() const;
     bool alertsMuted() const { return _arbiter.muted(); }
+    int activeLevel() const { return _activeLevel; }
+    int predictionLevel() const { return _predictionLevel; }
     static int defaultMuteSecs() { return GeoZoneAlertArbiter::defaultMuteMSecs / 1000; }
     QStringList approvedZoneKeys() const;
 
 signals:
     /// Emitted once when a zone is approached and once when it is entered. The message names the vehicle when
     /// several vehicles are monitored. The alerts of an evaluation are emitted most severe first.
-    /// @param severity GeoZone::restrictionSeverity of the zone, plus trafficSeverity for traffic
+    /// @param severity GeoZoneAlertLevel::severity of the level and zone, plus trafficSeverity for traffic
     /// @param alertId See AlertEvent::id and acknowledgeAlert()
     void alert(const QString &message, int severity, int alertId);
     /// An unacknowledged entry into a prohibited zone was announced again, the vehicle is still inside. Also when the
@@ -332,6 +348,7 @@ signals:
     void alertsMutedChanged();
     void trafficChanged();
     void approvalsChanged();
+    void activeLevelChanged();
 
 private slots:
     void _updateEvaluateTimer();
@@ -368,7 +385,9 @@ private:
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
     /// Adds an alert to the shown alerts, logging that the pilot was notified
-    void _show(int alertId, const QString &message, int severity);
+    void _show(int alertId, const QString &message, int severity, GeoZoneAlertLevel::Level level);
+    /// Updates activeLevel() and predictionLevel()
+    void _updateActiveLevel();
     /// Logs what the pilot was shown or answered about a geozone alert, with where its vehicle is now
     void _logPilotEvent(int alertId, AlertEvent::Kind kind, const QString &detail);
     /// Acknowledges an alert and removes it from the shown alerts
@@ -428,6 +447,8 @@ private:
     bool _adsbTraffic = false;                  ///< Checks the traffic of ADSBVehicleManager
     GeoZoneAlertArbiter _arbiter;
     std::shared_ptr<AudioSink> _audioSink;
+    int _activeLevel = -1;
+    int _predictionLevel = -1;
     QTimer _muteTimer;                          ///< Notifies the end of the mute
     bool _alertsMuted = false;                  ///< As last notified
     std::optional<Settings> _fixedSettings;     ///< Set by setSettings()

@@ -74,7 +74,9 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
             continue;
         }
 
-        const State state = inside ? State::Inside : State::Near;
+        // Once imminent, it stays so while near, like the approach
+        const bool imminent = !std::isnan(entryTime) && (entryTime <= limits.imminentTime);
+        const State state = inside ? State::Inside : ((imminent || (previous == State::Imminent)) ? State::Imminent : State::Near);
         // Zones only near in time can be far, or above or below the vehicle
         const double distance = nearByDistance ? (std::min)(insideDistance, nearDistance) : zone->distanceTo(position, std::numeric_limits<double>::max());
 
@@ -82,7 +84,7 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         _states[key] = state;
         update.nearby.append(Nearby{ zone, inside, static_cast<int>(std::lround(distance)), std::isnan(entryTime) ? -1 : static_cast<int>(std::lround(entryTime)) });
         if (state > previous) {
-            update.alerts.append(Alert{ zone, inside, inside ? 0 : distance, entryTime });
+            update.alerts.append(Alert{ zone, inside, !inside && (state == State::Imminent), inside ? 0 : distance, entryTime });
         }
     }
 

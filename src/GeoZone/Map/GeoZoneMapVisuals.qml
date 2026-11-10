@@ -159,7 +159,8 @@ Item {
     }
 
     readonly property bool _predictionShown: showPrediction && map.visible && (GeoZoneMonitor.activeVehicle?.predictedEntryTime ?? -1) >= 0
-    readonly property color _predictionColor: _predictionShown ? GeoZoneStyle.restrictionColor(GeoZoneMonitor.activeVehicle?.predictedEntryZone?.restriction) : "transparent"
+    // The level of the entry, like the alerts
+    readonly property color _predictionColor: _predictionShown ? GeoZoneStyle.levelColor(GeoZoneMonitor.predictionLevel, GeoZoneStyle.restrictionColor(GeoZoneMonitor.activeVehicle?.predictedEntryZone?.restriction)) : "transparent"
 
     Component.onCompleted: {
         _scheduleViewUpdate()

@@ -15,6 +15,8 @@
 #include <QtCore/QSet>
 #include <QtCore/QString>
 
+#include "GeoZoneAlertLevel.h"
+
 #include <functional>
 #include <limits>
 
@@ -23,9 +25,9 @@
 /// and muted) and has no output of its own: GeoZoneMonitor calls tick() after each evaluation of the vehicles, every
 /// second while it monitors them, shows the repeats of the announcement and speaks its text when spoken alerts are on.
 /// So repeats, acknowledgements and muting work the same with the audio turned off.
-/// - The alerts submitted since the last tick are announced as one message, the most urgent first: the most severe
-///   restriction, then entries before repeats before approaches. The message names maxSpokenAlerts of them and
-///   counts the others ("and 2 more").
+/// - The alerts submitted since the last tick are announced as one message, the most urgent first: the highest level
+///   and most severe restriction, then entries before repeats before approaches. The message names maxSpokenAlerts of
+///   them, each level starting with its word ("Warning: ..."), and counts the others ("and 2 more").
 /// - Messages are at least minIntervalMSecs apart. Alerts arriving sooner wait for a later tick, unless they are more
 ///   urgent than the last message, which they preempt.
 /// - Entering a prohibited zone (a breach) is repeated every repeatIntervalMSecs until its alert is acknowledged or
@@ -52,7 +54,8 @@ public:
         int id = 0;             ///< Unique for the session, see acknowledge()
         int vehicleKey = 0;     ///< Unique for each monitored vehicle, a vehicle which reconnects gets a new one
         QString zoneKey;        ///< GeoZone::key
-        int severity = 0;       ///< GeoZone::restrictionSeverity, the most severe is 0
+        int severity = 0;       ///< GeoZoneAlertLevel::severity, the most severe is 0
+        GeoZoneAlertLevel::Level level = GeoZoneAlertLevel::Caution;
         bool inside = false;    ///< Entered, otherwise approached
         bool breach = false;    ///< Entered a prohibited zone: repeated until acknowledged or left, first spoken also while muted
         QString message;        ///< Announced

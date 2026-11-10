@@ -38,4 +38,5 @@ private slots:
     void _testGroundAlerts();
     void _testAwareness();
     void _testPermits();
+    void _testAlertLevels();
 };

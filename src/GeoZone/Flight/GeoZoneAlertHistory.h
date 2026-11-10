@@ -47,6 +47,7 @@ public:
         AltitudeRole,                   ///< Of the vehicle in meters AMSL, NaN when unknown
         AcknowledgedRole,
         EarlierRole,                    ///< Logged by an earlier session
+        LevelRole,                      ///< GeoZoneAlertLevel::Level
     };
 
     static constexpr int maxEntries = 500;

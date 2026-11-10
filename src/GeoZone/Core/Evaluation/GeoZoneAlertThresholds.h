@@ -106,7 +106,9 @@ public:
         QString vehicleClass;               ///< Of the profile
         QString profileName;
 
-        GeoZoneAlertTracker::Limits limits() const { return GeoZoneAlertTracker::Limits{ distance, verticalDistance, time }; }
+        /// @return The limits of the tracker, whose predicted entries within the reaction time and the evaluation
+        ///         interval are imminent
+        GeoZoneAlertTracker::Limits limits() const { return GeoZoneAlertTracker::Limits{ distance, verticalDistance, time, reactionTime + evaluationInterval }; }
         /// @return Seconds of warning at least before a predicted entry: the reaction and manoeuvre times and the
         ///         evaluation interval
         double minWarningTime() const { return reactionTime + manoeuvreTime + evaluationInterval; }

@@ -23,7 +23,8 @@ class GeoZoneCatalog;
 class GeoZonePolicy;
 
 /// Approach and entry states of the zones around one vehicle. Each zone alerts once
-/// when the vehicle comes near it, by distance or by its predicted entry, and once when the vehicle enters it, with
+/// when the vehicle comes near it, by distance or by its predicted entry, once more when its predicted entry becomes
+/// imminent, and once when the vehicle enters it, with
 /// hysteresis so that alerts don't repeat while the vehicle stays at a limit. States are kept by GeoZone::key, so
 /// reloading a source doesn't repeat alerts. The approach distances cover at least minWarningTime at the vehicle's
 /// speed, so a fast vehicle is warned in time also when its entry isn't predicted.
@@ -52,6 +53,7 @@ public:
         double distance = 0;            ///< Meters horizontally, at least minWarningTime at the ground speed
         double verticalDistance = 0;    ///< Meters vertically, at least minWarningTime at the vertical speed
         double time = 0;                ///< Seconds until the predicted entry, 0 to not predict entries
+        double imminentTime = 0;        ///< Seconds until the predicted entry within which it is imminent, 0 for never
     };
 
     /// Zone near or around the vehicle
@@ -68,6 +70,7 @@ public:
     struct Alert {
         const GeoZone *zone = nullptr;
         bool inside = false;            ///< Entered, otherwise approached
+        bool imminent = false;          ///< Approached with its entry predicted within Limits::imminentTime
         double distance = 0;            ///< Meters to the zone, 0 inside
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach, NaN when not predicted
     };
@@ -107,6 +110,7 @@ private:
     enum class State {
         Away,
         Near,
+        Imminent,   ///< Near, with its entry predicted within the imminent time once
         Inside,
     };
 

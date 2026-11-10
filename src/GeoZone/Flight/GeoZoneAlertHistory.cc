@@ -151,6 +151,8 @@ QVariant GeoZoneAlertHistory::data(const QModelIndex &index, int role) const
         return entry.acknowledged;
     case EarlierRole:
         return entry.earlier;
+    case LevelRole:
+        return static_cast<int>(entry.event.level);
     default:
         return QVariant();
     }
@@ -168,6 +170,7 @@ QHash<int, QByteArray> GeoZoneAlertHistory::roleNames() const
         { AltitudeRole, "altitudeAMSL" },
         { AcknowledgedRole, "acknowledged" },
         { EarlierRole, "earlier" },
+        { LevelRole, "level" },
     };
 }
 
@@ -237,7 +240,7 @@ QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
 
 QString GeoZoneAlertHistory::logHeader()
 {
-    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic,alert_id,detail,warning_distance_m,warning_vertical_m,warning_time_s,ground_speed_mps,vertical_speed_mps");
+    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic,alert_id,detail,warning_distance_m,warning_vertical_m,warning_time_s,ground_speed_mps,vertical_speed_mps,level");
 }
 
 QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
@@ -265,6 +268,7 @@ QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
         numberText(event.warningTime, 0),
         numberText(event.groundSpeed, 1),
         numberText(event.verticalSpeed, 1),
+        GeoZoneAlertLevel::code(event.level),
     }.join(QLatin1Char(','));
 }
 
@@ -398,6 +402,12 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.warningTime = (fields.count() > 18) ? numberValue(fields[18]) : qQNaN();
     event.groundSpeed = (fields.count() > 19) ? numberValue(fields[19]) : qQNaN();
     event.verticalSpeed = (fields.count() > 20) ? numberValue(fields[20]) : qQNaN();
+    // Logs written before the levels have the level of the alert
+    bool levelOk = false;
+    event.level = GeoZoneAlertLevel::fromCode(fields.value(21), &levelOk);
+    if (!levelOk) {
+        event.level = GeoZoneMonitor::alertLevel(event);
+    }
 
     // The messages of the monitor
     const QString name = event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName;

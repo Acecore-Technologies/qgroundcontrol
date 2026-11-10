@@ -19,7 +19,9 @@ import QGroundControl.Palette
 import QGroundControl.ScreenTools
 import QGroundControl.GeoZone
 
-/// Non-blocking popup for the flight alerts of GeoZoneMonitor (GeoZoneMonitor.alerts), the most severe first. An alert
+/// Non-blocking popup for the flight alerts of GeoZoneMonitor (GeoZoneMonitor.alerts), the most severe first, each
+/// marked with its level (GeoZoneAlertLevel: a bar and the word in red for a warning, amber for a caution, neutral for
+/// an advisory) and framed in the color of the highest level, on a dark background readable over the map. An alert
 /// of the vehicle approaching or entering a restricted zone asks whether the pilot has the legal permission to fly
 /// there: "I do" acknowledges it and silences the zone until the vehicle leaves it and its approach range. The popup
 /// stays open while such a question is unanswered, otherwise it closes after a while. Other alerts are dismissed. The
@@ -55,6 +57,7 @@ Popup {
     readonly property bool  _guidable:      !!_guided && _alerts.activeVehicleAlerts
     readonly property bool  _questions:     _alerts.questionCount > 0
     readonly property color _textColor:     "white"
+    readonly property color _frameColor:    GeoZoneStyle.levelColor(_alerts.level, _textColor)
     readonly property real  _climbTarget:   _guidable ? _climbTargetFor(_alerts.climbHeight) : NaN
     readonly property bool  _showHold:      _guidable && _guided.showPause
     readonly property bool  _showReturn:    _guidable && _guided.showRTL
@@ -135,8 +138,8 @@ Popup {
         anchors.fill:   parent
         color:          Qt.rgba(0.11, 0.11, 0.12, 0.95)
         radius:         ScreenTools.defaultFontPixelHeight * 0.5
-        border.color:   control._textColor
-        border.width:   2
+        border.color:   control._frameColor
+        border.width:   ScreenTools.defaultFontPixelHeight * 0.2
 
         Rectangle {
             anchors.horizontalCenter:   parent.horizontalCenter
@@ -144,8 +147,8 @@ Popup {
             anchors.topMargin:          -(height / 2)
             color:                      parent.color
             radius:                     ScreenTools.defaultFontPixelHeight * 0.25
-            border.color:               control._textColor
-            border.width:               1
+            border.color:               control._frameColor
+            border.width:               2
             width:                      titleLabel.contentWidth + _margins * 4
             height:                     titleLabel.contentHeight + _margins
 
@@ -174,51 +177,70 @@ Popup {
             Repeater {
                 model: control._alerts
 
-                ColumnLayout {
+                RowLayout {
                     id:                 alertItem
                     Layout.fillWidth:   true
-                    spacing:            ScreenTools.defaultFontPixelHeight * 0.25
+                    spacing:            ScreenTools.defaultFontPixelWidth
 
                     required property int       alertId
                     required property string    message
                     required property bool      question
+                    required property int       level
+                    required property string    levelText
 
-                    RowLayout {
-                        Layout.fillWidth:   true
-                        spacing:            ScreenTools.defaultFontPixelWidth
+                    readonly property color _levelColor: GeoZoneStyle.levelColor(level, control._textColor)
 
-                        QGCLabel {
-                            Layout.fillWidth:   true
-                            wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
-                            textFormat:         Text.PlainText
-                            color:              control._textColor
-                            text:               alertItem.message
-                        }
-
-                        QGCButton {
-                            text:       qsTr("Dismiss")
-                            visible:    !alertItem.question
-                            onClicked:  control._monitor.dismissAlert(alertItem.alertId)
-                        }
+                    // Bold bar of the level
+                    Rectangle {
+                        Layout.fillHeight:      true
+                        Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 0.8
+                        radius:                 width / 3
+                        color:                  alertItem._levelColor
                     }
 
-                    RowLayout {
+                    ColumnLayout {
                         Layout.fillWidth:   true
-                        spacing:            ScreenTools.defaultFontPixelWidth
-                        visible:            alertItem.question
+                        spacing:            ScreenTools.defaultFontPixelHeight * 0.25
 
-                        QGCLabel {
+                        RowLayout {
                             Layout.fillWidth:   true
-                            wrapMode:           Text.WordWrap
-                            color:              control._textColor
-                            font.bold:          true
-                            text:               qsTr("Do you have legal permission to fly here?")
+                            spacing:            ScreenTools.defaultFontPixelWidth
+
+                            QGCLabel {
+                                Layout.fillWidth:   true
+                                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
+                                textFormat:         Text.StyledText
+                                color:              control._textColor
+                                // The level word in its color, then the message as plain text
+                                text:               "<b><font color=\"" + alertItem._levelColor + "\">" + alertItem.levelText + "</font></b>&nbsp;&nbsp;" +
+                                                    alertItem.message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                            }
+
+                            QGCButton {
+                                text:       qsTr("Dismiss")
+                                visible:    !alertItem.question
+                                onClicked:  control._monitor.dismissAlert(alertItem.alertId)
+                            }
                         }
 
-                        QGCButton {
-                            text:       qsTr("I do")
-                            primary:    true
-                            onClicked:  control._monitor.approveAlert(alertItem.alertId)
+                        RowLayout {
+                            Layout.fillWidth:   true
+                            spacing:            ScreenTools.defaultFontPixelWidth
+                            visible:            alertItem.question
+
+                            QGCLabel {
+                                Layout.fillWidth:   true
+                                wrapMode:           Text.WordWrap
+                                color:              control._textColor
+                                font.bold:          true
+                                text:               qsTr("Do you have legal permission to fly here?")
+                            }
+
+                            QGCButton {
+                                text:       qsTr("I do")
+                                primary:    true
+                                onClicked:  control._monitor.approveAlert(alertItem.alertId)
+                            }
                         }
                     }
                 }

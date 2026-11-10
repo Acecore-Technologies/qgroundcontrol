@@ -18,10 +18,11 @@ import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
-/// Toolbar icon showing whether the active vehicle is in or near restricted geozones, colored by the most restrictive
-/// zone, with badges counting the unacknowledged alerts, marking the nearby zones stale while the vehicle's position
-/// is lost, warning that the vehicle is on the ground inside a restricted zone and that geo-awareness is degraded or
-/// unavailable, like with outdated data. Clicking it opens GeoZoneIndicatorPage.
+/// Toolbar icon showing whether the active vehicle is in or near restricted geozones, colored by its alert level
+/// (GeoZoneMonitor.activeLevel: red warning, amber caution, neutral advisory), with badges counting the unacknowledged
+/// alerts, marking the nearby zones stale while the vehicle's position is lost, warning that the vehicle is on the
+/// ground inside a restricted zone and that geo-awareness is degraded or unavailable, like with outdated data.
+/// Clicking it opens GeoZoneIndicatorPage.
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
@@ -39,10 +40,6 @@ Item {
     readonly property int _groundLevel:     _monitor.monitoring && (_active?.groundWarning ?? "") !== "" ? _active.groundLevel : -1
     readonly property int _awareness:       _monitor.awareness.state
 
-    function _restrictionColor(restriction) {
-        return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
-    }
-
     QGCPalette { id: qgcPal }
 
     QGCColoredImage {
@@ -53,7 +50,7 @@ Item {
         source:             "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
-        color:              control._active?.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._active?.alertRestriction ?? -1 : -1)
+        color:              GeoZoneStyle.levelColor(control._monitor.activeLevel, qgcPal.text)
         opacity:            (control._monitor.monitoring && control._active?.positionUnavailable !== true && control._awareness !== GeoZoneAwareness.Unavailable) ? 1 : 0.5
     }
 

@@ -6,6 +6,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneAlertArbiter.h
         GeoZoneAlertHistory.cc
         GeoZoneAlertHistory.h
+        GeoZoneAlertLevel.cc
+        GeoZoneAlertLevel.h
         GeoZoneAlertModel.cc
         GeoZoneAlertModel.h
         GeoZoneAwareness.cc

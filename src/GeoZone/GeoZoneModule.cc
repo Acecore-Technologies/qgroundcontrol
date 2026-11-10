@@ -10,6 +10,7 @@
 #include "GeoZoneModule.h"
 #include "FactMetaData.h"
 #include "GeoZone.h"
+#include "GeoZoneAlertLevel.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneAwareness.h"
 #include "GeoZoneBriefingExport.h"
@@ -106,6 +107,7 @@ void registerQmlTypes()
 
     (void) qmlRegisterUncreatableMetaObject(GeoZone::staticMetaObject, kUri, 1, 0, "GeoZone", "Enums only");
     (void) qmlRegisterUncreatableMetaObject(GeoZoneIntendedLevel::staticMetaObject, kUri, 1, 0, "GeoZoneIntendedLevel", "Enums only");
+    (void) qmlRegisterUncreatableMetaObject(GeoZoneAlertLevel::staticMetaObject, kUri, 1, 0, "GeoZoneAlertLevel", "Enums only");
     (void) qmlRegisterSingletonType<GeoZoneManager>(kUri, 1, 0, "GeoZoneManager", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneManager::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneMonitor>(kUri, 1, 0, "GeoZoneMonitor", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneMonitor::instance()); });
     (void) qmlRegisterSingletonType<GeoZoneConformance>(kUri, 1, 0, "GeoZoneConformance", [](QQmlEngine*, QJSEngine*) { return singleton(GeoZoneConformance::instance()); });

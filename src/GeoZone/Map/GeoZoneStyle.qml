@@ -26,8 +26,23 @@ QtObject {
 
     readonly property color terrainColor:           Qt.rgba(0.45, 0.35, 0.2, 0.8)  ///< Ground below altitude scales
 
+    // Alert levels after EN 4709-003 Annex D, see GeoZoneAlertLevel, readable on the dark alert popup and the map
+    readonly property color warningColor:   "#ff3b30"   ///< Red
+    readonly property color cautionColor:   "#ffb000"   ///< Amber
+    readonly property color advisoryColor:  "#b0bec5"   ///< Neutral
+
     readonly property real activeFillAlpha:     0.25
     readonly property real inactiveFillAlpha:   0.08    ///< Zones not active at the current time
+
+    /// @return Color of a GeoZoneAlertLevel, the default color when it is undefined or -1
+    function levelColor(level, defaultColor) {
+        switch (level) {
+        case GeoZoneAlertLevel.Warning:     return warningColor
+        case GeoZoneAlertLevel.Caution:     return cautionColor
+        case GeoZoneAlertLevel.Advisory:    return advisoryColor
+        default:                            return defaultColor === undefined ? "transparent" : defaultColor
+        }
+    }
 
     function restrictionColor(restriction) {
         switch (restriction) {

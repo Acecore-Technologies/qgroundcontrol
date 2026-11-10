@@ -110,7 +110,8 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::approvalsChanged);
     (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::_updateAlertActions);
     // Fences stop or return the vehicle, shown above the geozone alerts
-    (void) connect(this, &GeoZoneMonitor::fenceBreach, this, [this](const QString &message) { _show(_nextAlertId++, message, -1); });
+    (void) connect(this, &GeoZoneMonitor::fenceBreach, this, [this](const QString &message) { _show(_nextAlertId++, message, -1, GeoZoneAlertLevel::Warning); });
+    (void) connect(this, &GeoZoneMonitor::approvalsChanged, this, &GeoZoneMonitor::_updateActiveLevel);
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
@@ -336,6 +337,7 @@ void GeoZoneMonitor::_resolveActive()
         _activeMonitor = monitor;
         emit activeMonitorChanged();
     }
+    _updateActiveLevel();
 }
 
 QString GeoZoneMonitor::Aircraft::label() const
@@ -424,7 +426,9 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
         const GeoZoneAlertTracker::Update update = tracker.update(*context.catalog, context.policy, position, velocity, limits);
         for (const GeoZoneAlertTracker::Alert &zoneAlert : update.alerts) {
             if (zoneAlert.inside) {
-                entries.append(_alertEvent(zoneAlert.zone, AlertEvent::Traffic, true, 0, qQNaN(), position, noVehicle, plane->label()));
+                AlertEvent event = _alertEvent(zoneAlert.zone, AlertEvent::Traffic, true, 0, qQNaN(), position, noVehicle, plane->label());
+                event.level = alertLevel(event);
+                entries.append(event);
             }
         }
         if (!update.nearby.isEmpty()) {
@@ -450,9 +454,9 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
         _alertSubjects.insert(event.id, AlertSubject{ 0, event, false });
         (void) _alertSubjects.remove(event.id - maxActionAlerts);
         emit alertEvent(event);
-        const int severity = trafficSeverity + GeoZone::restrictionSeverity(event.restriction);
+        const int severity = trafficSeverity + GeoZoneAlertLevel::severity(event.level, GeoZone::restrictionSeverity(event.restriction));
         emit alert(event.message, severity, event.id);
-        _show(event.id, event.message, severity);
+        _show(event.id, event.message, severity, event.level);
     }
 }
 
@@ -564,6 +568,7 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
         // Like the pre-arm checks of the vehicle, a vehicle on the ground is told it is inside the zone
         const AlertEvent::Kind kind = zoneAlert.inside ? (monitor->onGround() ? AlertEvent::OnGround : AlertEvent::Entry) : AlertEvent::Approach;
         AlertEvent event = _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId());
+        event.level = alertLevel(event, zoneAlert.imminent);
         // The thresholds which raised it, logged with it
         if (!settings().limits) {
             const GeoZoneAlertThresholds::Result &thresholds = monitor->thresholds().result();
@@ -595,7 +600,12 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
         event.detail = QStringLiteral("permit");
         event.message = _labelled(monitor->vehicleId(), alertMessage(event, zone->displayName(), GeoZoneText::restriction(zone->restriction())));
     }
-    const int severity = permitted ? GeoZoneIntendedLevel::severity(GeoZoneIntendedLevel::Advisory) : GeoZone::restrictionSeverity(event.restriction);
+    // The pilot has the permission to fly in an approved zone
+    const bool approved = _arbiter.zoneApproved(monitor->key(), event.zoneKey);
+    if (permitted || approved) {
+        event.level = GeoZoneAlertLevel::Advisory;
+    }
+    const int severity = GeoZoneAlertLevel::severity(event.level, GeoZone::restrictionSeverity(event.restriction));
     const bool asks = zoneAlert && asksPermission(event.restriction) && !permitted;
     _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event, asks, GeoZonePermits::applies(zone) ? GeoZonePermits::key(zone) : QString() });
     (void) _alertSubjects.remove(event.id - maxActionAlerts);
@@ -604,16 +614,16 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
         _alertHistory->acknowledgeAlert(event.id);
         if (event.kind != AlertEvent::Approach) {
             emit alert(event.message, severity, event.id);
-            _show(event.id, event.message, severity);
+            _show(event.id, event.message, severity, event.level);
         }
         return;
     }
     // A zone approved until the vehicle leaves it is logged but not shown, the pilot answered already
-    if (_arbiter.zoneApproved(monitor->key(), event.zoneKey)) {
+    if (approved) {
         _alertHistory->acknowledgeAlert(event.id);
     } else {
         emit alert(event.message, severity, event.id);
-        _show(event.id, event.message, severity);
+        _show(event.id, event.message, severity, event.level);
     }
 
     GeoZoneAlertArbiter::Alert announced;
@@ -621,6 +631,7 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
     announced.vehicleKey = monitor->key();
     announced.zoneKey = event.zoneKey;
     announced.severity = severity;
+    announced.level = event.level;
     // A lost position is as urgent as an entry
     announced.inside = (event.kind != AlertEvent::Approach);
     announced.breach = ((event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround)) && (event.restriction == GeoZone::Prohibited);
@@ -862,18 +873,20 @@ void GeoZoneMonitor::_announce()
     }
     for (const GeoZoneAlertArbiter::Alert &repeated : announcement.repeated) {
         emit alertRepeated(repeated.repeatMessage, repeated.severity, repeated.id);
-        _show(repeated.id, repeated.repeatMessage, repeated.severity);
+        _show(repeated.id, repeated.repeatMessage, repeated.severity, repeated.level);
     }
     _updateMuted();
     _updateAlertActions();
+    _updateActiveLevel();
 }
 
-void GeoZoneMonitor::_show(int alertId, const QString &message, int severity)
+void GeoZoneMonitor::_show(int alertId, const QString &message, int severity, GeoZoneAlertLevel::Level level)
 {
     GeoZoneAlertModel::Alert alert;
     alert.alertId = alertId;
     alert.message = message;
     alert.severity = severity;
+    alert.level = level;
     const auto subject = _alertSubjects.constFind(alertId);
     if (subject != _alertSubjects.cend()) {
         alert.vehicleKey = subject->vehicleKey;
@@ -975,6 +988,62 @@ void GeoZoneMonitor::unmuteAlerts()
 bool GeoZoneMonitor::asksPermission(GeoZone::Restriction restriction)
 {
     return GeoZonePolicy::isRestricted(restriction);
+}
+
+GeoZoneAlertLevel::Level GeoZoneMonitor::zoneLevel(GeoZone::Restriction restriction, bool inside, bool imminent, bool approved)
+{
+    if (approved || (restriction == GeoZone::Conditional) || (restriction == GeoZone::NoRestriction)) {
+        return GeoZoneAlertLevel::Advisory;
+    }
+    if (restriction == GeoZone::USpace) {
+        return GeoZoneAlertLevel::Caution;
+    }
+    return (inside || imminent) ? GeoZoneAlertLevel::Warning : GeoZoneAlertLevel::Caution;
+}
+
+GeoZoneAlertLevel::Level GeoZoneMonitor::alertLevel(const AlertEvent &event, bool imminent)
+{
+    switch (event.kind) {
+    case AlertEvent::Approach:
+    case AlertEvent::Entry:
+        return zoneLevel(event.restriction, event.inside, imminent);
+    case AlertEvent::Traffic:
+        return GeoZoneAlertLevel::Advisory;
+    case AlertEvent::PositionLost:
+    case AlertEvent::NonConformance:
+        return GeoZoneAlertLevel::Caution;
+    default:
+        return event.level;
+    }
+}
+
+void GeoZoneMonitor::_updateActiveLevel()
+{
+    int level = -1;
+    int predictionLevel = -1;
+    const GeoZoneVehicleMonitor *const monitor = _activeMonitor;
+    if (monitor && (_manager->zoneCount() > 0)) {
+        const auto imminent = [this, monitor](double timeToEntry) {
+            const double imminentTime = settings().limits ? settings().limits->imminentTime : monitor->thresholds().result().limits().imminentTime;
+            return (timeToEntry >= 0) && (timeToEntry <= imminentTime);
+        };
+        const QSet<QString> approved = _arbiter.approvedZones(monitor->key());
+        for (const GeoZoneAlertTracker::Nearby &nearby : monitor->nearby()) {
+            const int zoneLevel = GeoZoneMonitor::zoneLevel(nearby.zone->restriction(), nearby.inside, imminent(nearby.timeToEntry), approved.contains(nearby.zone->key()));
+            level = (level < 0) ? zoneLevel : (std::min)(level, zoneLevel);
+        }
+        if (const std::optional<GeoZoneAlertTracker::Entry> entry = monitor->entry()) {
+            predictionLevel = zoneLevel(entry->zone->restriction(), false, imminent(entry->time), approved.contains(entry->zone->key()));
+        }
+        if (monitor->fenceBreached()) {
+            level = GeoZoneAlertLevel::Warning;
+        }
+    }
+    if ((level != _activeLevel) || (predictionLevel != _predictionLevel)) {
+        _activeLevel = level;
+        _predictionLevel = predictionLevel;
+        emit activeLevelChanged();
+    }
 }
 
 void GeoZoneMonitor::approveAlert(int alertId)
@@ -1266,7 +1335,7 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
 }
 
 GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance,
-                                                              const QString &identifier, const QString &name)
+                                                              const QString &identifier, const QString &name, GeoZoneAlertLevel::Level level)
 {
     AlertEvent event;
     event.id = _nextAlertId++;
@@ -1277,9 +1346,10 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind ki
     event.distance = distance;
     event.zoneIdentifier = identifier;
     event.zoneName = name;
+    event.level = level;
     event.message = _labelled(vehicleId, alertMessage(event, name, QString()));
     qCDebug(GeoZoneMonitorLog) << event.message;
-    const int severity = GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation);
+    const int severity = GeoZoneAlertLevel::severity(level, GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
     emit alertEvent(event);
     emit alert(event.message, severity, event.id);
 
@@ -1289,6 +1359,7 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind ki
     announced.vehicleKey = (monitor != _monitors.cend()) ? (*monitor)->key() : 0;
     announced.zoneKey = identifier;
     announced.severity = severity;
+    announced.level = level;
     announced.inside = true;
     announced.message = event.message;
     _arbiter.submit(announced);

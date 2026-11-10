@@ -61,6 +61,10 @@ QVariant GeoZoneAlertModel::data(const QModelIndex &index, int role) const
         return alert.inside;
     case ClimbHeightRole:
         return alert.climbHeight;
+    case LevelRole:
+        return static_cast<int>(alert.level);
+    case LevelTextRole:
+        return GeoZoneAlertLevel::text(alert.level);
     default:
         return QVariant();
     }
@@ -77,6 +81,8 @@ QHash<int, QByteArray> GeoZoneAlertModel::roleNames() const
         { ActiveVehicleRole, "activeVehicle" },
         { InsideRole, "inside" },
         { ClimbHeightRole, "climbHeight" },
+        { LevelRole, "level" },
+        { LevelTextRole, "levelText" },
     };
 }
 
@@ -189,6 +195,14 @@ void GeoZoneAlertModel::_setActions(int row, const Alert &alert)
 
 void GeoZoneAlertModel::_updateSummary()
 {
+    int level = -1;
+    for (const Alert &alert : std::as_const(_alerts)) {
+        level = (level < 0) ? alert.level : (std::min)(level, static_cast<int>(alert.level));
+    }
+    if (level != _level) {
+        _level = level;
+        emit levelChanged();
+    }
     const bool active = std::any_of(_alerts.cbegin(), _alerts.cend(), [](const Alert &alert) { return alert.activeVehicle; });
     if (active != _activeVehicleAlerts) {
         _activeVehicleAlerts = active;
