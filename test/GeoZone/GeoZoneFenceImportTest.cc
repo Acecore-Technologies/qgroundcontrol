@@ -9,6 +9,8 @@
 
 #include "GeoZoneFenceImportTest.h"
 #include "GeoZoneFenceTags.h"
+#include "GeoZoneFenceWarning.h"
+#include "GeoZoneMonitor.h"
 #include "GeoZonePreflightCheck.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
@@ -772,6 +774,88 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     _disconnectMockLink();
     QTRY_COMPARE(upload->state(), GeoZoneFenceUpload::Failed);
     QVERIFY2(upload->message().contains(QStringLiteral("disconnected")), qPrintable(upload->message()));
+}
+
+void GeoZoneFenceImportTest::_testFenceWarningVehicle()
+{
+    // A prohibited zone 500 m east of the MockLink vehicle, as an exclusion fence of the vehicle
+    const QGeoCoordinate mockPosition(47.397, 8.5455);
+    ZoneOwner zoneParent;
+    GeoZone::Volume volume;
+    volume.rings.append(GeoZone::toRing(_circleRing(mockPosition.atDistanceAndAzimuth(600, 90), 100, 8)));
+    GeoZone::Data data;
+    data.identifier = QStringLiteral("P");
+    data.restriction = GeoZone::Prohibited;
+    data.volumes.append(volume);
+    const QList<const GeoZone*> zones = { zoneParent.add(data) };
+
+    for (const MAV_AUTOPILOT autopilot : { MAV_AUTOPILOT_PX4, MAV_AUTOPILOT_ARDUPILOTMEGA }) {
+        const bool px4 = autopilot == MAV_AUTOPILOT_PX4;
+        _connectMockLink(autopilot);
+        Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+        QVERIFY(vehicle);
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+        // The circle fence of ArduPilot is around home
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->homePosition().isValid(), 15000);
+        GeoZoneMonitor monitor(GeoZoneManager::instance());
+        GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(vehicle);
+        GeoZoneFenceWarning *const warning = vehicleMonitor->fenceWarning();
+        QVERIFY(warning);
+
+        // The fence action from the parameters: PX4 GF_ACTION 1 only warns, the MockLink ArduCopter has FENCE_ACTION 1
+        // with its fence disabled
+        QCOMPARE(warning->config().firmware, px4 ? GeoZoneFenceWarning::Firmware::PX4 : GeoZoneFenceWarning::Firmware::ArduPilot);
+        QCOMPARE(warning->actionText(), px4 ? QStringLiteral("Warning only, no manoeuvre") : QStringLiteral("RTL or land"));
+        QVERIFY(!warning->enabled());
+
+        // The fence uploaded from geozones, and the altitude and circle fences of ArduPilot's FENCE_TYPE 7
+        PlanMasterController masterController;
+        masterController.setFlyView(false);
+        masterController.start();
+        GeoZoneFenceImporter importer;
+        importer.setGeoFenceController(masterController.geoFenceController());
+        importer.select(zones, 25);
+        QCOMPARE(importer.selectedCount(), 1);
+        QSignalSpy configSpy(warning, &GeoZoneFenceWarning::configChanged);
+        importer.uploadToVehicle();
+        QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Verified, 15000);
+        QTRY_VERIFY(configSpy.count() > 0);
+        QCOMPARE(warning->config().fence.polygons.count(), 1);
+        QVERIFY(!warning->config().fence.polygons.first().inclusion);
+        if (px4) {
+            QVERIFY(warning->config().fence.inclusionUnion);
+            QVERIFY(std::isnan(warning->config().fence.maxAltitude));
+        } else {
+            QCOMPARE(warning->config().fence.maxAltitude, 100.0);
+            QCOMPARE(warning->config().fence.maxDistance, 300.0);
+            QCOMPARE(warning->config().fence.horizontalMargin, 2.0);
+            QVERIFY(!warning->config().fence.inclusionUnion);
+        }
+
+        // Enabling the fence, by its parameter like an RC switch would, enables the warning
+        const QString parameter = px4 ? QStringLiteral("GF_ACTION") : QStringLiteral("FENCE_ENABLE");
+        vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, parameter)->setRawValue(px4 ? 3 : 1);
+        QTRY_COMPARE(warning->config().action, px4 ? 3 : 1);
+        QTRY_VERIFY(warning->enabled());
+        QCOMPARE(warning->actionText(), px4 ? QStringLiteral("Return") : QStringLiteral("RTL or land"));
+
+        // Flying east at 12 m/s, less than 8 s before the exclusion polygon 500 m east, or ArduPilot's circle fence 300 m
+        // from home, the breach is predicted
+        QSignalSpy warningSpy(&monitor, &GeoZoneMonitor::fenceWarning);
+        const QGeoCoordinate start = vehicle->homePosition().atDistanceAndAzimuth(px4 ? 430 : 220, 90);
+        warning->evaluate(start, 30, GeoZoneFenceWarning::Velocity{ 0, 12, 0, true });
+        QVERIFY2(warning->active(), qPrintable(QStringLiteral("%1 home %2 vehicle %3 max %4").arg(px4).arg(vehicle->homePosition().toString(), vehicle->coordinate().toString())
+                                                   .arg(warning->config().fence.maxDistance)));
+        QCOMPARE(warning->config().fence.polygons.isEmpty(), false);
+        const GeoZoneFencePrediction::Breach breach = *warning->breach();
+        QCOMPARE(breach.boundary, px4 ? GeoZoneFencePrediction::Boundary::Polygon : GeoZoneFencePrediction::Boundary::MaxDistance);
+        QCOMPARE(warningSpy.count(), 1);
+        QVERIFY2(warning->text().startsWith(QStringLiteral("Geofence: %1 in ").arg(warning->actionText())), qPrintable(warning->text()));
+
+        monitor.removeVehicle(vehicle);
+        _disconnectMockLink();
+    }
 }
 
 GEOZONE_TEST(GeoZoneFenceImportTest)

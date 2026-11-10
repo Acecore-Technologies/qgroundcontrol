@@ -18,6 +18,7 @@
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneFenceTags.h"
 #include "GeoZoneFenceUpload.h"
+#include "GeoZoneFenceWarning.h"
 #include "GeoZoneFlightRecorder.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneIntendedLevel.h"
@@ -117,6 +118,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneAwareness>(kUri, 1, 0, "GeoZoneAwareness", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZonePermits>(kUri, 1, 0, "GeoZonePermits", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneVehicleMonitor>(kUri, 1, 0, "GeoZoneVehicleMonitor", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneFenceWarning>(kUri, 1, 0, "GeoZoneFenceWarning", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneOperatorZones>(kUri, 1, 0, "GeoZoneOperatorZones", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneSettings>(kUri, 1, 0, "GeoZoneSettings", "Reference only");

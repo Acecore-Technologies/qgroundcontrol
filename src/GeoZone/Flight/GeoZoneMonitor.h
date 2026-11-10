@@ -121,6 +121,9 @@ public:
             OnGround,               ///< The vehicle is on the ground inside the zone, or tried to arm there when detail is "arming"
             Awareness,              ///< The geo-awareness of the flying vehicle changed state: the zone identifier is the
                                     ///< GeoZoneAwareness::stateCode, the name has the reasons
+            FenceWarning,           ///< The vehicle is about to breach its own fence, see GeoZoneFenceWarning: the zone name is the
+                                    ///< boundary, the detail the fence action
+            FenceBreach,            ///< The vehicle reports a breach of its own fence (FENCE_STATUS)
             // What the pilot was shown and answered, only logged. Keep them last, see pilotEvent().
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
@@ -315,6 +318,8 @@ signals:
     void activeMonitorChanged();
     /// A vehicle started breaching its fence. The vehicle announces it, so it isn't spoken.
     void fenceBreach(const QString &message);
+    /// A vehicle is about to breach its fence, see GeoZoneFenceWarning. Shown, spoken and logged.
+    void fenceWarning(const QString &message);
     void alertsMutedChanged();
     void trafficChanged();
     void approvalsChanged();
@@ -364,6 +369,10 @@ private:
     void _updateAlertActions();
     void _settingsChanged(const Settings &previous);
     void _resetMonitors();
+    /// Shows, updates or ends the fence warning of the vehicle, see GeoZoneFenceWarning
+    void _updateFenceWarning(GeoZoneVehicleMonitor *monitor);
+    /// Logs a fence warning or breach of the vehicle
+    void _logFenceEvent(GeoZoneVehicleMonitor *monitor, AlertEvent::Kind kind, int alertId, const QString &message);
 
     AlertEvent _alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId, const QString &traffic = QString());
     /// Aircraft in or near a zone, with the most restrictive one
@@ -403,6 +412,7 @@ private:
     QTimer _awarenessTimer;                     ///< Updates the geo-awareness while the vehicles aren't evaluated
     GeoZonePermits *_permits = nullptr;
     QSet<int> _flying;                          ///< Keys of the vehicles armed since they were on the ground
+    QHash<int, int> _fenceWarningAlerts;        ///< Alert ids of the active fence warnings by vehicle key
     QTimer _evaluateTimer;
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty

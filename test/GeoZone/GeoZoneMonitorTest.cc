@@ -8,6 +8,8 @@
  ****************************************************************************/
 
 #include "GeoZoneMonitorTest.h"
+#include "GeoZoneAlertHistory.h"
+#include "GeoZoneFenceWarning.h"
 #include "GeoZoneIntendedLevel.h"
 #include "GeoZoneNearbyModel.h"
 #include "GeoZonePermits.h"
@@ -857,6 +859,147 @@ void GeoZoneMonitorTest::_testFenceStatus()
     QCOMPARE(monitor.activeMonitor()->fenceBreachText(), QStringLiteral("Minimum altitude fence breached"));
     monitor.removeVehicle(&other);
     QVERIFY(!monitor.activeMonitor());
+}
+
+void GeoZoneMonitorTest::_testFenceWarning()
+{
+    const ScopedMetricUnits metricUnits;
+    const QGeoCoordinate origin(47, 8);
+    const auto local = [&origin](double east, double north) {
+        return origin.atDistanceAndAzimuth(north, 0).atDistanceAndAzimuth(east, 90);
+    };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    GeoZoneMonitor::Settings settings;
+    monitor.setSettings(settings);
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+
+    for (const MAV_AUTOPILOT autopilot : { MAV_AUTOPILOT_PX4, MAV_AUTOPILOT_ARDUPILOTMEGA }) {
+        const bool px4 = autopilot == MAV_AUTOPILOT_PX4;
+        Vehicle vehicle(autopilot, MAV_TYPE_QUADROTOR);
+        GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(&vehicle);
+        monitor.setActiveVehicle(&vehicle);
+        GeoZoneFenceWarning *const warning = vehicleMonitor->fenceWarning();
+        QVERIFY(warning);
+        // An offline vehicle has no fence
+        QVERIFY(!warning->enabled());
+
+        // An exclusion polygon from 450 m east, and the vehicle's fence action: PX4 returns, ArduPilot copters RTL or land
+        GeoZoneFenceWarning::Config config;
+        config.enabled = true;
+        config.firmware = px4 ? GeoZoneFenceWarning::Firmware::PX4 : GeoZoneFenceWarning::Firmware::ArduPilot;
+        config.action = px4 ? 3 : 1;
+        config.fence.polygons.append({ { local(450, 100), local(550, 100), local(550, -100), local(450, -100) }, false });
+        config.fence.inclusionUnion = px4;
+        warning->setConfig(config);
+        QVERIFY(warning->enabled());
+        const QString action = px4 ? QStringLiteral("Return") : QStringLiteral("RTL or land");
+        QCOMPARE(warning->actionText(), action);
+
+        QSignalSpy warningSpy(&monitor, &GeoZoneMonitor::fenceWarning);
+        QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+        sink->spoken.clear();
+        // East at 10 m/s, as GLOBAL_POSITION_INT reports it (vy is east)
+        const auto fly = [&](double east, int16_t vy, double relativeAltitude = 30) {
+            now += 1000;
+            const QGeoCoordinate position = local(east, 0);
+            mavlink_message_t message{};
+            (void) mavlink_msg_global_position_int_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &message, 0, std::lround(position.latitude() * 1e7),
+                                                        std::lround(position.longitude() * 1e7), 500000, std::lround(relativeAltitude * 1000), 0, vy, 0, UINT16_MAX);
+            emit vehicle.mavlinkMessageReceived(message);
+        };
+        // 35 s away, then within the warning time of 8 s
+        fly(100, 1000);
+        QVERIFY(!warning->active());
+        QCOMPARE(warningSpy.count(), 0);
+        fly(390, 1000);
+        QVERIFY(warning->active());
+        QCOMPARE(warning->timeToFence(), 6);
+        QVERIFY(std::abs(warning->distanceToFence() - 60) < 1);
+        QVERIFY(warning->intersection().distanceTo(local(450, 0)) < 1);
+        QCOMPARE(warning->path().count(), 2);
+        const QString text = QStringLiteral("Geofence: %1 in 6 s, 60 m ahead").arg(action);
+        QCOMPARE(warning->text(), text);
+        // Shown above the geozone alerts, spoken once and logged with the fence, time and distance
+        QCOMPARE(warningSpy.count(), 1);
+        QCOMPARE(warningSpy.first().first().toString(), text);
+        QCOMPARE(monitor.alertModel()->alerts().count(), 1);
+        const GeoZoneAlertModel::Alert shown = monitor.alertModel()->alerts().first();
+        QCOMPARE(shown.message, text);
+        QCOMPARE(shown.severity, -1);
+        QCOMPARE(sink->spoken, QStringList({ text }));
+        QCOMPARE(eventSpy.count(), 1);
+        const GeoZoneMonitor::AlertEvent event = eventSpy.first().first().value<GeoZoneMonitor::AlertEvent>();
+        QCOMPARE(event.kind, GeoZoneMonitor::AlertEvent::FenceWarning);
+        QCOMPARE(event.zoneIdentifier, QStringLiteral("FENCE"));
+        QCOMPARE(event.zoneName, QStringLiteral("Exclusion polygon 1"));
+        QCOMPARE(event.detail, QStringLiteral("Fence action: %1").arg(action));
+        QCOMPARE(std::lround(event.timeToEntry), 6);
+        QVERIFY(GeoZoneAlertHistory::logLine(event).contains(QStringLiteral(",fence_warning,60,FENCE,Exclusion polygon 1,")));
+
+        // Counting down in place, without speaking again, and at most every 250 ms
+        fly(400, 1000);
+        QCOMPARE(warning->timeToFence(), 5);
+        QCOMPARE(monitor.alertModel()->alerts().count(), 1);
+        QCOMPARE(monitor.alertModel()->alerts().first().alertId, shown.alertId);
+        QCOMPARE(monitor.alertModel()->alerts().first().message, QStringLiteral("Geofence: %1 in 5 s, 50 m ahead").arg(action));
+        now -= 900;
+        fly(420, 1000);
+        QCOMPARE(warning->timeToFence(), 5);
+        QCOMPARE(warningSpy.count(), 1);
+        QCOMPARE(sink->spoken.count(), 1);
+
+        // Turning away ends it
+        fly(400, -1000);
+        QVERIFY(!warning->active());
+        QCOMPARE(monitor.alertModel()->alerts().count(), 0);
+
+        // Back towards the fence, then its breach, which the vehicle reports: the warning ends with it
+        fly(420, 1000);
+        QVERIFY(warning->active());
+        QCOMPARE(warningSpy.count(), 2);
+        fly(460, 1000);
+        QVERIFY(!warning->active());
+        const qsizetype spokenCount = sink->spoken.count();
+        QSignalSpy breachSpy(&monitor, &GeoZoneMonitor::fenceBreach);
+        mavlink_message_t fenceStatus{};
+        (void) mavlink_msg_fence_status_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &fenceStatus, 1, 1, FENCE_BREACH_BOUNDARY, 0, FENCE_MITIGATE_NONE);
+        emit vehicle.mavlinkMessageReceived(fenceStatus);
+        QCOMPARE(breachSpy.count(), 1);
+        QCOMPARE(monitor.alertModel()->alerts().count(), 1);
+        QCOMPARE(monitor.alertModel()->alerts().first().message, QStringLiteral("Boundary fence breached"));
+        QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().kind, GeoZoneMonitor::AlertEvent::FenceBreach);
+        // The vehicle speaks its breach itself
+        QCOMPARE(sink->spoken.count(), spokenCount);
+
+        // Hovering, or with the fence disabled, nothing is predicted
+        fly(300, 0);
+        QVERIFY(!warning->active());
+        config.enabled = false;
+        warning->setConfig(config);
+        fly(300, 1000);
+        fly(400, 1000);
+        QVERIFY(!warning->active());
+
+        monitor.closeAlerts();
+        monitor.removeVehicle(&vehicle);
+    }
+
+    // The manoeuvres of the fence actions
+    using Warning = GeoZoneFenceWarning;
+    QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Copter, 2), QStringLiteral("Hold"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Copter, 5), QStringLiteral("Land"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, 4), QStringLiteral("Brake or land"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, 0), QStringLiteral("Report only, no manoeuvre"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Plane, 1), QStringLiteral("RTL"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Rover, 2), QStringLiteral("Hold"));
+    QVERIFY(Warning::isManoeuvre(Warning::Firmware::ArduPilot, 1) && !Warning::isManoeuvre(Warning::Firmware::ArduPilot, 0));
+    QVERIFY(Warning::isManoeuvre(Warning::Firmware::PX4, 2) && !Warning::isManoeuvre(Warning::Firmware::PX4, 1));
 }
 
 void GeoZoneMonitorTest::_testVehicleMonitors()

@@ -9,6 +9,7 @@
 
 #include "GeoZoneVehicleMonitor.h"
 #include "GeoZoneCatalog.h"
+#include "GeoZoneFenceWarning.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneMonitor.h"
 #include "GeoZoneNearbyModel.h"
@@ -35,6 +36,7 @@ GeoZoneVehicleMonitor::GeoZoneVehicleMonitor(Vehicle *vehicle, int vehicleId, in
     (void) connect(this, &GeoZoneVehicleMonitor::nearbyChanged, this, &GeoZoneVehicleMonitor::keptZonesChanged);
     (void) connect(this, &GeoZoneVehicleMonitor::predictionChanged, this, &GeoZoneVehicleMonitor::keptZonesChanged);
     if (vehicle) {
+        _fenceWarning = new GeoZoneFenceWarning(vehicle, clock, this);
         (void) connect(vehicle, &Vehicle::mavlinkMessageReceived, this, [this](const mavlink_message_t &message) {
             handleMessage(message, _clock());
         });
@@ -57,6 +59,9 @@ void GeoZoneVehicleMonitor::_positionReceived(qint64 msecs)
 
 void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint64 msecs)
 {
+    if (_fenceWarning) {
+        _fenceWarning->handleMessage(message, msecs);
+    }
     switch (message.msgid) {
     case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
         mavlink_global_position_int_t globalPosition{};

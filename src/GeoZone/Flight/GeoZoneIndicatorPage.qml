@@ -216,6 +216,12 @@ ToolIndicatorPage {
                     visible:            control._active?.fenceBreached === true
                 }
 
+                // The fence action, while the alert popup may be closed
+                GeoZoneFenceAlert {
+                    Layout.fillWidth:   true
+                    textColor:          qgcPal.text
+                }
+
                 GeoZoneConformanceStatus { Layout.fillWidth: true }
 
                 RowLayout {

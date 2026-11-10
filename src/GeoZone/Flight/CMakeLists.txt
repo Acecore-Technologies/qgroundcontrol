@@ -12,6 +12,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZoneAwareness.h
         GeoZoneConformance.cc
         GeoZoneConformance.h
+        GeoZoneFenceWarning.cc
+        GeoZoneFenceWarning.h
         GeoZoneFlightRecorder.cc
         GeoZoneFlightRecorder.h
         GeoZoneGuidedCheck.cc

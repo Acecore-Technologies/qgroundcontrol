@@ -62,6 +62,7 @@ qt_add_qml_module(GeoZoneModule
         Flight/GeoZoneAlertPopup.qml
         Flight/GeoZoneAltitudeStrip.qml
         Flight/GeoZoneConformanceStatus.qml
+        Flight/GeoZoneFenceAlert.qml
         Flight/GeoZoneFlyMapLayer.qml
         Flight/GeoZoneGuidedActionWarning.qml
         Flight/GeoZoneIndicator.qml

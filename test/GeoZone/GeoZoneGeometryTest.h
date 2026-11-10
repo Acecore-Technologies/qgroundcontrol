@@ -26,6 +26,7 @@ private slots:
     void _testExclusionShapes();
     void _testFenceCapacity();
     void _testFenceSelection();
+    void _testFencePrediction();
     void _testContainsAndPaths();
     void _testRingContainment();
     void _testAltitudeLimits();

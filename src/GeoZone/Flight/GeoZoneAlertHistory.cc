@@ -34,7 +34,8 @@ constexpr QLatin1StringView formulaStarts("=+-@\t\r");
 const QStringList &eventNames()
 {
     static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered"),
-                                       QStringLiteral("outside_volume"), QStringLiteral("on_ground"), QStringLiteral("geo_awareness"), QStringLiteral("notified"),
+                                       QStringLiteral("outside_volume"), QStringLiteral("on_ground"), QStringLiteral("geo_awareness"),
+                                       QStringLiteral("fence_warning"), QStringLiteral("fence_breached"), QStringLiteral("notified"),
                                        QStringLiteral("approved"), QStringLiteral("dismissed"), QStringLiteral("muted"), QStringLiteral("permit"),
                                        QStringLiteral("permit_ended") };
     return names;

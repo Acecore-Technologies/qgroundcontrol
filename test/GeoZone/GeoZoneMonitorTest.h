@@ -27,6 +27,7 @@ private slots:
     void _testPilotEventLog();
     void _testAlertHistory();
     void _testFenceStatus();
+    void _testFenceWarning();
     void _testVehicleMonitors();
     void _testAlertArbiter();
     void _testSpokenAlerts();

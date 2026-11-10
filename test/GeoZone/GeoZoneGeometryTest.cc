@@ -9,6 +9,7 @@
 
 #include "GeoZoneGeometryTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneFencePrediction.h"
 #include "GeoZoneFences.h"
 #include "GeoZoneText.h"
 #include "GeoZoneVertical.h"
@@ -757,6 +758,100 @@ void GeoZoneGeometryTest::_testFenceSelection()
         candidate.excluded = false;
     }
     QCOMPARE(select(partTime, Capacity::arduPilot(true, 8)).selectedZones().count(), zones.count() - 2);
+}
+
+void GeoZoneGeometryTest::_testFencePrediction()
+{
+    using namespace GeoZoneFencePrediction;
+
+    const QGeoCoordinate origin(47, 8);
+    const auto local = [&origin](double east, double north) {
+        return origin.atDistanceAndAzimuth(north, 0).atDistanceAndAzimuth(east, 90);
+    };
+    // Square with the half size around a point, east and north of the origin
+    const auto square = [&local](double east, double north, double half) {
+        return QList<QGeoCoordinate>{ local(east - half, north + half), local(east + half, north + half), local(east + half, north - half), local(east - half, north - half) };
+    };
+    const auto near = [](double actual, double expected, double tolerance) { return std::abs(actual - expected) <= tolerance; };
+    const Velocity east{ 0, 10, 0, true };
+
+    // An exclusion polygon whose west edge is 450 m east: reached in 45 s, at the margin 0.2 s sooner
+    Fence fence;
+    fence.polygons.append({ square(500, 0, 50), false });
+    std::optional<Breach> breach = predict(fence, origin, 50, east, 60);
+    QVERIFY(breach);
+    QCOMPARE(breach->boundary, Boundary::Polygon);
+    QVERIFY(!breach->inclusion);
+    QCOMPARE(breach->index, 0);
+    QVERIFY2(near(breach->time, 45, 0.1), qPrintable(QString::number(breach->time)));
+    QVERIFY(near(breach->distance, 450, 1));
+    QVERIFY(near(origin.distanceTo(breach->coordinate), 450, 1));
+    QCOMPARE(breach->altitude, 50.0);
+    QVERIFY(!predict(fence, origin, 50, east, 30));
+    QVERIFY(!predict(fence, origin, 50, Velocity{ 0, -10, 0, true }, 60));
+    QVERIFY(!predict(fence, origin, 50, Velocity(), 60));
+    fence.horizontalMargin = 2;
+    QVERIFY(near(predict(fence, origin, 50, east, 60)->time, 44.8, 0.05));
+    // Within the margin already, the polygon itself is reached
+    QVERIFY(near(predict(fence, local(449, 0), 50, east, 60)->time, 0.1, 0.02));
+    // Inside it, the vehicle breaches it already
+    QVERIFY(breached(fence, local(500, 0), 50));
+    QVERIFY(!predict(fence, local(500, 0), 50, east, 60));
+    // Climbing at 10 m/s too, the distance is along the velocity
+    QVERIFY(near(predict(fence, origin, 50, Velocity{ 0, 10, 10, true }, 60)->distance, 44.8 * std::sqrt(200.0), 2));
+
+    // Inclusion polygons: leaving one of them, or the last of them for their union
+    fence = Fence();
+    fence.polygons.append({ square(0, 0, 1000), true });
+    fence.polygons.append({ square(1250, 0, 1750), true });
+    QVERIFY(!breached(fence, origin, qQNaN()));
+    breach = predict(fence, origin, qQNaN(), east, 400);
+    QVERIFY(breach && breach->inclusion && (breach->index == 0));
+    QVERIFY(near(breach->time, 100, 0.2));
+    fence.inclusionUnion = true;
+    breach = predict(fence, origin, qQNaN(), east, 400);
+    QVERIFY(breach && (breach->index == 1));
+    QVERIFY(near(breach->time, 300, 0.5));
+    // Outside one of them is a breach of their intersection only
+    QVERIFY(!breached(fence, local(2000, 0), qQNaN()));
+    fence.inclusionUnion = false;
+    QVERIFY(breached(fence, local(2000, 0), qQNaN()));
+
+    // Circles: entering an exclusion one, leaving an inclusion one
+    fence = Fence();
+    fence.circles.append({ QGeoCircle(local(0, 300), 100), false });
+    breach = predict(fence, origin, qQNaN(), Velocity{ 5, 0, 0, true }, 60);
+    QVERIFY(breach && (breach->boundary == Boundary::Circle) && !breach->inclusion);
+    QVERIFY(near(breach->time, 40, 0.2));
+    fence.circles = { { QGeoCircle(origin, 200), true } };
+    fence.horizontalMargin = 10;
+    breach = predict(fence, origin, qQNaN(), Velocity{ 10, 0, 0, true }, 60);
+    QVERIFY(breach && breach->inclusion);
+    QVERIFY(near(breach->time, 19, 0.1));
+
+    // The circle around home, and the altitude limits above home with the margin
+    fence = Fence();
+    fence.home = local(-50, 0);
+    fence.maxDistance = 150;
+    breach = predict(fence, origin, 30, east, 60);
+    QVERIFY(breach && (breach->boundary == Boundary::MaxDistance));
+    QVERIFY(near(breach->time, 10, 0.1));
+    fence = Fence();
+    fence.maxAltitude = 100;
+    fence.minAltitude = 20;
+    fence.verticalMargin = 2;
+    breach = predict(fence, origin, 50, Velocity{ 0, 0, 2, true }, 60);
+    QVERIFY(breach && (breach->boundary == Boundary::MaxAltitude));
+    QVERIFY(near(breach->time, 24, 0.01));
+    QVERIFY(near(breach->altitude, 98, 0.01));
+    QVERIFY(breach->coordinate.distanceTo(origin) < 0.01);
+    breach = predict(fence, origin, 50, Velocity{ 0, 0, -5, true }, 60);
+    QVERIFY(breach && (breach->boundary == Boundary::MinAltitude));
+    QVERIFY(near(breach->time, 5.6, 0.01));
+    // Unknown altitudes aren't predicted, those beyond the limits breach them
+    QVERIFY(!predict(fence, origin, qQNaN(), Velocity{ 0, 0, 2, true }, 60));
+    QVERIFY(breached(fence, origin, 101));
+    QVERIFY(fence.polygons.isEmpty() && !fence.isEmpty() && Fence().isEmpty());
 }
 
 void GeoZoneGeometryTest::_testContainsAndPaths()

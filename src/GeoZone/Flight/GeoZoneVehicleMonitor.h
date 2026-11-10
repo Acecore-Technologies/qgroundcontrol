@@ -26,8 +26,10 @@
 #include <optional>
 
 Q_MOC_INCLUDE("GeoZoneNearbyModel.h")
+Q_MOC_INCLUDE("GeoZoneFenceWarning.h")
 
 class GeoZoneCatalog;
+class GeoZoneFenceWarning;
 class GeoZoneNearbyModel;
 class Vehicle;
 
@@ -71,6 +73,8 @@ class GeoZoneVehicleMonitor : public QObject
     /// geozone P — take-off not allowed here", empty when it isn't on the ground inside a restricted zone
     Q_PROPERTY(QString          groundWarning       READ groundWarning      NOTIFY groundStatusChanged FINAL)
     Q_PROPERTY(int              groundLevel         READ groundLevel        NOTIFY groundStatusChanged FINAL)    ///< GeoZoneAwareness::Level of groundWarning
+    /// Warns before the vehicle breaches its own fence, null for positions passed to evaluate()
+    Q_PROPERTY(GeoZoneFenceWarning *fenceWarning    READ fenceWarning       CONSTANT FINAL)
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -166,6 +170,7 @@ public:
     GeoZoneAwareness::Gnss gnss(qint64 msecs) const;
     void setPositionUnavailable(bool unavailable);
 
+    GeoZoneFenceWarning *fenceWarning() const { return _fenceWarning; }
     bool fenceStatusKnown() const { return _fenceStatusKnown; }
     bool fenceBreached() const { return _fenceBreached; }
     /// Description of the current fence breach, empty without
@@ -244,6 +249,7 @@ private:
     bool _unavailable = false;              ///< Alerts are paused for lack of a current position
     TerrainSource _terrainSource = TerrainSource::Unknown;
 
+    GeoZoneFenceWarning *_fenceWarning = nullptr;
     bool _fenceStatusKnown = false;
     bool _fenceBreached = false;
     int _fenceBreachType = FENCE_BREACH_NONE;

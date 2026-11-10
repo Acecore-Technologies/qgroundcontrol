@@ -14,6 +14,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAlertHistory.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneFenceWarning.h"
 #include "GeoZoneGuidedCheck.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneIntendedLevel.h"
@@ -215,8 +216,13 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
     _monitors.append(monitor);
 
     (void) connect(monitor, &GeoZoneVehicleMonitor::fenceBreachStarted, this, [this, monitor](const QString &text) {
-        emit fenceBreach(_labelled(monitor->vehicleId(), text));
+        const QString message = _labelled(monitor->vehicleId(), text);
+        _logFenceEvent(monitor, AlertEvent::FenceBreach, _nextAlertId, message);
+        emit fenceBreach(message);
     });
+    if (GeoZoneFenceWarning *const fenceWarning = monitor->fenceWarning()) {
+        (void) connect(fenceWarning, &GeoZoneFenceWarning::warningChanged, this, [this, monitor]() { _updateFenceWarning(monitor); });
+    }
     (void) connect(monitor, &GeoZoneVehicleMonitor::positionUnavailableChanged, this, [this, monitor]() {
         _positionAvailabilityChanged(monitor);
         _updateAlertActions();
@@ -247,6 +253,10 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
     (void) _flying.remove(monitor->key());
     if (monitor->followsVehicle()) {
         _permits->endFlight(monitor->vehicleId(), QStringLiteral("vehicle disconnected"));
+    }
+    const int fenceWarningId = _fenceWarningAlerts.take(monitor->key());
+    if (fenceWarningId > 0) {
+        _alertModel->removeIf([fenceWarningId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == fenceWarningId; });
     }
     const int approvalCount = _arbiter.approvalCount();
     _arbiter.removeVehicle(monitor->key());
@@ -612,6 +622,90 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
         announced.repeatMessage = _labelled(monitor->vehicleId(), tr("Still inside geozone %1 (%2)").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())));
     }
     _arbiter.submit(announced);
+}
+
+void GeoZoneMonitor::_updateFenceWarning(GeoZoneVehicleMonitor *monitor)
+{
+    const GeoZoneFenceWarning *const warning = monitor->fenceWarning();
+    const int alertId = _fenceWarningAlerts.value(monitor->key());
+    if (!warning->active()) {
+        if (alertId > 0) {
+            _fenceWarningAlerts.remove(monitor->key());
+            _arbiter.acknowledge(alertId);
+            _alertModel->removeIf([alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
+        }
+        return;
+    }
+    const QString message = _labelled(monitor->vehicleId(), warning->text());
+    if (alertId == 0) {
+        // Above the geozone alerts like the fence breaches, and more urgent than any of them
+        const int id = _nextAlertId++;
+        _fenceWarningAlerts.insert(monitor->key(), id);
+        _logFenceEvent(monitor, AlertEvent::FenceWarning, id, message);
+        emit fenceWarning(message);
+        _show(id, message, -1);
+        GeoZoneAlertArbiter::Alert announced;
+        announced.id = id;
+        announced.vehicleKey = monitor->key();
+        announced.zoneKey = QStringLiteral("fence");
+        announced.severity = -1;
+        announced.inside = true;
+        announced.message = message;
+        _arbiter.submit(announced);
+        _announce();
+        return;
+    }
+    // The time and distance count down while the pilot keeps the alert, which keeps the popup open
+    const QList<GeoZoneAlertModel::Alert> &shown = _alertModel->alerts();
+    const auto row = std::find_if(shown.cbegin(), shown.cend(), [alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
+    if ((row != shown.cend()) && (row->message != message)) {
+        _show(alertId, message, -1);
+    }
+}
+
+void GeoZoneMonitor::_logFenceEvent(GeoZoneVehicleMonitor *monitor, AlertEvent::Kind kind, int alertId, const QString &message)
+{
+    AlertEvent event;
+    event.id = alertId;
+    event.time = GeoZoneEnvironment::currentDateTimeUtc();
+    event.vehicleId = monitor->vehicleId();
+    event.position = monitor->position();
+    event.kind = kind;
+    event.zoneIdentifier = QStringLiteral("FENCE");
+    event.message = message;
+    const GeoZoneFenceWarning *const warning = monitor->fenceWarning();
+    if (warning) {
+        if (!event.position.coordinate.isValid()) {
+            event.position = GeoZone::Position{ warning->position() };
+        }
+        event.detail = tr("Fence action: %1").arg(warning->actionText());
+    }
+    if ((kind == AlertEvent::FenceWarning) && warning && warning->breach()) {
+        const GeoZoneFencePrediction::Breach &breach = *warning->breach();
+        event.distance = breach.distance;
+        event.timeToEntry = breach.time;
+        switch (breach.boundary) {
+        case GeoZoneFencePrediction::Boundary::Polygon:
+            event.zoneName = breach.inclusion ? tr("Inclusion polygon %1").arg(breach.index + 1) : tr("Exclusion polygon %1").arg(breach.index + 1);
+            break;
+        case GeoZoneFencePrediction::Boundary::Circle:
+            event.zoneName = breach.inclusion ? tr("Inclusion circle %1").arg(breach.index + 1) : tr("Exclusion circle %1").arg(breach.index + 1);
+            break;
+        case GeoZoneFencePrediction::Boundary::MaxDistance:
+            event.zoneName = tr("Maximum distance from home");
+            break;
+        case GeoZoneFencePrediction::Boundary::MaxAltitude:
+            event.zoneName = tr("Maximum altitude");
+            break;
+        case GeoZoneFencePrediction::Boundary::MinAltitude:
+            event.zoneName = tr("Minimum altitude");
+            break;
+        }
+    } else {
+        event.zoneName = message;
+    }
+    qCDebug(GeoZoneMonitorLog) << message;
+    emit alertEvent(event);
 }
 
 void GeoZoneMonitor::_positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor)
@@ -1130,6 +1224,10 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         return zoneName.isEmpty() ? tr("Outside planned volume") : tr("Outside planned volume: %1").arg(zoneName);
     case AlertEvent::Awareness:
         return GeoZoneAwareness::alertMessage(GeoZoneAwareness::stateFromCode(event.zoneIdentifier), event.zoneName);
+    case AlertEvent::FenceWarning:
+        return tr("Geofence ahead: %1").arg(zoneName);
+    case AlertEvent::FenceBreach:
+        return zoneName;
     case AlertEvent::Notified:
         return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approved:
