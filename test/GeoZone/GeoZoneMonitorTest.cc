@@ -2393,10 +2393,13 @@ void GeoZoneMonitorTest::_testAlertLevels()
 
 void GeoZoneMonitorTest::_testZoneActivation()
 {
-    // A prohibited zone from 12:00 to 13:00 UTC, and one which is always active
+    // A prohibited zone from 12:00 to 13:00 UTC, and one which is always active, cautioned 1 min before
     ScopedEnvironment environment;
     const QDate day(2027, 3, 1);
-    environment.setNow(_utc(day, QTime(11, 59, 30)));
+    environment.setNow(_utc(day, QTime(11, 58, 30)));
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->activationCaution()->setRawValue(settings->activationCaution()->rawDefaultValue()); });
+    settings->activationCaution()->setRawValue(1);
     const QGeoCoordinate center(47, 8);
     const QGeoCoordinate always = center.atDistanceAndAzimuth(5000, 90);
     QJsonObject scheduled = _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), center, 300);
@@ -2469,4 +2472,94 @@ void GeoZoneMonitorTest::_testZoneActivation()
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Activated);
     QCOMPARE(event.message, QStringLiteral("Vehicle 3: Geozone NEW (Authorisation required) is now active \u2014 you are inside it. Leave or land as soon as possible."));
     QCOMPARE(event.level, GeoZoneAlertLevel::Warning);
+}
+
+void GeoZoneMonitorTest::_testActivationCaution()
+{
+    // A prohibited zone from 12:00 to 13:00 and from 14:00 to 15:00 UTC
+    ScopedEnvironment environment;
+    const QDate day(2027, 3, 1);
+    environment.setNow(_utc(day, QTime(11, 40)));
+    const QGeoCoordinate center(47, 8);
+    QJsonObject scheduled = _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), center, 300);
+    scheduled[QStringLiteral("applicability")] = QJsonArray{
+        QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-03-01T12:00:00Z" }, { "endDateTime", "2027-03-01T13:00:00Z" } },
+        QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-03-01T14:00:00Z" }, { "endDateTime", "2027-03-01T15:00:00Z" } },
+    };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ scheduled }), errorString), qPrintable(errorString));
+    const GeoZone *const zone = manager.zoneList().constFirst();
+    const auto at = [&environment, &manager](const QTime &time) {
+        environment.setNow(_utc(QDate(2027, 3, 1), time));
+        QVERIFY(QMetaObject::invokeMethod(&manager, "_updateActive"));
+    };
+
+    // The activation to the second
+    QCOMPARE(GeoZoneActivationTracker::nextActivation(zone, _utc(day, QTime(11, 51, 17)), 600), _utc(day, QTime(12, 0)));
+    QVERIFY(!GeoZoneActivationTracker::nextActivation(zone, _utc(day, QTime(11, 40)), 600).isValid());
+    QVERIFY(!GeoZoneActivationTracker::nextActivation(zone, _utc(day, QTime(12, 10)), 600).isValid());
+
+    GeoZoneMonitor monitor(&manager);
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    const GeoZone::Position inside{ center.atDistanceAndAzimuth(100, 0), 500, 450 };
+    const GeoZone::Position near{ center.atDistanceAndAzimuth(350, 0), 500, 450 };
+    const GeoZone::Position far{ center.atDistanceAndAzimuth(2000, 0), 500, 450 };
+
+    // More than the 10 min of the setting before, nothing
+    monitor.evaluate(inside, 1);
+    QVERIFY(eventSpy.isEmpty());
+
+    // Within them, a caution with the time left, once for the activation
+    at(QTime(11, 51, 30));
+    monitor.evaluate(inside, 1);
+    QCOMPARE(eventSpy.count(), 1);
+    GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::ActivationSoon);
+    QCOMPARE(event.level, GeoZoneAlertLevel::Caution);
+    QCOMPARE(event.timeToEntry, 510.0);
+    QCOMPARE(event.message, QStringLiteral("Geozone S (Prohibited) becomes active in 9 min, you are inside it"));
+    QCOMPARE(sink->spoken.last(), QStringLiteral("Caution: ") + event.message);
+    QVERIFY(shownAlert(monitor, event.id));
+    const std::optional<GeoZoneMonitor::AlertEvent> logged = GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(event));
+    QVERIFY(logged && (logged->kind == GeoZoneMonitor::AlertEvent::ActivationSoon) && logged->inside);
+    QCOMPARE(logged->message, event.message);
+    QCOMPARE(GeoZoneAlertHistory::logFields(GeoZoneAlertHistory::logLine(event))[6], QStringLiteral("activation_soon"));
+    at(QTime(11, 55));
+    monitor.evaluate(inside, 1);
+    monitor.evaluate(far, 1);
+    monitor.evaluate(inside, 1);
+    QCOMPARE(eventSpy.count(), 1);
+
+    // Then the warning that it is active
+    at(QTime(12, 0, 1));
+    monitor.evaluate(inside, 1);
+    QCOMPARE(eventSpy.count(), 2);
+    QVERIFY(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().kind == GeoZoneMonitor::AlertEvent::Activated);
+
+    // The next activation cautions again, also a vehicle within the approach distance, but not one farther
+    at(QTime(13, 0, 30));
+    monitor.evaluate(near, 1);
+    monitor.evaluate(far, 2);
+    at(QTime(13, 59, 50));
+    eventSpy.clear();
+    monitor.evaluate(near, 1);
+    monitor.evaluate(far, 2);
+    QCOMPARE(eventSpy.count(), 1);
+    event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::ActivationSoon);
+    QVERIFY(!event.inside);
+    QVERIFY(_near(event.distance, 50, 0.01));
+    QCOMPARE(event.message, QStringLiteral("Vehicle 1: Geozone S (Prohibited) nearby becomes active in 10 s"));
+
+    // The pilot sets how long before
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreDefault = qScopeGuard([settings]() { settings->activationCaution()->setRawValue(settings->activationCaution()->rawDefaultValue()); });
+    QCOMPARE(monitor.settings().activationCautionSecs, 600);
+    settings->activationCaution()->setRawValue(30);
+    QCOMPARE(monitor.settings().activationCautionSecs, 1800);
 }

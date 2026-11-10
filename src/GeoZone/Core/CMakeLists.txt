@@ -103,6 +103,8 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneSourceVersion.h
     Sources/GeoZoneStore.cc
     Sources/GeoZoneStore.h
+    Evaluation/GeoZoneActivationTracker.cc
+    Evaluation/GeoZoneActivationTracker.h
     Evaluation/GeoZoneAlertTracker.cc
     Evaluation/GeoZoneAlertTracker.h
     Evaluation/GeoZoneFencePrediction.cc

@@ -83,6 +83,16 @@
     "default":      0
 },
 {
+    "name":         "activationCaution",
+    "shortDesc":    "Caution before zones become active",
+    "longDesc":     "Minutes before a time-limited geozone becomes active at which a vehicle inside it or within its approach distances is cautioned, with the time left.",
+    "type":         "uint32",
+    "units":        "min",
+    "min":          1,
+    "max":          120,
+    "default":      10
+},
+{
     "name":         "trafficEnabled",
     "shortDesc":    "Check traffic against geozones",
     "longDesc":     "List the ADS-B and Remote ID aircraft received by QGroundControl within 10 km of the active vehicle which are in or near active geozones, and show an alert when one enters a zone.",

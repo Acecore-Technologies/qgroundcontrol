@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneEvaluatorTest.h"
+#include "GeoZoneActivationTracker.h"
 #include "GeoZoneAlertThresholds.h"
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneAuthorisations.h"
@@ -784,6 +785,52 @@ void GeoZoneEvaluatorTest::_testThresholdWarningTimes()
             }
         }
     }
+}
+
+void GeoZoneEvaluatorTest::_testActivationTracker()
+{
+    // Every day from 08:00 to 09:00 UTC
+    const QGeoCoordinate center(47, 8);
+    QJsonObject daily = _circleFeature(QStringLiteral("D"), QStringLiteral("REQ_AUTHORISATION"), center, 300);
+    daily[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-01-01T00:00:00Z" }, { "schedule", QJsonArray{
+        QJsonObject{ { "day", QJsonArray{ "ANY" } }, { "startTime", "08:00:00Z" }, { "endTime", "09:00:00Z" } } } } } };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ daily }), errorString), qPrintable(errorString));
+    GeoZone *const zone = zones.zoneList().constFirst();
+    const QDate day(2027, 5, 3);
+    const GeoZonePolicy policy = GeoZonePolicy::alerts().anyTime();
+    const GeoZoneAlertTracker::Limits limits{ 100, 30, 0, 0 };
+    const GeoZone::Position inside{ center };
+
+    GeoZoneActivationTracker tracker;
+    const auto update = [&](const QTime &time) {
+        const QDateTime now = _utc(day, time);
+        (void) zone->updateActive(now);
+        return tracker.update(zones.catalog(), policy, inside, limits, now, 600);
+    };
+    QVERIFY(zone->isActiveAt(_utc(day, QTime(8, 30))));
+    QVERIFY(!zone->isActiveAt(_utc(day, QTime(7, 30))));
+    QVERIFY(update(QTime(7, 45)).isEmpty());
+    const QList<GeoZoneActivationTracker::Alert> alerts = update(QTime(7, 52, 10));
+    QCOMPARE(alerts.count(), 1);
+    QCOMPARE(alerts[0].zone, zone);
+    QVERIFY(alerts[0].inside);
+    QCOMPARE(alerts[0].activation, _utc(day, QTime(8, 0)));
+    QVERIFY(update(QTime(7, 55)).isEmpty());
+    QVERIFY(update(QTime(8, 30)).isEmpty());
+
+    // The next day's activation alerts again
+    const QDateTime nextDay = _utc(day.addDays(1), QTime(7, 51));
+    (void) zone->updateActive(nextDay);
+    QCOMPARE(tracker.update(zones.catalog(), policy, inside, limits, nextDay, 600).count(), 1);
+
+    // Out of the approach distance nothing, the zone needn't be active to be found
+    tracker.reset();
+    QVERIFY(tracker.update(zones.catalog(), policy, GeoZone::Position{ center.atDistanceAndAzimuth(500, 0) }, limits, nextDay, 600).isEmpty());
+    QCOMPARE(tracker.update(zones.catalog(), policy, GeoZone::Position{ center.atDistanceAndAzimuth(350, 0) }, limits, nextDay, 600).count(), 1);
 }
 
 GEOZONE_TEST(GeoZoneEvaluatorTest)

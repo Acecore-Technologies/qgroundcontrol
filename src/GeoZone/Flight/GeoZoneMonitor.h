@@ -26,6 +26,7 @@
 #include "GeoZone.h"
 #include "GeoZoneAlertArbiter.h"
 #include "GeoZoneAlertLevel.h"
+#include "GeoZoneActivationTracker.h"
 #include "GeoZoneAlertModel.h"
 #include "GeoZoneAlertThresholds.h"
 #include "GeoZoneAlertTracker.h"
@@ -133,6 +134,7 @@ public:
                                     ///< boundary, the detail the fence action
             FenceBreach,            ///< The vehicle reports a breach of its own fence (FENCE_STATUS)
             Activated,              ///< The zone became active, or was loaded, while the vehicle was inside it
+            ActivationSoon,         ///< The zone the vehicle is in or near becomes active soon: timeToEntry has the seconds left
             // What the pilot was shown and answered, only logged. Keep them last, see pilotEvent().
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
@@ -184,6 +186,7 @@ public:
         bool audioAlerts = true;
         GeoZoneAlertThresholds::Extras extras;              ///< The pilot's extra warning time and distance
         std::optional<GeoZoneAlertTracker::Limits> limits;  ///< Instead of the thresholds of the vehicles, like tests use
+        int activationCautionSecs = 600;                    ///< Before a zone becomes active, see GeoZoneActivationTracker
         bool trafficEnabled = false;
 
         /// @return The settings of GeoZoneSettings::instance()
@@ -367,8 +370,9 @@ private:
     /// @return What the vehicles are evaluated against, kept until the settings or zones change
     GeoZoneVehicleMonitor::Context _context() const;
     void _evaluate(GeoZoneVehicleMonitor *monitor, const GeoZone::Position &position, const Velocity &velocity);
-    /// Shows, logs and submits the alerts of a vehicle to the arbiter
+    /// Shows, logs and submits the alerts of a vehicle to the arbiter, with those of the zones becoming active soon
     void _raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneAlertTracker::Alert> &alerts);
+    void _raiseActivations(GeoZoneVehicleMonitor *monitor);
     void _submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone);
     /// Suspends the breaches of a vehicle whose position is lost and alerts it once, or resumes them
     void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
@@ -457,6 +461,7 @@ private:
     mutable std::optional<GeoZonePolicy> _policy;   ///< Until the zones change
     QPointer<GeoZoneVehicleMonitor> _activeMonitor;
     QHash<quint32, GeoZoneAlertTracker> _trafficTrackers;  ///< By ICAO address
+    QHash<int, GeoZoneActivationTracker> _activationTrackers;   ///< By GeoZoneVehicleMonitor::key
     QList<ZoneTraffic> _traffic;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;
     GeoZoneAlertHistory *_alertHistory = nullptr;

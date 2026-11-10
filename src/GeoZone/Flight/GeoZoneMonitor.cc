@@ -130,7 +130,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     });
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    for (Fact *const fact : { settings->audioAlerts(), settings->approachExtraDistance(), settings->approachExtraTime(),
+    for (Fact *const fact : { settings->audioAlerts(), settings->approachExtraDistance(), settings->approachExtraTime(), settings->activationCaution(),
                               settings->trafficEnabled() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMonitor::_applicationSettingsChanged);
     }
@@ -148,6 +148,7 @@ GeoZoneMonitor::Settings GeoZoneMonitor::Settings::fromApplication()
     result.audioAlerts = settings->audioAlerts()->rawValue().toBool();
     result.extras.distance = settings->approachExtraDistance()->rawValue().toDouble();
     result.extras.time = settings->approachExtraTime()->rawValue().toDouble();
+    result.activationCautionSecs = settings->activationCaution()->rawValue().toInt() * 60;
     result.trafficEnabled = settings->trafficEnabled()->rawValue().toBool();
     return result;
 }
@@ -193,6 +194,7 @@ void GeoZoneMonitor::_resetMonitors()
     for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
         monitor->reset();
     }
+    _activationTrackers.clear();
     _arbiter.clear();
 }
 
@@ -253,6 +255,7 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
     if (fenceWarningId > 0) {
         _alertModel->removeIf([fenceWarningId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == fenceWarningId; });
     }
+    (void) _activationTrackers.remove(monitor->key());
     const int approvalCount = _arbiter.approvalCount();
     _arbiter.removeVehicle(monitor->key());
     _approvalsChanged(approvalCount);
@@ -582,6 +585,7 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
         }
         _submit(monitor, event, zoneAlert.zone);
     }
+    _raiseActivations(monitor);
     // Breaches end when the vehicle leaves the zone, approvals when it leaves its approach range too. Without a
     // current position the zones it is in aren't known, the nearby zones are those of its last position.
     if (!monitor->positionUnavailable()) {
@@ -590,6 +594,25 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
         _approvalsChanged(approvalCount);
     }
     _updateGroundStatus(monitor);
+}
+
+void GeoZoneMonitor::_raiseActivations(GeoZoneVehicleMonitor *monitor)
+{
+    if (monitor->positionUnavailable() || !monitor->position().coordinate.isValid()) {
+        return;
+    }
+    // Within the approach distances the vehicle has now
+    const GeoZoneAlertTracker::Limits limits = settings().limits.value_or(monitor->thresholds().result().limits());
+    const GeoZonePolicy policy = _context().policy.anyTime();
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    const QList<GeoZoneActivationTracker::Alert> activations = _activationTrackers[monitor->key()].update(_manager->catalog(), policy, monitor->position(), limits, now,
+                                                                                                          settings().activationCautionSecs);
+    for (const GeoZoneActivationTracker::Alert &activation : activations) {
+        AlertEvent event = _alertEvent(activation.zone, AlertEvent::ActivationSoon, activation.inside, activation.distance,
+                                       static_cast<double>(now.secsTo(activation.activation)), monitor->position(), monitor->vehicleId());
+        event.level = alertLevel(event);
+        _submit(monitor, event, activation.zone);
+    }
 }
 
 void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &raised, const GeoZone *zone)
@@ -635,8 +658,8 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
     announced.zoneKey = event.zoneKey;
     announced.severity = severity;
     announced.level = event.level;
-    // A lost position is as urgent as an entry
-    announced.inside = (event.kind != AlertEvent::Approach);
+    // A lost position is as urgent as an entry, an activation soon as an approach
+    announced.inside = (event.kind != AlertEvent::Approach) && (event.kind != AlertEvent::ActivationSoon);
     announced.breach = ((event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround) || (event.kind == AlertEvent::Activated)) &&
                        (event.restriction == GeoZone::Prohibited);
     announced.message = event.message;
@@ -1014,6 +1037,8 @@ GeoZoneAlertLevel::Level GeoZoneMonitor::alertLevel(const AlertEvent &event, boo
         return zoneLevel(event.restriction, event.inside, imminent);
     case AlertEvent::Traffic:
         return GeoZoneAlertLevel::Advisory;
+    case AlertEvent::ActivationSoon:
+        return (event.restriction == GeoZone::Conditional) ? GeoZoneAlertLevel::Advisory : GeoZoneAlertLevel::Caution;
     case AlertEvent::PositionLost:
     case AlertEvent::NonConformance:
         return GeoZoneAlertLevel::Caution;
@@ -1317,6 +1342,13 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         return zoneName;
     case AlertEvent::Activated:
         return tr("Geozone %1 (%2) is now active \u2014 you are inside it. Leave or land as soon as possible.").arg(zoneName, restrictionText);
+    case AlertEvent::ActivationSoon: {
+        // Minutes rounded up, so the zone never applies before the time said
+        const qint64 secs = std::isnan(event.timeToEntry) ? 0 : static_cast<qint64>(std::ceil(event.timeToEntry));
+        const QString left = (secs >= 60) ? tr("%n min", nullptr, static_cast<int>((secs + 59) / 60)) : tr("%n s", nullptr, static_cast<int>(secs));
+        return event.inside ? tr("Geozone %1 (%2) becomes active in %3, you are inside it").arg(zoneName, restrictionText, left) :
+                              tr("Geozone %1 (%2) nearby becomes active in %3").arg(zoneName, restrictionText, left);
+    }
     case AlertEvent::Notified:
         return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approved:

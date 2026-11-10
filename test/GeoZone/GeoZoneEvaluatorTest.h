@@ -28,4 +28,5 @@ private slots:
     void _testAntimeridianQueries();
     void _testAlertThresholds();
     void _testThresholdWarningTimes();
+    void _testActivationTracker();
 };

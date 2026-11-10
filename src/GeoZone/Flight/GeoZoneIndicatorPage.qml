@@ -531,6 +531,13 @@ ToolIndicatorPage {
                     visible:            fact.visible
                 }
 
+                LabelledFactTextField {
+                    Layout.fillWidth:   true
+                    label:              fact.shortDescription
+                    fact:               control._geoZoneSettings.activationCaution
+                    visible:            fact.visible
+                }
+
                 FactCheckBoxSlider {
                     Layout.fillWidth:   true
                     text:               fact.shortDescription

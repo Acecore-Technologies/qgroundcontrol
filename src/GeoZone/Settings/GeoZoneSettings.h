@@ -31,6 +31,7 @@ public:
     DEFINE_SETTINGFACT(includeOperatorDetails)
     DEFINE_SETTINGFACT(approachExtraDistance)
     DEFINE_SETTINGFACT(approachExtraTime)
+    DEFINE_SETTINGFACT(activationCaution)
     DEFINE_SETTINGFACT(trafficEnabled)
     DEFINE_SETTINGFACT(qnhHPa)
     DEFINE_SETTINGFACT(feedRefreshHours)

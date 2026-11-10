@@ -90,6 +90,14 @@ SettingsPage {
             visible:                 fact.visible
         }
 
+        LabelledFactTextField {
+            Layout.fillWidth:        true
+            textFieldPreferredWidth: _fieldWidth
+            label:                   fact.shortDescription
+            fact:                    _geoZoneSettings.activationCaution
+            visible:                 fact.visible
+        }
+
         QGCLabel {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
