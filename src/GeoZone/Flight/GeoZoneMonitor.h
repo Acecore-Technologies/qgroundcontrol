@@ -26,6 +26,7 @@
 #include "GeoZoneAlertArbiter.h"
 #include "GeoZoneAlertModel.h"
 #include "GeoZoneAlertTracker.h"
+#include "GeoZoneAwareness.h"
 #include "GeoZonePolicy.h"
 #include "GeoZoneVehicleMonitor.h"
 
@@ -58,6 +59,8 @@ class Vehicle;
 /// the zone and its approach range.
 /// A vehicle on the ground (see GeoZoneVehicleMonitor::onGround) inside a restricted zone is alerted as such, like by a
 /// pre-arm check, and again when it tries to arm there, see AlertEvent::OnGround.
+/// Whether geo-awareness is available for the active vehicle is published as awareness(), and the changes of state of
+/// flying vehicles are alerted, see AlertEvent::Awareness.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -75,6 +78,7 @@ class GeoZoneMonitor : public QObject
     /// the zone) and altitude (meters AMSL, NaN when unknown)
     Q_PROPERTY(QVariantList     traffic             READ traffic            NOTIFY trafficChanged FINAL)
     Q_PROPERTY(double           trafficRadius       READ trafficRadius      CONSTANT FINAL)
+    Q_PROPERTY(GeoZoneAwareness *awareness          READ awareness          CONSTANT FINAL)    ///< Of the active vehicle, or of the data without
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
@@ -110,6 +114,8 @@ public:
             NonConformance,         ///< The vehicle left the volumes of its operational intent, see GeoZoneConformance: the zone
                                     ///< identifier is the GeoZoneConformance::stateCode, the name tells how far
             OnGround,               ///< The vehicle is on the ground inside the zone, or tried to arm there when detail is "arming"
+            Awareness,              ///< The geo-awareness of the flying vehicle changed state: the zone identifier is the
+                                    ///< GeoZoneAwareness::stateCode, the name has the reasons
             // What the pilot was shown and answered, only logged
             Notified,               ///< The alert popup showed the alert, asking for the permission when detail has the question
             Approved,               ///< The pilot confirmed the permission to fly in the zone, see approveAlert()
@@ -266,6 +272,9 @@ public:
     static int groundLevel(GeoZone::Restriction restriction, bool permitted);
 
     GeoZoneManager *manager() const { return _manager; }
+    GeoZoneAwareness *awareness() const { return _awareness; }
+    /// @return Geo-awareness of the vehicle, of the data alone without
+    GeoZoneAwareness::Status awarenessStatus(const GeoZoneVehicleMonitor *monitor) const;
     /// Monitor of the active vehicle, or of the positions of activeVehicleId() without, null when not monitored
     GeoZoneVehicleMonitor *activeMonitor() const { return _activeMonitor; }
     QVariantList traffic() const;
@@ -327,6 +336,9 @@ private:
     void _armingAttempted(GeoZoneVehicleMonitor *monitor);
     /// Sets the ground warning of the vehicle from the restricted zones it is in while on the ground
     void _updateGroundStatus(GeoZoneVehicleMonitor *monitor);
+    /// Publishes the geo-awareness of the active vehicle and alerts the changes of state of the flying vehicles
+    void _updateAwareness();
+    void _raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
     /// Adds an alert to the shown alerts, logging that the pilot was notified
@@ -373,6 +385,9 @@ private:
     };
     QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
     QHash<int, qint64> _armingAlerts;           ///< When the arming attempts were alerted by vehicle key
+    GeoZoneAwareness *_awareness = nullptr;
+    QHash<int, GeoZoneAwareness::Tracker> _awarenessTrackers;  ///< By vehicle key
+    QTimer _awarenessTimer;                     ///< Updates the geo-awareness while the vehicles aren't evaluated
     QTimer _evaluateTimer;
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty

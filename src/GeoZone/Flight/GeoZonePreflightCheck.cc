@@ -146,6 +146,7 @@ void GeoZonePreflightCheck::setMonitor(GeoZoneMonitor *monitor)
     if (_monitor) {
         (void) connect(_monitor, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZonePreflightCheck::_connectMonitor);
         (void) connect(_monitor, &GeoZoneMonitor::monitoringChanged, this, &GeoZonePreflightCheck::_connectMonitor);
+        (void) connect(_monitor->awareness(), &GeoZoneAwareness::changed, this, &GeoZonePreflightCheck::_scheduleUpdate);
     }
     _connectMonitor();
 }
@@ -211,8 +212,10 @@ void GeoZonePreflightCheck::update()
     }
 
     const Item takeoff = takeoffItem(_vehicleMonitor());
+    const Item awareness = awarenessItem(_monitor ? _monitor->awarenessStatus(_vehicleMonitor()) : GeoZoneAwareness::evaluate(GeoZoneAwareness::dataInput(_manager)));
 
-    if ((data == _data) && (mission == _mission) && (fence == _fence) && (qnh == _qnh) && (remoteId == _remoteId) && (takeoff == _takeoff)) {
+    if ((data == _data) && (mission == _mission) && (fence == _fence) && (qnh == _qnh) && (remoteId == _remoteId) && (takeoff == _takeoff) &&
+        (awareness == _awareness)) {
         return;
     }
     _data = data;
@@ -221,6 +224,7 @@ void GeoZonePreflightCheck::update()
     _qnh = qnh;
     _remoteId = remoteId;
     _takeoff = takeoff;
+    _awareness = awareness;
     emit itemsChanged();
 }
 
@@ -341,6 +345,14 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::takeoffItem(const GeoZoneVehi
         break;
     }
     return { Passed, warning + QLatin1Char('.') };
+}
+
+GeoZonePreflightCheck::Item GeoZonePreflightCheck::awarenessItem(const GeoZoneAwareness::Status &status)
+{
+    if (status.state == GeoZoneAwareness::Available) {
+        return { Passed, tr("Geo-awareness is available.") };
+    }
+    return { Warning, status.summary() + QLatin1Char('.') };
 }
 
 QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path)

@@ -18,6 +18,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneAlertTracker.h"
+#include "GeoZoneAwareness.h"
 #include "GeoZonePolicy.h"
 #include "QGCMAVLink.h"
 
@@ -160,6 +161,9 @@ public:
     QVariant predictedEntryZone() const;
 
     bool positionUnavailable() const { return _unavailable; }
+    /// @return GNSS status of the last GPS_RAW_INT of the vehicle, not known when it is older than the position timeout
+    /// @param msecs Time of the clock
+    GeoZoneAwareness::Gnss gnss(qint64 msecs) const;
     void setPositionUnavailable(bool unavailable);
 
     bool fenceStatusKnown() const { return _fenceStatusKnown; }
@@ -246,6 +250,8 @@ private:
     int _fenceBreachCount = 0;
 
     std::optional<bool> _armed;             ///< Of positions passed to evaluate()
+    GeoZoneAwareness::Gnss _gnss;
+    qint64 _gnssMSecs = -1;                 ///< Last GPS_RAW_INT, -1 without
     QString _groundWarning;
     int _groundLevel = 0;
 };

@@ -20,15 +20,16 @@ import QGroundControl.Palette
 
 /// Toolbar icon showing whether the active vehicle is in or near restricted geozones, colored by the most restrictive
 /// zone, with badges counting the unacknowledged alerts, marking the nearby zones stale while the vehicle's position
-/// is lost, warning that the vehicle is on the ground inside a restricted zone and that some geozone data may be
-/// outdated. Clicking it opens GeoZoneIndicatorPage.
+/// is lost, warning that the vehicle is on the ground inside a restricted zone and that geo-awareness is degraded or
+/// unavailable, like with outdated data. Clicking it opens GeoZoneIndicatorPage.
 Item {
     id:             control
     width:          geoZoneIcon.width * 1.1
     anchors.top:    parent.top
     anchors.bottom: parent.bottom
 
-    property bool showIndicator: GeoZoneManager.zoneCount > 0 || _outdated
+    // Also without zones while a vehicle is connected, to tell that geo-awareness is unavailable
+    property bool showIndicator: GeoZoneManager.zoneCount > 0 || _outdated || !!QGroundControl.multiVehicleManager.activeVehicle
 
     readonly property var _monitor:         GeoZoneMonitor
     readonly property var _active:          GeoZoneMonitor.activeVehicle     ///< GeoZoneVehicleMonitor, null without
@@ -36,6 +37,7 @@ Item {
     readonly property bool _stale:          _monitor.monitoring && _active?.positionUnavailable === true
     readonly property bool _outdated:       GeoZoneManager.repository.validityWarning !== ""
     readonly property int _groundLevel:     _monitor.monitoring && (_active?.groundWarning ?? "") !== "" ? _active.groundLevel : -1
+    readonly property int _awareness:       _monitor.awareness.state
 
     function _restrictionColor(restriction) {
         return restriction < 0 ? qgcPal.text : GeoZoneStyle.restrictionColor(restriction)
@@ -52,7 +54,7 @@ Item {
         fillMode:           Image.PreserveAspectFit
         sourceSize.height:  height
         color:              control._active?.fenceBreached ? qgcPal.colorRed : control._restrictionColor(control._monitor.monitoring ? control._active?.alertRestriction ?? -1 : -1)
-        opacity:            (control._monitor.monitoring && control._active?.positionUnavailable !== true) ? 1 : 0.5
+        opacity:            (control._monitor.monitoring && control._active?.positionUnavailable !== true && control._awareness !== GeoZoneAwareness.Unavailable) ? 1 : 0.5
     }
 
     component IconBadge: GeoZoneBadge {
@@ -69,15 +71,18 @@ Item {
         visible:        control._stale
     }
 
-    // Some data may be outdated (yellow), or treated as invalid when outdated (red, its zones still apply), see
-    // GeoZoneSourceRepository::dataInvalid; the page details them
+    // Geo-awareness is degraded (orange), like with outdated data, or unavailable (red), like without zones or GNSS fix,
+    // or the data is treated as invalid when outdated (red, its zones still apply), see GeoZoneSourceRepository::dataInvalid;
+    // the page details them
     IconBadge {
+        readonly property bool _red: control._awareness === GeoZoneAwareness.Unavailable || GeoZoneManager.repository.dataInvalid
+
         anchors.bottom: parent.bottom
         anchors.left:   geoZoneIcon.left
         text:           "!"
-        textColor:      GeoZoneManager.repository.dataInvalid ? "white" : "black"
-        color:          GeoZoneManager.repository.dataInvalid ? qgcPal.colorRed : qgcPal.colorYellow
-        visible:        control._outdated || GeoZoneManager.repository.dataInvalid
+        textColor:      _red ? "white" : "black"
+        color:          _red ? qgcPal.colorRed : qgcPal.colorOrange
+        visible:        control._awareness !== GeoZoneAwareness.Available || control._outdated
     }
 
     // On the ground inside a prohibited zone (red), or a restricted zone without permission (orange), like a pre-arm

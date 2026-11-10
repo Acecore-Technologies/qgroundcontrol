@@ -11,6 +11,7 @@
 #include "FactMetaData.h"
 #include "GeoZone.h"
 #include "GeoZoneAuthorisations.h"
+#include "GeoZoneAwareness.h"
 #include "GeoZoneBriefingExport.h"
 #include "GeoZoneConformance.h"
 #include "GeoZoneEnvironment.h"
@@ -112,6 +113,7 @@ void registerQmlTypes()
     (void) qmlRegisterUncreatableType<GeoZoneFenceChoiceModel>(kUri, 1, 0, "GeoZoneFenceChoiceModel", "Reference only");
     (void) qmlRegisterType<QSortFilterProxyModel>(kUri, 1, 0, "GeoZoneSortFilterModel");
     (void) qmlRegisterUncreatableType<GeoZoneGuidedCheck>(kUri, 1, 0, "GeoZoneGuidedCheck", "Reference only");
+    (void) qmlRegisterUncreatableType<GeoZoneAwareness>(kUri, 1, 0, "GeoZoneAwareness", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneVehicleMonitor>(kUri, 1, 0, "GeoZoneVehicleMonitor", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneAuthorisations>(kUri, 1, 0, "GeoZoneAuthorisations", "Reference only");
     (void) qmlRegisterUncreatableType<GeoZoneOperatorZones>(kUri, 1, 0, "GeoZoneOperatorZones", "Reference only");

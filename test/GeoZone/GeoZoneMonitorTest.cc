@@ -27,6 +27,15 @@ mavlink_message_t globalPositionMessage(int vehicleId, int16_t vx, int16_t vy, i
     return message;
 }
 
+/// @return GPS_RAW_INT with the fix, satellites, HDOP and horizontal accuracy in meters (0 when unknown)
+mavlink_message_t gpsMessage(int vehicleId, uint8_t fixType, uint8_t satellites, double hdop, double horizontalAccuracy)
+{
+    mavlink_message_t message{};
+    (void) mavlink_msg_gps_raw_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, fixType, 470000000, 80000000, 500000, static_cast<uint16_t>(hdop * 100),
+                                        UINT16_MAX, UINT16_MAX, UINT16_MAX, satellites, 0, static_cast<uint32_t>(horizontalAccuracy * 1000), 0, 0, 0, 0);
+    return message;
+}
+
 /// Keeps what would be spoken
 class RecordingAudioSink : public GeoZoneMonitor::AudioSink
 {
@@ -1683,6 +1692,176 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     QVERIFY(vehicle->groundWarning().isEmpty());
     monitor.evaluate({ authorisationCenter, 400, 400 }, vehicleId + 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 3: Entered geozone A (Authorisation required)"));
+}
+
+
+void GeoZoneMonitorTest::_testAwareness()
+{
+    using Awareness = GeoZoneAwareness;
+
+    // Each reason, the unavailable ones first
+    Awareness::Input input;
+    QCOMPARE(Awareness::evaluate(input).state, Awareness::Unavailable);
+    QCOMPARE(Awareness::evaluate(input).reasons(), QStringList{ QStringLiteral("no geozone data loaded") });
+    input.zoneCount = 10;
+    QCOMPARE(Awareness::evaluate(input).state, Awareness::Available);
+    QCOMPARE(Awareness::evaluate(input).summary(), QStringLiteral("Geo-awareness available"));
+    input.vehicle = true;
+    input.covered = true;
+    input.gnss = Awareness::Gnss{ true, 3, 10, 0.9, 1.2 };
+    QCOMPARE(Awareness::evaluate(input).state, Awareness::Available);
+    const auto check = [&input](const std::function<void(Awareness::Input &)> &change, Awareness::State state, const QString &summary) {
+        Awareness::Input changed = input;
+        change(changed);
+        const Awareness::Status status = Awareness::evaluate(changed);
+        return (status.state == state) && (status.summary() == summary);
+    };
+    QVERIFY(check([](Awareness::Input &in) { in.gnss.fixType = 2; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (2D fix)")));
+    QVERIFY(check([](Awareness::Input &in) { in.gnss.satellites = 4; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (4 satellite(s))")));
+    QVERIFY(check([](Awareness::Input &in) { in.gnss.hdop = 6.5; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (HDOP 6.5)")));
+    QVERIFY(check([](Awareness::Input &in) { in.gnss.horizontalAccuracy = 8; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (accuracy 8.0 m)")));
+    QVERIFY(check([](Awareness::Input &in) { in.gnss.fixType = 1; }, Awareness::Unavailable, QStringLiteral("Geo-awareness unavailable: GNSS lost (no fix)")));
+    QVERIFY(check([](Awareness::Input &in) { in.positionUnavailable = true; }, Awareness::Unavailable, QStringLiteral("Geo-awareness unavailable: no current vehicle position")));
+    // A lost link explains the rest
+    QVERIFY(check([](Awareness::Input &in) { in.linkLost = true; in.positionUnavailable = true; in.gnss.fixType = 1; }, Awareness::Unavailable,
+                  QStringLiteral("Geo-awareness unavailable: telemetry link lost")));
+    QVERIFY(check([](Awareness::Input &in) { in.validityWarning = QStringLiteral("A: 40 days old"); }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: geozone data may be outdated")));
+    QVERIFY(check([](Awareness::Input &in) { in.validityWarning = QStringLiteral("A: 40 days old"); in.dataInvalid = true; }, Awareness::Degraded,
+                  QStringLiteral("Geo-awareness degraded: geozone data expired")));
+    QVERIFY(check([](Awareness::Input &in) { in.failedSources = { QStringLiteral("A"), QStringLiteral("B"), QStringLiteral("C"), QStringLiteral("D") }; }, Awareness::Degraded,
+                  QStringLiteral("Geo-awareness degraded: update of A, B, C, 1 more failed")));
+    QVERIFY(check([](Awareness::Input &in) { in.covered = false; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: no geozone data covers the vehicle position")));
+    QVERIFY(check([](Awareness::Input &in) { in.covered = false; in.positionUnavailable = true; }, Awareness::Unavailable,
+                  QStringLiteral("Geo-awareness unavailable: no current vehicle position; no geozone data covers the vehicle position")));
+    // Without a vehicle, only the data counts
+    QVERIFY(check([](Awareness::Input &in) { in.vehicle = false; in.positionUnavailable = true; in.gnss.fixType = 1; }, Awareness::Available, QStringLiteral("Geo-awareness available")));
+
+    // Changes of state are alerted once they last, in flight only
+    Awareness::Status degraded;
+    degraded.state = Awareness::Degraded;
+    Awareness::Tracker tracker;
+    QVERIFY(!tracker.update(degraded, false, 0));
+    QVERIFY(!tracker.update(degraded, false, 10000));
+    QVERIFY(!tracker.update(degraded, true, 10000));
+    QVERIFY(!tracker.update(degraded, true, 10000 + Awareness::Tracker::worseSettleMSecs - 1));
+    std::optional<Awareness::Tracker::Change> change = tracker.update(degraded, true, 10000 + Awareness::Tracker::worseSettleMSecs);
+    QVERIFY(change && (change->from == Awareness::Available) && (change->to == Awareness::Degraded));
+    QVERIFY(!tracker.update(degraded, true, 20000));
+    QVERIFY(!tracker.update(Awareness::Status(), true, 21000));
+    QVERIFY(!tracker.update(degraded, true, 22000));
+    QVERIFY(!tracker.update(Awareness::Status(), true, 23000));
+    QVERIFY(!tracker.update(Awareness::Status(), true, 23000 + Awareness::Tracker::betterSettleMSecs - 1));
+    change = tracker.update(Awareness::Status(), true, 23000 + Awareness::Tracker::betterSettleMSecs);
+    QVERIFY(change && (change->to == Awareness::Available));
+    QCOMPARE(Awareness::alertLevel(Awareness::Unavailable), static_cast<int>(GeoZoneIntendedLevel::Warning));
+    QCOMPARE(Awareness::alertLevel(Awareness::Degraded), static_cast<int>(GeoZoneIntendedLevel::Caution));
+    QCOMPARE(Awareness::alertLevel(Awareness::Available), static_cast<int>(GeoZoneIntendedLevel::Advisory));
+
+    // A flying vehicle near the zones of a feed, current a day after it was issued
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.repository()->addUrl(server.url(QStringLiteral("/ok")));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    GeoZoneSource *const feed = manager.repository()->source(server.url(QStringLiteral("/ok")));
+    QVERIFY(feed && feed->box().isValid());
+    environment.setNow(feed->dataDate().addDays(1));
+    manager.repository()->updateValidity();
+    QVERIFY2(manager.repository()->validityWarning().isEmpty(), qPrintable(manager.repository()->validityWarning()));
+    QVERIFY(GeoZoneAwareness::dataInput(&manager, feed->box().center()).covered == true);
+    QVERIFY(GeoZoneAwareness::dataInput(&manager, QGeoCoordinate(-30, 100)).covered == false);
+    QVERIFY(!GeoZoneAwareness::dataInput(&manager).covered.has_value());
+
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    const auto sink = std::make_shared<RecordingAudioSink>();
+    monitor.setAudioSink(sink);
+    QSignalSpy alertSpy(&monitor, &GeoZoneMonitor::alert);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    constexpr int vehicleId = 1;
+    // High above the zones
+    const GeoZone::Position position{ feed->box().center(), 20000, 400 };
+    monitor.setActiveVehicleId(vehicleId);
+    monitor.evaluate(position, vehicleId);
+    GeoZoneVehicleMonitor *const vehicle = monitor.positionMonitor(vehicleId);
+    QVERIFY(vehicle);
+    vehicle->setArmed(true);
+    mavlink_message_t gps = gpsMessage(vehicleId, GPS_FIX_TYPE_3D_FIX, 12, 0.8, 1.5);
+    const auto step = [&](qint64 msecs) {
+        now += msecs;
+        vehicle->handleMessage(gps, now);
+        monitor.evaluate(position, vehicleId);
+    };
+    const auto awarenessAlerts = [&alertSpy]() {
+        QStringList alerts;
+        for (const QList<QVariant> &arguments : alertSpy) {
+            if (arguments.constFirst().toString().startsWith(QStringLiteral("Geo-awareness"))) {
+                alerts.append(arguments.constFirst().toString());
+            }
+        }
+        return alerts;
+    };
+    step(1000);
+    QVERIFY2(monitor.awareness()->status().state == Awareness::Available, qPrintable(monitor.awareness()->summary()));
+    QVERIFY(awarenessAlerts().isEmpty());
+
+    // Losing the GNSS fix is a warning once it lasts, spoken and logged
+    gps = gpsMessage(vehicleId, GPS_FIX_TYPE_NO_FIX, 3, 0, 0);
+    step(1000);
+    QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(Awareness::Unavailable));
+    QCOMPARE(monitor.awareness()->reasons(), QStringList{ QStringLiteral("GNSS lost (no fix)") });
+    QVERIFY(awarenessAlerts().isEmpty());
+    step(Awareness::Tracker::worseSettleMSecs);
+    const QString lost = QStringLiteral("Geo-awareness unavailable: GNSS lost (no fix)");
+    QCOMPARE(awarenessAlerts(), QStringList{ lost });
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::Prohibited));
+    QCOMPARE(sink->spoken.last(), lost);
+    const GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Awareness);
+    const QString line = GeoZoneAlertHistory::logLine(event);
+    QCOMPARE(line.section(QLatin1Char(','), 6, 6), QStringLiteral("geo_awareness"));
+    QCOMPARE(line.section(QLatin1Char(','), 8, 9), QStringLiteral("unavailable,GNSS lost (no fix)"));
+    QCOMPARE(GeoZoneAlertHistory::parseLogLine(line)->message, lost);
+    QVERIFY(shownAlert(monitor, event.id) && !shownAlert(monitor, event.id)->question);
+    step(10000);
+    QCOMPARE(awarenessAlerts().count(), 1);
+
+    // Recovering is an advisory
+    gps = gpsMessage(vehicleId, GPS_FIX_TYPE_3D_FIX, 12, 0.8, 1.5);
+    step(1000);
+    step(Awareness::Tracker::betterSettleMSecs);
+    QCOMPARE(awarenessAlerts().last(), QStringLiteral("Geo-awareness available again"));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::NoRestriction));
+
+    // A refresh of the feed which fails degrades it, a caution
+    server.okPathStatus = "503 Service Unavailable";
+    manager.repository()->refreshFeeds();
+    QTRY_VERIFY(!manager.repository()->busy());
+    QVERIFY(!feed->errorString().isEmpty());
+    step(1000);
+    step(Awareness::Tracker::worseSettleMSecs);
+    QCOMPARE(awarenessAlerts().last(), QStringLiteral("Geo-awareness degraded: update of %1 failed").arg(feed->name()));
+    QCOMPARE(alertSpy.last()[1].toInt(), GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
+    QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(Awareness::Degraded));
+
+    // On the ground nothing is alerted, the state is still published
+    vehicle->setArmed(false);
+    const qsizetype count = awarenessAlerts().count();
+    monitor.positionLost(vehicleId);
+    for (int i = 0; i < 3; i++) {
+        now += 5000;
+        vehicle->handleMessage(gps, now);
+        monitor.evaluateVehicles();
+    }
+    QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(Awareness::Unavailable));
+    QVERIFY(monitor.awareness()->reasons().contains(QStringLiteral("no current vehicle position")));
+    QCOMPARE(awarenessAlerts().count(), count);
 }
 
 GEOZONE_TEST(GeoZoneMonitorTest)

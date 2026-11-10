@@ -29,6 +29,7 @@
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
+#include "VehicleLinkManager.h"
 
 #include <QtCore/QtMath>
 #include <QtCore/qapplicationstatic.h>
@@ -58,6 +59,16 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
     _alertHistory->startLog();
     _audioSink = std::make_shared<ApplicationAudioSink>();
 
+    // Without zones, alerts or vehicles to evaluate, the geo-awareness is still followed
+    _awarenessTimer.setInterval(evaluateIntervalMSecs);
+    (void) connect(&_awarenessTimer, &QTimer::timeout, this, [this]() {
+        if (!_evaluateTimer.isActive()) {
+            _updateAwareness();
+            _announce();
+        }
+    });
+    _awarenessTimer.start();
+
     // Evaluated periodically, since a hovering or climbing vehicle doesn't report a new coordinate, with the traffic
     _evaluateTimer.setInterval(evaluateIntervalMSecs);
     (void) connect(&_evaluateTimer, &QTimer::timeout, this, &GeoZoneMonitor::evaluateVehicles);
@@ -80,6 +91,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
     , _alertModel(new GeoZoneAlertModel(this))
+    , _awareness(new GeoZoneAwareness(this))
 {
     _elapsed.start();
     _arbiter.setClock([this]() { return _now(); });
@@ -99,6 +111,8 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
+    (void) connect(_manager->repository(), &GeoZoneSourceRepository::validityWarningChanged, this, &GeoZoneMonitor::_updateAwareness);
+    (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::_updateAwareness);
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachDistance(), settings->approachTime(),
@@ -213,6 +227,7 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
     }
     (void) _monitors.removeOne(monitor);
     (void) _armingAlerts.remove(monitor->key());
+    (void) _awarenessTrackers.remove(monitor->key());
     const int approvalCount = _arbiter.approvalCount();
     _arbiter.removeVehicle(monitor->key());
     _approvalsChanged(approvalCount);
@@ -469,6 +484,7 @@ void GeoZoneMonitor::evaluateVehicles()
     if (_adsbTraffic && settings().trafficEnabled) {
         _evaluateADSBTraffic();
     }
+    _updateAwareness();
     _announce();
 }
 
@@ -479,6 +495,7 @@ void GeoZoneMonitor::evaluate(Vehicle *vehicle, const GeoZone::Position &positio
         return;
     }
     _evaluate(monitor, position, velocity);
+    _updateAwareness();
     _announce();
 }
 
@@ -492,6 +509,7 @@ void GeoZoneMonitor::evaluate(const GeoZone::Position &position, int vehicleId, 
         monitor = _createMonitor(nullptr, vehicleId);
     }
     _evaluate(monitor, position, velocity);
+    _updateAwareness();
     _announce();
 }
 
@@ -502,6 +520,7 @@ void GeoZoneMonitor::positionLost(int vehicleId)
         return;
     }
     monitor->setPositionUnavailable(true);
+    _updateAwareness();
     _announce();
 }
 
@@ -629,6 +648,68 @@ void GeoZoneMonitor::_updateGroundStatus(GeoZoneVehicleMonitor *monitor)
         }
     }
     monitor->setGroundStatus(warning, level);
+}
+
+GeoZoneAwareness::Status GeoZoneMonitor::awarenessStatus(const GeoZoneVehicleMonitor *monitor) const
+{
+    const bool positioned = monitor && !monitor->positionUnavailable() && monitor->position().coordinate.isValid();
+    GeoZoneAwareness::Input input = GeoZoneAwareness::dataInput(_manager, positioned ? monitor->position().coordinate : QGeoCoordinate());
+    if (monitor) {
+        Vehicle *const vehicle = monitor->vehicle();
+        const VehicleLinkManager *const links = vehicle ? vehicle->vehicleLinkManager() : nullptr;
+        input.vehicle = true;
+        input.linkLost = links && links->communicationLost();
+        input.positionUnavailable = !positioned;
+        input.gnss = monitor->gnss(_now());
+    }
+    return GeoZoneAwareness::evaluate(input);
+}
+
+void GeoZoneMonitor::_updateAwareness()
+{
+    const qint64 now = _now();
+    for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
+        const GeoZoneAwareness::Status status = awarenessStatus(monitor);
+        // Of flying vehicles, like those whose link is lost, which were flying when last seen
+        if (const std::optional<GeoZoneAwareness::Tracker::Change> change = _awarenessTrackers[monitor->key()].update(status, monitor->inFlight(), now)) {
+            _raiseAwarenessAlert(monitor, *change);
+        }
+    }
+    _awareness->setStatus(awarenessStatus(_activeMonitor));
+}
+
+void GeoZoneMonitor::_raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change)
+{
+    if (!settings().alertsEnabled) {
+        return;
+    }
+    const int level = GeoZoneAwareness::alertLevel(change.to);
+    AlertEvent event;
+    event.id = _nextAlertId++;
+    event.time = GeoZoneEnvironment::currentDateTimeUtc();
+    event.vehicleId = monitor->vehicleId();
+    event.position = monitor->position();
+    event.kind = AlertEvent::Awareness;
+    event.distance = qQNaN();
+    event.zoneIdentifier = GeoZoneAwareness::stateCode(change.to);
+    event.zoneName = change.status.reasons().join(QStringLiteral("; "));
+    event.message = _labelled(monitor->vehicleId(), alertMessage(event, event.zoneName, QString()));
+    qCDebug(GeoZoneMonitorLog) << event.message;
+    const int severity = GeoZoneIntendedLevel::severity(static_cast<GeoZoneIntendedLevel::Level>(level));
+    _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event, false });
+    (void) _alertSubjects.remove(event.id - maxActionAlerts);
+    emit alertEvent(event);
+    emit alert(event.message, severity, event.id);
+    _show(event.id, event.message, severity);
+
+    GeoZoneAlertArbiter::Alert announced;
+    announced.id = event.id;
+    announced.vehicleKey = monitor->key();
+    announced.zoneKey = QStringLiteral("geo-awareness");
+    announced.severity = severity;
+    announced.inside = (level != GeoZoneIntendedLevel::Advisory);
+    announced.message = event.message;
+    _arbiter.submit(announced);
 }
 
 void GeoZoneMonitor::_announce()
@@ -955,6 +1036,8 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         return tr("Traffic %1 entered geozone %2 (%3)").arg(event.traffic, zoneName, restrictionText);
     case AlertEvent::NonConformance:
         return zoneName.isEmpty() ? tr("Outside planned volume") : tr("Outside planned volume: %1").arg(zoneName);
+    case AlertEvent::Awareness:
+        return GeoZoneAwareness::alertMessage(GeoZoneAwareness::stateFromCode(event.zoneIdentifier), event.zoneName);
     case AlertEvent::Notified:
         return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approved:

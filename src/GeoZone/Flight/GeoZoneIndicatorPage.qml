@@ -19,8 +19,8 @@ import QGroundControl.GeoZone
 import QGroundControl.ScreenTools
 import QGroundControl.Palette
 
-/// Drop-down page of GeoZoneIndicator: whether the active vehicle is on the ground inside a restricted zone, whether
-/// some geozone data may be outdated, the zones in or near which the active
+/// Drop-down page of GeoZoneIndicator: whether geo-awareness is available for the active vehicle and why not, whether
+/// it is on the ground inside a restricted zone, whether some geozone data may be outdated, the zones in or near which the active
 /// vehicle is, with a badge marking them stale while the vehicle's position is lost, the ADS-B and Remote ID traffic in or near zones when it is checked,
 /// the recent alerts, the map legend and the geozone options.
 ToolIndicatorPage {
@@ -54,6 +54,47 @@ ToolIndicatorPage {
     contentComponent: Component {
         ColumnLayout {
             spacing: ScreenTools.defaultFontPixelHeight / 2
+
+            // Whether the zones can be checked for the active vehicle, with the reasons when not
+            RowLayout {
+                Layout.preferredWidth:  control._pageWidth
+                spacing:                ScreenTools.defaultFontPixelWidth
+
+                readonly property int _state: control._monitor.awareness.state
+
+                GeoZoneBadge {
+                    Layout.alignment:   Qt.AlignTop
+                    text:               control._monitor.awareness.stateText
+                    textColor:          parent._state === GeoZoneAwareness.Degraded ? "black" : "white"
+                    color:              parent._state === GeoZoneAwareness.Unavailable ? qgcPal.colorRed :
+                                            (parent._state === GeoZoneAwareness.Degraded ? qgcPal.colorOrange : qgcPal.colorGreen)
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth:   true
+                    spacing:            0
+
+                    QGCLabel {
+                        Layout.fillWidth:   true
+                        wrapMode:           Text.WordWrap
+                        font.bold:          parent.parent._state !== GeoZoneAwareness.Available
+                        text:               qsTr("Geo-awareness")
+                    }
+
+                    Repeater {
+                        model: control._monitor.awareness.reasons
+
+                        QGCLabel {
+                            required property string modelData
+
+                            Layout.fillWidth:   true
+                            wrapMode:           Text.WordWrap
+                            textFormat:         Text.PlainText
+                            text:               "\u2022 " + modelData
+                        }
+                    }
+                }
+            }
 
             // The vehicle on the ground inside a restricted zone, like a pre-arm message
             RowLayout {

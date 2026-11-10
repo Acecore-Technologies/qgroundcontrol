@@ -339,12 +339,20 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     // with the zone it was last seen in
     _mockLink->setCommLost(true);
     QTRY_VERIFY_WITH_TIMEOUT(monitor.activeMonitor()->positionUnavailable(), 10000);
+    // ... and geo-awareness is unavailable, a warning once it lasts
+    QTRY_COMPARE_WITH_TIMEOUT(spiedAlerts(alertSpy).filter(QStringLiteral("Geo-awareness unavailable: telemetry link lost")).count(), 1, 10000);
+    QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(GeoZoneAwareness::Unavailable));
+    QCOMPARE(monitor.awareness()->reasons().constFirst(), QStringLiteral("telemetry link lost"));
     const QStringList lost = spiedAlerts(alertSpy).filter(QStringLiteral("Position lost inside geozone"));
     QCOMPARE(lost.count(), 1);
     QVERIFY2((lost.first() == alertText(*manager, QStringLiteral("Position lost inside"), ctrs[0])) ||
              (lost.first() == alertText(*manager, QStringLiteral("Position lost inside"), ctrs[1])), qPrintable(lost.first()));
     _mockLink->setCommLost(false);
     QTRY_VERIFY_WITH_TIMEOUT(!monitor.activeMonitor()->positionUnavailable(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(monitor.awareness()->stateValue() != GeoZoneAwareness::Unavailable, 10000);
+    // The state it comes back to once it lasts, an advisory when available
+    QTRY_VERIFY_WITH_TIMEOUT(spiedAlerts(alertSpy).constLast().startsWith(QStringLiteral("Geo-awareness ")) &&
+                             !spiedAlerts(alertSpy).constLast().contains(QStringLiteral("link lost")), 10000);
     QCOMPARE(spiedAlerts(alertSpy).filter(QStringLiteral("Position lost")).count(), 1);
 
     // Alerts can be turned off in flight

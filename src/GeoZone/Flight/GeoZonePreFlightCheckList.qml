@@ -87,5 +87,10 @@ ColumnLayout {
             name:   qsTr("Take-off position")
             item:   geoZoneGroup.check.takeoffItem
         }
+
+        GeoZonePreFlightCheckButton {
+            name:   qsTr("Geo-awareness")
+            item:   geoZoneGroup.check.awarenessItem
+        }
     }
 }

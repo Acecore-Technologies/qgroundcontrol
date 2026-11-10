@@ -18,6 +18,7 @@
 
 #include <optional>
 
+#include "GeoZoneAwareness.h"
 #include "GeoZoneFenceUpload.h"
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneRemoteId.h"
@@ -39,6 +40,7 @@ class Vehicle;
 /// - Remote ID: ready, with the operator ID set, when the mission enters U-space airspace, see GeoZoneRemoteId
 /// - take-off position: the vehicle on the ground isn't inside a prohibited zone, or a restricted zone the pilot hasn't
 ///   confirmed the permission for, see GeoZoneVehicleMonitor::groundWarning
+/// - geo-awareness: available for the vehicle, see GeoZoneAwareness
 /// Each item is a map with its state and the text explaining it.
 class GeoZonePreflightCheck : public QObject
 {
@@ -52,6 +54,7 @@ class GeoZonePreflightCheck : public QObject
     Q_PROPERTY(QVariantMap  qnhItem         READ qnhItem        NOTIFY itemsChanged FINAL)
     Q_PROPERTY(QVariantMap  remoteIdItem    READ remoteIdItem   NOTIFY itemsChanged FINAL)
     Q_PROPERTY(QVariantMap  takeoffItem     READ takeoffItem    NOTIFY itemsChanged FINAL)
+    Q_PROPERTY(QVariantMap  awarenessItem   READ awarenessItem  NOTIFY itemsChanged FINAL)
 
 public:
     /// Checks the vehicles of GeoZoneMonitor::instance()
@@ -96,6 +99,8 @@ public:
     QVariantMap remoteIdItem() const { return _remoteId.toMap(); }
     const Item &takeoff() const { return _takeoff; }
     QVariantMap takeoffItem() const { return _takeoff.toMap(); }
+    const Item &awareness() const { return _awareness; }
+    QVariantMap awarenessItem() const { return _awareness.toMap(); }
 
     /// Monitor of the vehicle whose take-off position is checked, none by default
     void setMonitor(GeoZoneMonitor *monitor);
@@ -127,6 +132,7 @@ public:
 
     /// @param monitor Of the vehicle, null without
     static Item takeoffItem(const GeoZoneVehicleMonitor *monitor);
+    static Item awarenessItem(const GeoZoneAwareness::Status &status);
 
     /// @return Zones with a flight level limit within qnhVerticalMargin of the altitudes of the mission path, any when
     ///         they are unknown, and within qnhHorizontalMargin of it
@@ -159,4 +165,5 @@ private:
     Item _qnh;
     Item _remoteId;
     Item _takeoff;
+    Item _awareness;
 };

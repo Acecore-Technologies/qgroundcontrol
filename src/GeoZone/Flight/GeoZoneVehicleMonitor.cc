@@ -73,6 +73,13 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
         if (gps.fix_type >= GPS_FIX_TYPE_2D_FIX) {
             _positionReceived(msecs);
         }
+        _gnss.known = true;
+        _gnss.fixType = gps.fix_type;
+        _gnss.satellites = (gps.satellites_visible == UINT8_MAX) ? -1 : gps.satellites_visible;
+        _gnss.hdop = (gps.eph == UINT16_MAX) ? qQNaN() : (gps.eph / 100.0);
+        // Millimeters, 0 from receivers which don't report it
+        _gnss.horizontalAccuracy = (gps.h_acc == 0) ? qQNaN() : (gps.h_acc / 1000.0);
+        _gnssMSecs = msecs;
         break;
     }
     case MAVLINK_MSG_ID_HIGH_LATENCY2:
@@ -168,6 +175,14 @@ QString GeoZoneVehicleMonitor::fenceBreachText(int breachType, int breachCount)
         text += QStringLiteral(" ") + tr("(%n time(s))", nullptr, breachCount);
     }
     return text;
+}
+
+GeoZoneAwareness::Gnss GeoZoneVehicleMonitor::gnss(qint64 msecs) const
+{
+    if ((_gnssMSecs < 0) || ((msecs - _gnssMSecs) > positionTimeoutMSecs)) {
+        return GeoZoneAwareness::Gnss();
+    }
+    return _gnss;
 }
 
 bool GeoZoneVehicleMonitor::positionStale(qint64 msecs) const
