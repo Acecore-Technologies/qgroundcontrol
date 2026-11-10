@@ -1,3 +1,11 @@
+# Builds without geozones only get the stub of the QML module, which the QML of QGroundControl imports, and the
+# definition leaving out the module's hooks in its C++
+if(QGC_DISABLE_GEOZONE)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE QGC_DISABLE_GEOZONE)
+    add_subdirectory(Stub)
+    return()
+endif()
+
 add_subdirectory(Core)
 
 # The application layer: zones on the maps (Map), mission checks (Planning) and their exports (Export), flight

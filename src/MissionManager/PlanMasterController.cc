@@ -23,7 +23,9 @@
 #include "BlankPlanCreator.h"
 #include "QmlObjectListModel.h"
 #include "GeoFenceManager.h"
+#ifndef QGC_DISABLE_GEOZONE
 #include "GeoZonePlanData.h"
+#endif
 #include "RallyPointManager.h"
 #include "QGCLoggingCategory.h"
 
@@ -93,7 +95,9 @@ void PlanMasterController::start(void)
     connect(_multiVehicleMgr, &MultiVehicleManager::activeVehicleChanged, this, &PlanMasterController::_activeVehicleChanged);
 
     _updatePlanCreatorsList();
+#ifndef QGC_DISABLE_GEOZONE
     GeoZonePlanData::follow(this);
+#endif
 }
 
 void PlanMasterController::startStaticActiveVehicle(Vehicle* vehicle, bool deleteWhenSendCompleted)
@@ -395,7 +399,9 @@ void PlanMasterController::loadFromFile(const QString& filename)
                 !_rallyPointController.load(json[kJsonRallyPointsObjectKey].toObject(), errorString)) {
             qgcApp()->showAppMessage(errorMessage.arg(errorString));
         } else {
+#ifndef QGC_DISABLE_GEOZONE
             GeoZonePlanData::load(this, json);
+#endif
             //-- Allow plugins to post process the load
             QGCCorePlugin::instance()->postLoadFromJson(this, json);
             success = true;
@@ -432,7 +438,9 @@ QJsonDocument PlanMasterController::saveToJson()
     planJson[kJsonMissionObjectKey] = missionJson;
     planJson[kJsonGeoFenceObjectKey] = fenceJson;
     planJson[kJsonRallyPointsObjectKey] = rallyJson;
+#ifndef QGC_DISABLE_GEOZONE
     GeoZonePlanData::save(this, planJson);
+#endif
     QGCCorePlugin::instance()->postSaveToJson(this, planJson);
     return QJsonDocument(planJson);
 }

@@ -334,7 +334,9 @@ const QVariantList &QGCCorePlugin::toolBarIndicators()
     static const QVariantList toolBarIndicatorList = QVariantList(
         {
             QVariant::fromValue(QUrl::fromUserInput(QStringLiteral("qrc:/qml/QGroundControl/Toolbar/RTKGPSIndicator.qml"))),
+#ifndef QGC_DISABLE_GEOZONE
             QVariant::fromValue(QUrl::fromUserInput(QStringLiteral("qrc:/qml/QGroundControl/GeoZone/Flight/GeoZoneIndicator.qml"))),
+#endif
         }
     );
 

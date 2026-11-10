@@ -32,6 +32,9 @@
 ///
 /// Changes outside the module which don't depend on it and could go upstream on their own: the fileName of
 /// QGCFileDialog.qml, and Vehicle clearing altitudeAboveTerr when the terrain query fails.
+///
+/// Builds with -DQGC_DISABLE_GEOZONE=ON leave the module out: the C++ hooks are within #ifndef QGC_DISABLE_GEOZONE and
+/// the QML ones get the hidden no-op types of the stub module in src/GeoZone/Stub.
 namespace GeoZoneModule {
 
 /// Connects the geozone core to the settings, units, terrain and downloads of QGroundControl, see GeoZoneEnvironment,

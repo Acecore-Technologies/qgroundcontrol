@@ -1,3 +1,8 @@
+# Builds without geozones (QGC_DISABLE_GEOZONE) have none of the tests of the module
+if(QGC_DISABLE_GEOZONE)
+    return()
+endif()
+
 # The geozone test classes, each in <Class>.cc and <Class>.h, which registers itself with GEOZONE_TEST(<Class>), see
 # GeoZoneTestBase.h. These lists are the only list of them: they choose where each class is built and runs, and each
 # class is a CTest test labeled geozone.

@@ -41,7 +41,9 @@
 #include "ESP8266ComponentController.h"
 #include "FollowMe.h"
 #include "GeoTagController.h"
+#ifndef QGC_DISABLE_GEOZONE
 #include "GeoZoneModule.h"
+#endif
 #include "GimbalController.h"
 #include "GPSRtk.h"
 #include "JoystickConfigController.h"
@@ -272,7 +274,9 @@ void QGCApplication::init()
     LinkManager::registerQmlTypes();
     ParameterManager::registerQmlTypes();
     QGroundControlQmlGlobal::registerQmlTypes();
+#ifndef QGC_DISABLE_GEOZONE
     GeoZoneModule::registerQmlTypes();
+#endif
     MissionManager::registerQmlTypes();
     QGCCameraManager::registerQmlTypes();
     MultiVehicleManager::registerQmlTypes();
@@ -357,7 +361,9 @@ void QGCApplication::_initForNormalAppBoot()
 
     AudioOutput::instance()->init(SettingsManager::instance()->appSettings()->audioMuted());
     FollowMe::instance()->init();
+#ifndef QGC_DISABLE_GEOZONE
     GeoZoneModule::init();
+#endif
     QGCPositionManager::instance()->init();
     LinkManager::instance()->init();
     VideoManager::instance()->init(mainRootWindow());
