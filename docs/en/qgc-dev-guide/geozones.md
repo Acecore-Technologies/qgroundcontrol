@@ -24,6 +24,7 @@ The module has two layers:
 | `src/GeoZone/Flight` | Fly View: `GeoZoneMonitor`, `GeoZoneVehicleMonitor`, `GeoZoneAlertArbiter`, `GeoZoneAlertHistory`, `GeoZoneGuidedCheck` (the checks of the guided commands, with the returns from `GeoZoneReturnModel` and the mission from `GeoZoneMissionPath`, and of the mission started), `GeoZoneConformance`, `GeoZoneFlightRecorder`, `GeoZonePreflightCheck` with the checklist QML, `GeoZoneRemoteId` (the Remote ID settings and status), the toolbar indicator (`GeoZoneIndicator`, with its drop-down page `GeoZoneIndicatorPage`), alert popup, altitude strip and map layer. See [Flight Alerts](#flight-alerts). |
 | `src/GeoZone/Export` | Exports of the planned mission: `GeoZoneBriefingExport` and `GeoZoneOperationalIntentExport` (on `GeoZoneMissionExport`). |
 | `src/GeoZone/Settings` | `GeoZoneSettings` with `GeoZone.SettingsGroup.json`, and the Geozones page of the Application Settings. |
+| `src/GeoZone/Stub` | The stub of the QML module which builds without geozones use instead of the module, see [Building Without Geozones](#building-without-geozones). |
 
 The QML of each feature is next to its C++, in the `QGroundControl.GeoZone` QML module (`GeoZoneModule` in `src/GeoZone/CMakeLists.txt`, which lists the QML of all the directories).
 
@@ -271,10 +272,45 @@ The jobs select the tests by their CTest labels, so a class added to the lists o
   - `sanitizers` builds with AddressSanitizer and UndefinedBehaviorSanitizer and runs `ctest -L geozone -LE "benchmark|fuzz"` but `GeoZoneFlightTest`, whose MockLink copies short strings into fixed size MAVLink fields, which AddressSanitizer reports as overflows. The job fails on any failed test function, crash or sanitizer abort, and on undefined behavior reported in `src/GeoZone`.
   - `fuzz` builds the standalone fuzz project with clang and fuzzes each target for a minute when started by hand; the weekly run fuzzes 20 minutes each and keeps the corpus it grows in the Actions cache for the next runs. Crashes are uploaded as an artifact.
   - `windows-core` builds `GeoZoneCoreTest` and `geozone-validate` with MSVC in a debug build of _QGroundControl_ without GStreamer and runs `ctest -L core`, since the Windows workflow builds releases without tests.
+  - `without-geozones` runs `GeoZoneStubCheck`, builds a release of _QGroundControl_ with `-DQGC_DISABLE_GEOZONE=ON` and fails when the binary has strings of the module's classes, see [Building Without Geozones](#building-without-geozones).
 
 ::: warning
 QML errors are only found at runtime. A component of the module with a missing import or an unknown type still builds, but fails to load, and since the components are placed in views of _QGroundControl_ (like `PlanView.qml` and `FlyViewMap.qml`), the parent view breaks with it. After changing QML, run _QGroundControl_, open the Plan View, the Fly View and the Geozones settings with zones loaded, and check the console for QML warnings.
 :::
+
+## Building Without Geozones {#building-without-geozones}
+
+Products without geo-awareness build _QGroundControl_ from the same branch without the module, configured with `-DQGC_DISABLE_GEOZONE=ON` (an option of `cmake/CustomOptions.cmake`, `OFF` by default):
+
+```sh
+cmake -S . -B build-nogeozones -G Ninja -DCMAKE_BUILD_TYPE=Release -DQGC_DISABLE_GEOZONE=ON
+cmake --build build-nogeozones --target QGroundControl
+```
+
+The option is kept in the CMake cache: an existing build directory changes with `-DQGC_DISABLE_GEOZONE=ON` or `OFF` given again. The configure summary shows it as **Disable Geozones**.
+
+What the option leaves out:
+
+- **The module**: all of `src/GeoZone` but `src/GeoZone/Stub`, that is the `GeoZoneCore` library, the application layer, the QML module with its resources and the `GeoZoneManager` settings group. The binary has none of the module's code, QML or settings, only the stub module and the module's icon, which the hidden button of the settings page loads.
+- **Its tests**: the classes of `test/GeoZone`, `GeoZoneCoreTest`, `GeoZoneBenchmark`, `geozone-validate` and the fuzz targets. The other unit tests of _QGroundControl_ build and run as usual with `QGC_BUILD_TESTING`.
+- **The C++ hooks**, within `#ifndef QGC_DISABLE_GEOZONE` (defined for the whole application by `src/GeoZone/CMakeLists.txt`): `GeoZoneModule::registerQmlTypes()` and `init()` in `QGCApplication`, the toolbar indicator of `QGCCorePlugin::toolBarIndicators()`, the `geoZones` section of plan files in `PlanMasterController` (not written, and ignored when loading a plan saved with geozones) and the checklist of `QGCOptions::preFlightChecklistUrl()`, which is then the upstream `PreFlightCheckList.qml`.
+
+The QML hooks stay unchanged: the QML of _QGroundControl_ still imports `QGroundControl.GeoZone` and places its types (see [Upstream Footprint](#upstream-footprint)), which the stub module of `src/GeoZone/Stub` provides as hidden items doing nothing. `GeoZonePlanViewOverlay.confirmUpload()` uploads at once, its `selectFenceAt()` and `showZonesAt()` and `GeoZoneFlyMapLayer.gotoEntersZones()` return false, `GeoZoneToolStripAction` is hidden and the `GeoZoneManager` singleton hides the Geozones settings page, so the views work like those of upstream _QGroundControl_.
+
+A new hook must keep both builds working:
+
+- In C++, within `#ifndef QGC_DISABLE_GEOZONE`.
+- In the QML outside `src/GeoZone`, with its type, the properties it sets and the functions it calls in the stub. The `GeoZoneStubCheck` test (`test/GeoZone/GeoZoneStubCheck.cmake`, labeled `geozone` and `core`, which runs in both builds) fails when the stub lacks a type that QML places, a property it sets or a signal it handles on it, a member it uses through the type's id, or a member of a singleton it reads.
+
+### One Branch for Both Product Lines {#one-branch}
+
+Keep a single branch and build it twice: the products with geozones with the default configuration, the others with `-DQGC_DISABLE_GEOZONE=ON`, like the other options of `cmake/CustomOptions.cmake`. A [custom build](custom_build/custom_build.md) without geozones sets the option in its `custom/cmake/CustomOverrides.cmake`:
+
+```cmake
+set(QGC_DISABLE_GEOZONE ON CACHE BOOL "Disable Geozones" FORCE)
+```
+
+A custom build can instead keep the module and hide it at runtime with the plugin interfaces of _QGroundControl_, but the module then stays in the binary and zones stored earlier still load and alert. `QGCCorePlugin::overrideSettingsGroupVisibility()` returning false for `GeoZoneManager` (the settings group of `GeoZoneSettings`) hides the Geozones settings page, so that no zones can be loaded, its `toolBarIndicators()` can leave out `GeoZoneIndicator.qml` and `QGCOptions::preFlightChecklistUrl()` can return the upstream `qrc:/qml/QGroundControl/FlightDisplay/PreFlightCheckList.qml`. The other geozone items of the views only show when zones are loaded.
 
 ## Upstream Footprint {#upstream-footprint}
 
@@ -285,8 +321,9 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | File | Lines (+/-) | Insertion point |
 | ---- | ----------- | --------------- |
 | `src/CMakeLists.txt`, `test/CMakeLists.txt` | +1, +2 | `add_subdirectory(GeoZone)` |
-| `src/QGCApplication.cc` | +3 | `GeoZoneModule::registerQmlTypes()` and `GeoZoneModule::init()` |
-| `src/API/QGCCorePlugin.cc` | +1 | `GeoZoneIndicator.qml` in the toolbar indicators |
+| `cmake/CustomOptions.cmake`, `cmake/PrintSummary.cmake` | +1, +1 | The `QGC_DISABLE_GEOZONE` option, see [Building Without Geozones](#building-without-geozones) |
+| `src/QGCApplication.cc` | +9 | `GeoZoneModule::registerQmlTypes()` and `GeoZoneModule::init()` |
+| `src/API/QGCCorePlugin.cc` | +3 | `GeoZoneIndicator.qml` in the toolbar indicators |
 | `src/UI/AppSettings/SettingsPagesModel.qml` | +8 | The Geozones settings page |
 | `src/UI/MainWindow.qml` | +8 | `GeoZoneAlertPopup` |
 | `src/QmlControls/PlanView.qml` | +26/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks and the upload confirmation (`GeoZoneMissionCheck::uploadReasons()`) |
@@ -296,8 +333,8 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/FlightDisplay/FlyViewMap.qml` | +13/-1 | `GeoZoneFlyMapLayer`, `GeoZoneMapClickButton` and confirmed go to locations entering zones |
 | `src/FlightDisplay/FlyViewWidgetLayer.qml` | +9 | `GeoZoneAltitudeStrip` |
 | `src/FlightDisplay/GuidedActionConfirm.qml` | +3 | `GeoZoneGuidedActionWarning` |
-| `src/MissionManager/PlanMasterController.cc` | +4 | `GeoZonePlanData::load()` and `save()` of the `geoZones` section of plan files, and `follow()`, which resets the planned start and audit record when the Plan View replaces its mission |
-| `src/API/QGCOptions.h` | +1/-1 | `preFlightChecklistUrl()` points to `GeoZonePreFlightCheckList.qml`, which loads the checklist of the vehicle type and adds the Geozones group of `GeoZonePreflightCheck` |
+| `src/MissionManager/PlanMasterController.cc` | +12 | `GeoZonePlanData::load()` and `save()` of the `geoZones` section of plan files, and `follow()`, which resets the planned start and audit record when the Plan View replaces its mission |
+| `src/API/QGCOptions.h` | +5/-1 | `preFlightChecklistUrl()` points to `GeoZonePreFlightCheckList.qml`, which loads the checklist of the vehicle type and adds the Geozones group of `GeoZonePreflightCheck` |
 | `src/Vehicle/Vehicle.cc` | +2 | Clears `altitudeAboveTerr` when the terrain query fails |
 
-The `fileName` of `QGCFileDialog.qml` and the `Vehicle.cc` change don't depend on the module and could go upstream on their own.
+The `fileName` of `QGCFileDialog.qml` and the `Vehicle.cc` change don't depend on the module and could go upstream on their own. The C++ hooks are within `#ifndef QGC_DISABLE_GEOZONE`, counted in the lines above, and the QML hooks have their stubs in `src/GeoZone/Stub`, see [Building Without Geozones](#building-without-geozones).

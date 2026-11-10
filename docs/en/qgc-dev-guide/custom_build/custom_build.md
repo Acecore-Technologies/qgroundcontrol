@@ -24,3 +24,13 @@ There is also a mechanism which allows you to override resources so you can chan
 Also internal to QGC is the concept of an "Advanced Mode". Whereas a standard QGC builds always runs in advanced mode. A custom build always starts out in regular/not advanced mode. There is an easier mechanism in the build to turn on advanced mode which is to click the fly view button 5 times in a row fairly quickly. If you do this in a custom build you will be warned about entering advanced mode. The concept here is to hide things which normal users should not have access to behind advanced mode. For example a commercial vehicle will not need access to most setup pages which are oriented to DIY setup. So a custom build can hide this. The custom example code shows how to do this.
 
 If you want to understand the possibilities, the first step is to read through those files which document what is possible. Next look through the [`custom-example`](https://github.com/mavlink/qgroundcontrol/tree/master/custom-example) source code including the [README](https://github.com/mavlink/qgroundcontrol/blob/master/custom-example/README.md).
+
+## Building Without Geozones
+
+Products which don't need geo-awareness can be built from the same branch without the geozone module, which leaves its code, views, settings and tests out of the build. Configure with `-DQGC_DISABLE_GEOZONE=ON`, or set the option in the `custom/cmake/CustomOverrides.cmake` of a custom build:
+
+```cmake
+set(QGC_DISABLE_GEOZONE ON CACHE BOOL "Disable Geozones" FORCE)
+```
+
+What is removed, how the views of _QGroundControl_ keep working and how to hide the module at runtime instead are described in [Building Without Geozones](../geozones.md#building-without-geozones).
