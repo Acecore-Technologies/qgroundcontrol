@@ -65,6 +65,10 @@ qt_add_library(GeoZoneCore STATIC
     Sources/GeoZoneCredentials.h
     Sources/GeoZoneDownloader.cc
     Sources/GeoZoneDownloader.h
+    Sources/GeoZoneFeedCatalogue.cc
+    Sources/GeoZoneFeedCatalogue.h
+    Sources/GeoZoneFeedCatalogueLoader.cc
+    Sources/GeoZoneFeedCatalogueLoader.h
     Sources/GeoZoneFeedFetch.cc
     Sources/GeoZoneFeedFetch.h
     Sources/GeoZoneHash.h
@@ -195,4 +199,12 @@ qt_add_resources(GeoZoneCore "geozone_geoid"
     PREFIX "/geoid"
     BASE Geoid
     FILES Geoid/egm96_1deg.bin
+)
+
+# The built-in feed catalogue, see GeoZoneFeedCatalogue. Custom builds can compile in their own catalogue instead.
+set(GEOZONE_FEEDS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Sources/GeoZoneFeeds.json" CACHE FILEPATH "Built-in geozone feed catalogue (GeoZoneFeeds.json format)")
+set_source_files_properties("${GEOZONE_FEEDS_FILE}" PROPERTIES QT_RESOURCE_ALIAS GeoZoneFeeds.json)
+qt_add_resources(GeoZoneCore "geozone_feeds"
+    PREFIX "/geozone"
+    FILES "${GEOZONE_FEEDS_FILE}"
 )

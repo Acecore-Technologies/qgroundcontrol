@@ -8,8 +8,11 @@
  ****************************************************************************/
 
 #include "GeoZoneProviders.h"
+#include "GeoZoneEnvironment.h"
+#include "GeoZoneFeedCatalogue.h"
 #include "GeoZoneFormat.h"
 
+#include <QtCore/QReadWriteLock>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 
@@ -17,244 +20,113 @@
 
 namespace {
 
-/// DiPUL layers of aviation zones, small enough to download for the whole country
-const QStringList kDipulAviationLayers = {
-    QStringLiteral("kontrollzonen"), QStringLiteral("flughaefen"), QStringLiteral("flugplaetze"),
-    QStringLiteral("flugbeschraenkungsgebiete"), QStringLiteral("temporaere_betriebseinschraenkungen"),
+/// The catalogue in use, the built-in one until the repository applies its overlays
+struct ActiveCatalogue {
+    QReadWriteLock lock;
+    bool initialized = false;
+    QList<GeoZoneProviders::Service> services;
+    QList<GeoZoneProviders::ServiceTemplate> templates;
 };
 
-const QStringList kDipulAllLayers = {
-    QStringLiteral("bahnanlagen"), QStringLiteral("behoerden"), QStringLiteral("binnenwasserstrassen"), QStringLiteral("bundesautobahnen"),
-    QStringLiteral("bundesstrassen"), QStringLiteral("diplomatische_vertretungen"), QStringLiteral("flugbeschraenkungsgebiete"),
-    QStringLiteral("flughaefen"), QStringLiteral("flugplaetze"), QStringLiteral("freibaeder"), QStringLiteral("industrieanlagen"),
-    QStringLiteral("internationale_organisationen"), QStringLiteral("justizvollzugsanstalten"), QStringLiteral("kontrollzonen"),
-    QStringLiteral("kraftwerke"), QStringLiteral("krankenhaeuser"), QStringLiteral("labore"), QStringLiteral("militaerische_anlagen"),
-    QStringLiteral("nationalparks"), QStringLiteral("naturschutzgebiete"), QStringLiteral("polizei"), QStringLiteral("schifffahrtsanlagen"),
-    QStringLiteral("seewasserstrassen"), QStringLiteral("sicherheitsbehoerden"), QStringLiteral("stromleitungen"),
-    QStringLiteral("temporaere_betriebseinschraenkungen"), QStringLiteral("umspannwerke"), QStringLiteral("vogelschutzgebiete"),
-    QStringLiteral("windkraftanlagen"), QStringLiteral("wohngrundstuecke"),
-};
+ActiveCatalogue &activeCatalogue()
+{
+    static ActiveCatalogue catalogue;
+    {
+        const QReadLocker locker(&catalogue.lock);
+        if (catalogue.initialized) {
+            return catalogue;
+        }
+    }
+    const GeoZoneFeedCatalogue::Catalogue builtIn = GeoZoneFeedCatalogue::builtIn();
+    const QWriteLocker locker(&catalogue.lock);
+    if (!catalogue.initialized) {
+        catalogue.services = builtIn.feeds;
+        catalogue.templates = builtIn.templates;
+        catalogue.initialized = true;
+    }
+    return catalogue;
+}
 
-/// The FAA's public ArcGIS feature services, see https://udds-faa.opendata.arcgis.com
-const QString kFaaHost = QStringLiteral("services6.arcgis.com");
-const QString kFaaPath = QStringLiteral("/ssFJjBXIUyZDrSYZ/arcgis/rest/services/");
-
-struct FaaLayer {
-    const char *id;
-    const char *service;
-    const char *where;
-    const char *fields;
-};
-
-/// The layers of the FAA airspace providers: UAS facility maps, national security UAS flight restrictions, the
-/// controlled airspace classes reaching the surface and special use airspace
-const FaaLayer kFaaLayers[] = {
-    { "faa-uasfm", "FAA_UAS_FacilityMap_Data", "1=1",
-      "OBJECTID,GLOBALID,CEILING,UNIT,MAP_EFF,ARPT_COUNT,APT1_FAAID,APT1_ICAO,APT1_NAME,APT1_LAANC,APT2_ICAO,APT2_NAME,APT2_LAANC,AIRSPACE_1,AIRSPACE_2" },
-    { "faa-nsufr", "DoD_Mar_13", "1=1", "*" },
-    { "faa-class", "Class_Airspace", "TYPE_CODE='CLASS' AND LOCAL_TYPE IN ('CLASS_B','CLASS_C','CLASS_D','CLASS_E2','CLASS_E3','CLASS_E4')", "*" },
-    { "faa-sua", "Special_Use_Airspace", "1=1", "*" },
-};
-
-/// The 50 states and the territories in the Caribbean
-const QGeoRectangle kUnitedStates(QGeoCoordinate(72.0, -180.0), QGeoCoordinate(17.5, -64.5));
+/// Names and notes of the built-in catalogue are translated when read, so that they follow the language
+QString translated(const QString &text, bool translatable)
+{
+    return (translatable && !text.isEmpty()) ? QCoreApplication::translate(GeoZoneFeedCatalogue::translationContext, text.toUtf8().constData()) : text;
+}
 
 } // namespace
 
+QString GeoZoneProviders::Service::areaUrl(const QGeoRectangle &area) const
+{
+    return areaUrlTemplate.isEmpty() ? QString() : GeoZoneService().requestUrl(areaUrlTemplate, area, GeoZoneEnvironment::currentDateTimeUtc());
+}
+
+QList<GeoZoneProviders::Service> GeoZoneProviders::_services()
+{
+    ActiveCatalogue &catalogue = activeCatalogue();
+    const QReadLocker locker(&catalogue.lock);
+    return catalogue.services;
+}
+
 QList<GeoZoneProviders::Service> GeoZoneProviders::services()
 {
-    using Format = GeoZoneParser::Format;
-    const auto feed = [](const QString &id, const QString &name, const QString &host, Format format, const QString &url) {
-        Service service;
-        service.id = id;
-        service.name = name;
-        service.host = host;
-        service.format = format;
-        service.feedUrl = url;
-        return service;
-    };
-
-    Service dipulAviation = feed(QStringLiteral("dipul-aviation"), tr("Germany aviation zones (DiPUL)"), QStringLiteral("uas-betrieb.de"), Format::Dipul,
-                                 _dipulUrl(kDipulAviationLayers, QGeoRectangle()));
-
-    Service dipulAll = feed(QStringLiteral("dipul"), tr("Germany, all zones (DiPUL)"), QStringLiteral("uas-betrieb.de"), Format::Dipul, QString());
-    dipulAll.coverage = QGeoRectangle(QGeoCoordinate(55.2, 5.8), QGeoCoordinate(47.2, 15.1));
-    dipulAll.areaUrl = [](const QGeoRectangle &area) { return _dipulUrl(kDipulAllLayers, area); };
-
-    Service france = feed(QStringLiteral("france"), tr("France, open category (IGN)"), QStringLiteral("data.geopf.fr"), Format::FranceUas, QString());
-    france.coverage = QGeoRectangle(QGeoCoordinate(51.2, -5.3), QGeoCoordinate(41.3, 9.7));
-    france.areaUrl = [](const QGeoRectangle &area) {
-        return QStringLiteral("https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=TRANSPORTS.DRONES.RESTRICTIONS:carte_restriction_drones_lf"
-                              "&OUTPUTFORMAT=application/json&BBOX=") + _bboxQuery(area, QStringLiteral(",EPSG:4326"));
-    };
-
-    Service nats = feed(QStringLiteral("nats"), tr("United Kingdom FRZ (NATS)"), QStringLiteral("ead-it.com"), Format::Aixm,
-                        QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/"));
-    // NATS lists the full UAS flight restriction datasets of the current and next AIRAC cycles
-    nats.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\""));
-    nats.airac = true;
-
-    // ENAIRE publishes the Spanish zones as ED-318 downloads, updated on AIRAC dates, and its many infrastructure
-    // zones (mostly railways) by area through the feature service of its AIS
-    Service enaireAero = feed(QStringLiteral("enaire-aero"), tr("Spain aeronautical zones (ENAIRE)"), QStringLiteral("enaire.es"), Format::ED318,
-                              QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Aero.zip"));
-    enaireAero.path = QStringLiteral("/recursos/descargas/ZGUAS/");
-    Service enaireUrban = feed(QStringLiteral("enaire-urban"), tr("Spain urban zones (ENAIRE)"), QStringLiteral("enaire.es"), Format::ED318,
-                               QStringLiteral("https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Urbano.zip"));
-    enaireUrban.path = enaireAero.path;
-    Service enaireInfra = feed(QStringLiteral("enaire-infra"), tr("Spain infrastructure zones (ENAIRE)"), QStringLiteral("enaire.es"), Format::ED318, QString());
-    enaireInfra.path = QStringLiteral("/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/");
-    enaireInfra.coverage = QGeoRectangle(QGeoCoordinate(44.0, -18.5), QGeoCoordinate(27.5, 4.5));
-    enaireInfra.areaUrl = [](const QGeoRectangle &area) {
-        return QStringLiteral("https://servais.enaire.es/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/FeatureServer/0/query?where=1%3D1&geometry=%1"
-                              "&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&geometryPrecision=6"
-                              "&f=geojson&resultRecordCount=2000&resultOffset=0").arg(_bboxQuery(area));
-    };
-
-    // The ministry IenW links the current ED-269 file of the Dutch zones from its page on drones
-    Service netherlands = feed(QStringLiteral("ienw"), tr("Netherlands (IenW)"), QStringLiteral("luchtvaartindetoekomst.nl"), Format::ED269,
-                               QStringLiteral("https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart"));
-    netherlands.datasetLinkPattern = QRegularExpression(QStringLiteral("<a\\b(?=[^>]*JSON)[^>]*href=\"(https://www\\.nieuwsienw\\.nl/api/documents/downloadfile\\?[^\"]+)\""));
-
-    // Austro Control lists its ED-269 datasets with the date each takes effect, the test datasets aside
-    Service austria = feed(QStringLiteral("austro-control"), tr("Austria (Austro Control)"), QStringLiteral("austrocontrol.at"), Format::ED269,
-                           QStringLiteral("https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen"));
-    austria.datasetLinkPattern = QRegularExpression(QStringLiteral("href=\"([^\"]*/UASZones-ACG-\\d{8}-\\d{6}-full(?![^\"]*test)[^\"]*\\.(?:zip|json))\""
-                                                                   "(?:(?!</tr>)[\\s\\S])*?<td[^>]*>\\s*(?:<span[^>]*>)?\\s*(\\d{1,2}\\.\\d{1,2}\\.\\d{4})"));
-    austria.datasetDateFormat = QStringLiteral("d.M.yyyy");
-
-    const QStringList faaNames = {
-        tr("United States UAS facility maps (FAA)"), tr("United States national security UAS restrictions (FAA)"),
-        tr("United States controlled airspace (FAA)"), tr("United States special use airspace (FAA)"),
-    };
-    QList<Service> faa;
-    qsizetype nameIndex = 0;
-    for (const FaaLayer &layer : kFaaLayers) {
-        Service service = feed(QString::fromLatin1(layer.id), faaNames.value(nameIndex++), kFaaHost, Format::FaaAirspace, QString());
-        service.path = kFaaPath + QString::fromLatin1(layer.service) + QLatin1Char('/');
-        service.coverage = kUnitedStates;
-        service.areaUrl = [layer](const QGeoRectangle &area) {
-            return _faaUrl(QString::fromLatin1(layer.service), QString::fromLatin1(layer.where), QString::fromLatin1(layer.fields), _bboxQuery(area));
-        };
-        faa.append(service);
+    QList<Service> services = _services();
+    for (Service &service : services) {
+        if (service.translatable) {
+            service.name = translated(service.name, true);
+            service.note = translated(service.note, true);
+            service.templateNote = translated(service.templateNote, true);
+        }
     }
-
-    return QList<Service>{
-        feed(QStringLiteral("traficom"), tr("Finland (Traficom)"), QStringLiteral("traficom.fi"), Format::Unknown,
-             QStringLiteral("https://eservices.traficom.fi/Ilmatilasovellus/api/uas-reservations/json?lang=en")),
-        feed(QStringLiteral("lgs"), tr("Latvia (LGS)"), QStringLiteral("drz.lv"), Format::Unknown,
-             QStringLiteral("https://drz.lv/api/v1/export-history/UASZoneVersion")),
-        feed(QStringLiteral("geoportail-lu"), tr("Luxembourg (Geoportail)"), QStringLiteral("geoportail.lu"), Format::Unknown,
-             QStringLiteral("https://drones.geoportail.lu/zones")),
-        feed(QStringLiteral("lfv"), tr("Sweden (LFV)"), QStringLiteral("lfv.se"), Format::Unknown,
-             QStringLiteral("https://dronechart.lfv.se/data/uas_zones_ED318.json")),
-        feed(QStringLiteral("faa-tfr"), tr("United States TFRs (FAA)"), QStringLiteral("faa.gov"), Format::FaaTfr,
-             QStringLiteral("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&outputFormat=application/json")),
-        feed(QStringLiteral("foca"), tr("Switzerland (FOCA)"), QStringLiteral("admin.ch"), Format::Unknown,
-             QStringLiteral("https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json")),
-        dipulAviation,
-        nats,
-        enaireAero,
-        enaireUrban,
-        netherlands,
-        austria,
-        dipulAll,
-        france,
-        enaireInfra,
-    } + faa;
+    return services;
 }
 
 QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
 {
+    ActiveCatalogue &catalogue = activeCatalogue();
     QList<ServiceTemplate> templates;
-
-    ServiceTemplate ed318;
-    ed318.service.id = QStringLiteral("ed318");
-    ed318.service.name = tr("ED-318 geozone service");
-    ed318.service.method = GeoZoneService::Method::Ed318Post;
-    ed318.service.areaOfInterest = true;
-    ed318.note = tr("Enter the address of the UAS zones endpoint of a service following the ED-318 retrieval interface. "
-                    "The zones around the mission, the vehicle and the map view are requested with their area and time.");
-    templates.append(ed318);
-
-    // The ED-318 retrieval interface of the DFS Geospatial Information Service, see its OpenAPI specification
-    ServiceTemplate dfs;
-    dfs.url = QStringLiteral("https://dipul-service.dfs.de/api/geofencing/v2/uas-zones");
-    dfs.service.id = QStringLiteral("dfs-ed318");
-    dfs.service.name = tr("Germany ED-318 service (DFS)");
-    dfs.service.method = GeoZoneService::Method::Ed318Post;
-    dfs.service.auth = GeoZoneService::Auth::Basic;
-    dfs.service.areaOfInterest = true;
-    dfs.service.maxAreaKm2 = 100;
-    dfs.note = tr("Requires a dipul account, requested from DFS through the dipul contact form. The service answers areas up to 100 km².");
-    templates.append(dfs);
-
-    ServiceTemplate area;
-    area.service.id = QStringLiteral("area");
-    area.service.name = tr("Zones of the area (GET)");
-    area.service.areaOfInterest = true;
-    area.note = tr("Enter an address with {bbox} (west,south,east,north), {west}, {south}, {east}, {north}, {lat}, {lon}, {radiusKm}, "
-                   "{start} or {end}, filled with the area around the mission, the vehicle and the map view.");
-    templates.append(area);
-
-    // The FAA NOTAM Management Service isn't offered until its NOTAM GeoJSON can be read
-
-    // OpenAIP airspaces, unofficial community data, by area with an API key or by country without
-    ServiceTemplate openAip;
-    openAip.url = QStringLiteral("https://api.core.openaip.net/api/airspaces?bbox={bbox}&limit=1000&page=1");
-    openAip.service.id = QStringLiteral("openaip");
-    openAip.service.name = tr("Airspaces (OpenAIP, unofficial)");
-    openAip.service.auth = GeoZoneService::Auth::ApiKeyHeader;
-    openAip.service.authParameter = QStringLiteral("x-openaip-api-key");
-    openAip.service.responseMember = QStringLiteral("items");
-    openAip.service.areaOfInterest = true;
-    // The API answers areas up to 5 degrees wide and high
-    openAip.service.maxAreaKm2 = 40000;
-    openAip.format = GeoZoneParser::Format::OpenAip;
-    openAip.note = tr("Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation: "
-                      "check the official drone zones. Enter the API key of an API client created in your openaip.net profile.");
-    templates.append(openAip);
-
-    ServiceTemplate openAipExport;
-    openAipExport.url = QStringLiteral("https://storage.openaip.net/openaip-system-exports/ch_asp.geojson");
-    openAipExport.service.id = QStringLiteral("openaip-export");
-    // Its sources are named after the country of their data, see GeoZoneOpenAipFormat
-    openAipExport.name = tr("Airspaces of a country (OpenAIP, unofficial)");
-    openAipExport.format = GeoZoneParser::Format::OpenAip;
-    openAipExport.note = tr("The daily export of a country's airspaces, without an account: replace ch with the two-letter code of the country. "
-                            "Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation.");
-    templates.append(openAipExport);
-
-    // The Airspace Link AirHub API briefs an area posted as GeoJSON with OAuth2 client credentials and an API key header
-    ServiceTemplate airspaceLink;
-    airspaceLink.url = QStringLiteral("https://airhub-api.airspacelink.com/v2/briefing/b4ufly/area");
-    airspaceLink.service.id = QStringLiteral("airspacelink");
-    airspaceLink.service.name = tr("United States advisories (Airspace Link)");
-    airspaceLink.service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
-    airspaceLink.service.tokenUrl = QStringLiteral("https://airhub-api.airspacelink.com/v1/oauth/token");
-    airspaceLink.service.scope = QStringLiteral("briefing:area:read");
-    airspaceLink.service.areaOfInterest = true;
-    airspaceLink.note = tr("Configuration only: QGroundControl does not post GeoJSON areas or read Airspace Link notices yet, and the API also takes "
-                           "an API key header (x-api-key). Airspace Link grants the key and client credentials on request (developers.airspacelink.com).");
-    airspaceLink.supported = false;
-    templates.append(airspaceLink);
-
-    // The FAA's public airspace layers, also offered for the map area, following the area of interest
-    const QList<Service> all = services();
-    for (const FaaLayer &layer : kFaaLayers) {
-        const auto service = std::find_if(all.cbegin(), all.cend(), [&layer](const Service &candidate) { return candidate.id == QLatin1String(layer.id); });
-        ServiceTemplate faa;
-        faa.url = _faaUrl(QString::fromLatin1(layer.service), QString::fromLatin1(layer.where), QString::fromLatin1(layer.fields), QStringLiteral("{bbox}"));
-        faa.service.id = service->id;
-        faa.service.name = service->name;
-        faa.service.areaOfInterest = true;
-        // Facility maps are grids of cells of about 900 m, many around large airports
-        faa.service.maxAreaKm2 = (faa.service.id == QStringLiteral("faa-uasfm")) ? 10000 : 0;
-        faa.note = tr("Public FAA data, no account needed. Informational: check B4UFLY or a LAANC provider before flying.");
-        templates.append(faa);
+    {
+        const QReadLocker locker(&catalogue.lock);
+        templates = catalogue.templates;
+    }
+    for (ServiceTemplate &serviceTemplate : templates) {
+        if (serviceTemplate.translatable) {
+            serviceTemplate.service.name = translated(serviceTemplate.service.name, true);
+            serviceTemplate.name = translated(serviceTemplate.name, true);
+            serviceTemplate.note = translated(serviceTemplate.note, true);
+        }
     }
 
+    // Area services also follow the area of interest, like the FAA's public layers
+    for (const Service &service : services()) {
+        if (!service.serviceTemplate || !service.servesAreas()) {
+            continue;
+        }
+        ServiceTemplate serviceTemplate;
+        serviceTemplate.url = service.areaUrlTemplate;
+        serviceTemplate.service.id = service.id;
+        serviceTemplate.service.name = service.name;
+        serviceTemplate.service.areaOfInterest = true;
+        serviceTemplate.service.maxAreaKm2 = service.templateMaxAreaKm2;
+        serviceTemplate.note = service.templateNote;
+        // The format comes from the service, whose path tells it apart from others on the same server
+        serviceTemplate.origin = service.origin;
+        templates.append(serviceTemplate);
+    }
     return templates;
+}
+
+void GeoZoneProviders::setCatalogue(const QList<Service> &services, const QList<ServiceTemplate> &templates)
+{
+    ActiveCatalogue &catalogue = activeCatalogue();
+    const QWriteLocker locker(&catalogue.lock);
+    catalogue.services = services;
+    catalogue.templates = templates;
+}
+
+void GeoZoneProviders::resetCatalogue()
+{
+    const GeoZoneFeedCatalogue::Catalogue builtIn = GeoZoneFeedCatalogue::builtIn();
+    setCatalogue(builtIn.feeds, builtIn.templates);
 }
 
 QVariantList GeoZoneProviders::serviceTemplateList()
@@ -285,11 +157,20 @@ GeoZoneService GeoZoneProviders::serviceFromForm(int templateIndex, const QVaria
 
 QVariantList GeoZoneProviders::feedPresets()
 {
-    QVariantList presets;
+    QList<Service> feeds;
     for (const Service &service : services()) {
         if (!service.feedUrl.isEmpty()) {
-            presets.append(QVariantMap{ { QStringLiteral("name"), service.name }, { QStringLiteral("url"), service.feedUrl } });
+            feeds.append(service);
         }
+    }
+    std::stable_sort(feeds.begin(), feeds.end(), [](const Service &a, const Service &b) { return a.name.localeAwareCompare(b.name) < 0; });
+    QVariantList presets;
+    for (const Service &service : std::as_const(feeds)) {
+        presets.append(QVariantMap{
+            { QStringLiteral("id"), service.id }, { QStringLiteral("name"), service.name }, { QStringLiteral("url"), service.feedUrl },
+            { QStringLiteral("country"), service.country }, { QStringLiteral("note"), service.note }, { QStringLiteral("licence"), service.licence },
+            { QStringLiteral("attribution"), service.attribution }, { QStringLiteral("info"), service.info }, { QStringLiteral("origin"), service.origin },
+        });
     }
     return presets;
 }
@@ -298,7 +179,7 @@ QVariantList GeoZoneProviders::areaProviders()
 {
     QVariantList providers;
     for (const Service &service : services()) {
-        if (service.areaUrl) {
+        if (service.servesAreas()) {
             providers.append(QVariantMap{ { QStringLiteral("name"), service.name }, { QStringLiteral("id"), service.id },
                                           { QStringLiteral("coverage"), QVariant::fromValue(service.coverage) } });
         }
@@ -311,8 +192,8 @@ QString GeoZoneProviders::areaFeedUrl(const QString &serviceId, const QGeoRectan
     if (!area.isValid() || (area.width() > maxAreaDegrees) || (area.height() > maxAreaDegrees)) {
         return QString();
     }
-    for (const Service &service : services()) {
-        if ((service.id == serviceId) && service.areaUrl) {
+    for (const Service &service : _services()) {
+        if ((service.id == serviceId) && service.servesAreas()) {
             return service.areaUrl(area);
         }
     }
@@ -328,7 +209,7 @@ QGeoRectangle GeoZoneProviders::feedArea(const QString &url)
             ((item.first != QStringLiteral("geometry")) || (query.queryItemValue(QStringLiteral("geometryType")) != QStringLiteral("esriGeometryEnvelope")))) {
             continue;
         }
-        // West, south, east and north, see _bboxQuery
+        // West, south, east and north, see GeoZoneService::resolve
         const QStringList values = item.second.split(QLatin1Char(','));
         if (values.count() < 4) {
             return QGeoRectangle();
@@ -380,7 +261,7 @@ bool GeoZoneProviders::_matches(const Service &service, const QUrl &url)
 GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
 {
     const QUrl parsedUrl(url);
-    for (const Service &service : services()) {
+    for (const Service &service : _services()) {
         if ((service.format != GeoZoneParser::Format::Unknown) && _matches(service, parsedUrl)) {
             return service.format;
         }
@@ -395,7 +276,7 @@ GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
 
 QString GeoZoneProviders::serviceId(const QString &url)
 {
-    const QList<Service> all = services();
+    const QList<Service> all = _services();
     for (const Service &service : all) {
         if (!service.feedUrl.isEmpty() && (service.feedUrl == url)) {
             return service.id;
@@ -407,7 +288,7 @@ QString GeoZoneProviders::serviceId(const QString &url)
     QString id;
     for (const Service &service : all) {
         if (_matches(service, parsedUrl)) {
-            if (id.isEmpty() || (area && service.areaUrl)) {
+            if (id.isEmpty() || (area && service.servesAreas())) {
                 id = service.id;
             }
         }
@@ -417,14 +298,21 @@ QString GeoZoneProviders::serviceId(const QString &url)
 
 QString GeoZoneProviders::serviceName(const QString &url)
 {
+    const QList<Service> all = services();
+    const Service *const service = _serviceOf(all, url);
+    return service ? service->name : QString();
+}
+
+const GeoZoneProviders::Service *GeoZoneProviders::_serviceOf(const QList<Service> &services, const QString &url)
+{
     // Other URLs of a service's server needn't be its data
     const QString id = feedArea(url).isValid() ? serviceId(url) : QString();
-    for (const Service &service : services()) {
-        if ((!service.feedUrl.isEmpty() && (service.feedUrl == url)) || (!id.isEmpty() && (service.id == id) && service.areaUrl)) {
-            return service.name;
+    for (const Service &service : services) {
+        if ((!service.feedUrl.isEmpty() && (service.feedUrl == url)) || (!id.isEmpty() && (service.id == id) && service.servesAreas())) {
+            return &service;
         }
     }
-    return QString();
+    return nullptr;
 }
 
 QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data, const QDate &today)
@@ -435,7 +323,7 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
     }
 
     const QString page = QString::fromUtf8(data);
-    for (const Service &service : services()) {
+    for (const Service &service : _services()) {
         if (!service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {
             continue;
         }
@@ -487,7 +375,7 @@ QDate GeoZoneProviders::airacDatasetDate(const QString &datasetUrl)
     }
     // The patterns match the links of the download pages
     const QString link = QStringLiteral("href=\"%1\"").arg(datasetUrl);
-    for (const Service &service : services()) {
+    for (const Service &service : _services()) {
         if (!service.airac || !service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {
             continue;
         }
@@ -505,34 +393,18 @@ bool GeoZoneProviders::isLive(GeoZoneParser::Format format)
     return found && found->isLive();
 }
 
-QString GeoZoneProviders::_bboxQuery(const QGeoRectangle &area, const QString &suffix)
+bool GeoZoneProviders::isLiveUrl(const QString &url)
 {
-    return QStringLiteral("%1,%2,%3,%4").arg(area.topLeft().longitude(), 0, 'f', 5).arg(area.bottomRight().latitude(), 0, 'f', 5)
-                                         .arg(area.bottomRight().longitude(), 0, 'f', 5).arg(area.topLeft().latitude(), 0, 'f', 5) + suffix;
+    const QList<Service> all = _services();
+    const Service *const service = _serviceOf(all, url);
+    return service && service->live;
 }
 
-QString GeoZoneProviders::_faaUrl(const QString &service, const QString &where, const QString &fields, const QString &bbox)
+double GeoZoneProviders::refreshHours(const QString &url)
 {
-    // Pages of 1000 features, the most each of the services answers, see paging()
-    return QStringLiteral("https://") + kFaaHost + kFaaPath + service +
-           QStringLiteral("/FeatureServer/0/query?where=%1&geometry=%2&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects"
-                          "&outFields=%3&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=1000&resultOffset=0")
-               .arg(QString::fromLatin1(QUrl::toPercentEncoding(where)), bbox, fields);
-}
-
-QString GeoZoneProviders::_dipulUrl(const QStringList &layers, const QGeoRectangle &area)
-{
-    QStringList typeNames;
-    for (const QString &layer : layers) {
-        typeNames.append(QStringLiteral("dipul:") + layer);
-    }
-    // WFS 1.0.0 is the version of the DiPUL server which filters several layers by a bounding box
-    QString url = QStringLiteral("https://uas-betrieb.de/geoservices/dipul/ows?service=WFS&version=1.0.0&request=GetFeature&outputFormat=application/json&typeName=%1")
-                      .arg(typeNames.join(QLatin1Char(',')));
-    if (area.isValid()) {
-        url += QStringLiteral("&BBOX=") + _bboxQuery(area);
-    }
-    return url;
+    const QList<Service> all = _services();
+    const Service *const service = _serviceOf(all, url);
+    return service ? service->refreshHours : 0;
 }
 
 qint64 GeoZoneProviders::_jsonCount(const QByteArray &head, const QByteArray &tail, const char *name)

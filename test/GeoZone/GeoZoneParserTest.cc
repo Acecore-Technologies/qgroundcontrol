@@ -10,6 +10,7 @@
 #include "GeoZoneParserTest.h"
 #include "GeoZoneTestHelpers.h"
 #include "GeoZoneEd318Writer.h"
+#include "GeoZoneFeedCatalogue.h"
 #include "GeoZoneFormat.h"
 #include "GeoZoneParserUtils.h"
 #include "GeoZoneText.h"
@@ -1861,14 +1862,14 @@ void GeoZoneParserTest::_testProviders()
         QVERIFY2(!ids.contains(service.id), qPrintable(service.id));
         ids.insert(service.id);
         QVERIFY(!service.name.isEmpty());
-        QVERIFY(!service.feedUrl.isEmpty() || service.areaUrl);
+        QVERIFY(!service.feedUrl.isEmpty() || service.servesAreas());
         if (!service.feedUrl.isEmpty()) {
             QVERIFY2(QUrl(service.feedUrl).host().endsWith(service.host), qPrintable(service.id));
             if (service.format != GeoZoneParser::Format::Unknown) {
                 QCOMPARE(GeoZoneProviders::formatHint(service.feedUrl), service.format);
             }
         }
-        if (service.areaUrl) {
+        if (service.servesAreas()) {
             const QString url = GeoZoneProviders::areaFeedUrl(service.id, area);
             QVERIFY2(QUrl(url).host().endsWith(service.host), qPrintable(url));
             QCOMPARE(GeoZoneProviders::formatHint(url), service.format);
@@ -1907,6 +1908,95 @@ void GeoZoneParserTest::_testProviders()
 
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://example.com/zones.json")), GeoZoneParser::Format::Unknown);
     QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://notfaa.gov/zones.json")), GeoZoneParser::Format::Unknown);
+}
+
+void GeoZoneParserTest::_testFeedCatalogue()
+{
+    // The built-in catalogue is valid
+    const GeoZoneFeedCatalogue::Catalogue builtIn = GeoZoneFeedCatalogue::builtIn();
+    QVERIFY2(builtIn.warnings.isEmpty(), qPrintable(builtIn.warnings.join(QLatin1Char('\n'))));
+    QCOMPARE(builtIn.feeds.count(), 19);
+    QCOMPARE(builtIn.templates.count(), 6);
+    QVERIFY(builtIn.disabled.isEmpty());
+
+    // A catalogue replaces, adds and turns off entries, entries which can't be used are left out with a warning
+    const QByteArray overlay = R"json({
+        "fileType": "GeoZoneFeeds", "version": 1,
+        "feeds": [
+            { "id": "foca", "name": "Switzerland (mirror)", "url": "https://mirror.example.com/ch.json", "format": "ed269", "refreshHours": 12, "licence": "Test licence" },
+            { "id": "acme", "country": "nl", "name": "Acme zones", "url": "https://zones.example.com/nl.json", "live": true },
+            { "id": "acme-area", "name": "Acme area", "areaUrl": "https://zones.example.com/area?bbox={bbox}", "coverage": [3, 50, 8, 54], "format": "ed318",
+              "serviceTemplate": { "maxAreaKm2": 500, "note": "Acme note" } },
+            { "id": "faa-tfr", "enabled": false },
+            { "id": "broken-format", "name": "Broken", "url": "https://zones.example.com/x.json", "format": "kml" },
+            { "id": "no-url", "name": "No URL" },
+            { "id": "bad-area", "name": "Bad area", "areaUrl": "https://zones.example.com/area" },
+            { "id": "bad-pattern", "name": "Bad pattern", "url": "https://zones.example.com/page", "datasetLink": { "pattern": "href=\"(" } },
+            { "name": "No id", "url": "https://zones.example.com/y.json" },
+            { "id": "acme", "name": "Twice", "url": "https://zones.example.com/twice.json" }
+        ],
+        "services": [
+            { "id": "acme-ed318", "name": "Acme ED-318", "url": "https://utm.example.com/uas-zones", "note": "Acme account needed",
+              "service": { "method": "ed318Post", "auth": "basic", "areaOfInterest": true, "maxAreaKm2": 200 } },
+            { "id": "airspacelink", "enabled": false }
+        ]
+    })json";
+    GeoZoneFeedCatalogue::Catalogue parsed;
+    QString errorString;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(overlay, QStringLiteral("feeds.json"), parsed, errorString), qPrintable(errorString));
+    QCOMPARE(parsed.feeds.count(), 3);
+    QCOMPARE(parsed.templates.count(), 1);
+    QCOMPARE(parsed.disabled, QStringList({ QStringLiteral("faa-tfr"), QStringLiteral("airspacelink") }));
+    QCOMPARE(parsed.warnings.count(), 6);
+    QCOMPARE(parsed.warnings[0], QStringLiteral("Feed broken-format: Its format kml is unknown. It is left out."));
+    QCOMPARE(parsed.warnings[1], QStringLiteral("Feed no-url: It has neither a url nor an areaUrl. It is left out."));
+    QVERIFY(parsed.warnings[2].startsWith(QStringLiteral("Feed bad-area: Its areaUrl must be")));
+    QVERIFY(parsed.warnings[3].startsWith(QStringLiteral("Feed bad-pattern: Its datasetLink pattern is invalid")));
+    QCOMPARE(parsed.warnings[4], QStringLiteral("Feed 9 has no id, it is left out."));
+    QCOMPARE(parsed.warnings[5], QStringLiteral("Feed acme is listed twice, the first is used."));
+    QCOMPARE(parsed.feeds[1].country, QStringLiteral("NL"));
+    QCOMPARE(parsed.feeds[0].origin, QStringLiteral("feeds.json"));
+
+    GeoZoneFeedCatalogue::Catalogue merged = builtIn;
+    GeoZoneFeedCatalogue::apply(merged, parsed);
+    GeoZoneProviders::setCatalogue(merged.feeds, merged.templates);
+    const auto restore = qScopeGuard([]() { GeoZoneProviders::resetCatalogue(); });
+    QStringList names;
+    for (const QVariant &preset : GeoZoneProviders::feedPresets()) {
+        names.append(preset.toMap().value(QStringLiteral("name")).toString());
+    }
+    QVERIFY(names.contains(QStringLiteral("Switzerland (mirror)")) && names.contains(QStringLiteral("Acme zones")));
+    QVERIFY(!names.contains(QStringLiteral("Switzerland (FOCA)")) && !names.contains(QStringLiteral("United States TFRs (FAA)")));
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://mirror.example.com/ch.json")), GeoZoneParser::Format::ED269);
+    QCOMPARE(GeoZoneProviders::refreshHours(QStringLiteral("https://mirror.example.com/ch.json")), 12.0);
+    QVERIFY(GeoZoneProviders::isLiveUrl(QStringLiteral("https://zones.example.com/nl.json")));
+    const QGeoRectangle area(QGeoCoordinate(52.2, 4.5), QGeoCoordinate(52.0, 4.8));
+    QCOMPARE(GeoZoneProviders::areaFeedUrl(QStringLiteral("acme-area"), area), QStringLiteral("https://zones.example.com/area?bbox=4.50000,52.00000,4.80000,52.20000"));
+    QCOMPARE(GeoZoneProviders::serviceName(GeoZoneProviders::areaFeedUrl(QStringLiteral("acme-area"), area)), QStringLiteral("Acme area"));
+    const QList<GeoZoneProviders::ServiceTemplate> templates = GeoZoneProviders::serviceTemplates();
+    const auto findTemplate = [&templates](const QString &id) {
+        return std::find_if(templates.cbegin(), templates.cend(), [&id](const GeoZoneProviders::ServiceTemplate &serviceTemplate) { return serviceTemplate.service.id == id; });
+    };
+    QVERIFY(findTemplate(QStringLiteral("airspacelink")) == templates.cend());
+    const auto acme = findTemplate(QStringLiteral("acme-ed318"));
+    QVERIFY(acme != templates.cend());
+    QCOMPARE(acme->service.method, GeoZoneService::Method::Ed318Post);
+    QCOMPARE(acme->service.auth, GeoZoneService::Auth::Basic);
+    QCOMPARE(acme->service.maxAreaKm2, 200.0);
+    QCOMPARE(acme->service.name, QStringLiteral("Acme ED-318"));
+    const auto acmeArea = findTemplate(QStringLiteral("acme-area"));
+    QVERIFY(acmeArea != templates.cend());
+    QCOMPARE(acmeArea->url, QStringLiteral("https://zones.example.com/area?bbox={bbox}"));
+    QCOMPARE(acmeArea->service.maxAreaKm2, 500.0);
+    QVERIFY(acmeArea->service.areaOfInterest);
+
+    // Documents which aren't catalogues of this version are refused whole
+    for (const QByteArray &invalid : { QByteArray("[]"), QByteArray("not json"), QByteArray(R"({ "fileType": "FactMetaData", "feeds": [] })"),
+                                       QByteArray(R"({ "version": 2, "feeds": [] })"), QByteArray(R"({ "feeds": {} })"), QByteArray("{}") }) {
+        QVERIFY2(!GeoZoneFeedCatalogue::parse(invalid, QStringLiteral("feeds.json"), parsed, errorString), invalid.constData());
+        QVERIFY(!errorString.isEmpty());
+    }
+    QCOMPARE(errorString, QStringLiteral("Not a feed catalogue: it has no feeds or services."));
 }
 
 void GeoZoneParserTest::_testXmlAndPackages()

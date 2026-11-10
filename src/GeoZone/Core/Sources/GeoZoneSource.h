@@ -182,7 +182,7 @@ public:
     void updateValidity(const QDateTime &now);
 
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner
-    bool isLive() const { return GeoZoneProviders::isLive(_format); }
+    bool isLive() const { return GeoZoneProviders::isLive(_format) || (isFeed() && GeoZoneProviders::isLiveUrl(_url)); }
     static constexpr int liveStaleHours = 2;    ///< Age after which live data is outdated
 
     /// @return Local date and time like "2026-11-02 09:41" in the short format of the locale, only the time with

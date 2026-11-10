@@ -29,6 +29,7 @@ private slots:
     void _testFeedFetchFormatCompanions();
     void _testFeedCancellation();
     void _testRefreshScheduler();
+    void _testFeedCatalogueOverlays();
     void _testReloadChanges();
     void _testAiracCycles_data();
     void _testAiracCycles();

@@ -41,6 +41,17 @@ ColumnLayout {
 
     GeoZoneSourceNote { Layout.fillWidth: true }
 
+    // Feed catalogues which can't be read, the built-in feeds are used
+    QGCLabel {
+        Layout.fillWidth:   true
+        wrapMode:           Text.WordWrap
+        textFormat:         Text.PlainText
+        font.pointSize:     ScreenTools.smallFontPointSize
+        color:              qgcPal.warningText
+        text:               _repository.feedCatalogue.warning
+        visible:            text !== ""
+    }
+
     ColumnLayout {
         Layout.fillWidth:   true
         spacing:            _margin / 2
@@ -150,6 +161,47 @@ ColumnLayout {
             Layout.fillWidth:   true
             placeholderText:    "https://"
             visible:            feedPresetCombo.customUrl
+        }
+
+        // What the chosen feed holds and its terms
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            textFormat:         Text.PlainText
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               _presetText(feedPresetCombo.customUrl ? null : _geoZoneManager.feedPresets[feedPresetCombo.currentIndex])
+            visible:            text !== ""
+
+            function _presetText(preset) {
+                if (!preset) {
+                    return ""
+                }
+                var lines = []
+                if (preset.note) {
+                    lines.push(preset.note)
+                }
+                if (preset.licence) {
+                    lines.push(qsTr("Licence: %1").arg(preset.licence))
+                }
+                if (preset.attribution) {
+                    lines.push(qsTr("Data: %1").arg(preset.attribution))
+                }
+                if (preset.info) {
+                    lines.push(preset.info)
+                }
+                if (preset.origin) {
+                    lines.push(qsTr("From the feed catalogue %1").arg(preset.origin))
+                }
+                return lines.join("\n")
+            }
+        }
+
+        QGCLabel {
+            Layout.fillWidth:   true
+            wrapMode:           Text.WordWrap
+            textFormat:         Text.PlainText
+            font.pointSize:     ScreenTools.smallFontPointSize
+            text:               _repository.feedCatalogue.statusText
         }
 
         QGCLabel {

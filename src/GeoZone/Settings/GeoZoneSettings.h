@@ -36,6 +36,7 @@ public:
     DEFINE_SETTINGFACT(trafficEnabled)
     DEFINE_SETTINGFACT(qnhHPa)
     DEFINE_SETTINGFACT(feedRefreshHours)
+    DEFINE_SETTINGFACT(feedCatalogueUrl)
     DEFINE_SETTINGFACT(liveFeedRefreshMinutes)
     DEFINE_SETTINGFACT(staleDays)
     DEFINE_SETTINGFACT(outdatedInvalid)

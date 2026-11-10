@@ -19,10 +19,10 @@
 #include <QtCore/QVariantList>
 #include <QtPositioning/QGeoRectangle>
 
-#include <functional>
-
 /// The national geozone services QGroundControl knows: the feeds offered when adding a feed, the services serving
-/// their zones by area, and how to recognize their URLs. Adding a service takes an entry in services().
+/// their zones by area, the service templates, and how to recognize their URLs. They come from the feed catalogue,
+/// see GeoZoneFeedCatalogue: the built-in GeoZoneFeeds.json, extended or changed by the catalogues the repository
+/// reads (setCatalogue).
 class GeoZoneProviders
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneProviders)
@@ -31,19 +31,37 @@ public:
     struct Service {
         QString id;                         ///< Stable identifier
         QString name;                       ///< Shown to the user, translated
+        QString country;                    ///< ISO 3166-1 alpha-2 code of the country of the data, empty when several
         QString host;                       ///< The service's URLs have this host or a subdomain of it
         QString path;                       ///< and a path starting with this one, for services sharing a host
         GeoZoneParser::Format format = GeoZoneParser::Format::Unknown;
         QString feedUrl;                    ///< URL of the whole dataset, empty for services only serving areas
-        /// URL of the zones in the area, null for services without area downloads
-        std::function<QString(const QGeoRectangle &area)> areaUrl;
-        QGeoRectangle coverage;             ///< Area served by areaUrl
+        /// URL template of the zones in an area, with the placeholders of GeoZoneService, empty for services without
+        /// area downloads
+        QString areaUrlTemplate;
+        QGeoRectangle coverage;             ///< Area served by areaUrlTemplate
         /// Links to the current dataset on a download page, with the dataset's effective date as the second capture in
         /// datasetDateFormat. Without a second capture, the first link is the current dataset. Empty when the feed URL
         /// is the dataset.
         QRegularExpression datasetLinkPattern;
         QString datasetDateFormat = QStringLiteral("yyyyMMdd");
         bool airac = false;     ///< The datasets take effect by AIRAC cycle, see GeoZoneAirac
+        double refreshHours = 0;    ///< Longest time between refreshes, the setting's interval when shorter. 0 for the setting.
+        bool live = false;      ///< Short-lived restrictions, refreshed and outdated like the live formats, see isLive
+        QString licence;
+        QString attribution;
+        QString info;           ///< Page of the publisher about the data
+        QString note;           ///< Shown when the feed is chosen, translated
+        /// The area URL is also offered as a service template following the area of interest, see serviceTemplates
+        bool serviceTemplate = false;
+        double templateMaxAreaKm2 = 0;  ///< GeoZoneService::maxAreaKm2 of the template
+        QString templateNote;
+        QString origin;         ///< Catalogue of the entry, empty for the built-in one
+        bool translatable = false;  ///< name and notes are translated, see GeoZoneFeedCatalogue
+
+        bool servesAreas() const { return !areaUrlTemplate.isEmpty(); }
+        /// @return URL of the zones in the area, from areaUrlTemplate
+        QString areaUrl(const QGeoRectangle &area) const;
     };
 
     /// A service queried with credentials, an ED-318 POST or by the area of interest, which the user completes with its
@@ -57,19 +75,28 @@ public:
         bool supported = true;      ///< false when QGroundControl can't read the data yet: configuration only
         /// Format of the service's responses, see formatHint, Unknown to detect it
         GeoZoneParser::Format format = GeoZoneParser::Format::Unknown;
+        QString origin;             ///< Catalogue of the template, empty for the built-in one
+        bool translatable = false;
     };
 
     static constexpr double maxAreaDegrees = 1.0;   ///< Largest area downloaded from services serving zones by area
 
+    /// @return The feeds and area services of the catalogue
     static QList<Service> services();
+    /// @return The service templates of the catalogue, then the area services offered as templates
     static QList<ServiceTemplate> serviceTemplates();
+    /// Replaces the catalogue, the built-in one with the overlays applied, see GeoZoneFeedCatalogue. Thread safe.
+    static void setCatalogue(const QList<Service> &services, const QList<ServiceTemplate> &templates);
+    /// Goes back to the built-in catalogue
+    static void resetCatalogue();
     /// @return Maps with name, url, note, supported and form (GeoZoneService::toForm) of the service templates, and of
     ///         another service last, for the form of QML
     static QVariantList serviceTemplateList();
     /// @return The service of the template of serviceTemplateList at the index with the fields of the form
     static GeoZoneService serviceFromForm(int templateIndex, const QVariantMap &form);
 
-    /// @return Maps with name and url of the services with a whole dataset, for QML
+    /// @return Maps with id, name, url, country, note, licence, attribution, info and origin of the services with a
+    ///         whole dataset, by name, for QML
     static QVariantList feedPresets();
     /// @return Maps with name, id and coverage (rectangle) of the services serving zones by area, for QML
     static QVariantList areaProviders();
@@ -99,6 +126,10 @@ public:
 
     /// @return true for formats of short-lived restrictions, refreshed and outdated after hours rather than days
     static bool isLive(GeoZoneParser::Format format);
+    /// @return true when the URL is the feed of a service of short-lived restrictions, see Service::live
+    static bool isLiveUrl(const QString &url);
+    /// @return Service::refreshHours of the service whose feed or area URL this is, 0 when it has none
+    static double refreshHours(const QString &url);
 
     /// Feature counts of a WFS GeoJSON response, -1 when not given
     struct WfsCounts {
@@ -137,10 +168,10 @@ private:
     static qint64 _jsonCount(const QByteArray &head, const QByteArray &tail, const char *name);
     /// @return The URL with the query item set, replacing an item with the same name in any case
     static QString _withQueryItem(const QString &url, const QString &name, const QString &value);
-    static QString _bboxQuery(const QGeoRectangle &area, const QString &suffix = QString());
-    static QString _dipulUrl(const QStringList &layers, const QGeoRectangle &area);
-    /// @return URL of the query of a layer of the FAA's ArcGIS feature services, for the area or its {bbox} placeholder
-    static QString _faaUrl(const QString &service, const QString &where, const QString &fields, const QString &bbox);
+    /// @return The services of the catalogue, with their names and notes as published, for lookups
+    static QList<Service> _services();
+    /// @return The service whose feed URL this is, or whose area URL it is, nullptr for others
+    static const Service *_serviceOf(const QList<Service> &services, const QString &url);
     /// @return true when the URL is one of the service's, see Service::host and Service::path
     static bool _matches(const Service &service, const QUrl &url);
 };

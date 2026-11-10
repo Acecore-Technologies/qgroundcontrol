@@ -51,4 +51,5 @@ private slots:
     void _testLimitTexts();
     void _testFlightLevelQnh();
     void _testProviders();
+    void _testFeedCatalogue();
 };

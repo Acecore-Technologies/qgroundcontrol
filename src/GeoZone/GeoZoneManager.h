@@ -56,9 +56,9 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(int                  disabledSourceCount READ disabledSourceCount NOTIFY zoneCountChanged FINAL)           ///< Sources whose zones are left out
     Q_PROPERTY(GeoZoneSourceRepository* repository      READ repository         CONSTANT FINAL)                           ///< Adds, loads, refreshes and removes the sources
     Q_PROPERTY(QStringList          fileDialogFilters   READ fileDialogFilters  CONSTANT FINAL)
-    Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        CONSTANT FINAL)     ///< Maps with name and url of national feeds
-    Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      CONSTANT FINAL)     ///< See areaProviders()
-    Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   CONSTANT FINAL)     ///< Of the service form, see GeoZoneProviders::serviceTemplateList
+    Q_PROPERTY(QVariantList         feedPresets         READ feedPresets        NOTIFY feedCatalogueChanged FINAL)  ///< See GeoZoneProviders::feedPresets
+    Q_PROPERTY(QVariantList         areaProviders       READ areaProviders      NOTIFY feedCatalogueChanged FINAL)  ///< See areaProviders()
+    Q_PROPERTY(QVariantList         serviceTemplates    READ serviceTemplates   NOTIFY feedCatalogueChanged FINAL)  ///< Of the service form, see GeoZoneProviders::serviceTemplateList
     Q_PROPERTY(bool                 packSigningAvailable READ packSigningAvailable CONSTANT FINAL)  ///< The build can sign packs and check their signatures
     Q_PROPERTY(QString              packPublicKey       READ packPublicKey      NOTIFY packSigningChanged FINAL)   ///< Base64 public key of the pack signing key, empty without
     Q_PROPERTY(QString              packKeyId           READ packKeyId          NOTIFY packSigningChanged FINAL)   ///< See GeoZonePackSignature::keyId
@@ -200,6 +200,7 @@ signals:
     void packSigningChanged();
     void trustedPublishersChanged();
     void sourceNoteChanged();
+    void feedCatalogueChanged();    ///< The feeds, area providers and service templates of the catalogue changed
 
 private slots:
     void _updateActive();

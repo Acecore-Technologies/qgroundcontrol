@@ -72,6 +72,8 @@ public:
 signals:
     /// The feed should be downloaded again
     void refreshDue(GeoZoneSource *source);
+    /// check() looked at the sources, for other periodic checks
+    void checked();
 
 private:
     struct State {

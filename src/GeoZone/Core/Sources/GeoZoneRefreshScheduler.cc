@@ -9,6 +9,7 @@
 
 #include "GeoZoneRefreshScheduler.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneProviders.h"
 #include "GeoZoneSource.h"
 
 #include <QtCore/QLocale>
@@ -44,6 +45,7 @@ void GeoZoneRefreshScheduler::check()
             emit refreshDue(source);
         }
     }
+    emit checked();
 }
 
 int GeoZoneRefreshScheduler::refreshIntervalSecs(const GeoZoneSource &source) const
@@ -52,7 +54,11 @@ int GeoZoneRefreshScheduler::refreshIntervalSecs(const GeoZoneSource &source) co
         return 0;
     }
     const GeoZoneEnvironment::SourceSettings settings = GeoZoneEnvironment::sourceSettings();
-    const int interval = source.isLive() ? (settings.liveFeedRefreshMinutes * 60) : (settings.feedRefreshHours * 3600);
+    int interval = source.isLive() ? (settings.liveFeedRefreshMinutes * 60) : (settings.feedRefreshHours * 3600);
+    // Feeds of the catalogue may be refreshed more often, like datasets taking effect on their own dates
+    if (const double catalogueHours = GeoZoneProviders::refreshHours(source.url()); catalogueHours > 0) {
+        interval = (std::min)(interval, (std::max)(minRefreshSecs, static_cast<int>(std::lround(catalogueHours * 3600))));
+    }
     // Servers telling caches to keep their data for a long time don't delay the refresh the user asked for
     const qint64 maxAge = _states.value(source.key()).maxAgeSecs;
     if (maxAge <= 0) {

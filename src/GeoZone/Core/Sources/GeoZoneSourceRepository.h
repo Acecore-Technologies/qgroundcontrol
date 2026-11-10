@@ -21,6 +21,7 @@
 #include "GeoZoneCancelToken.h"
 #include "GeoZoneCredentials.h"
 #include "GeoZoneDownloader.h"
+#include "GeoZoneFeedCatalogueLoader.h"
 #include "GeoZoneFeedFetch.h"
 #include "GeoZoneLoader.h"
 #include "GeoZonePackSignature.h"
@@ -47,6 +48,7 @@ class GeoZoneSourceRepository : public QObject
     Q_PROPERTY(bool     dataInvalid     READ dataInvalid        NOTIFY validityWarningChanged FINAL)    ///< Sources turned on have outdated data treated as invalid
     Q_PROPERTY(QDateTime lastPulledAt   READ lastPulledAt       NOTIFY validityWarningChanged FINAL)    ///< See lastPulledAt()
     Q_PROPERTY(QString  lastPulledText  READ lastPulledText     NOTIFY validityWarningChanged FINAL)    ///< Like "Data pulled 09:41 today", empty without data
+    Q_PROPERTY(GeoZoneFeedCatalogueLoader *feedCatalogue READ feedCatalogue CONSTANT FINAL)             ///< The feed catalogues in use and their warnings
 
 public:
     enum class LoadMode : quint8 {
@@ -150,6 +152,8 @@ public:
     QString storageDir() const { return _store.dir(); }
     /// Decides when the feeds are refreshed
     GeoZoneRefreshScheduler *scheduler() const { return _scheduler; }
+    /// Reads the feed catalogues extending the built-in one, see GeoZoneFeedCatalogue
+    GeoZoneFeedCatalogueLoader *feedCatalogue() const { return _feedCatalogue; }
 
     bool busy() const { return _pendingCount > 0; }
     double progress() const;
@@ -220,6 +224,7 @@ private:
     GeoZoneDownloader *_downloader = nullptr;
     QList<GeoZoneSource*> _sources;
     GeoZoneRefreshScheduler *_scheduler = nullptr;
+    GeoZoneFeedCatalogueLoader *_feedCatalogue = nullptr;
     int _pendingCount = 0;
     QHash<QString, GeoZoneCancelToken> _operations; ///< Fetch or load in progress per source key, earlier ones were canceled
     QHash<QString, GeoZoneFeedFetch*> _fetches;     ///< Feeds being downloaded, by URL

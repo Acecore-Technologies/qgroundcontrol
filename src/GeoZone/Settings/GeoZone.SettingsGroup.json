@@ -125,6 +125,13 @@
     "default":      24
 },
 {
+    "name":         "feedCatalogueUrl",
+    "shortDesc":    "Feed catalogue URL",
+    "longDesc":     "Address of a feed catalogue (GeoZoneFeeds.json format) extending or changing the built-in feeds, like one published by the manufacturer. It is downloaded again with the feeds. Leave empty to use the built-in feeds and the feeds.json file of the geozone data folder only.",
+    "type":         "string",
+    "default":      ""
+},
+{
     "name":         "liveFeedRefreshMinutes",
     "shortDesc":    "Live restrictions refresh interval",
     "longDesc":     "Minutes after which feeds of temporary flight restrictions, which change during the day, are downloaded again.",

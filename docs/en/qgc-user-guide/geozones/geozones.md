@@ -96,6 +96,108 @@ With **Download the zones around the mission, the vehicle and the map view**, a 
 
 The map view is taken a second after the map stops moving, so panning and zooming don't send a request per frame, and nothing is downloaded while the view stays inside the area downloaded. Views wider or higher than 200 km count with their central 200 km, so zooming out doesn't request a whole continent. The view only joins the mission and the vehicle when all of them fit in 200 km (and in the area the service answers, like the 100 km² of the DFS service): looking at the map far from a planned mission or a flying vehicle never replaces the zones around them. Without a mission or a vehicle, the view alone is downloaded, cut around its center for services answering smaller areas. Turn off **Download services for the map view** to only follow the mission and the vehicle.
 
+### Adding or Changing Feeds {#adding-or-changing-feeds}
+
+Feeds change over time: publishers move their files, new countries publish their zones, and a manufacturer may want to offer its own list. Feeds can be added or changed without a new version of _QGroundControl_ in three ways.
+
+**A single feed** – **Add Feed...** > **Other URL** downloads any `https://` (or `http://`, `file://`) address of a geozone file: an ED-269 or ED-318 file, a zip archive of them, AIXM 5.1, or the GeoJSON of the formats in the [format support matrix](#format-support-matrix). It is refreshed like the built-in feeds. A service which needs credentials or takes the area, like a company ED-318 server or a WFS with a `{bbox}` parameter, is added with **Add Service...** (see [Geozone Services](#geozone-services)).
+
+**A feed catalogue** – the list of feeds **Add Feed...**, **Download zones for the map area** and **Add Service...** offer is a catalogue in JSON, which can be extended or changed:
+
+- with a file named `feeds.json` in the `GeoZones` folder of the application data location (on Linux `~/.local/share/QGroundControl/QGroundControl/GeoZones`, on Windows `%APPDATA%\QGroundControl\QGroundControl\GeoZones`). The settings show the folder below **Feed catalogue URL**. The file is read at startup and again when it changes (checked every 5 minutes and by **Refresh Feeds**).
+- with the **Feed catalogue URL** setting (_Application Settings > Geozones > Data Updates_): the address of a catalogue, like one the manufacturer publishes. It is downloaded at startup, after the feed refresh interval (24 hours by default) and by **Refresh Feeds**, and its last valid copy is kept for starts without a network. On Android controllers like the Signav Pro, whose application data folder isn't accessible, use the URL; a `file://` address of a file on the controller works too.
+
+Entries of these catalogues with the `id` of a built-in entry replace it, other entries are added, and `"enabled": false` removes the built-in entry with that `id`. The URL's catalogue applies first, then `feeds.json`. Below **Add Feed...**, _Feed catalogue: built-in feeds, 2 change(s) from feeds.json_ tells which catalogues are used. A catalogue which can't be read (invalid JSON, a newer version) is ignored, and an entry which can't be used (no name, an unknown format, a URL without `{bbox}` for an area service) is left out; a warning below the sources says which and why. The built-in feeds are always kept. Feeds already added stay in the list of sources whatever the catalogue: a catalogue changes what is offered, not the sources loaded.
+
+A complete example, which adds a feed, a service serving its zones by area, a feed whose current file is linked from a download page, a company ED-318 service, replaces the URL of the Swiss feed and removes the Latvian one:
+
+```json
+{
+    "fileType": "GeoZoneFeeds",
+    "version": 1,
+    "feeds": [
+        {
+            "id": "acme-nl",
+            "country": "NL",
+            "name": "Netherlands (Acme mirror)",
+            "url": "https://zones.acme.example/nl/UASZoneVersion.json",
+            "format": "ed269",
+            "refreshHours": 12,
+            "licence": "CC0 1.0",
+            "attribution": "Ministerie van Infrastructuur en Waterstaat",
+            "info": "https://zones.acme.example/nl/",
+            "note": "Checked and mirrored by Acme every day."
+        },
+        {
+            "id": "acme-area",
+            "country": "DE",
+            "name": "Germany, Acme zones by area",
+            "areaUrl": "https://zones.acme.example/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=zones&outputFormat=application/json&bbox={bbox},EPSG:4326",
+            "coverage": [5.8, 47.2, 15.1, 55.2],
+            "format": "ed318",
+            "serviceTemplate": { "maxAreaKm2": 10000, "note": "Follows the mission, the vehicle and the map view." }
+        },
+        {
+            "id": "acme-airac",
+            "name": "Acme AIRAC datasets",
+            "url": "https://zones.acme.example/datasets/",
+            "format": "ed269",
+            "datasetLink": { "pattern": "href=\"([^\"]*_(\\d{8})\\.zip)\"", "dateFormat": "yyyyMMdd" },
+            "airac": true
+        },
+        {
+            "id": "foca",
+            "country": "CH",
+            "name": "Switzerland (FOCA)",
+            "url": "https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json"
+        },
+        { "id": "lgs", "enabled": false }
+    ],
+    "services": [
+        {
+            "id": "acme-ed318",
+            "name": "Acme ED-318 service",
+            "url": "https://utm.acme.example/api/uas-zones",
+            "note": "Use the account Acme gave you.",
+            "service": { "method": "ed318Post", "auth": "basic", "areaOfInterest": true, "maxAreaKm2": 400 }
+        }
+    ]
+}
+```
+
+The members of a catalogue:
+
+| Member | Description |
+| ------ | ----------- |
+| `fileType` | `GeoZoneFeeds` (optional). |
+| `version` | `1`. Catalogues of a later version are ignored. |
+| `feeds` | The feeds and the services serving zones by area. |
+| `services` | The services offered by **Add Service...**. |
+
+The members of a feed:
+
+| Member | Required | Description |
+| ------ | -------- | ----------- |
+| `id` | Yes | Identifies the entry, to replace or remove it, like `acme-nl`. |
+| `name` | Yes | Shown in the lists, and as the name of sources without a title of their own. |
+| `country` | | ISO 3166-1 two-letter code of the country of the data, like `NL`. |
+| `url` | `url` or `areaUrl` | Address of the whole dataset, offered by **Add Feed...**: the file, a zip archive, or a download page with `datasetLink`. |
+| `areaUrl` | `url` or `areaUrl` | Address of the zones of an area, with the placeholders of **Zones of the area (GET)**: `{bbox}` (west,south,east,north in degrees), `{west}`, `{south}`, `{east}`, `{north}`, `{lat}`, `{lon}`, `{radiusM}`, `{radiusKm}`, `{radiusNm}`, `{start}`, `{end}`. Offered by **Download zones for the map area**, for areas up to about 100 km. Further pages of WFS (`numberMatched`), ArcGIS (`exceededTransferLimit` with `resultRecordCount` and `resultOffset`) and numbered (`page`, `totalPages`) responses are downloaded too. |
+| `coverage` | With `areaUrl` | `[west, south, east, north]` in degrees: where the service has zones. The whole world when left out. |
+| `format` | | `ed269`, `ed318`, `aixm`, `dipul`, `france-uas`, `faa-tfr`, `faa-airspace` or `openaip`. Left out, the format is recognised from the content. Give it when responses can be empty, like those of a WFS for an area without zones. |
+| `match` | | `{ "host": ..., "path": ... }`: the addresses of the service, when they differ from the host of `url` or `areaUrl`, like several services on one server told apart by their path. Addresses of the service get its format. |
+| `datasetLink` | | For a `url` which is a download page: `pattern`, a regular expression whose first capture is the link to a dataset and whose second capture, if any, is the date it takes effect in `dateFormat` (`yyyyMMdd` by default, like `d.M.yyyy` for 25.10.2026). The latest dataset in effect is downloaded, or the first link found without a date. Write `\\` for a backslash in JSON. |
+| `airac` | | `true` when the datasets of `datasetLink` take effect by AIRAC cycle: the source shows the cycle and is outdated when the next one starts. |
+| `refreshHours` | | Check the feed at least this often (hours, can be fractional, at least 5 minutes), when the setting's interval is longer. |
+| `live` | | `true` for short-lived restrictions: refreshed with **Live restrictions refresh interval** and outdated after 2 hours. |
+| `licence`, `attribution`, `info`, `note` | | Shown below the list when the feed is chosen: the licence of the data, its owner, the page of the publisher about it, and a note. |
+| `serviceTemplate` | | With `areaUrl`: also offer the service in **Add Service...**, following the mission, the vehicle and the map view. `{ "maxAreaKm2": ..., "note": ... }` or `true`. |
+| `enabled` | | `false` removes the entry with this `id` from the catalogues applied before (the built-in one). |
+
+The members of a service: `id`, `name`, `url` (the address or URL template, empty for the user to enter), `note`, `format`, `supported` (`false` for services _QGroundControl_ can't read yet, offered for configuration only), `nameFromData` (`true` when its sources take the title of their data), `enabled`, and `service` with the settings of the **Add Service...** form: `method` (`get` or `ed318Post`), `auth` (`none`, `apiKeyHeader`, `apiKeyQuery`, `bearer`, `basic` or `oauth2ClientCredentials`), `authParameter` (the header or query parameter of an API key), `user`, `tokenUrl` and `scope` (OAuth2), `headers` (an object of further request headers), `responseMember` (the member holding the zones, like `data.geojson`), `areaOfInterest`, `timeWindowHours`, `maxAreaKm2` and `sha256Url`. Secrets never go into a catalogue: the user enters them in the form.
+
+To test a feed before publishing it, add its address with **Add Feed...** > **Other URL**: the source shows its format, zone count and the problems found, and its zones can be checked on the map and in their details. Developers can check files and downloads with the `geozone-validate` tool (see the [developer guide](../../qgc-dev-guide/geozones.md#validating-files)). A catalogue is tested by placing it as `feeds.json` and checking the warning below the sources and the list of **Add Feed...**.
+
 ### Integrity Checks {#integrity-checks}
 
 If a server sends the SHA-256 of its data in a `Repr-Digest`, `Content-Digest` or `Digest` header, or a service publishes it in a file whose address is given in **SHA-256 URL** (like `{url}.sha256`, in the format `sha256sum` writes), the data is checked against it (the headers of compressed responses are not checked, since they give the SHA-256 of the compressed data). Verified sources say so. Data which doesn't match, or whose SHA-256 can't be downloaded, isn't loaded: the previous data is kept and the source shows that the integrity check failed. Feeds are checked by SHA-256 only; offline packs can be signed, see [Signed Packs](#signed-packs).
@@ -474,6 +576,7 @@ Besides the **Sources** and **Authorisations**, the **Geozones** page of the _Ap
 | Data Updates | **Treat outdated data as invalid** | On | | Outdated data is shown as expired and uploading a mission asks for confirmation. Its zones still apply. |
 | Data Updates | **Download services around the mission and vehicle** | On | | Whether services taking an area download the zones of a new area when the mission or the vehicle leaves the one downloaded. |
 | Data Updates | **Download services for the map view** | On | | Whether the area shown on the Fly or Plan map, up to 200 km across, is part of the area downloaded from services taking an area. |
+| Data Updates | **Feed catalogue URL** | None | | The address of a feed catalogue extending or changing the feeds offered, see [Adding or Changing Feeds](#adding-or-changing-feeds). |
 | Sources > Pack Signatures | **Signing key** | None | | The Ed25519 private key file (PEM) signing exported packs. |
 | Sources > Pack Signatures | **Publisher** | None | | The name signed packs give for their publisher. |
 | Sources > Pack Signatures | Trusted publishers | None | | The publishers, with their public keys, whose signed packs are trusted. |

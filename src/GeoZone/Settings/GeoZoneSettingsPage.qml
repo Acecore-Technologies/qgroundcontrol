@@ -211,5 +211,28 @@ SettingsPage {
             visible:            fact.visible
             enabled:            _geoZoneSettings.followAreaOfInterest.rawValue
         }
+
+        // A catalogue of feeds extending or changing the built-in ones, see GeoZoneFeedCatalogue
+        ColumnLayout {
+            Layout.fillWidth:   true
+            visible:            _geoZoneSettings.feedCatalogueUrl.visible
+
+            QGCLabel { text: _geoZoneSettings.feedCatalogueUrl.shortDescription }
+
+            FactTextField {
+                Layout.fillWidth:   true
+                fact:               _geoZoneSettings.feedCatalogueUrl
+                placeholderText:    qsTr("https://... (optional)")
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                textFormat:         Text.PlainText
+                font.pointSize:     ScreenTools.smallFontPointSize
+                text:               qsTr("Adds or changes the feeds offered by Add Feed..., like a catalogue of the manufacturer. A feeds.json file in %1 does the same.")
+                                        .arg(GeoZoneManager.repository.feedCatalogue.filePath.replace(/[\\/]feeds\.json$/, ""))
+            }
+        }
     }
 }

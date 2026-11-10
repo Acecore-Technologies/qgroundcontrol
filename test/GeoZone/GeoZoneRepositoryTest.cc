@@ -708,6 +708,94 @@ void GeoZoneRepositoryTest::_testRefreshScheduler()
     QCOMPARE(restarted.repository()->scheduler()->refreshIntervalSecs(*restarted.repository()->source(url)), 7200);
 }
 
+void GeoZoneRepositoryTest::_testFeedCatalogueOverlays()
+{
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/catalogue", R"({ "version": 1, "feeds": [ { "id": "maker", "name": "Maker zones", "url": "https://maker.example.com/zones.json" },
+                                                                    { "id": "lgs", "enabled": false } ] })");
+    server.etags.insert("/catalogue", "\"c1\"");
+    const QString catalogueUrl = server.url(QStringLiteral("/catalogue"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString filePath = QDir(storageDir.path()).filePath(QStringLiteral("feeds.json"));
+    const auto writeCatalogue = [&filePath](const QByteArray &content) {
+        QFile file(filePath);
+        return file.open(QIODevice::WriteOnly) && (file.write(content) == content.size());
+    };
+    const auto presetNames = []() {
+        QStringList names;
+        for (const QVariant &preset : GeoZoneProviders::feedPresets()) {
+            names.append(preset.toMap().value(QStringLiteral("name")).toString());
+        }
+        return names;
+    };
+    // The catalogue file of the geozone data folder replaces a built-in feed
+    QVERIFY(writeCatalogue(R"json({ "feeds": [ { "id": "foca", "name": "Switzerland (operator mirror)", "url": "https://mirror.example.com/ch.json" } ] })json"));
+
+    {
+        GeoZoneManager manager(storageDir.path());
+        GeoZoneFeedCatalogueLoader *const catalogue = manager.repository()->feedCatalogue();
+        QSignalSpy changedSpy(&manager, &GeoZoneManager::feedCatalogueChanged);
+        catalogue->setUrl(catalogueUrl);
+        manager.repository()->init();
+        QVERIFY2(presetNames().contains(QStringLiteral("Switzerland (operator mirror)")), qPrintable(catalogue->warning() + catalogue->statusText() + presetNames().join(QLatin1Char('|'))));
+        QVERIFY(!presetNames().contains(QStringLiteral("Switzerland (FOCA)")));
+        QVERIFY(changedSpy.count() > 0);
+
+        // The catalogue of the URL is downloaded and applied below the file
+        QTRY_VERIFY(presetNames().contains(QStringLiteral("Maker zones")));
+        QVERIFY(!presetNames().contains(QStringLiteral("Latvia (LGS)")));
+        QVERIFY2(catalogue->warning().isEmpty(), qPrintable(catalogue->warning()));
+        QVERIFY(catalogue->statusText().contains(QStringLiteral("feeds.json")));
+        QCOMPARE(server.requestCount, 1);
+        // Downloaded again after the refresh interval, confirmed with its validators
+        catalogue->check();
+        QCOMPARE(server.requestCount, 1);
+        environment.addSecs(24 * 3600);
+        catalogue->check();
+        QTRY_COMPARE(server.requestCount, 2);
+        QVERIFY(TestFeedServer::header(server.requests.constLast(), "if-none-match").contains("c1"));
+        QTRY_COMPARE(catalogue->checkedAt(), environment.now());
+
+        // An invalid file is ignored with a warning: the built-in feed is back, the downloaded catalogue stays
+        QVERIFY(writeCatalogue("{ \"feeds\": [ "));
+        catalogue->check();
+        QVERIFY2(catalogue->warning().contains(QStringLiteral("feeds.json is ignored: Invalid JSON")), qPrintable(catalogue->warning()));
+        QVERIFY(presetNames().contains(QStringLiteral("Switzerland (FOCA)")));
+        QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
+
+        // An invalid download is ignored, its last valid copy stays in use
+        server.files.insert("/catalogue", R"({ "version": 9, "feeds": [] })");
+        server.etags.insert("/catalogue", "\"c2\"");
+        catalogue->check(true);
+        QTRY_VERIFY(catalogue->warning().contains(QStringLiteral("is ignored, its previous copy is used")));
+        QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
+    }
+    // The built-in catalogue is used again once the repository is gone
+    QVERIFY(presetNames().contains(QStringLiteral("Latvia (LGS)")));
+    QVERIFY(!presetNames().contains(QStringLiteral("Maker zones")));
+
+    // Offline at the next start, the copy of the downloaded catalogue is used
+    QFile::remove(filePath);
+    server.close();
+    {
+        GeoZoneManager manager(storageDir.path());
+        GeoZoneFeedCatalogueLoader *const catalogue = manager.repository()->feedCatalogue();
+        catalogue->setUrl(catalogueUrl);
+        environment.addSecs(24 * 3600);
+        manager.repository()->init();
+        QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
+        QTRY_VERIFY(catalogue->warning().contains(QStringLiteral("couldn't be downloaded")));
+        QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
+        // Without a URL, its copy is dropped
+        catalogue->setUrl(QString());
+        QVERIFY(!presetNames().contains(QStringLiteral("Maker zones")));
+        QVERIFY(catalogue->warning().isEmpty());
+    }
+}
+
 void GeoZoneRepositoryTest::_testReloadChanges()
 {
     const QGeoCoordinate center(47, 8);

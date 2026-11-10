@@ -100,6 +100,9 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(settings->followAreaOfInterest(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowArea(value.toBool()); });
     _repository->setFollowView(settings->followMapView()->rawValue().toBool());
     (void) connect(settings->followMapView(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->setFollowView(value.toBool()); });
+    _repository->feedCatalogue()->setUrl(settings->feedCatalogueUrl()->rawValue().toString());
+    (void) connect(settings->feedCatalogueUrl(), &Fact::rawValueChanged, _repository, [this](const QVariant &value) { _repository->feedCatalogue()->setUrl(value.toString()); });
+    (void) connect(_repository->feedCatalogue(), &GeoZoneFeedCatalogueLoader::changed, this, &GeoZoneManager::feedCatalogueChanged);
     _mapViewTimer->setSingleShot(true);
     _mapViewTimer->setInterval(mapViewDelayMSecs);
     (void) connect(_mapViewTimer, &QTimer::timeout, this, [this]() { _repository->setViewArea(_mapView); });

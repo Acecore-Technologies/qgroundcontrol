@@ -1,0 +1,328 @@
+{
+    "fileType": "GeoZoneFeeds",
+    "version": 1,
+    "translateKeys": "name,note",
+    "arrayIDKeys": "id",
+    "feeds": [
+        {
+            "id": "traficom",
+            "country": "FI",
+            "name": "Finland (Traficom)",
+            "url": "https://eservices.traficom.fi/Ilmatilasovellus/api/uas-reservations/json?lang=en",
+            "match": {
+                "host": "traficom.fi"
+            }
+        },
+        {
+            "id": "lgs",
+            "country": "LV",
+            "name": "Latvia (LGS)",
+            "url": "https://drz.lv/api/v1/export-history/UASZoneVersion"
+        },
+        {
+            "id": "geoportail-lu",
+            "country": "LU",
+            "name": "Luxembourg (Geoportail)",
+            "url": "https://drones.geoportail.lu/zones",
+            "match": {
+                "host": "geoportail.lu"
+            }
+        },
+        {
+            "id": "lfv",
+            "country": "SE",
+            "name": "Sweden (LFV)",
+            "url": "https://dronechart.lfv.se/data/uas_zones_ED318.json",
+            "match": {
+                "host": "lfv.se"
+            }
+        },
+        {
+            "id": "faa-tfr",
+            "country": "US",
+            "name": "United States TFRs (FAA)",
+            "url": "https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&outputFormat=application/json",
+            "format": "faa-tfr",
+            "match": {
+                "host": "faa.gov"
+            },
+            "licence": "Public domain (US government data)",
+            "attribution": "FAA",
+            "info": "https://tfr.faa.gov"
+        },
+        {
+            "id": "foca",
+            "country": "CH",
+            "name": "Switzerland (FOCA)",
+            "url": "https://data.geo.admin.ch/ch.bazl.einschraenkungen-drohnen/einschraenkungen-drohnen/einschraenkungen-drohnen_4326.json",
+            "match": {
+                "host": "admin.ch"
+            }
+        },
+        {
+            "id": "dipul-aviation",
+            "country": "DE",
+            "name": "Germany aviation zones (DiPUL)",
+            "url": "https://uas-betrieb.de/geoservices/dipul/ows?service=WFS&version=1.0.0&request=GetFeature&outputFormat=application/json&typeName=dipul:kontrollzonen,dipul:flughaefen,dipul:flugplaetze,dipul:flugbeschraenkungsgebiete,dipul:temporaere_betriebseinschraenkungen",
+            "format": "dipul",
+            "licence": "CC BY-ND 4.0",
+            "attribution": "DFS Deutsche Flugsicherung GmbH, dipul",
+            "info": "https://uas-betrieb.de"
+        },
+        {
+            "id": "nats",
+            "country": "GB",
+            "name": "United Kingdom FRZ (NATS)",
+            "url": "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/",
+            "format": "aixm",
+            "match": {
+                "host": "ead-it.com"
+            },
+            "datasetLink": {
+                "pattern": "href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\"",
+                "dateFormat": "yyyyMMdd"
+            },
+            "airac": true,
+            "info": "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/"
+        },
+        {
+            "id": "enaire-aero",
+            "country": "ES",
+            "name": "Spain aeronautical zones (ENAIRE)",
+            "url": "https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Aero.zip",
+            "format": "ed318",
+            "match": {
+                "host": "enaire.es",
+                "path": "/recursos/descargas/ZGUAS/"
+            },
+            "attribution": "ENAIRE",
+            "info": "https://aip.enaire.es/AIP/UAS-en.html",
+            "note": "ED-318 files of ENAIRE, updated on AIRAC dates. Credit ENAIRE as the owner of the data."
+        },
+        {
+            "id": "enaire-urban",
+            "country": "ES",
+            "name": "Spain urban zones (ENAIRE)",
+            "url": "https://aip.enaire.es/recursos/descargas/ZGUAS/ZGUAS_Urbano.zip",
+            "format": "ed318",
+            "match": {
+                "host": "enaire.es",
+                "path": "/recursos/descargas/ZGUAS/"
+            },
+            "attribution": "ENAIRE",
+            "info": "https://aip.enaire.es/AIP/UAS-en.html",
+            "note": "ED-318 files of ENAIRE, updated on AIRAC dates. Credit ENAIRE as the owner of the data."
+        },
+        {
+            "id": "ienw",
+            "country": "NL",
+            "name": "Netherlands (IenW)",
+            "url": "https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart",
+            "format": "ed269",
+            "match": {
+                "host": "luchtvaartindetoekomst.nl"
+            },
+            "datasetLink": {
+                "pattern": "<a\\b(?=[^>]*JSON)[^>]*href=\"(https://www\\.nieuwsienw\\.nl/api/documents/downloadfile\\?[^\"]+)\""
+            },
+            "licence": "CC0 1.0",
+            "attribution": "Ministerie van Infrastructuur en Waterstaat",
+            "info": "https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart",
+            "note": "The ED-269 file linked from the drone page of the ministry IenW."
+        },
+        {
+            "id": "austro-control",
+            "country": "AT",
+            "name": "Austria (Austro Control)",
+            "url": "https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen",
+            "format": "ed269",
+            "match": {
+                "host": "austrocontrol.at"
+            },
+            "datasetLink": {
+                "pattern": "href=\"([^\"]*/UASZones-ACG-\\d{8}-\\d{6}-full(?![^\"]*test)[^\"]*\\.(?:zip|json))\"(?:(?!</tr>)[\\s\\S])*?<td[^>]*>\\s*(?:<span[^>]*>)?\\s*(\\d{1,2}\\.\\d{1,2}\\.\\d{4})",
+                "dateFormat": "d.M.yyyy"
+            },
+            "attribution": "Austro Control",
+            "info": "https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen",
+            "note": "The ED-269 dataset in effect from the list of Austro Control. Its terms reserve the use of its contents: check them before redistributing the data.",
+            "refreshHours": 6
+        },
+        {
+            "id": "dipul",
+            "country": "DE",
+            "name": "Germany, all zones (DiPUL)",
+            "areaUrl": "https://uas-betrieb.de/geoservices/dipul/ows?service=WFS&version=1.0.0&request=GetFeature&outputFormat=application/json&typeName=dipul:bahnanlagen,dipul:behoerden,dipul:binnenwasserstrassen,dipul:bundesautobahnen,dipul:bundesstrassen,dipul:diplomatische_vertretungen,dipul:flugbeschraenkungsgebiete,dipul:flughaefen,dipul:flugplaetze,dipul:freibaeder,dipul:industrieanlagen,dipul:internationale_organisationen,dipul:justizvollzugsanstalten,dipul:kontrollzonen,dipul:kraftwerke,dipul:krankenhaeuser,dipul:labore,dipul:militaerische_anlagen,dipul:nationalparks,dipul:naturschutzgebiete,dipul:polizei,dipul:schifffahrtsanlagen,dipul:seewasserstrassen,dipul:sicherheitsbehoerden,dipul:stromleitungen,dipul:temporaere_betriebseinschraenkungen,dipul:umspannwerke,dipul:vogelschutzgebiete,dipul:windkraftanlagen,dipul:wohngrundstuecke&BBOX={bbox}",
+            "coverage": [5.8, 47.2, 15.1, 55.2],
+            "format": "dipul",
+            "licence": "CC BY-ND 4.0",
+            "attribution": "DFS Deutsche Flugsicherung GmbH, dipul",
+            "info": "https://uas-betrieb.de"
+        },
+        {
+            "id": "france",
+            "country": "FR",
+            "name": "France, open category (IGN)",
+            "areaUrl": "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=TRANSPORTS.DRONES.RESTRICTIONS:carte_restriction_drones_lf&OUTPUTFORMAT=application/json&BBOX={bbox},EPSG:4326",
+            "coverage": [-5.3, 41.3, 9.7, 51.2],
+            "format": "france-uas",
+            "attribution": "DGAC, IGN",
+            "info": "https://www.geoportail.gouv.fr"
+        },
+        {
+            "id": "enaire-infra",
+            "country": "ES",
+            "name": "Spain infrastructure zones (ENAIRE)",
+            "areaUrl": "https://servais.enaire.es/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/FeatureServer/0/query?where=1%3D1&geometry={bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=2000&resultOffset=0",
+            "coverage": [-18.5, 27.5, 4.5, 44],
+            "format": "ed318",
+            "match": {
+                "host": "enaire.es",
+                "path": "/insigniads/rest/services/NSF_SRV/SRV_UAS_ZG_data_V2/"
+            },
+            "attribution": "ENAIRE",
+            "info": "https://aip.enaire.es/AIP/UAS-en.html",
+            "note": "The infrastructure zones (mostly railways) of the area from the servAIS feature service of ENAIRE."
+        },
+        {
+            "id": "faa-uasfm",
+            "country": "US",
+            "name": "United States UAS facility maps (FAA)",
+            "areaUrl": "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/FAA_UAS_FacilityMap_Data/FeatureServer/0/query?where=1%3D1&geometry={bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=OBJECTID,GLOBALID,CEILING,UNIT,MAP_EFF,ARPT_COUNT,APT1_FAAID,APT1_ICAO,APT1_NAME,APT1_LAANC,APT2_ICAO,APT2_NAME,APT2_LAANC,AIRSPACE_1,AIRSPACE_2&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=1000&resultOffset=0",
+            "coverage": [-180, 17.5, -64.5, 72],
+            "format": "faa-airspace",
+            "match": {
+                "host": "services6.arcgis.com",
+                "path": "/ssFJjBXIUyZDrSYZ/arcgis/rest/services/FAA_UAS_FacilityMap_Data/"
+            },
+            "licence": "Public domain (US government data)",
+            "attribution": "FAA",
+            "info": "https://udds-faa.opendata.arcgis.com",
+            "serviceTemplate": {
+                "maxAreaKm2": 10000,
+                "note": "Public FAA data, no account needed. Informational: check B4UFLY or a LAANC provider before flying."
+            }
+        },
+        {
+            "id": "faa-nsufr",
+            "country": "US",
+            "name": "United States national security UAS restrictions (FAA)",
+            "areaUrl": "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/DoD_Mar_13/FeatureServer/0/query?where=1%3D1&geometry={bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=1000&resultOffset=0",
+            "coverage": [-180, 17.5, -64.5, 72],
+            "format": "faa-airspace",
+            "match": {
+                "host": "services6.arcgis.com",
+                "path": "/ssFJjBXIUyZDrSYZ/arcgis/rest/services/DoD_Mar_13/"
+            },
+            "licence": "Public domain (US government data)",
+            "attribution": "FAA",
+            "info": "https://udds-faa.opendata.arcgis.com",
+            "serviceTemplate": {
+                "note": "Public FAA data, no account needed. Informational: check B4UFLY or a LAANC provider before flying."
+            }
+        },
+        {
+            "id": "faa-class",
+            "country": "US",
+            "name": "United States controlled airspace (FAA)",
+            "areaUrl": "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query?where=TYPE_CODE%3D%27CLASS%27%20AND%20LOCAL_TYPE%20IN%20%28%27CLASS_B%27%2C%27CLASS_C%27%2C%27CLASS_D%27%2C%27CLASS_E2%27%2C%27CLASS_E3%27%2C%27CLASS_E4%27%29&geometry={bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=1000&resultOffset=0",
+            "coverage": [-180, 17.5, -64.5, 72],
+            "format": "faa-airspace",
+            "match": {
+                "host": "services6.arcgis.com",
+                "path": "/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/"
+            },
+            "licence": "Public domain (US government data)",
+            "attribution": "FAA",
+            "info": "https://udds-faa.opendata.arcgis.com",
+            "serviceTemplate": {
+                "note": "Public FAA data, no account needed. Informational: check B4UFLY or a LAANC provider before flying."
+            }
+        },
+        {
+            "id": "faa-sua",
+            "country": "US",
+            "name": "United States special use airspace (FAA)",
+            "areaUrl": "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Special_Use_Airspace/FeatureServer/0/query?where=1%3D1&geometry={bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&geometryPrecision=6&f=geojson&resultRecordCount=1000&resultOffset=0",
+            "coverage": [-180, 17.5, -64.5, 72],
+            "format": "faa-airspace",
+            "match": {
+                "host": "services6.arcgis.com",
+                "path": "/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Special_Use_Airspace/"
+            },
+            "licence": "Public domain (US government data)",
+            "attribution": "FAA",
+            "info": "https://udds-faa.opendata.arcgis.com",
+            "serviceTemplate": {
+                "note": "Public FAA data, no account needed. Informational: check B4UFLY or a LAANC provider before flying."
+            }
+        }
+    ],
+    "services": [
+        {
+            "id": "ed318",
+            "name": "ED-318 geozone service",
+            "note": "Enter the address of the UAS zones endpoint of a service following the ED-318 retrieval interface. The zones around the mission, the vehicle and the map view are requested with their area and time.",
+            "service": {
+                "areaOfInterest": true,
+                "method": "ed318Post"
+            }
+        },
+        {
+            "id": "dfs-ed318",
+            "name": "Germany ED-318 service (DFS)",
+            "url": "https://dipul-service.dfs.de/api/geofencing/v2/uas-zones",
+            "note": "Requires a dipul account, requested from DFS through the dipul contact form. The service answers areas up to 100 km².",
+            "service": {
+                "areaOfInterest": true,
+                "auth": "basic",
+                "maxAreaKm2": 100,
+                "method": "ed318Post"
+            }
+        },
+        {
+            "id": "area",
+            "name": "Zones of the area (GET)",
+            "note": "Enter an address with {bbox} (west,south,east,north), {west}, {south}, {east}, {north}, {lat}, {lon}, {radiusKm}, {start} or {end}, filled with the area around the mission, the vehicle and the map view.",
+            "service": {
+                "areaOfInterest": true
+            }
+        },
+        {
+            "id": "openaip",
+            "name": "Airspaces (OpenAIP, unofficial)",
+            "url": "https://api.core.openaip.net/api/airspaces?bbox={bbox}&limit=1000&page=1",
+            "format": "openaip",
+            "note": "Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation: check the official drone zones. Enter the API key of an API client created in your openaip.net profile.",
+            "service": {
+                "areaOfInterest": true,
+                "auth": "apiKeyHeader",
+                "authParameter": "x-openaip-api-key",
+                "maxAreaKm2": 40000,
+                "responseMember": "items"
+            }
+        },
+        {
+            "id": "openaip-export",
+            "name": "Airspaces of a country (OpenAIP, unofficial)",
+            "nameFromData": true,
+            "url": "https://storage.openaip.net/openaip-system-exports/ch_asp.geojson",
+            "format": "openaip",
+            "note": "The daily export of a country's airspaces, without an account: replace ch with the two-letter code of the country. Unofficial community data under CC BY-NC 4.0 (non-commercial use, attribution to www.openaip.net), not for navigation.",
+            "service": {}
+        },
+        {
+            "id": "airspacelink",
+            "name": "United States advisories (Airspace Link)",
+            "url": "https://airhub-api.airspacelink.com/v2/briefing/b4ufly/area",
+            "supported": false,
+            "note": "Configuration only: QGroundControl does not post GeoJSON areas or read Airspace Link notices yet, and the API also takes an API key header (x-api-key). Airspace Link grants the key and client credentials on request (developers.airspacelink.com).",
+            "service": {
+                "areaOfInterest": true,
+                "auth": "oauth2ClientCredentials",
+                "scope": "briefing:area:read",
+                "tokenUrl": "https://airhub-api.airspacelink.com/v1/oauth/token"
+            }
+        }
+    ]
+}

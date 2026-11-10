@@ -10,6 +10,7 @@
 #include "GeoZoneStore.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneFeedCatalogueLoader.h"
 #include "GeoZoneParseCache.h"
 #include "GeoZoneSource.h"
 
@@ -20,6 +21,15 @@
 #include <QtCore/QUuid>
 
 namespace {
+
+/// @return true for the files of the folder which aren't stored copies of sources: the authorisations and the feed
+///         catalogues
+bool otherFile(const QString &fileName)
+{
+    static const QStringList names = { QLatin1String(GeoZoneAuthorisations::fileName), QLatin1String(GeoZoneFeedCatalogue::fileName),
+                                       QLatin1String(GeoZoneFeedCatalogueLoader::cacheFileName) };
+    return names.contains(fileName);
+}
 
 bool saveFile(const QString &path, const QByteArray &bytes, QString &errorString)
 {
@@ -77,7 +87,7 @@ QString GeoZoneStore::moveToBackup() const
 
     bool moved = false;
     for (const QString &fileName : dir.entryList(fileNameFilters(), QDir::Files)) {
-        if (fileName != QLatin1String(GeoZoneAuthorisations::fileName)) {
+        if (!otherFile(fileName)) {
             moved = dir.rename(fileName, QStringLiteral("%1/%2").arg(backupName, fileName)) || moved;
             GeoZoneParseCache::remove(dir.filePath(fileName));
         }
@@ -156,7 +166,7 @@ void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) c
 {
     const QDir dir(_dir);
     for (const QString &fileName : dir.entryList(fileNameFilters(), QDir::Files)) {
-        if ((fileName != QLatin1String(GeoZoneAuthorisations::fileName)) && !referencedFileNames.contains(fileName)) {
+        if (!otherFile(fileName) && !referencedFileNames.contains(fileName)) {
             qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
             (void) QFile::remove(dir.filePath(fileName));
         }

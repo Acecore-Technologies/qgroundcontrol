@@ -29,8 +29,11 @@ GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObj
     , _index(_store)
     , _downloader(new GeoZoneDownloader(this))
     , _scheduler(new GeoZoneRefreshScheduler([this]() { return _sources; }, this))
+    , _feedCatalogue(new GeoZoneFeedCatalogueLoader(storageDir, _downloader, this))
 {
     _downloader->setDirectory(_store.downloadDir());
+    // The catalogue file and the catalogue URL are checked with the feeds
+    (void) connect(_scheduler, &GeoZoneRefreshScheduler::checked, _feedCatalogue, [this]() { _feedCatalogue->check(); });
 
     (void) connect(_scheduler, &GeoZoneRefreshScheduler::refreshDue, this, [this](GeoZoneSource *source) {
         _download(source->url(), GeoZoneLoader::Request::Automatic);
@@ -53,6 +56,7 @@ GeoZoneSourceRepository::~GeoZoneSourceRepository()
 void GeoZoneSourceRepository::init()
 {
     _store.clearDownloads();
+    _feedCatalogue->init();
     _startupRefreshPending = true;
     _startupCheckPending = true;
     loadStoredSources(LoadMode::Background);
@@ -278,6 +282,7 @@ void GeoZoneSourceRepository::_checkAreas()
 
 void GeoZoneSourceRepository::refreshFeeds()
 {
+    _feedCatalogue->check(true);
     for (int i = 0; i < _sources.count(); i++) {
         const GeoZoneSource *const source = _sources[i];
         if (source->isFeed()) {
