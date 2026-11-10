@@ -24,8 +24,9 @@ import QGroundControl.GeoZone
 /// there: "I do" acknowledges it and silences the zone until the vehicle leaves it and its approach range. The popup
 /// stays open while such a question is unanswered, otherwise it closes after a while. Other alerts are dismissed. The
 /// overflow menu holds, returns or climbs the active vehicle above the ceilings of the zones, each confirmed with the
-/// guided action slider of the Fly View, and on mobile devices mutes the alerts for a while. While the active vehicle is
-/// about to breach or breaches its own fence, GeoZoneFenceAlert tells what the autopilot does and how to override it.
+/// guided action slider of the Fly View, and on mobile devices silences the speech of the alerts for a while, which
+/// never hides them. While the active vehicle is about to breach or breaches its own fence, GeoZoneFenceAlert tells
+/// what the autopilot does and how to override it.
 Popup {
     id:             control
     // Below a guided action being confirmed, which the alerts don't hide
@@ -59,7 +60,9 @@ Popup {
     readonly property bool  _showReturn:    _guidable && _guided.showRTL
     readonly property bool  _showClimb:     _guidable && !isNaN(_climbTarget) && _guided.showChangeAlt
     readonly property bool  _muteInMenu:    ScreenTools.isMobile
-    readonly property string _muteText:     _monitor.alertsMuted ? qsTr("Unmute Alerts") : qsTr("Mute Alerts for %1 min").arg(Math.round(_monitor.defaultMuteSecs / 60))
+    // Silencing only matters while the alerts are spoken
+    readonly property bool  _showMute:      _monitor.alertsMuted || GeoZoneManager.settings.audioAlerts.rawValue
+    readonly property string _muteText:     _monitor.alertsMuted ? qsTr("Resume Speech") : qsTr("Silence Speech for %1 min").arg(Math.round(_monitor.defaultMuteSecs / 60))
 
     /// @return Altitude above home in meters which puts the active vehicle the climb height higher, NaN when the guided
     ///         altitude change can't reach it
@@ -235,13 +238,13 @@ Popup {
                 QGCButton {
                     id:         moreButton
                     text:       "\u2022\u2022\u2022"
-                    visible:    control._showHold || control._showReturn || control._showClimb || control._muteInMenu
+                    visible:    control._showHold || control._showReturn || control._showClimb || (control._muteInMenu && control._showMute)
                     onClicked:  actionsMenu.popup(moreButton, 0, moreButton.height)
                 }
 
                 QGCButton {
                     text:       control._muteText
-                    visible:    !control._muteInMenu
+                    visible:    !control._muteInMenu && control._showMute
                     onClicked:  control._toggleMute()
                 }
 
@@ -276,7 +279,7 @@ Popup {
 
         QGCMenuItem {
             text:           control._muteText
-            visible:        control._muteInMenu
+            visible:        control._muteInMenu && control._showMute
             onTriggered:    control._toggleMute()
         }
     }

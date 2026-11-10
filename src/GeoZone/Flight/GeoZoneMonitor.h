@@ -72,11 +72,11 @@ class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(bool         monitoring          READ monitoring         NOTIFY monitoringChanged FINAL)       ///< Alerts are enabled and vehicles are monitored against loaded zones
+    Q_PROPERTY(bool         monitoring          READ monitoring         NOTIFY monitoringChanged FINAL)       ///< Vehicles are monitored against loaded zones
     Q_PROPERTY(GeoZoneVehicleMonitor *activeVehicle READ activeMonitor NOTIFY activeMonitorChanged FINAL)    ///< Geozone state of the active vehicle, null without
     Q_PROPERTY(GeoZoneGuidedCheck *guidedCheck  READ guidedCheck        CONSTANT FINAL)                       ///< Checks of guided commands
     Q_PROPERTY(GeoZoneAlertHistory *alertHistory READ alertHistory      CONSTANT FINAL)                       ///< Alerts of the session and earlier today
-    Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< Alerts are neither spoken nor repeated, see muteAlerts()
+    Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< The speech of the alerts is silenced, see muteAlerts()
     Q_PROPERTY(int              defaultMuteSecs     READ defaultMuteSecs    CONSTANT FINAL)
     Q_PROPERTY(QStringList      approvedZoneKeys    READ approvedZoneKeys   NOTIFY approvalsChanged FINAL)   ///< Zones approved for the active vehicle until it leaves them, see approveAlert()
     Q_PROPERTY(GeoZoneAlertModel *alerts            READ alertModel         CONSTANT FINAL)                  ///< Alerts shown by the alert popup
@@ -171,9 +171,8 @@ public:
         virtual void say(const QString &text) = 0;
     };
 
-    /// What the monitor uses of GeoZoneSettings
+    /// What the monitor uses of GeoZoneSettings. The alerts and their log are always on, after EN 4709-003.
     struct Settings {
-        bool alertsEnabled = true;
         bool audioAlerts = true;
         GeoZoneAlertThresholds::Extras extras;              ///< The pilot's extra warning time and distance
         std::optional<GeoZoneAlertTracker::Limits> limits;  ///< Instead of the thresholds of the vehicles, like tests use
@@ -261,7 +260,7 @@ public:
 
     /// Shows, logs and announces an alert of a vehicle which isn't about a zone of the catalog, like the
     /// NonConformance alerts of GeoZoneConformance, as urgent as an entry into a zone requiring an authorisation. It
-    /// isn't repeated. Nothing is raised while the alerts are off.
+    /// isn't repeated.
     /// @param identifier,name Of the zone column of the log, the name also ends the message
     /// @return The alert, with id 0 when not raised
     AlertEvent raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance, const QString &identifier,
@@ -278,8 +277,8 @@ public:
     Q_INVOKABLE void dismissAlert(int alertId);
     /// The pilot closed the alert popup: removes the shown alerts, unacknowledged
     Q_INVOKABLE void closeAlerts();
-    /// Mutes the alerts for the seconds, defaultMuteSecs when 0 and at most maxMuteSecs: they are shown but neither
-    /// spoken nor repeated, except new entries into prohibited zones
+    /// Silences the speech of the alerts for the seconds, defaultMuteSecs when 0 and at most maxMuteSecs: they are
+    /// still shown and repeated but not spoken, except new entries into prohibited zones. Muting never hides an alert.
     Q_INVOKABLE void muteAlerts(int seconds = 0);
     Q_INVOKABLE void unmuteAlerts();
 

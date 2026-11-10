@@ -32,7 +32,6 @@ ToolIndicatorPage {
     readonly property var _active:          GeoZoneMonitor.activeVehicle     ///< GeoZoneVehicleMonitor, null without
     readonly property var _history:         GeoZoneMonitor.alertHistory
     readonly property var _geoZoneSettings: GeoZoneManager.settings
-    readonly property bool _alertsEnabled:  _geoZoneSettings.alertsEnabled.rawValue
     readonly property bool _stale:          _monitor.monitoring && _active?.positionUnavailable === true
     // Long zone names, alerts and descriptions wrap within the page rather than widening it off the window
     readonly property real _pageWidth:      ScreenTools.defaultFontPixelWidth * 60
@@ -228,8 +227,7 @@ ToolIndicatorPage {
                 }
 
                 QGCLabel {
-                    text: !control._alertsEnabled ? qsTr("Flight alerts are off") :
-                              (QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby"))
+                    text: QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby")
                     visible: (!control._monitor.monitoring || !control._active?.nearbyModel.count) && !_pausedLabel.visible
                 }
 
@@ -287,11 +285,11 @@ ToolIndicatorPage {
                         Layout.fillWidth:   true
                         wrapMode:           Text.WordWrap
                         color:              qgcPal.warningText
-                        text:               qsTr("Alerts are muted: they are shown but neither spoken nor repeated, except entries into prohibited zones.")
+                        text:               qsTr("Speech is silenced: alerts are shown and repeated but not spoken, except new entries into prohibited zones.")
                     }
 
                     QGCButton {
-                        text:       qsTr("Unmute")
+                        text:       qsTr("Resume Speech")
                         onClicked:  control._monitor.unmuteAlerts()
                     }
                 }
@@ -515,24 +513,8 @@ ToolIndicatorPage {
                 FactCheckBoxSlider {
                     Layout.fillWidth:   true
                     text:               fact.shortDescription
-                    fact:               control._geoZoneSettings.alertsEnabled
-                    visible:            fact.visible
-                }
-
-                FactCheckBoxSlider {
-                    Layout.fillWidth:   true
-                    text:               fact.shortDescription
                     fact:               control._geoZoneSettings.audioAlerts
                     visible:            fact.visible
-                    enabled:            control._alertsEnabled
-                }
-
-                FactCheckBoxSlider {
-                    Layout.fillWidth:   true
-                    text:               fact.shortDescription
-                    fact:               control._geoZoneSettings.logAlerts
-                    visible:            fact.visible
-                    enabled:            control._alertsEnabled
                 }
 
                 LabelledFactTextField {
@@ -540,7 +522,6 @@ ToolIndicatorPage {
                     label:              fact.shortDescription
                     fact:               control._geoZoneSettings.approachExtraTime
                     visible:            fact.visible
-                    enabled:            control._alertsEnabled
                 }
 
                 LabelledFactTextField {
@@ -548,7 +529,6 @@ ToolIndicatorPage {
                     label:              fact.shortDescription
                     fact:               control._geoZoneSettings.approachExtraDistance
                     visible:            fact.visible
-                    enabled:            control._alertsEnabled
                 }
 
                 FactCheckBoxSlider {

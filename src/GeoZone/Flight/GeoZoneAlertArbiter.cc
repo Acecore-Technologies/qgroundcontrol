@@ -128,6 +128,15 @@ int GeoZoneAlertArbiter::_urgency(const Candidate &candidate)
     return (candidate.alert.severity * Count) + kind;
 }
 
+void GeoZoneAlertArbiter::_markAnnounced(int alertId, qint64 msecs)
+{
+    for (Breach &breach : _breaches) {
+        if (breach.alert.id == alertId) {
+            breach.announcedMSecs = msecs;
+        }
+    }
+}
+
 GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
 {
     Announcement announcement;
@@ -140,12 +149,20 @@ GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
     for (const Alert &alert : std::as_const(_pending)) {
         candidates.append(Candidate{ alert, false });
     }
-    if (!silenced) {
-        for (const Breach &breach : std::as_const(_breaches)) {
-            if ((breach.announcedMSecs >= 0) && ((now - breach.announcedMSecs) >= repeatIntervalMSecs) && !_suspended.contains(breach.alert.vehicleKey)) {
-                candidates.append(Candidate{ breach.alert, true });
-            }
+    QList<Candidate> repeats;
+    for (const Breach &breach : std::as_const(_breaches)) {
+        if ((breach.announcedMSecs >= 0) && ((now - breach.announcedMSecs) >= repeatIntervalMSecs) && !_suspended.contains(breach.alert.vehicleKey)) {
+            repeats.append(Candidate{ breach.alert, true });
         }
+    }
+    // Muted, the repeats are shown but not spoken
+    if (silenced) {
+        for (const Candidate &repeat : std::as_const(repeats)) {
+            announcement.repeated.append(repeat.alert);
+            _markAnnounced(repeat.alert.id, now);
+        }
+    } else {
+        candidates.append(repeats);
     }
     if (candidates.isEmpty()) {
         return announcement;
@@ -169,11 +186,7 @@ GeoZoneAlertArbiter::Announcement GeoZoneAlertArbiter::tick()
             announcement.repeated.append(alert);
         }
         if (alert.breach) {
-            for (Breach &breach : _breaches) {
-                if (breach.alert.id == alert.id) {
-                    breach.announcedMSecs = now;
-                }
-            }
+            _markAnnounced(alert.id, now);
         }
     }
     announcement.text = parts.join(QStringLiteral(". "));

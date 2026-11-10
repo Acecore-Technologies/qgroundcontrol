@@ -40,22 +40,8 @@
     "default":      ""
 },
 {
-    "name":         "alertsEnabled",
-    "shortDesc":    "Flight alerts",
-    "longDesc":     "Alert when a connected vehicle approaches or enters an active restricted geozone or U-space airspace.",
-    "type":         "bool",
-    "default":      true
-},
-{
     "name":         "audioAlerts",
     "shortDesc":    "Speak flight alerts",
-    "type":         "bool",
-    "default":      true
-},
-{
-    "name":         "logAlerts",
-    "shortDesc":    "Log flight alerts",
-    "longDesc":     "Append flight alerts to a CSV file per day in the telemetry folder of the application load/save path. They are kept as long as the alert logs and flight records setting says.",
     "type":         "bool",
     "default":      true
 },
@@ -99,7 +85,7 @@
 {
     "name":         "trafficEnabled",
     "shortDesc":    "Check traffic against geozones",
-    "longDesc":     "List the ADS-B and Remote ID aircraft received by QGroundControl within 10 km of the active vehicle which are in or near active geozones while flight alerts are on, and show an alert when one enters a zone.",
+    "longDesc":     "List the ADS-B and Remote ID aircraft received by QGroundControl within 10 km of the active vehicle which are in or near active geozones, and show an alert when one enters a zone.",
     "type":         "bool",
     "default":      false
 },

@@ -172,9 +172,7 @@ QJsonObject withHeightLimits(QJsonObject feature, double lower, double upper)
 void restoreSettingDefaults()
 {
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->logAlerts() }) {
-        fact->setRawValue(fact->rawDefaultValue());
-    }
+    settings->audioAlerts()->setRawValue(settings->audioAlerts()->rawDefaultValue());
 }
 
 } // namespace
@@ -359,16 +357,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
                              !spiedAlerts(alertSpy).constLast().contains(QStringLiteral("link lost")), 10000);
     QCOMPARE(spiedAlerts(alertSpy).filter(QStringLiteral("Position lost")).count(), 1);
 
-    // Alerts can be turned off in flight
-    settings->alertsEnabled()->setRawValue(false);
-    QVERIFY(!monitor.monitoring());
-    QVERIFY(monitor.activeMonitor()->nearby().isEmpty());
-    // Not even after the vehicle is evaluated again
-    QVERIFY(!alertSpy.wait(GeoZoneMonitor::evaluateIntervalMSecs + 200));
-    QVERIFY(monitor.activeMonitor()->nearby().isEmpty());
-
     // Disconnecting the vehicle while monitoring clears its state
-    settings->alertsEnabled()->setRawValue(true);
     QVERIFY(monitor.monitoring());
     QTRY_COMPARE_WITH_TIMEOUT(nearbyIdentifiers(monitor), ctrs, 5000);
     QVERIFY(monitor.activeMonitor()->inside());
@@ -759,8 +748,11 @@ void GeoZoneFlightTest::_testFlightRecord()
     QCOMPARE(events.constLast(), QStringLiteral("approved"));
     QCOMPARE(json[QStringLiteral("alerts")].toArray().last()[QStringLiteral("altitude_amsl_m")].toDouble(), 710.0);
 
-    // Without the log, the alerts raised during the flight
-    GeoZoneSettings::instance()->logAlerts()->setRawValue(false);
+    // When the log can't be written, the alerts raised during the flight
+    QFile blocker(dir.filePath(QStringLiteral("blocker")));
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    history->startLog(dir.filePath(QStringLiteral("blocker/logs")));
     recorder.start(vehicleId);
     environment.addSecs(1);
     monitor.removePositionMonitor(vehicleId);

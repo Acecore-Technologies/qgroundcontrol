@@ -578,9 +578,7 @@ void GeoZoneMonitorTest::_testAlertLog()
     ScopedEnvironment environment;
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     const auto restoreDefault = qScopeGuard([settings]() {
-        for (Fact *const fact : { settings->logAlerts(), settings->recordRetention() }) {
-            fact->setRawValue(fact->rawDefaultValue());
-        }
+        settings->recordRetention()->setRawValue(settings->recordRetention()->rawDefaultValue());
     });
 
     const QGeoCoordinate center(47, 8);
@@ -637,15 +635,6 @@ void GeoZoneMonitorTest::_testAlertLog()
     QCOMPARE(fields[6], QStringLiteral("entered"));
     QCOMPARE(fields[7], QStringLiteral("0"));
 
-    // Turned off
-    settings->logAlerts()->setRawValue(false);
-    monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
-    monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
-    log.flushLog();
-    QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
-    QCOMPARE(QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 5);
-    file.close();
-
     // The files of the days past the retention are deleted when a file is started, others are kept
     settings->recordRetention()->setRawValue(30);
     const QDir logDir(dir.filePath(QStringLiteral("logs")));
@@ -656,7 +645,6 @@ void GeoZoneMonitorTest::_testAlertLog()
         QFile touched(path);
         QVERIFY(touched.open(QIODevice::Append));
     }
-    settings->logAlerts()->setRawValue(true);
     environment.addSecs(24 * 60 * 60);
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0) }, 3);
     monitor.evaluate({ center.atDistanceAndAzimuth(250, 0) }, 3);
@@ -683,9 +671,6 @@ void GeoZoneMonitorTest::_testAlertLog()
 void GeoZoneMonitorTest::_testPilotEventLog()
 {
     ScopedEnvironment environment;
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
-    settings->logAlerts()->setRawValue(true);
 
     const QGeoCoordinate center(47, 8);
     const QGeoCoordinate uSpaceCenter = center.atDistanceAndAzimuth(5000, 90);
@@ -749,7 +734,7 @@ void GeoZoneMonitorTest::_testPilotEventLog()
         QStringLiteral("dismissed U1 %1 Dismiss").arg(uSpace),
         QStringLiteral("entered U1 %1").arg(uSpaceAgain),
         QStringLiteral("notified U1 %1").arg(uSpaceAgain),
-        QStringLiteral("muted U1 %1 Mute alerts for 120 s").arg(uSpaceAgain),
+        QStringLiteral("muted U1 %1 Silence speech for 120 s").arg(uSpaceAgain),
         QStringLiteral("dismissed U1 %1 Close").arg(uSpaceAgain),
     }));
 
@@ -774,9 +759,6 @@ void GeoZoneMonitorTest::_testPilotEventLog()
 void GeoZoneMonitorTest::_testAlertHistory()
 {
     const ScopedEnvironment environment;
-    GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    const auto restoreDefault = qScopeGuard([settings]() { settings->logAlerts()->setRawValue(settings->logAlerts()->rawDefaultValue()); });
-    settings->logAlerts()->setRawValue(true);
 
     const QGeoCoordinate center(47, 8);
     const QTemporaryDir dir;
@@ -1322,7 +1304,7 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     QVERIFY(arbiter.tick().text.isEmpty());
     QCOMPARE(arbiter.breachCount(), 0);
 
-    // Muted, alerts are dropped, but the first announcement of a new breach is made
+    // Muted, alerts aren't spoken, but the first announcement of a new breach is made
     arbiter.mute();
     QVERIFY(arbiter.muted());
     QCOMPARE(arbiter.mutedUntil(), now + GeoZoneAlertArbiter::defaultMuteMSecs);
@@ -1337,11 +1319,16 @@ void GeoZoneMonitorTest::_testAlertArbiter()
     QCOMPARE(mutedBreach.alerts.count(), 1);
     arbiter.setZones(1, { QStringLiteral("P3") }, { QStringLiteral("P3") });
 
-    // Its repeats wait for the end of the mute, the alerts dropped meanwhile aren't announced
+    // Its repeats are shown but not spoken until the end of the mute, the alerts dropped meanwhile aren't announced
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
-    QVERIFY(arbiter.tick().text.isEmpty());
+    const GeoZoneAlertArbiter::Announcement mutedRepeat = arbiter.tick();
+    QVERIFY(mutedRepeat.text.isEmpty());
+    QCOMPARE(mutedRepeat.repeated.count(), 1);
+    QCOMPARE(mutedRepeat.repeated.first().id, 14);
     now = mutedUntil;
     QVERIFY(!arbiter.muted());
+    QVERIFY(arbiter.tick().text.isEmpty());
+    now += GeoZoneAlertArbiter::minIntervalMSecs;
     QCOMPARE(arbiter.tick().text, QStringLiteral("Still inside P3"));
 
     // A vehicle no longer monitored is forgotten
@@ -1453,7 +1440,7 @@ void GeoZoneMonitorTest::_testSpokenAlerts()
     monitor.evaluate(inProhibited);
     QCOMPARE(sink->spoken.count(), 4);
 
-    // Muted, approaches and entries aren't spoken, but a new entry into a prohibited zone is
+    // Muted, approaches and entries are shown but not spoken, and a new entry into a prohibited zone is spoken
     monitor.muteAlerts();
     QVERIFY(monitor.alertsMuted());
     QCOMPARE(mutedSpy.count(), 1);
@@ -1468,10 +1455,13 @@ void GeoZoneMonitorTest::_testSpokenAlerts()
     QCOMPARE(sink->spoken.count(), 5);
     QCOMPARE(sink->spoken.last(), QStringLiteral("Entered geozone P (Prohibited)"));
 
-    // Its repeats wait for the end of the mute
+    // Its repeats are shown, but only spoken after the end of the mute
+    const qsizetype repeats = repeatSpy.count();
     now += GeoZoneAlertArbiter::repeatIntervalMSecs;
     monitor.evaluate(inProhibited);
     QCOMPARE(sink->spoken.count(), 5);
+    QCOMPARE(repeatSpy.count(), repeats + 1);
+    QVERIFY(shownAlert(monitor, repeatSpy.last()[2].toInt()));
     now += GeoZoneAlertArbiter::defaultMuteMSecs;
     monitor.evaluate(inProhibited);
     QVERIFY(!monitor.alertsMuted());

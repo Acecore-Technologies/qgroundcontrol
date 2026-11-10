@@ -198,7 +198,7 @@ void GeoZoneAlertHistory::logPilotEvent(const GeoZoneMonitor::AlertEvent &event)
 
 void GeoZoneAlertHistory::_log(const GeoZoneMonitor::AlertEvent &event)
 {
-    if (!_logging || !GeoZoneSettings::instance()->logAlerts()->rawValue().toBool()) {
+    if (!_logging) {
         return;
     }
     const QDate date = event.time.toUTC().date();

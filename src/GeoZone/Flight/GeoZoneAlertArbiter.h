@@ -31,8 +31,8 @@
 /// - Entering a prohibited zone (a breach) is repeated every repeatIntervalMSecs until its alert is acknowledged or
 ///   the vehicle leaves the zone. While the position of the vehicle is lost, its breaches are suspended: kept, since
 ///   it may still be inside, but not repeated.
-/// - Muting silences the alerts and repeats for a while, except the first announcement of a new breach. Alerts
-///   raised while muted are dropped, not announced later.
+/// - Muting silences the speech of the alerts and repeats for a while, except the first announcement of a new breach.
+///   It never hides them: the repeats are still due and shown. Alerts raised while muted aren't spoken later.
 /// - Approving a zone for a vehicle, when the pilot confirms the permission to fly there, drops its alerts about the
 ///   zone and ends its breach until the vehicle leaves the zone and its approach range.
 class GeoZoneAlertArbiter
@@ -54,16 +54,16 @@ public:
         QString zoneKey;        ///< GeoZone::key
         int severity = 0;       ///< GeoZone::restrictionSeverity, the most severe is 0
         bool inside = false;    ///< Entered, otherwise approached
-        bool breach = false;    ///< Entered a prohibited zone: repeated until acknowledged or left, and never muted
+        bool breach = false;    ///< Entered a prohibited zone: repeated until acknowledged or left, first spoken also while muted
         QString message;        ///< Announced
         QString repeatMessage;  ///< Announced when a breach is repeated
     };
 
     /// What a tick announces
     struct Announcement {
-        QString text;               ///< Empty when nothing is announced
+        QString text;               ///< Spoken, empty when nothing is spoken
         QList<Alert> alerts;        ///< Named or counted, the most urgent first
-        QList<Alert> repeated;      ///< Breaches among them which were announced before
+        QList<Alert> repeated;      ///< Breaches which were announced before and are shown again, also while muted
     };
 
     /// @param clock A timer started now when empty
@@ -124,6 +124,7 @@ private:
 
     /// @return Lower for more urgent alerts: by severity, then entries, repeats and approaches
     static int _urgency(const Candidate &candidate);
+    void _markAnnounced(int alertId, qint64 msecs);
     qint64 _now() const { return _clock(); }
 
     Clock _clock;

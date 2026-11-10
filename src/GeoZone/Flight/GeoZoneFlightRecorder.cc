@@ -449,11 +449,8 @@ QJsonObject GeoZoneFlightRecorder::record(const Flight &flight) const
     }
     json.insert(QStringLiteral("permits"), permits);
 
-    // The log has the pilot's answers to the alerts too, the alerts raised are recorded without it
-    QJsonArray alerts;
-    if (GeoZoneSettings::instance()->logAlerts()->rawValue().toBool()) {
-        alerts = loggedAlerts(flight.vehicleId, flight.start, flight.end);
-    }
+    // The log has the pilot's answers to the alerts too, the alerts raised are recorded when it can't be read
+    QJsonArray alerts = loggedAlerts(flight.vehicleId, flight.start, flight.end);
     if (alerts.isEmpty()) {
         const QStringList header = GeoZoneAlertHistory::logHeader().split(QLatin1Char(','));
         for (const GeoZoneMonitor::AlertEvent &event : flight.alerts) {

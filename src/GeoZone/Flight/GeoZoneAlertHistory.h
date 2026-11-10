@@ -27,7 +27,7 @@ class GeoZoneManager;
 /// UTC day, with what the pilot was shown and answered about them (GeoZoneMonitor::AlertEvent::pilotEvent()),
 /// buffered and written to the open file every logFlushIntervalMSecs rather than opening and flushing the file for
 /// each alert. The files of the days before the retention of GeoZoneSettings::recordRetention are deleted when a new
-/// file is started. Logging is turned on and off in GeoZoneSettings.
+/// file is started. The application monitor always logs, the flight alerts must be traceable.
 class GeoZoneAlertHistory : public QAbstractListModel
 {
     Q_OBJECT

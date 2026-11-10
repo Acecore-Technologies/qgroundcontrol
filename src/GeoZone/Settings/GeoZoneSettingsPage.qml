@@ -65,29 +65,13 @@ SettingsPage {
         Layout.fillWidth:       true
         Layout.preferredWidth:  _groupWidth
         heading:                qsTr("Flight Alerts")
-        headingDescription:     _geoZoneSettings.alertsEnabled.longDescription
-
-        FactCheckBoxSlider {
-            Layout.fillWidth:   true
-            text:               fact.shortDescription
-            fact:               _geoZoneSettings.alertsEnabled
-            visible:            fact.visible
-        }
+        headingDescription:     qsTr("Always on: connected vehicles are warned when they approach or enter an active restricted geozone or U-space airspace, and the alerts are logged.")
 
         FactCheckBoxSlider {
             Layout.fillWidth:   true
             text:               fact.shortDescription
             fact:               _geoZoneSettings.audioAlerts
             visible:            fact.visible
-            enabled:            _geoZoneSettings.alertsEnabled.rawValue
-        }
-
-        FactCheckBoxSlider {
-            Layout.fillWidth:   true
-            text:               fact.shortDescription
-            fact:               _geoZoneSettings.logAlerts
-            visible:            fact.visible
-            enabled:            _geoZoneSettings.alertsEnabled.rawValue
         }
 
         LabelledFactTextField {
@@ -96,7 +80,6 @@ SettingsPage {
             label:                   fact.shortDescription
             fact:                    _geoZoneSettings.approachExtraTime
             visible:                 fact.visible
-            enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
 
         LabelledFactTextField {
@@ -105,7 +88,6 @@ SettingsPage {
             label:                   fact.shortDescription
             fact:                    _geoZoneSettings.approachExtraDistance
             visible:                 fact.visible
-            enabled:                 _geoZoneSettings.alertsEnabled.rawValue
         }
 
         QGCLabel {

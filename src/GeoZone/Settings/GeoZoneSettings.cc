@@ -51,6 +51,11 @@ DECLARE_SETTINGGROUP(GeoZone, "GeoZoneManager")
         }
         settings.remove(legacy.key);
     }
+
+    // Flight alerts and their log are always on, EN 4709-003 requires the warnings: stored switches are dropped
+    for (const char *key : { "alertsEnabled", "logAlerts" }) {
+        settings.remove(key);
+    }
 }
 
 DECLARE_SETTINGSFACT(GeoZoneSettings, showZones)
@@ -58,9 +63,7 @@ DECLARE_SETTINGSFACT(GeoZoneSettings, hiddenRestrictions)
 DECLARE_SETTINGSFACT(GeoZoneSettings, altitudeFilter)
 DECLARE_SETTINGSFACT(GeoZoneSettings, scheduleFilter)
 DECLARE_SETTINGSFACT(GeoZoneSettings, mapSource)
-DECLARE_SETTINGSFACT(GeoZoneSettings, alertsEnabled)
 DECLARE_SETTINGSFACT(GeoZoneSettings, audioAlerts)
-DECLARE_SETTINGSFACT(GeoZoneSettings, logAlerts)
 DECLARE_SETTINGSFACT(GeoZoneSettings, recordRetention)
 DECLARE_SETTINGSFACT(GeoZoneSettings, includeOperatorDetails)
 DECLARE_SETTINGSFACT(GeoZoneSettings, approachExtraDistance)

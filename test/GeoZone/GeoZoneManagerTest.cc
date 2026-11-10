@@ -104,6 +104,15 @@ void GeoZoneManagerTest::_testSettings()
     QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/approachExtraTime")));
     qSettings.remove(QStringLiteral("GeoZoneManager/approachExtraDistance"));
 
+    // Flight alerts and their log are always on: the switches turned off before are dropped
+    qSettings.setValue(QStringLiteral("GeoZoneManager/alertsEnabled"), false);
+    qSettings.setValue(QStringLiteral("GeoZoneManager/logAlerts"), false);
+    {
+        const GeoZoneSettings migrated;
+    }
+    QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/alertsEnabled")));
+    QVERIFY(!qSettings.contains(QStringLiteral("GeoZoneManager/logAlerts")));
+
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QGeoCoordinate center(47, 8);

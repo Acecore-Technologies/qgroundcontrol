@@ -129,7 +129,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     });
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
-    for (Fact *const fact : { settings->alertsEnabled(), settings->audioAlerts(), settings->approachExtraDistance(), settings->approachExtraTime(),
+    for (Fact *const fact : { settings->audioAlerts(), settings->approachExtraDistance(), settings->approachExtraTime(),
                               settings->trafficEnabled() }) {
         (void) connect(fact, &Fact::rawValueChanged, this, &GeoZoneMonitor::_applicationSettingsChanged);
     }
@@ -144,7 +144,6 @@ GeoZoneMonitor::Settings GeoZoneMonitor::Settings::fromApplication()
 {
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
     Settings result;
-    result.alertsEnabled = settings->alertsEnabled()->rawValue().toBool();
     result.audioAlerts = settings->audioAlerts()->rawValue().toBool();
     result.extras.distance = settings->approachExtraDistance()->rawValue().toDouble();
     result.extras.time = settings->approachExtraTime()->rawValue().toDouble();
@@ -182,10 +181,7 @@ void GeoZoneMonitor::_applicationSettingsChanged()
 
 void GeoZoneMonitor::_settingsChanged(const Settings &previous)
 {
-    if (settings().alertsEnabled != previous.alertsEnabled) {
-        _resetMonitors();
-        emit monitoringChanged();
-    }
+    Q_UNUSED(previous);
     if (!settings().trafficEnabled) {
         _clearTraffic();
     }
@@ -427,7 +423,7 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
             GeoZoneAlertThresholds::compute(GeoZoneAlertThresholds::profile(QString::fromLatin1(GeoZoneAlertThresholds::defaultClass)), { velocity }).limits());
         const GeoZoneAlertTracker::Update update = tracker.update(*context.catalog, context.policy, position, velocity, limits);
         for (const GeoZoneAlertTracker::Alert &zoneAlert : update.alerts) {
-            if (zoneAlert.inside && settings().alertsEnabled) {
+            if (zoneAlert.inside) {
                 entries.append(_alertEvent(zoneAlert.zone, AlertEvent::Traffic, true, 0, qQNaN(), position, noVehicle, plane->label()));
             }
         }
@@ -723,7 +719,7 @@ void GeoZoneMonitor::_positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor
 {
     const bool lost = monitor->positionUnavailable();
     _arbiter.setSuspended(monitor->key(), lost);
-    if (!lost || monitor->nearby().isEmpty() || !settings().alertsEnabled) {
+    if (!lost || monitor->nearby().isEmpty()) {
         return;
     }
     // The vehicle may still be where it was last seen: in or near the most restrictive zone around it
@@ -961,7 +957,7 @@ void GeoZoneMonitor::muteAlerts(int seconds)
     // Clamped so that the timer's milliseconds fit an int
     const int msecs = (seconds > 0) ? ((std::min)(seconds, maxMuteSecs) * 1000) : GeoZoneAlertArbiter::defaultMuteMSecs;
     for (const GeoZoneAlertModel::Alert &alert : _alertModel->alerts()) {
-        _logPilotEvent(alert.alertId, AlertEvent::Muted, QStringLiteral("Mute alerts for %1 s").arg(msecs / 1000));
+        _logPilotEvent(alert.alertId, AlertEvent::Muted, QStringLiteral("Silence speech for %1 s").arg(msecs / 1000));
     }
     _arbiter.mute(msecs);
     // Notified after the arbiter's clock passed the end
@@ -1165,7 +1161,7 @@ void GeoZoneMonitor::_updateMuted()
 bool GeoZoneMonitor::monitoring() const
 {
     const bool vehicles = std::any_of(_monitors.cbegin(), _monitors.cend(), [](const GeoZoneVehicleMonitor *monitor) { return monitor->followsVehicle(); });
-    return vehicles && (_manager->zoneCount() > 0) && settings().alertsEnabled;
+    return vehicles && (_manager->zoneCount() > 0);
 }
 
 void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
@@ -1273,9 +1269,6 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind ki
                                                               const QString &identifier, const QString &name)
 {
     AlertEvent event;
-    if (!settings().alertsEnabled) {
-        return event;
-    }
     event.id = _nextAlertId++;
     event.time = GeoZoneEnvironment::currentDateTimeUtc();
     event.vehicleId = vehicleId;
