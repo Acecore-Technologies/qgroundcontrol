@@ -69,7 +69,7 @@ public:
         double returnAltitude = qQNaN();
         double climbMinimum = 0;                ///< ArduCopter RTL_CLIMB_MIN, climbed before turning home
 
-        int returnType = 0;                     ///< PX4 RTL_TYPE
+        int returnType = 0;                     ///< PX4 RTL_TYPE, see ReturnType
         double descendAltitude = qQNaN();       ///< PX4 RTL_DESCEND_ALT above the destination, NaN to land without loitering above it
         double landDelay = 0;                   ///< PX4 RTL_LAND_DELAY seconds, negative to loiter at the descend altitude
         double coneHalfAngle = 0;               ///< PX4 RTL_CONE_ANG, 0 without a cone
@@ -95,6 +95,22 @@ public:
         /// @return true if the return altitude is known
         bool altitudeKnown() const { return !qIsNaN(returnAltitude); }
     };
+
+    /// PX4 RTL_TYPE values
+    enum ReturnType {
+        ReturnTypeHomeOrRally = 0,          ///< To the closest of home and the rally points
+        ReturnTypeLandingOrRally = 1,       ///< To the closest of the mission landing and the rally points, home without them
+        ReturnTypeMissionPath = 2,          ///< On along the mission to its landing, back along it home without one
+        ReturnTypeClosest = 3,              ///< To the closest of home, the mission landing and the rally points
+        ReturnTypeShortestMissionPath = 4,  ///< Along the mission to its landing or back home, whichever has fewer items
+        ReturnTypeRallyOrLand = 5,          ///< To the closest rally point, landing where it is without them
+    };
+
+    /// Fences of ArduPilot's FENCE_TYPE the model reads
+    static constexpr int fenceTypeAltitudeMax = 0x1;
+
+    /// Meters within which positions are the same place, for paths which need no position twice
+    static constexpr double samePositionTolerance = 0.01;
 
     /// ArduPlane RTL_AUTOLAND values
     enum AutoLand {
@@ -130,7 +146,7 @@ public:
     };
 
     enum class Destination {
-        None,                   ///< The vehicle doesn't fly anywhere, like PX4 landing without rally points with RTL_TYPE 5
+        None,                   ///< The vehicle doesn't fly anywhere, like PX4 landing without rally points with ReturnTypeRallyOrLand
         Home,
         RallyPoint,
         MissionLanding,         ///< Then the landing sequence of the mission

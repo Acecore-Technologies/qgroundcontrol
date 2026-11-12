@@ -32,7 +32,7 @@ void append(QList<Position> &positions, const QGeoCoordinate &coordinate, double
 {
     const Position position{ QGeoCoordinate(coordinate.latitude(), coordinate.longitude()), altitudeAMSL, terrainAMSL };
     if (!positions.isEmpty() && sameAltitude(positions.last().altitudeAMSL, altitudeAMSL) &&
-        (positions.last().coordinate.distanceTo(position.coordinate) < 0.01)) {
+        (positions.last().coordinate.distanceTo(position.coordinate) < GeoZoneReturnModel::samePositionTolerance)) {
         return;
     }
     positions.append(position);
@@ -144,9 +144,10 @@ GeoZoneReturnModel::Path px4Return(const GeoZoneReturnModel::Parameters &paramet
     const bool fixedWing = !parameters.multicopter && !parameters.vtol;
 
     // Mission path returns: on to the landing of the mission or back along it, home after the first waypoint
-    if ((type == 2) || (type == 4)) {
+    const bool missionPathType = (type == GeoZoneReturnModel::ReturnTypeMissionPath) || (type == GeoZoneReturnModel::ReturnTypeShortestMissionPath);
+    if (missionPathType) {
         const bool hasLanding = !destinations.landings.isEmpty();
-        const bool forward = hasLanding && ((type == 2) ||
+        const bool forward = hasLanding && ((type == GeoZoneReturnModel::ReturnTypeMissionPath) ||
                              ((start.sequenceNumber >= 0) && ((destinations.landings.first().sequenceNumber - start.sequenceNumber) < start.sequenceNumber)));
         if (forward) {
             path.destination = Destination::MissionForward;
@@ -176,14 +177,14 @@ GeoZoneReturnModel::Path px4Return(const GeoZoneReturnModel::Parameters &paramet
     Position destination = home;
     path.destination = home.coordinate.isValid() ? Destination::Home : Destination::None;
     double minDistance = infinity;
-    const bool missionPathType = (type == 2) || (type == 4);
     if (missionPathType) {
         minDistance = 0;
-    } else if (type != 5) {
-        if ((type != 1) && home.coordinate.isValid()) {
+    } else if (type != GeoZoneReturnModel::ReturnTypeRallyOrLand) {
+        if ((type != GeoZoneReturnModel::ReturnTypeLandingOrRally) && home.coordinate.isValid()) {
             minDistance = from.distanceTo(home.coordinate);
         }
-        if (((type == 1) || (type == 3) || std::isinf(minDistance)) && !destinations.landings.isEmpty()) {
+        if (((type == GeoZoneReturnModel::ReturnTypeLandingOrRally) || (type == GeoZoneReturnModel::ReturnTypeClosest) || std::isinf(minDistance)) &&
+            !destinations.landings.isEmpty()) {
             const GeoZoneReturnModel::Landing &landing = destinations.landings.first();
             const double distance = from.distanceTo(landing.touchdown.coordinate);
             if ((distance + GeoZoneReturnModel::px4DestinationMargin) < minDistance) {
@@ -208,7 +209,7 @@ GeoZoneReturnModel::Path px4Return(const GeoZoneReturnModel::Parameters &paramet
         }
     }
     // Without rally points it lands where it is
-    if ((type == 5) && (path.destination != Destination::RallyPoint)) {
+    if ((type == GeoZoneReturnModel::ReturnTypeRallyOrLand) && (path.destination != Destination::RallyPoint)) {
         path.destination = Destination::None;
         path.altitudeKnown = true;
         return path;
@@ -429,7 +430,7 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::parametersFrom(Firmware firmw
         parameters.coneSlope = value("RTL_CONE_SLOPE", 0);
         // The maximum altitude of the fence caps the return altitude
         const int fenceTypes = qRound(value("FENCE_TYPE", 0));
-        if (fenceEnabled && ((fenceTypes & 1) != 0) && lookup(QStringLiteral("FENCE_ALT_MAX"))) {
+        if (fenceEnabled && ((fenceTypes & fenceTypeAltitudeMax) != 0) && lookup(QStringLiteral("FENCE_ALT_MAX"))) {
             parameters.returnAltitudeLimit = value("FENCE_ALT_MAX", 0) - value("FENCE_MARGIN", 0);
         }
         parameters.breachAction = fenceEnabled ? breachAction(Autopilot::ArduCopter, qRound(value("FENCE_ACTION", 0))) : BreachAction::None;
@@ -469,7 +470,7 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::defaultParameters(Firmware fi
     QHash<QString, double> defaults;
     if (firmware == Firmware::PX4) {
         // Parameter defaults of PX4 1.14 to 1.16 and main (rtl_params, navigator_params, geofence_params)
-        defaults = { { QStringLiteral("RTL_TYPE"), 0 }, { QStringLiteral("RTL_RETURN_ALT"), 60 }, { QStringLiteral("RTL_DESCEND_ALT"), 30 },
+        defaults = { { QStringLiteral("RTL_TYPE"), ReturnTypeHomeOrRally }, { QStringLiteral("RTL_RETURN_ALT"), 60 }, { QStringLiteral("RTL_DESCEND_ALT"), 30 },
                      { QStringLiteral("RTL_LAND_DELAY"), 0 }, { QStringLiteral("RTL_CONE_ANG"), 45 }, { QStringLiteral("RTL_MIN_DIST"), 10 },
                      { QStringLiteral("NAV_ACC_RAD"), 10 }, { QStringLiteral("NAV_LOITER_RAD"), 80 }, { QStringLiteral("GF_ACTION"), 2 } };
         // Changed by the airframe defaults of the vehicle class, rc.mc_defaults, rc.fw_defaults and rc.vtol_defaults
@@ -480,13 +481,13 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::defaultParameters(Firmware fi
             defaults.insert(QStringLiteral("NAV_ACC_RAD"), 2);
             break;
         case VehicleClass::FixedWing:
-            defaults.insert(QStringLiteral("RTL_TYPE"), 1);
+            defaults.insert(QStringLiteral("RTL_TYPE"), ReturnTypeLandingOrRally);
             defaults.insert(QStringLiteral("RTL_RETURN_ALT"), 100);
             defaults.insert(QStringLiteral("RTL_DESCEND_ALT"), 100);
             defaults.insert(QStringLiteral("RTL_LAND_DELAY"), -1);
             break;
         case VehicleClass::Vtol:
-            defaults.insert(QStringLiteral("RTL_TYPE"), 1);
+            defaults.insert(QStringLiteral("RTL_TYPE"), ReturnTypeLandingOrRally);
             break;
         case VehicleClass::Other:
             break;

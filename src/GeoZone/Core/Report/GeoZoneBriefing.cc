@@ -13,17 +13,23 @@
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneProjection.h"
 #include "GeoZoneText.h"
 #include "GeoZoneVertical.h"
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace {
 
 using Evaluator = GeoZonePathEvaluator;
 
 constexpr double kEntryTolerance = 0.01;    ///< Meters along a path within which a volume is entered at the entry of a crossing
+
+/// Meters of a degree of latitude at least: of the sphere of the projection, less the 1 % the degrees of the earth are
+/// shorter by near the equator, so that areas grown by a distance in degrees aren't too small
+constexpr double kMinMetersPerDegree = GeoZoneGeometry::kEarthRadiusMeters * (std::numbers::pi / 180) * 0.99;
 
 void extend(double &minimum, double &maximum, double value)
 {
@@ -399,7 +405,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         }
         GeoZoneBox area = GeoZoneBox::fromPath(samples);
         if (area.isValid()) {
-            const double latitudeMargin = briefing.nearbyDistance / 111000.0;
+            const double latitudeMargin = briefing.nearbyDistance / kMinMetersPerDegree;
             const double latitude = (std::max)(std::abs(area.south()), std::abs(area.north()));
             const double longitudeMargin = latitudeMargin / (std::max)(std::cos(qDegreesToRadians((std::min)(latitude, 89.0))), 0.01);
             area = GeoZoneBox((std::max)(area.south() - latitudeMargin, -90.0), area.west() - longitudeMargin, (std::min)(area.north() + latitudeMargin, 90.0),

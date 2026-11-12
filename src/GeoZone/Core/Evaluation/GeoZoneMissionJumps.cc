@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneMissionJumps.h"
+#include "GeoZoneReturnModel.h"
 
 #include <algorithm>
 #include <iterator>
@@ -113,7 +114,7 @@ GeoZoneMissionJumps::Walk GeoZoneMissionJumps::walk(const QList<GeoZoneMissionIt
                 } else if (skippingJump >= 0) {
                     label = jumpLabel(skippingJump);
                 }
-                if (from.isValid() && to.isValid() && (from.distanceTo(to) > 0.01)) {
+                if (from.isValid() && to.isValid() && (from.distanceTo(to) > GeoZoneReturnModel::samePositionTolerance)) {
                     const double distance = from.distanceTo(to);
                     walk.steps.append(Step{ -1, lastCoordinateItem, i, label, distance });
                     walk.distance += distance;

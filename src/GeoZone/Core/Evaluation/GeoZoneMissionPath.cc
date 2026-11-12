@@ -334,12 +334,12 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
     for (Path &path : paths) {
         QList<GeoZone::Position> &positions = path.positions;
         for (qsizetype i = positions.count() - 2; i >= 0; i--) {
-            if (qIsNaN(positions[i].terrainAMSL) && (positions[i].coordinate.distanceTo(positions[i + 1].coordinate) < 0.01)) {
+            if (qIsNaN(positions[i].terrainAMSL) && (positions[i].coordinate.distanceTo(positions[i + 1].coordinate) < samePositionTolerance)) {
                 positions[i].terrainAMSL = positions[i + 1].terrainAMSL;
             }
         }
         for (qsizetype i = 1; i < positions.count(); i++) {
-            if (qIsNaN(positions[i].terrainAMSL) && (positions[i].coordinate.distanceTo(positions[i - 1].coordinate) < 0.01)) {
+            if (qIsNaN(positions[i].terrainAMSL) && (positions[i].coordinate.distanceTo(positions[i - 1].coordinate) < samePositionTolerance)) {
                 positions[i].terrainAMSL = positions[i - 1].terrainAMSL;
             }
         }

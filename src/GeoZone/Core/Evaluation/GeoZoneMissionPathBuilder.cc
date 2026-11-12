@@ -56,7 +56,7 @@ GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, co
     for (qsizetype k = coordinateItems.count() - 1; (k >= 0) && (returnItem >= 0); k--) {
         if (coordinateItems[k] < returnItem) {
             const int returnSegment = itemSegments[coordinateItems[k]].outgoing;
-            if ((returnSegment >= 0) && parameters.home.isValid() && (path._segments[returnSegment].to.distanceTo(parameters.home) < 1)) {
+            if ((returnSegment >= 0) && parameters.home.isValid() && (path._segments[returnSegment].to.distanceTo(parameters.home) < GeoZoneMissionPath::samePlaceTolerance)) {
                 path._returnSegment = returnSegment;
             }
             break;
@@ -74,7 +74,7 @@ GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, co
         leg.segment.to = toItem.item.entry.coordinate;
         leg.segment.itemIndex = leg.fromItemIndex;
         // Altitudes and terrain of the leg from its flight path segment
-        if (fromItem.outgoing && leg.segment.to.isValid() && (fromItem.outgoing->to.distanceTo(leg.segment.to) < 1)) {
+        if (fromItem.outgoing && leg.segment.to.isValid() && (fromItem.outgoing->to.distanceTo(leg.segment.to) < GeoZoneMissionPath::samePlaceTolerance)) {
             const GeoZoneMissionPath::Segment &known = *fromItem.outgoing;
             leg.segment.fromAltitudeAMSL = known.fromAltitudeAMSL;
             leg.segment.toAltitudeAMSL = known.toAltitudeAMSL;
@@ -196,10 +196,10 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPathBuilder::_coveragePaths(const 
             if (segment.terrainAMSL.isEmpty()) {
                 continue;
             }
-            if (segment.to.isValid() && (segment.to.distanceTo(coordinate) < 1)) {
+            if (segment.to.isValid() && (segment.to.distanceTo(coordinate) < GeoZoneMissionPath::samePlaceTolerance)) {
                 return segment.terrainAMSL.last();
             }
-            if (segment.from.isValid() && (segment.from.distanceTo(coordinate) < 1)) {
+            if (segment.from.isValid() && (segment.from.distanceTo(coordinate) < GeoZoneMissionPath::samePlaceTolerance)) {
                 return segment.terrainAMSL.first();
             }
         }
@@ -250,7 +250,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPathBuilder::_coveragePaths(const 
             if ((item.vtolTransition == VtolTransition::ToMulticopter) && (previous.count() >= 2)) {
                 // Slowing down to hover after the waypoint, along the leg to it
                 const QGeoCoordinate before = items[previous[previous.count() - 2]].item.exit.coordinate;
-                if (before.isValid() && (before.distanceTo(start) > 1)) {
+                if (before.isValid() && (before.distanceTo(start) > GeoZoneMissionPath::samePlaceTolerance)) {
                     overshootFrom = start;
                     azimuth = before.azimuthTo(start);
                     overshoot = transitionDistance;
@@ -258,7 +258,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPathBuilder::_coveragePaths(const 
             } else if ((item.vtolTransition == VtolTransition::ToFixedWing) && (next != coordinateItems.cend())) {
                 // Speeding up towards the next waypoint, past it when it is closer than the transition distance
                 const QGeoCoordinate end = items[*next].item.entry.coordinate;
-                if (end.isValid() && (start.distanceTo(end) > 1)) {
+                if (end.isValid() && (start.distanceTo(end) > GeoZoneMissionPath::samePlaceTolerance)) {
                     overshootFrom = end;
                     azimuth = start.azimuthTo(end);
                     overshoot = transitionDistance - start.distanceTo(end);
@@ -281,7 +281,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPathBuilder::_coveragePaths(const 
     start.sequenceNumber = path.sequenceNumber(returnItem);
     const GeoZoneReturnModel::Path returnPath = GeoZoneReturnModel::returnPath(parameters.returnParameters, parameters.destinations, start);
     const bool flies = std::any_of(returnPath.positions.cbegin(), returnPath.positions.cend(), [&start](const GeoZone::Position &position) {
-        return position.coordinate.distanceTo(start.position.coordinate) > 1;
+        return position.coordinate.distanceTo(start.position.coordinate) > GeoZoneMissionPath::samePlaceTolerance;
     });
     if (!returnPath.isValid() || !flies) {
         return paths;
@@ -317,8 +317,8 @@ void GeoZoneMissionPathBuilder::_appendContingencies(GeoZoneMissionPath &path, c
         if (!starts.isEmpty()) {
             const GeoZone::Position &last = starts.last().position;
             const double altitudeChange = std::abs(last.altitudeAMSL - start.position.altitudeAMSL);
-            const bool sameAltitude = (altitudeChange < 1) || (qIsNaN(last.altitudeAMSL) && qIsNaN(start.position.altitudeAMSL));
-            if (sameAltitude && (last.coordinate.distanceTo(start.position.coordinate) < 1)) {
+            const bool sameAltitude = (altitudeChange < GeoZoneMissionPath::samePlaceTolerance) || (qIsNaN(last.altitudeAMSL) && qIsNaN(start.position.altitudeAMSL));
+            if (sameAltitude && (last.coordinate.distanceTo(start.position.coordinate) < GeoZoneMissionPath::samePlaceTolerance)) {
                 return;
             }
         }
@@ -361,7 +361,7 @@ void GeoZoneMissionPathBuilder::_appendContingencies(GeoZoneMissionPath &path, c
 
     const auto appendContingency = [&path](const GeoZoneReturnModel::Path &returnPath, int start, const QString &label) {
         const bool flies = std::any_of(returnPath.positions.cbegin(), returnPath.positions.cend(), [&path, start](const GeoZone::Position &position) {
-            return position.coordinate.distanceTo(path._contingencyStarts[start].position.coordinate) > 1;
+            return position.coordinate.distanceTo(path._contingencyStarts[start].position.coordinate) > GeoZoneMissionPath::samePlaceTolerance;
         });
         if (!returnPath.isValid() || (!flies && returnPath.loiter.isEmpty())) {
             return;
@@ -408,7 +408,7 @@ QList<GeoZone::Position> GeoZoneMissionPathBuilder::_modelPositions(const QList<
     // The terrain known at the positions, like at the destinations, is kept
     for (GeoZone::Position &position : path) {
         for (const GeoZone::Position &known : positions) {
-            if (!qIsNaN(known.terrainAMSL) && (known.coordinate.distanceTo(position.coordinate) < 0.01)) {
+            if (!qIsNaN(known.terrainAMSL) && (known.coordinate.distanceTo(position.coordinate) < GeoZoneMissionPath::samePositionTolerance)) {
                 position.terrainAMSL = known.terrainAMSL;
                 break;
             }

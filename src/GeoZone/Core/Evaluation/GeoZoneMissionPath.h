@@ -141,6 +141,11 @@ public:
     /// @return The items of the starts as ranges, like "items 3–7, 12", the starts being indexes of contingencyStarts
     QString startsText(QList<int> starts) const;
 
+    /// Meters within which a position of the mission and one of its drawn flight path are the same place, like a
+    /// waypoint and the end of the segment drawn to it, horizontally or vertically
+    static constexpr double samePlaceTolerance = 1;
+    /// Meters within which positions are the same, so that a path needs only one of them
+    static constexpr double samePositionTolerance = GeoZoneReturnModel::samePositionTolerance;
     static constexpr double maxStepDistance = 1000;     ///< Meters between positions along long legs without terrain
     static constexpr int maxStepsPerSegment = 10000;
     static constexpr int circleVertexCount = GeoZoneReturnModel::circleVertexCount;    ///< Of loiter circles

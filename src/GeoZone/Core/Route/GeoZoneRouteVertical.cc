@@ -21,7 +21,6 @@ namespace {
 constexpr double kTolerance = 0.01;             ///< Meters altitudes may differ by, for rounding
 constexpr int kMaxVerticalRounds = 8;           ///< Climbs and descents raising the targets for the zones they enter
 constexpr int kMaxSamples = 2000;
-constexpr double kUnlimitedCeiling = 99999;     ///< Published as upper limit when a zone has no ceiling, see GeoZone
 
 using Failure = GeoZoneRouteSearch::Failure;
 
@@ -106,7 +105,7 @@ GeoZoneRouteSearch::Route GeoZoneRouteVertical::route(GeoZoneRouteSearch::Kind k
                     const GeoZone::VerticalReference reference = climb ? volume.upperReference : volume.lowerReference;
                     if (!climb && (qIsNaN(published) || ((reference == GeoZone::VerticalReference::Ground) && (published <= 0)))) {
                         route.failure = Failure::ReachesGround;
-                    } else if ((reference == GeoZone::VerticalReference::Ground) && !qIsNaN(published) && (published < kUnlimitedCeiling) &&
+                    } else if ((reference == GeoZone::VerticalReference::Ground) && !qIsNaN(published) && (published < GeoZoneVertical::unlimitedSentinel) &&
                                qIsNaN(position.terrainAMSL)) {
                         route.failure = Failure::TerrainUnknown;
                     } else {

@@ -298,7 +298,7 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
     for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
         const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
         const double length = segment.isValid() ? segment.from.distanceTo(segment.to) : 0;
-        if (length < 1) {
+        if (length < GeoZoneMissionPath::samePlaceTolerance) {
             continue;
         }
 
