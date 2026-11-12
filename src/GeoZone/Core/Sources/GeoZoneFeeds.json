@@ -79,7 +79,7 @@
                 "host": "ead-it.com"
             },
             "datasetLink": {
-                "pattern": "href=\"([^\"]*UAS_AREA_1/[^\"]*_FULL_(\\d{8})_XML\\.zip)\"",
+                "pattern": "href=\"([^\"]{0,300}UAS_AREA_1/[^\"]{0,300}_FULL_(\\d{8})_XML\\.zip)\"",
                 "dateFormat": "yyyyMMdd"
             },
             "airac": true,
@@ -123,7 +123,7 @@
                 "host": "luchtvaartindetoekomst.nl"
             },
             "datasetLink": {
-                "pattern": "<a\\b(?=[^>]*JSON)[^>]*href=\"(https://www\\.nieuwsienw\\.nl/api/documents/downloadfile\\?[^\"]+)\""
+                "pattern": "<a\\b(?=[^>]{0,1000}JSON)[^>]{0,1000}href=\"(https://www\\.nieuwsienw\\.nl/api/documents/downloadfile\\?[^\"]{1,1000})\""
             },
             "licence": "CC0 1.0",
             "attribution": "Ministerie van Infrastructuur en Waterstaat",
@@ -140,7 +140,7 @@
                 "host": "austrocontrol.at"
             },
             "datasetLink": {
-                "pattern": "href=\"([^\"]*/UASZones-ACG-\\d{8}-\\d{6}-full(?![^\"]*test)[^\"]*\\.(?:zip|json))\"(?:(?!</tr>)[\\s\\S])*?<td[^>]*>\\s*(?:<span[^>]*>)?\\s*(\\d{1,2}\\.\\d{1,2}\\.\\d{4})",
+                "pattern": "href=\"([^\"]{0,300}/UASZones-ACG-\\d{8}-\\d{6}-full(?![^\"]{0,300}test)[^\"]{0,300}\\.(?:zip|json))\"(?:[^<]{0,2000}+<(?!/tr>)[^>]{0,300}+>){0,40}?[^<]{0,2000}+<td[^>]{0,300}+>\\s{0,100}+(?:<span[^>]{0,300}+>)?\\s{0,100}+(\\d{1,2}\\.\\d{1,2}\\.\\d{4})",
                 "dateFormat": "d.M.yyyy"
             },
             "attribution": "Austro Control",

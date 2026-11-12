@@ -3226,4 +3226,82 @@ void GeoZoneParserTest::_testParseCacheValidation()
     QCOMPARE(GeoZoneStore::fileSuffix(QString()), QStringLiteral("json"));
 }
 
+void GeoZoneParserTest::_testDatasetLinkScope()
+{
+    const QDate today(2026, 11, 10);
+    const QString natsUrl = QStringLiteral("https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/");
+    const QByteArray natsPage = "<!DOCTYPE html><html><body><a href=\"https://elsewhere.example.com/first.json\">first</a>"
+                                "<a href=\"/export/UAS_AREA_1/EG_UAS_FR_DS_AREA1_FULL_20261029_XML.zip\">XML</a></body></html>";
+    const QString natsLink = QStringLiteral("https://nats-uk.ead-it.com/export/UAS_AREA_1/EG_UAS_FR_DS_AREA1_FULL_20261029_XML.zip");
+
+    // A catalogue adds a feed with a page of its own, whose pattern takes the first link of a page
+    GeoZoneFeedCatalogue::Catalogue catalogue = GeoZoneFeedCatalogue::builtIn();
+    GeoZoneFeedCatalogue::Catalogue overlay;
+    QString errorString;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(R"json({ "feeds": [
+        { "id": "acme", "name": "Acme", "url": "https://acme.example.com/zones", "datasetLink": { "pattern": "href=\"([^\"]{1,200})\"" } },
+        { "id": "plain", "name": "Plain", "url": "http://plain.example.com/zones", "datasetLink": { "pattern": "href=\"([^\"]{1,200})\"" } },
+        { "id": "slow", "name": "Slow", "url": "https://slow.example.com/zones", "datasetLink": { "pattern": "href=\"((?:x+)+)y\"" } }
+    ] })json", QStringLiteral("feeds.json"), overlay, errorString), qPrintable(errorString));
+    QCOMPARE(overlay.feeds.count(), 3);
+    GeoZoneFeedCatalogue::apply(catalogue, overlay);
+    GeoZoneProviders::setCatalogue(catalogue.feeds, catalogue.templates);
+    const auto restore = qScopeGuard([]() { GeoZoneProviders::resetCatalogue(); });
+    const QString acmeUrl = QStringLiteral("https://acme.example.com/zones");
+
+    // The pattern of a service only searches the page of that service: the page of NATS is searched with its own
+    // pattern, not with the one of the catalogue which comes first for another feed
+    QVERIFY(GeoZoneProviders::hasDatasetLink(natsUrl));
+    QCOMPARE(GeoZoneProviders::datasetLink(natsUrl, natsPage, today), natsLink);
+    QCOMPARE(GeoZoneProviders::datasetLink(acmeUrl, natsPage, today), QStringLiteral("https://elsewhere.example.com/first.json"));
+    // and the pages of other feeds, or other pages of the server of a service, aren't searched at all
+    for (const QString &other : { QStringLiteral("https://example.com/zones.json"), QStringLiteral("https://nats-uk.ead-it.com/cms-nats/other"),
+                                  QStringLiteral("https://acme.example.com/zones?x=1") }) {
+        QVERIFY2(!GeoZoneProviders::hasDatasetLink(other), qPrintable(other));
+        QCOMPARE(GeoZoneProviders::datasetLink(other, natsPage, today), QString());
+    }
+
+    // A link is only followed to an https address
+    const auto pageLinking = [](const QByteArray &link) { return QByteArray("<html><body><a href=\"" + link + "\">zones</a></body></html>"); };
+    QCOMPARE(GeoZoneProviders::datasetLink(acmeUrl, pageLinking("https://cdn.example.com/zones.json"), today, &errorString), QStringLiteral("https://cdn.example.com/zones.json"));
+    QCOMPARE(errorString, QString());
+    QCOMPARE(GeoZoneProviders::datasetLink(acmeUrl, pageLinking("data/zones.json?a=1&amp;b=2"), today, &errorString), QStringLiteral("https://acme.example.com/data/zones.json?a=1&b=2"));
+    // never down to http from a page read over https, to a file or to another kind of address
+    for (const QByteArray &link : { QByteArray("http://cdn.example.com/zones.json"), QByteArray("file:///etc/passwd"), QByteArray("ftp://cdn.example.com/zones.json"),
+                                    QByteArray("//"), QByteArray("javascript:alert(1)") }) {
+        QCOMPARE(GeoZoneProviders::datasetLink(acmeUrl, pageLinking(link), today, &errorString), QString());
+        QVERIFY2(errorString.contains(QStringLiteral("is not an https address")), link.constData());
+    }
+    // A page read over http, like one of a local server, may link to http, not to a file
+    const QString plainUrl = QStringLiteral("http://plain.example.com/zones");
+    QCOMPARE(GeoZoneProviders::datasetLink(plainUrl, pageLinking("http://cdn.example.com/zones.json"), today, &errorString), QStringLiteral("http://cdn.example.com/zones.json"));
+    QCOMPARE(GeoZoneProviders::datasetLink(plainUrl, pageLinking("file:///etc/passwd"), today, &errorString), QString());
+    QVERIFY(!errorString.isEmpty());
+
+    // Download pages are small: a larger document isn't searched
+    QByteArray largePage = pageLinking("https://cdn.example.com/zones.json");
+    largePage.append(QByteArray(GeoZoneProviders::maxLinkPageBytes, ' '));
+    QCOMPARE(GeoZoneProviders::datasetLink(acmeUrl, largePage, today, &errorString), QString());
+    QCOMPARE(errorString, QString());
+
+    // The patterns give up after a number of steps: one which backtracks without end finds nothing rather than hang
+    QCOMPARE(GeoZoneProviders::datasetLink(QStringLiteral("https://slow.example.com/zones"), pageLinking(QByteArray(40, 'x')), today), QString());
+    // The built-in patterns have no unbounded repetition, so a page they don't match costs a time in proportion to its
+    // size: every quantifier is a counted one, possessive or not
+    int patterns = 0;
+    const QString limit = QStringLiteral("(*LIMIT_MATCH=%1)").arg(GeoZoneProviders::linkMatchLimit);
+    for (const GeoZoneProviders::Service &service : GeoZoneFeedCatalogue::builtIn().feeds) {
+        QString pattern = service.datasetLinkPattern.pattern();
+        if (pattern.isEmpty()) {
+            continue;
+        }
+        patterns++;
+        QVERIFY2(service.datasetLinkPattern.isValid(), qPrintable(service.id));
+        QVERIFY2(pattern.startsWith(limit), qPrintable(pattern));
+        pattern = pattern.mid(limit.size()).remove(QStringLiteral("}+"));
+        QVERIFY2(!pattern.contains(QLatin1Char('*')) && !pattern.contains(QLatin1Char('+')), qPrintable(service.id + QStringLiteral(": ") + pattern));
+    }
+    QCOMPARE(patterns, 3);
+}
+
 GEOZONE_TEST(GeoZoneParserTest)

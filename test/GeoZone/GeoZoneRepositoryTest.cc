@@ -10,6 +10,7 @@
 #include "GeoZoneRepositoryTest.h"
 #include "GeoZoneAirac.h"
 #include "GeoZoneAwareness.h"
+#include "GeoZoneFeedCatalogue.h"
 #include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
@@ -2207,6 +2208,17 @@ void GeoZoneRepositoryTest::_testFeedDatasetLink()
         }
     });
     const QString url = QStringLiteral("http://127.0.0.1:%1/page").arg(server.serverPort());
+    // The page is the one of a feed of the catalogue, which links its datasets like NATS
+    GeoZoneFeedCatalogue::Catalogue catalogue = GeoZoneFeedCatalogue::builtIn();
+    GeoZoneFeedCatalogue::Catalogue overlay;
+    QString catalogueError;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(QStringLiteral(R"json({ "feeds": [ { "id": "test-page", "name": "Test page", "url": "%1", "format": "aixm", "airac": true,
+        "datasetLink": { "pattern": "href=\"([^\"]{0,300}UAS_AREA_1/[^\"]{0,300}_FULL_(\\d{8})_XML\\.zip)\"" } } ] })json").arg(url).toUtf8(),
+        QStringLiteral("feeds.json"), overlay, catalogueError), qPrintable(catalogueError));
+    QVERIFY2(overlay.warnings.isEmpty(), qPrintable(overlay.warnings.join(QLatin1Char('\n'))));
+    GeoZoneFeedCatalogue::apply(catalogue, overlay);
+    GeoZoneProviders::setCatalogue(catalogue.feeds, catalogue.templates);
+    const auto restoreCatalogue = qScopeGuard([]() { GeoZoneProviders::resetCatalogue(); });
     const auto lastRequest = [&requests](const QByteArray &path) {
         for (qsizetype i = requests.count() - 1; i >= 0; i--) {
             if (requests[i].split(' ').value(1) == path) {

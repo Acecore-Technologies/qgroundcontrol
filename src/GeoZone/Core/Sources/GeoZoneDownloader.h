@@ -79,7 +79,8 @@ public:
     ~GeoZoneDownloader() override;
 
     /// Starts a download. The callback is called once, after the call returned, unless the downloader is destroyed
-    /// first. A download whose file can't be created in directory() fails without a request.
+    /// first. A download whose file can't be created in directory(), or of another address than an http or https
+    /// one, fails without a request.
     /// @param etag, lastModified Validators of the previous download, empty to download unconditionally
     /// @param tag Identifies the downloads abort() cancels
     void get(const QString &url, const QString &etag, const QString &lastModified, Callback callback, const QString &tag = QString());

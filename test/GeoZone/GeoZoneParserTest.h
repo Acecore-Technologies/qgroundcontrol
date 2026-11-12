@@ -71,4 +71,5 @@ private slots:
     void _testFlightLevelQnh();
     void _testProviders();
     void _testFeedCatalogue();
+    void _testDatasetLinkScope();
 };

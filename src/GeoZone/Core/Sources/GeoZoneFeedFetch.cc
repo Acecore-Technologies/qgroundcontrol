@@ -193,9 +193,19 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
         return;
     }
 
-    // Pages linking to the current dataset, like the AIRAC cycles of NATS, are followed. Pages are small, datasets aren't read here.
-    const QByteArray page = GeoZoneDownloader::readFile(download.filePath, maxPageBytes);
-    const QString linkedUrl = GeoZoneProviders::datasetLink(_requestUrl, page, GeoZoneEnvironment::currentDateTimeUtc().date());
+    // The pages of the services linking to their current dataset, like the AIRAC cycles of NATS, are followed. Pages
+    // are small, datasets aren't read here.
+    QString linkedUrl;
+    if (GeoZoneProviders::hasDatasetLink(_requestUrl)) {
+        QString linkError;
+        const QByteArray page = GeoZoneDownloader::readFile(download.filePath, GeoZoneProviders::maxLinkPageBytes);
+        linkedUrl = GeoZoneProviders::datasetLink(_requestUrl, page, GeoZoneEnvironment::currentDateTimeUtc().date(), &linkError);
+        if (!linkError.isEmpty()) {
+            (void) QFile::remove(download.filePath);
+            _finish(Result::Status::Failed, linkError);
+            return;
+        }
+    }
     if (linkedUrl.isEmpty()) {
         _addMaxAge(maxAgeSecs);
         _documentReceived(download);

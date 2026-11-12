@@ -11,7 +11,9 @@
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFeedCatalogue.h"
 #include "GeoZoneFormat.h"
+#include "GeoZoneSource.h"
 
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QReadWriteLock>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -315,57 +317,98 @@ const GeoZoneProviders::Service *GeoZoneProviders::_serviceOf(const QList<Servic
     return nullptr;
 }
 
-QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data, const QDate &today)
+QRegularExpression GeoZoneProviders::linkPattern(const QString &pattern)
 {
+    return QRegularExpression(QStringLiteral("(*LIMIT_MATCH=%1)").arg(linkMatchLimit) + pattern);
+}
+
+namespace {
+
+/// @return The service whose download page the URL is, nullptr for other URLs
+const GeoZoneProviders::Service *linkingService(const QList<GeoZoneProviders::Service> &services, const QString &url)
+{
+    for (const GeoZoneProviders::Service &service : services) {
+        if (!service.feedUrl.isEmpty() && (service.feedUrl == url) && service.datasetLinkPattern.isValid() && !service.datasetLinkPattern.pattern().isEmpty()) {
+            return &service;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+bool GeoZoneProviders::hasDatasetLink(const QString &url)
+{
+    const QList<Service> services = _services();
+    return linkingService(services, url) != nullptr;
+}
+
+QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data, const QDate &today, QString *errorString)
+{
+    if (errorString) {
+        errorString->clear();
+    }
+    // The pattern of a service is for its own page: those of a catalogue never run on the pages of other feeds
+    const QList<Service> services = _services();
+    const Service *const service = linkingService(services, url);
+    if (!service || (data.size() > maxLinkPageBytes)) {
+        return QString();
+    }
     const QByteArray start = data.left(1024).trimmed().toLower();
     if (!start.startsWith("<!doctype html") && !start.startsWith("<html")) {
         return QString();
     }
 
     const QString page = QString::fromUtf8(data);
-    for (const Service &service : _services()) {
-        if (!service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {
-            continue;
+    QString link;
+    if (service->datasetLinkPattern.captureCount() < 2) {
+        const QRegularExpressionMatch match = service->datasetLinkPattern.match(page);
+        if (match.hasMatch()) {
+            link = match.captured(1);
         }
-        // Links in HTML attributes escape their ampersands
-        const auto resolved = [&url](const QString &link) {
-            return QUrl(url).resolved(QUrl(QString(link).replace(QStringLiteral("&amp;"), QStringLiteral("&")))).toString();
-        };
-        if (service.datasetLinkPattern.captureCount() < 2) {
-            const QRegularExpressionMatch match = service.datasetLinkPattern.match(page);
-            if (match.hasMatch() && !match.captured(1).isEmpty()) {
-                return resolved(match.captured(1));
-            }
-            continue;
-        }
-        QString link;
+    } else {
         QDate linkDate;
         QString earliestLink;
         QDate earliestDate;
-        QRegularExpressionMatchIterator it = service.datasetLinkPattern.globalMatch(page);
+        QElapsedTimer timer;
+        timer.start();
+        QRegularExpressionMatchIterator it = service->datasetLinkPattern.globalMatch(page);
         while (it.hasNext()) {
             const QRegularExpressionMatch match = it.next();
-            const QDate date = QDate::fromString(match.captured(2), service.datasetDateFormat);
-            if (!date.isValid()) {
-                continue;
-            }
-            if ((date <= today) && (!linkDate.isValid() || (date > linkDate))) {
+            const QDate date = QDate::fromString(match.captured(2), service->datasetDateFormat);
+            if (date.isValid() && (date <= today) && (!linkDate.isValid() || (date > linkDate))) {
                 link = match.captured(1);
                 linkDate = date;
             }
-            if (!earliestDate.isValid() || (date < earliestDate)) {
+            if (date.isValid() && (!earliestDate.isValid() || (date < earliestDate))) {
                 earliestLink = match.captured(1);
                 earliestDate = date;
+            }
+            if (timer.hasExpired(linkMatchBudgetMSecs)) {
+                qCWarning(GeoZoneSourceLog) << "The search of the download page of" << service->id << "for its datasets took too long and was cut short";
+                break;
             }
         }
         if (link.isEmpty()) {
             link = earliestLink;
         }
-        if (!link.isEmpty()) {
-            return resolved(link);
-        }
     }
-    return QString();
+    if (link.isEmpty()) {
+        return QString();
+    }
+
+    // Links in HTML attributes escape their ampersands
+    const QUrl pageUrl(url);
+    const QUrl target = pageUrl.resolved(QUrl(link.replace(QStringLiteral("&amp;"), QStringLiteral("&"))));
+    const QString scheme = target.scheme().toLower();
+    const bool secure = (scheme == QStringLiteral("https")) || ((scheme == QStringLiteral("http")) && (pageUrl.scheme().toLower() == QStringLiteral("http")));
+    if (!target.isValid() || target.host().isEmpty() || !secure) {
+        if (errorString) {
+            *errorString = tr("The page of the feed links its dataset at %1, which is not an https address.").arg(target.toString());
+        }
+        return QString();
+    }
+    return target.toString();
 }
 
 QDate GeoZoneProviders::airacDatasetDate(const QString &datasetUrl)

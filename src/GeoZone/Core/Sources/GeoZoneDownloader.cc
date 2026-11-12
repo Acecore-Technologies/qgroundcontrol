@@ -77,6 +77,21 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
 void GeoZoneDownloader::get(const QString &url, const QString &etag, const QString &lastModified, Callback callback, const QString &tag,
                             const Options &options)
 {
+    // Failures before the request are reported like the others, once the caller is done
+    const auto failLater = [this, &url, &options](Callback failed, const QString &errorString) {
+        Result result;
+        result.errorString = errorString;
+        result.finalUrl = redacted(url, options.secrets);
+        (void) QMetaObject::invokeMethod(this, [failed = std::move(failed), result]() { failed(result); }, Qt::QueuedConnection);
+    };
+    // Only web servers are asked: a link or an address from a document must not read a local file
+    const QUrl requested(url);
+    const QString scheme = requested.scheme().toLower();
+    if (!requested.isValid() || ((scheme != QStringLiteral("https")) && (scheme != QStringLiteral("http"))) || requested.host().isEmpty()) {
+        failLater(std::move(callback), tr("%1 is not an http or https address.").arg(redacted(url, options.secrets)));
+        return;
+    }
+
     Download download;
     download.url = url;
     download.tag = tag;
@@ -87,12 +102,8 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
     (void) QDir().mkpath(_directory);
     download.file = QSharedPointer<QFile>::create(QDir(_directory).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".part")));
     if (!download.file->open(QIODevice::WriteOnly)) {
-        // Nothing is requested: without its file, the response would pile up in memory. Reported like the other
-        // failures, once the caller is done.
-        Result result;
-        result.errorString = tr("The download could not be saved: %1").arg(download.file->errorString());
-        result.finalUrl = redacted(url, options.secrets);
-        (void) QMetaObject::invokeMethod(this, [callback = std::move(download.callback), result]() { callback(result); }, Qt::QueuedConnection);
+        // Nothing is requested: without its file, the response would pile up in memory
+        failLater(std::move(download.callback), tr("The download could not be saved: %1").arg(download.file->errorString()));
         return;
     }
     download.hash = QSharedPointer<QCryptographicHash>::create(QCryptographicHash::Sha256);

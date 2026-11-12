@@ -170,12 +170,13 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
 
         const QJsonObject datasetLink = entry.value(QStringLiteral("datasetLink")).toObject();
         if (problem.isEmpty() && !datasetLink.isEmpty()) {
-            service.datasetLinkPattern = QRegularExpression(_string(datasetLink, "pattern"));
+            const QString pattern = _string(datasetLink, "pattern");
+            service.datasetLinkPattern = GeoZoneProviders::linkPattern(pattern);
             if (const QString dateFormat = _string(datasetLink, "dateFormat"); !dateFormat.isEmpty()) {
                 service.datasetDateFormat = dateFormat;
             }
-            if (service.datasetLinkPattern.pattern().isEmpty() || !service.datasetLinkPattern.isValid()) {
-                problem = tr("Its datasetLink pattern is invalid: %1.").arg(service.datasetLinkPattern.pattern().isEmpty() ? tr("empty") : service.datasetLinkPattern.errorString());
+            if (pattern.isEmpty() || !service.datasetLinkPattern.isValid()) {
+                problem = tr("Its datasetLink pattern is invalid: %1.").arg(pattern.isEmpty() ? tr("empty") : service.datasetLinkPattern.errorString());
             } else if (service.datasetLinkPattern.captureCount() < 1) {
                 problem = tr("Its datasetLink pattern doesn't capture the link.");
             }

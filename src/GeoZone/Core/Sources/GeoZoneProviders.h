@@ -117,9 +117,22 @@ public:
     /// @return Service::name of the service whose feed or area URL this is, empty for other URLs
     static QString serviceName(const QString &url);
 
+    /// @return true when the URL is the download page of a service linking its current dataset, see datasetLink
+    static bool hasDatasetLink(const QString &url);
     /// @return URL of the current dataset linked from a download page, like the AIRAC datasets of NATS, or an empty
     ///         string when the data isn't such a page. The latest dataset effective today or earlier is chosen.
-    static QString datasetLink(const QString &url, const QByteArray &data, const QDate &today);
+    ///         Only the page of a service is searched, with the pattern of that service, when it is no larger than
+    ///         maxLinkPageBytes. A link is only followed to an https address, or to an http address from a page which
+    ///         was itself read over http: never to a file or to a less secure server.
+    /// @param url Feed URL of the service, see Service::feedUrl
+    /// @param errorString Set to why the link found isn't followed, empty otherwise
+    static QString datasetLink(const QString &url, const QByteArray &data, const QDate &today, QString *errorString = nullptr);
+    /// @return The pattern of the dataset links of a catalogue entry, see Service::datasetLinkPattern, which gives up
+    ///         after linkMatchLimit steps rather than search a page for seconds
+    static QRegularExpression linkPattern(const QString &pattern);
+    static constexpr qint64 maxLinkPageBytes = 1024 * 1024;     ///< Download pages are small, larger ones aren't searched for links
+    static constexpr int linkMatchLimit = 1000000;              ///< Steps of a match of a dataset link pattern, a tenth of the default
+    static constexpr int linkMatchBudgetMSecs = 250;            ///< Longest search of a page for its dated links
     /// @return Effective date of a dataset linked from a download page (see datasetLink) when its service publishes
     ///         its datasets by AIRAC cycle, invalid otherwise
     static QDate airacDatasetDate(const QString &datasetUrl);

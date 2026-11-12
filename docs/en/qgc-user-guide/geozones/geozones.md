@@ -148,7 +148,7 @@ A complete example, which adds a feed, a service serving its zones by area, a fe
             "name": "Acme AIRAC datasets",
             "url": "https://zones.acme.example/datasets/",
             "format": "ed269",
-            "datasetLink": { "pattern": "href=\"([^\"]*_(\\d{8})\\.zip)\"", "dateFormat": "yyyyMMdd" },
+            "datasetLink": { "pattern": "href=\"([^\"]{0,300}_(\\d{8})\\.zip)\"", "dateFormat": "yyyyMMdd" },
             "airac": true
         },
         {
@@ -192,7 +192,7 @@ The members of a feed:
 | `coverage` | With `areaUrl` | `[west, south, east, north]` in degrees: where the service has zones. The whole world when left out. |
 | `format` | | `ed269`, `ed318`, `aixm`, `dipul`, `france-uas`, `faa-tfr`, `faa-airspace` or `openaip`. Left out, the format is recognised from the content. Give it when responses can be empty, like those of a WFS for an area without zones. |
 | `match` | | `{ "host": ..., "path": ... }`: the addresses of the service, when they differ from the host of `url` or `areaUrl`, like several services on one server told apart by their path. Addresses of the service get its format. |
-| `datasetLink` | | For a `url` which is a download page: `pattern`, a regular expression whose first capture is the link to a dataset and whose second capture, if any, is the date it takes effect in `dateFormat` (`yyyyMMdd` by default, like `d.M.yyyy` for 25.10.2026). The latest dataset in effect is downloaded, or the first link found without a date. Write `\\` for a backslash in JSON. |
+| `datasetLink` | | For a `url` which is a download page: `pattern`, a regular expression whose first capture is the link to a dataset and whose second capture, if any, is the date it takes effect in `dateFormat` (`yyyyMMdd` by default, like `d.M.yyyy` for 25.10.2026). The latest dataset in effect is downloaded, or the first link found without a date. Write `\\` for a backslash in JSON. The pattern only searches the page at the `url` of its own feed (pages up to 1 MB), never the pages of other feeds, and the link is only followed to an `https://` address (to an `http://` one only from a page which was itself read over `http://`), never to a file. Prefer counted repetitions like `[^\"]{0,300}` to `*` and `+`: a search which takes too many steps is given up. |
 | `airac` | | `true` when the datasets of `datasetLink` take effect by AIRAC cycle: the source shows the cycle and is outdated when the next one starts. |
 | `refreshHours` | | Check the feed at least this often (hours, can be fractional, at least 5 minutes), when the setting's interval is longer. |
 | `live` | | `true` for short-lived restrictions: refreshed with **Live restrictions refresh interval** and outdated after 2 hours. |
