@@ -14,6 +14,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
 #include <QtCore/QSettings>
 
@@ -150,6 +151,15 @@ GeoZoneSourceIndex::Entry GeoZoneSourceIndex::entryFromJson(const QJsonObject &o
         entry.area = QGeoRectangle(QGeoCoordinate(area[3].toDouble(), area[0].toDouble()), QGeoCoordinate(area[1].toDouble(), area[2].toDouble()));
     }
     return entry;
+}
+
+bool GeoZoneSourceIndex::entryValid(const Entry &entry)
+{
+    // The name of a file of the store, nothing which leads elsewhere on any platform
+    static const QRegularExpression pathRegExp(QStringLiteral("[/\\\\:]"));
+    const QString &fileName = entry.fileName;
+    const bool bareName = !fileName.isEmpty() && (fileName != QStringLiteral(".")) && (fileName != QStringLiteral("..")) && !fileName.contains(pathRegExp);
+    return !entry.key.isEmpty() && bareName && (entry.url.isEmpty() || (entry.url == entry.key));
 }
 
 QJsonObject GeoZoneSourceIndex::entryToJson(const Entry &entry)

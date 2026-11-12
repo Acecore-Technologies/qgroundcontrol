@@ -421,6 +421,80 @@ void GeoZoneRepositoryTest::_testInterruptedCopiesRemoved()
     manager.repository()->clear();
 }
 
+void GeoZoneRepositoryTest::_testIndexEntriesValidated_data()
+{
+    QTest::addColumn<QString>("member");
+    QTest::addColumn<QString>("value");     // {outside} is the folder next to the store, {stored} the stored copy
+    QTest::addColumn<bool>("loaded");
+
+    QTest::newRow("as written") << QStringLiteral("file") << QStringLiteral("{stored}") << true;
+    QTest::newRow("absolute path") << QStringLiteral("file") << QStringLiteral("{outside}/victim.json") << false;
+    QTest::newRow("parent folder") << QStringLiteral("file") << QStringLiteral("../outside/victim.json") << false;
+    QTest::newRow("subfolder") << QStringLiteral("file") << QStringLiteral("operator/victim.json") << false;
+    QTest::newRow("windows path") << QStringLiteral("file") << QStringLiteral("..\\outside\\victim.json") << false;
+    QTest::newRow("drive") << QStringLiteral("file") << QStringLiteral("C:victim.json") << false;
+    QTest::newRow("parent") << QStringLiteral("file") << QStringLiteral("..") << false;
+    // Read, like the copies of profiles made by hand, and left when its source is removed
+    QTest::newRow("another file of the folder") << QStringLiteral("file") << QStringLiteral("notes.json") << true;
+    QTest::newRow("no file") << QStringLiteral("file") << QString() << false;
+    QTest::newRow("no key") << QStringLiteral("key") << QString() << false;
+    QTest::newRow("url of another source") << QStringLiteral("url") << QStringLiteral("https://elsewhere.example.com/zones") << false;
+}
+
+void GeoZoneRepositoryTest::_testIndexEntriesValidated()
+{
+    QFETCH(QString, member);
+    QFETCH(QString, value);
+    QFETCH(bool, loaded);
+
+    // A source stored by the application, and files which aren't its copies: next to the store, in a subfolder of it
+    // and in the store itself
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir root(dir.path());
+    QVERIFY(root.mkpath(QStringLiteral("store/operator")) && root.mkpath(QStringLiteral("outside")));
+    const QString storePath = root.filePath(QStringLiteral("store"));
+    const QString sourceFile = root.filePath(QStringLiteral("zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), sourceFile));
+    const QStringList victims = { root.filePath(QStringLiteral("outside/victim.json")), root.filePath(QStringLiteral("store/operator/victim.json")),
+                                  root.filePath(QStringLiteral("store/notes.json")) };
+    for (const QString &victim : victims) {
+        QVERIFY(QFile::copy(sourceFile, victim));
+    }
+    QString errorString;
+    QString storedFile;
+    {
+        GeoZoneManager manager(storePath);
+        QVERIFY2(manager.repository()->loadFile(sourceFile, errorString), qPrintable(errorString));
+        storedFile = manager.repository()->storedFileName(GeoZoneLoader::fileKey(sourceFile));
+    }
+
+    // The index as someone else may have written it
+    QFile indexFile(QDir(storePath).filePath(QStringLiteral("sources.json")));
+    QVERIFY(indexFile.open(QIODevice::ReadOnly));
+    QJsonObject index = QJsonDocument::fromJson(indexFile.readAll()).object();
+    indexFile.close();
+    QJsonArray sources = index.value(QStringLiteral("sources")).toArray();
+    QCOMPARE(sources.count(), 1);
+    QJsonObject entry = sources[0].toObject();
+    entry.insert(member, QString(value).replace(QStringLiteral("{outside}"), root.filePath(QStringLiteral("outside"))).replace(QStringLiteral("{stored}"), storedFile));
+    index.insert(QStringLiteral("sources"), QJsonArray{ entry });
+    QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(indexFile.write(QJsonDocument(index).toJson()) > 0);
+    indexFile.close();
+
+    // Its entry is only read when it names a file of the store, which is only removed with the source when the store
+    // named it
+    GeoZoneManager manager(storePath);
+    manager.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+    QCOMPARE(manager.sources()->count(), loaded ? 1 : 0);
+    QCOMPARE(manager.zoneCount(), loaded ? 3 : 0);
+    manager.repository()->clear();
+    for (const QString &victim : victims) {
+        QVERIFY2(QFile::exists(victim), qPrintable(victim));
+    }
+}
+
 void GeoZoneRepositoryTest::_testManagerBackgroundLoad()
 {
     const ScopedEnvironment environment;

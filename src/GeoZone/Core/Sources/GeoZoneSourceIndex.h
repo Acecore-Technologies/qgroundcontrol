@@ -61,6 +61,12 @@ public:
 
     /// @return The entry of a source in the index, also the fields restoring a source in a pack, see GeoZonePack
     static Entry entryFromJson(const QJsonObject &object);
+    /// @return true for an entry the index can have written: with a key, the bare name of a file of the store
+    ///         rather than a path, which may lead elsewhere, and, for feeds, the URL which is their key and which
+    ///         their service was checked against. The copy of an entry is read, so an index edited or synced from
+    ///         elsewhere isn't trusted with other folders; removed with its source it only is when the store named it,
+    ///         see GeoZoneStore::removeFile.
+    static bool entryValid(const Entry &entry);
     static QJsonObject entryToJson(const Entry &entry);
 
     /// @return Index entries in source order. Without an index, the single file kept by earlier versions is

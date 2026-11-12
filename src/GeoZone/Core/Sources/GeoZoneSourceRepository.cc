@@ -750,8 +750,13 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
 
     QList<GeoZoneLoader::Job> jobs;
     for (const GeoZoneSourceIndex::Entry &entry : index.entries) {
+        // Before its file is read, and later removed with the source
+        if (!GeoZoneSourceIndex::entryValid(entry)) {
+            qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source with an invalid entry" << entry.key << entry.url << entry.fileName;
+            continue;
+        }
         GeoZoneLoader::Job job = GeoZoneLoader::storedJob(entry, _store.path(entry.fileName));
-        if (job.key.isEmpty() || entry.fileName.isEmpty() || !QFile::exists(job.sourcePath) || source(job.key)) {
+        if (!QFile::exists(job.sourcePath) || source(job.key)) {
             qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source" << job.key << entry.fileName;
             continue;
         }
