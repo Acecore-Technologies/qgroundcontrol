@@ -1047,10 +1047,21 @@ void GeoZoneRepositoryTest::_testFeedCatalogueOverlays()
         QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
 
         // An invalid download is ignored, its last valid copy stays in use
+        const QByteArray validCatalogue = server.files.value("/catalogue");
         server.files.insert("/catalogue", R"({ "version": 9, "feeds": [] })");
         server.etags.insert("/catalogue", "\"c2\"");
         catalogue->check(true);
         QTRY_VERIFY(catalogue->warning().contains(QStringLiteral("is ignored, its previous copy is used")));
+        QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
+        // until the server confirms that copy again: nothing is ignored any more
+        server.files.insert("/catalogue", validCatalogue);
+        server.etags.insert("/catalogue", "\"c1\"");
+        const QDateTime checkedAt = catalogue->checkedAt();
+        environment.addSecs(60);
+        catalogue->check(true);
+        QTRY_VERIFY(catalogue->checkedAt() > checkedAt);
+        QVERIFY(TestFeedServer::header(server.requests.constLast(), "if-none-match").contains("c1"));
+        QVERIFY2(!catalogue->warning().contains(QStringLiteral("is ignored, its previous copy is used")), qPrintable(catalogue->warning()));
         QVERIFY(presetNames().contains(QStringLiteral("Maker zones")));
     }
     // The built-in catalogue is used again once the repository is gone

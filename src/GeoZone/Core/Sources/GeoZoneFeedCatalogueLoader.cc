@@ -270,6 +270,8 @@ void GeoZoneFeedCatalogueLoader::_downloaded(const GeoZoneDownloader::Result &re
     _retryAt = QDateTime();
     _downloadError.clear();
     if (result.status == GeoZoneDownloader::Result::Status::NotModified) {
+        // The server confirmed the copy in use: a catalogue it sent meanwhile and which was ignored is gone
+        _urlError.clear();
         _cache.checkedAt = now;
         _writeCache();
         emit changed();
