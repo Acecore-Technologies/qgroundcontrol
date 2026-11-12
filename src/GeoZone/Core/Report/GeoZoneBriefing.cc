@@ -182,7 +182,8 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
         result.verticalLimits = GeoZoneText::verticalLimits(zone->data());
         result.schedule = zone->data().applicability.isEmpty() ? QString() : GeoZoneSchedule::text(zone->data().applicability);
         result.activePeriods = activePeriods(zone, windowStart, windowEnd);
-        result.activeDuringFlight = start.isValid() ? !result.activePeriods.isEmpty() : zone->active();
+        // Without a planned start, by the schedule now: GeoZone::active may be a minute old
+        result.activeDuringFlight = start.isValid() ? !result.activePeriods.isEmpty() : zone->isActiveAt(now);
         result.authorities = zone->data().authorities;
         result.message = zone->message();
         result.conditions = zone->restrictionConditions();

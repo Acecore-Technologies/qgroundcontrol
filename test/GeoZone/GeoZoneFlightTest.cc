@@ -1617,6 +1617,96 @@ void GeoZoneFlightTest::_testPreflightCheckUpdates()
     check.setMonitor(nullptr);
 }
 
+void GeoZoneFlightTest::_testChecksFollowSchedules()
+{
+    using Check = GeoZonePreflightCheck;
+    // A prohibited zone and, north of it, a zone limited in flight levels, both from 12:00 to 13:00 UTC and loaded
+    // an hour before
+    ScopedEnvironment environment;
+    const QDate day(2027, 3, 1);
+    environment.setNow(_utc(day, QTime(11, 0)));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    Fact *const qnh = GeoZoneSettings::instance()->qnhHPa();
+    const auto restore = qScopeGuard([qnh]() { qnh->setRawValue(qnh->rawDefaultValue()); });
+    qnh->setRawValue(qnh->rawDefaultValue());
+    const QGeoCoordinate center(47, 8);
+    const QJsonArray noon{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-03-01T12:00:00Z" }, { "endDateTime", "2027-03-01T13:00:00Z" } } };
+    QJsonObject prohibited = _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), center, 300);
+    prohibited[QStringLiteral("applicability")] = noon;
+    QJsonObject levels = _withLimits(_circleFeature(QStringLiteral("L"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(800, 0), 200),
+                                     400, QStringLiteral("STD"), 700, QStringLiteral("STD"));
+    levels[QStringLiteral("applicability")] = noon;
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ prohibited, levels }), errorString), qPrintable(errorString));
+    const GeoZone *const zone = findZone(manager, QStringLiteral("S"));
+    const GeoZone *const levelZone = findZone(manager, QStringLiteral("L"));
+    QVERIFY(zone && levelZone);
+    QVERIFY(!zone->active());
+
+    // A mission west to east through the prohibited zone at 500 m above mean sea level, and a guided command along it
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    QList<GeoZone::Position> path;
+    for (const QGeoCoordinate &coordinate : { center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+        QVERIFY(item);
+        item->setAltitudeMode(QGroundControlQmlGlobal::AltitudeModeAbsolute);
+        item->altitude()->setRawValue(500);
+        path.append(GeoZone::Position{ coordinate, 500 });
+    }
+    GeoZoneMonitor monitor(&manager);
+    const GeoZoneGuidedCheck *const guided = monitor.guidedCheck();
+    Check check(&manager);
+    check.setPlanController(&masterController);
+
+    // An hour before the zones begin neither a guided command nor the mission started now enters them, and no flight
+    // level limit applies. Without a planned start the mission may be flown at any time, so its zones count.
+    QVERIFY2(guided->pathWarning(path).isEmpty(), qPrintable(guided->pathWarning(path)));
+    QVERIFY2(guided->startWarning(missionController).isEmpty(), qPrintable(guided->startWarning(missionController)));
+    QTRY_COMPARE(check.mission().state, Check::Failed);
+    QCOMPARE(check.qnh().state, Check::NotApplicable);
+    // The upload of the mission asks about them
+    const auto uploadAsksAboutZone = [&check]() { return check.missionCheck()->uploadReasons().join(QChar(u'\n')).contains(QStringLiteral("prohibited geozones: S.")); };
+    QVERIFY(uploadAsksAboutZone());
+
+    // The zones begin. The manager only evaluates the schedules of the zones away from the vehicles once a minute: the
+    // checks of what the pilot does now don't wait for it.
+    environment.setNow(_utc(day, QTime(12, 0, 1)));
+    QVERIFY(!zone->active());
+    QVERIFY2(guided->pathWarning(path).contains(QStringLiteral("S (Prohibited)")), qPrintable(guided->pathWarning(path)));
+    QVERIFY2(guided->startWarning(missionController).contains(QStringLiteral("S (Prohibited)")), qPrintable(guided->startWarning(missionController)));
+    QVERIFY(!zone->active());
+    // The checklist follows the zones becoming active, here the prohibited one only, with the schedules of the others
+    QCOMPARE(check.qnh().state, Check::NotApplicable);
+    QVERIFY(manager.updateActive(GeoZoneBox(QGeoRectangle(center.atDistanceAndAzimuth(100, 315), center.atDistanceAndAzimuth(100, 135)))));
+    QVERIFY(zone->active());
+    QVERIFY(!levelZone->active());
+    QTRY_COMPARE(check.qnh().state, Check::Warning);
+    QVERIFY2(check.qnh().text.startsWith(QStringLiteral("Flight level limits of L")), qPrintable(check.qnh().text));
+
+    // The zones ended, beyond the tolerance of the times of a mission: they no longer count, whatever their state
+    environment.setNow(_utc(day, QTime(13, 30)));
+    QVERIFY(zone->active());
+    QVERIFY2(guided->pathWarning(path).isEmpty(), qPrintable(guided->pathWarning(path)));
+    QVERIFY2(guided->startWarning(missionController).isEmpty(), qPrintable(guided->startWarning(missionController)));
+    check.update();
+    QCOMPARE(check.qnh().state, Check::NotApplicable);
+
+    // With a planned start the mission is checked for the time of the flight, whatever the zones are now
+    QCOMPARE(check.mission().state, Check::Failed);
+    manager.planning()->setPlannedStart(_utc(day, QTime(15, 0)));
+    QTRY_COMPARE(check.mission().state, Check::Passed);
+    QVERIFY(!uploadAsksAboutZone());
+    manager.planning()->setPlannedStart(_utc(day, QTime(12, 10)));
+    QTRY_COMPARE(check.mission().state, Check::Failed);
+    QVERIFY(uploadAsksAboutZone());
+    check.setPlanController(nullptr);
+}
+
 void GeoZoneFlightTest::_testArduPilotTakeoff()
 {
     const ScopedEnvironment environment;

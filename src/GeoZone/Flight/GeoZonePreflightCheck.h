@@ -157,8 +157,8 @@ public:
     };
     static Item permitItem(const QList<PermitZone> &zones);
 
-    /// @return Zones with a flight level limit within qnhVerticalMargin of the altitudes of the mission path, any when
-    ///         they are unknown, and within qnhHorizontalMargin of it
+    /// @return Zones active now with a flight level limit within qnhVerticalMargin of the altitudes of the mission
+    ///         path, any when they are unknown, and within qnhHorizontalMargin of it
     static QList<const GeoZone*> flightLevelZonesNear(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path);
 
 signals:

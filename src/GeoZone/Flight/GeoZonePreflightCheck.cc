@@ -81,6 +81,8 @@ GeoZonePreflightCheck::GeoZonePreflightCheck(GeoZoneManager *manager, QObject *p
     (void) connect(_missionCheck, &GeoZoneMissionCheck::zonesChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZonePreflightCheck::_forgetZones);
+    // The QNH item is about the zones active now
+    (void) connect(_manager, &GeoZoneManager::activeZonesChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     // The text of the mission item names the planned start
     (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     (void) connect(_manager->repository(), &GeoZoneSourceRepository::validityWarningChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
@@ -489,7 +491,8 @@ QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneC
     const GeoZone::Position center{ box.center(), qQNaN(), qQNaN() };
 
     QList<const GeoZone*> zones;
-    for (const GeoZone *zone : catalog.zonesInArea(area, GeoZonePolicy::alerts())) {
+    // Active now by their schedules: GeoZone::active of zones away from the vehicles may be a minute old
+    for (const GeoZone *zone : catalog.zonesInArea(area, GeoZonePolicy::alerts().activeDuring(GeoZoneEnvironment::currentDateTimeUtc()))) {
         const QList<GeoZone::Volume> &volumes = zone->data().volumes;
         const bool nearAltitudes = std::any_of(volumes.cbegin(), volumes.cend(), [&](const GeoZone::Volume &volume) {
             for (const GeoZoneVertical::Limit side : { GeoZoneVertical::Limit::Lower, GeoZoneVertical::Limit::Upper }) {

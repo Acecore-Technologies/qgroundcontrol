@@ -834,6 +834,17 @@ void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
     const QStringList nextHour = { QStringLiteral("A"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime, QStringLiteral("STARTS: ") + partTime };
     QCOMPARE(select(GeoZoneFenceImporter::Now), nextHour);
     QCOMPARE(importer.notFencedCount(), 2);
+    // At 12:31 the zone which started at 12:30 is fenced by its schedule, though the manager, which evaluates the
+    // schedules of the zones away from the vehicles once a minute, hasn't made it active yet. The hour now reaches 13:30.
+    const QList<GeoZone*> &zoneList = manager->zoneList();
+    const auto starts = std::find_if(zoneList.cbegin(), zoneList.cend(), [](const GeoZone *zone) { return zone->identifier() == QStringLiteral("STARTS"); });
+    QVERIFY(starts != zoneList.cend());
+    environment.setNow(now.addSecs(31 * 60));
+    QVERIFY(!(*starts)->active());
+    QCOMPARE(select(GeoZoneFenceImporter::Now), QStringList({ QStringLiteral("A"), QStringLiteral("STARTS"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime,
+                                                              QStringLiteral("LATER: ") + partTime }));
+    QVERIFY(!(*starts)->active());
+    environment.setNow(now.addSecs(300));
     // The flight time without a planned start is that flight, like for fences rebuilt after the start was cleared,
     // rather than any time, as are hours out of range
     planning->clearPlannedStart();

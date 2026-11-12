@@ -127,6 +127,43 @@ void GeoZoneBriefingTest::_testEnteredVolume()
     QCOMPARE(entered[1]->crossings.constFirst().zoneCeiling, 400.0);
 }
 
+void GeoZoneBriefingTest::_testNearbyActiveNow()
+{
+    // A prohibited zone from 12:00 to 13:00 UTC beside a path briefed without a planned start, loaded an hour before
+    ScopedEnvironment environment;
+    const QDate day(2027, 3, 1);
+    environment.setNow(_utc(day, QTime(11, 0)));
+    const QGeoCoordinate center(47, 8);
+    QJsonObject scheduled = _circleFeature(QStringLiteral("S"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(300, 0), 100);
+    scheduled[QStringLiteral("applicability")] = QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "startDateTime", "2027-03-01T12:00:00Z" }, { "endDateTime", "2027-03-01T13:00:00Z" } } };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ scheduled }), errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 1);
+    const GeoZone *const zone = zones.zoneList().constFirst();
+    QVERIFY(!zone->active());
+
+    GeoZoneBriefing::Input input;
+    input.paths = { GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center.atDistanceAndAzimuth(1000, 270), 100 },
+                                                                GeoZone::Position{ center.atDistanceAndAzimuth(1000, 90), 100 } }) };
+    const auto nearbyActive = [&zones, &input]() -> std::optional<bool> {
+        const GeoZoneBriefing briefing = GeoZoneBriefing::build(zones.catalog(), input);
+        const QList<const GeoZoneBriefing::Zone*> nearby = briefing.zonesWith(GeoZoneBriefing::Involvement::Nearby);
+        return (nearby.count() == 1) ? std::optional<bool>(nearby.constFirst()->activeDuringFlight) : std::nullopt;
+    };
+    QCOMPARE(nearbyActive(), std::optional<bool>(false));
+
+    // The zone begins: it is briefed as active now by its schedule, whatever GeoZone::active was last evaluated to
+    environment.setNow(_utc(day, QTime(12, 0, 1)));
+    QVERIFY(!zone->active());
+    QCOMPARE(nearbyActive(), std::optional<bool>(true));
+    // Or at the time the briefing is made for
+    input.now = _utc(day, QTime(13, 0, 1));
+    QCOMPARE(nearbyActive(), std::optional<bool>(false));
+}
+
 void GeoZoneBriefingTest::_testPlanAuditRecord()
 {
     // A zone of each restriction

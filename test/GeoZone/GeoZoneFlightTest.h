@@ -35,5 +35,6 @@ private slots:
     void _testAltitudeStrip();
     void _testPreflightPermits();
     void _testPreflightCheckUpdates();
+    void _testChecksFollowSchedules();
     void _testArduPilotTakeoff();
 };
