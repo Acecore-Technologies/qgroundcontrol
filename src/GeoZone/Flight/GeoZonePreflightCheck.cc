@@ -335,7 +335,9 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::fenceItem(const FenceInput &i
     // restarts and reconnects, of uploads which read the fence back (verified) and of plan uploads, which don't.
     const bool recorded = input.verification && GeoZoneFenceUpload::compareFences(input.verification->fence, input.vehicleFence).isEmpty();
     const bool verified = input.verification && input.verification->verified;
-    if (verified && !recorded) {
+    // A record which differs is only that of a changed fence when it is known to be of this vehicle, rather than of
+    // another one with its system id
+    if (verified && !recorded && input.verification->identified) {
         problems.append(tr("The vehicle's fence changed since it was verified at %1.").arg(timeText(input.verification->time)));
     } else if (vehicleFence && !(recorded && verified)) {
         problems.append(tr("The vehicle's fence wasn't verified. Upload it from the fence import of the Plan View, which reads it back."));

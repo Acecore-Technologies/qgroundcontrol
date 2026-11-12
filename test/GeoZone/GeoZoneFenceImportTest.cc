@@ -639,10 +639,17 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
         QCOMPARE(fenceItem(vehicle).text, notFenced);
     }
 
-    // The vehicle reconnects: the record is the one of the vehicle with its system id, for the fence it stored. The
-    // new MockLink vehicle stores no fence, so the fence verified before has changed.
+    // While the vehicle stays connected the record is known to be its own: a fence which differs has changed
     const std::optional<GeoZoneFenceUpload::Verification> before = GeoZoneFenceUpload::verification(vehicle);
     QVERIFY(before);
+    QVERIFY(before->identified);
+    GeoZonePreflightCheck::FenceInput changed;
+    changed.verification = before;
+    QVERIFY2(GeoZonePreflightCheck::fenceItem(changed).text.startsWith(QStringLiteral("The vehicle's fence changed since it was verified at ")), qPrintable(GeoZonePreflightCheck::fenceItem(changed).text));
+
+    // The vehicle reconnects: the record is the one of the vehicle with its system id, for the fence it stored. The
+    // MockLink vehicle reports no unique id, so it may be another vehicle with that system id, and it stores no
+    // fence: the checklist doesn't claim that a verified fence changed.
     _disconnectMockLink();
     vehicle = connectVehicle();
     QVERIFY(vehicle);
@@ -652,12 +659,17 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
     QVERIFY(after->verified);
     QCOMPARE(after->notFenced, before->notFenced);
     QVERIFY(GeoZoneFenceUpload::compareFences(after->fence, before->fence).isEmpty());
-    QVERIFY2(fenceItem(vehicle).text.startsWith(QStringLiteral("The vehicle's fence changed since it was verified at ")), qPrintable(fenceItem(vehicle).text));
+    QVERIFY(!after->identified);
+    QCOMPARE(fenceItem(vehicle).state, GeoZonePreflightCheck::NotApplicable);
     // With the fence it stored the checklist names the zones again
     GeoZonePreflightCheck::FenceInput reconnected;
     reconnected.vehicleFence = before->fence;
     reconnected.verification = after;
     QCOMPARE(GeoZonePreflightCheck::fenceItem(reconnected).text, notFenced);
+    // ... and with another fence it reports that one as not verified
+    reconnected.vehicleFence.polygons.removeLast();
+    reconnected.vehicleFence.circles.append({ false, QGeoCircle(QGeoCoordinate(47, 8), 100) });
+    QCOMPARE(GeoZonePreflightCheck::fenceItem(reconnected).text, wasntVerified);
 
     // Removing the fence from the vehicle forgets the record
     {

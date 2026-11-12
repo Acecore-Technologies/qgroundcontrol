@@ -167,13 +167,18 @@ public:
         /// Read back from the vehicle and found to be the fence sent. False for the fence of a plan upload, which isn't
         /// read back.
         bool verified = true;
+        /// The record is known to be of the vehicle it was asked for: it was made for it while it has been connected, or
+        /// both report the same unique id. False when only the system id tells, like after a reconnect of a vehicle
+        /// without unique id: another vehicle may have the same one, so a fence which differs from the record doesn't
+        /// mean that the vehicle's fence changed. Not kept in the file.
+        bool identified = true;
 
         QJsonObject toJson() const;
         static std::optional<Verification> fromJson(const QJsonObject &json);
     };
     /// @return The last fence uploaded to the vehicle, nothing without. Vehicles are told apart by the unique id they
-    ///         report, or by their system id without one. The fence is the vehicle's while it compares equal to the one
-    ///         the vehicle stores, see compareFences.
+    ///         report, or by their system id without one, see Verification::identified. The fence is the vehicle's
+    ///         while it compares equal to the one the vehicle stores, see compareFences.
     static std::optional<Verification> verification(const Vehicle *vehicle);
     /// Records the fence uploaded to the vehicle, as uploads do
     static void setVerification(Vehicle *vehicle, const Verification &verification);

@@ -27,6 +27,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSaveFile>
+#include <QtCore/QSet>
 #include <QtCore/QTimer>
 
 #include <algorithm>
@@ -133,6 +134,7 @@ struct Record {
     quint64 uid = 0;
     int systemId = 0;
     GeoZoneFenceUpload::Verification verification;
+    const Vehicle *vehicle = nullptr;   ///< It was made for, while that is connected. Only compared, never used.
 
     bool isOf(quint64 otherUid, int otherSystemId) const
     {
@@ -177,6 +179,16 @@ public:
         }
     }
 
+    /// The vehicle is gone: its address may be that of the next one
+    void forget(const Vehicle *vehicle)
+    {
+        for (Record &record : _records) {
+            if (record.vehicle == vehicle) {
+                record.vehicle = nullptr;
+            }
+        }
+    }
+
 private:
     QString _path() const
     {
@@ -204,7 +216,7 @@ private:
             const QJsonObject entry = value.toObject();
             const std::optional<GeoZoneFenceUpload::Verification> verification = GeoZoneFenceUpload::Verification::fromJson(entry);
             if (verification) {
-                _records.append(Record{ entry.value(uidKey).toString().toULongLong(nullptr, 16), entry.value(systemIdKey).toInt(), *verification });
+                _records.append(Record{ entry.value(uidKey).toString().toULongLong(nullptr, 16), entry.value(systemIdKey).toInt(), *verification, nullptr });
             }
         }
     }
@@ -654,7 +666,12 @@ std::optional<GeoZoneFenceUpload::Verification> GeoZoneFenceUpload::verification
         return std::nullopt;
     }
     const Record *const record = records().find(vehicle->vehicleUID(), vehicle->id());
-    return record ? std::make_optional(record->verification) : std::nullopt;
+    if (!record) {
+        return std::nullopt;
+    }
+    Verification verification = record->verification;
+    verification.identified = (record->vehicle == vehicle) || ((record->uid != 0) && (record->uid == vehicle->vehicleUID()));
+    return verification;
 }
 
 void GeoZoneFenceUpload::setVerification(Vehicle *vehicle, const Verification &verification)
@@ -662,7 +679,15 @@ void GeoZoneFenceUpload::setVerification(Vehicle *vehicle, const Verification &v
     if (!vehicle) {
         return;
     }
-    records().set(Record{ vehicle->vehicleUID(), vehicle->id(), verification });
+    static QSet<const Vehicle*> followed;
+    if (!followed.contains(vehicle)) {
+        followed.insert(vehicle);
+        (void) connect(vehicle, &QObject::destroyed, vehicle, [vehicle]() {
+            records().forget(vehicle);
+            (void) followed.remove(vehicle);
+        });
+    }
+    records().set(Record{ vehicle->vehicleUID(), vehicle->id(), verification, vehicle });
 }
 
 void GeoZoneFenceUpload::clearVerification(Vehicle *vehicle)
