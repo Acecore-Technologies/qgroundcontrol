@@ -29,7 +29,8 @@ class Vehicle;
 /// Records each flight of a vehicle, from arming to disarming, and writes its record as JSON in the GeoZones folder of
 /// the telemetry folder: the geozone briefing of the track flown, see GeoZoneBriefingExport::toJson, with the flight,
 /// its track, the permits used and the rows of the alert log of the vehicle during the flight, which include the
-/// alerts and the pilot's answers to them. Without the alert log, the alerts the monitor raised are recorded.
+/// alerts and the pilot's answers to them. Without the alert log, the alerts the monitor raised are recorded. A record
+/// which can't be written is reported to the pilot, see recordFailed.
 ///
 /// The track keeps a position when the vehicle moved sampleDistance or climbed sampleClimb since the last one kept, or
 /// sampleMaxSecs passed, and every other one when it grows beyond maxTrackPoints.
@@ -79,7 +80,8 @@ public:
     void start(int vehicleId, const QString &vehicle = QString(), const QString &firmware = QString());
     /// Adds a position of the vehicle at the current time to its flight
     void addPosition(int vehicleId, const GeoZone::Position &position);
-    /// Ends the flight of the vehicle and writes its record
+    /// Ends the flight of the vehicle and writes its record, notifying recordWritten, or recordFailed when it can't
+    /// be written
     /// @return Path of the record written, empty without flight or on errors
     QString finish(int vehicleId);
     bool recording(int vehicleId) const { return _flights.contains(vehicleId); }
@@ -110,6 +112,9 @@ public:
 
 signals:
     void recordWritten(const QString &filePath);
+    /// The record of a flight couldn't be written, for lack of a folder or because the file can't be written
+    /// @param message For the pilot, with the vehicle and the reason
+    void recordFailed(const QString &message);
 
 private:
     void _addVehicle(Vehicle *vehicle);

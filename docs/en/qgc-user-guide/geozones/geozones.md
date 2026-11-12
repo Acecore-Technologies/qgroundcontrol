@@ -736,6 +736,8 @@ When a vehicle disarms, _QGroundControl_ writes a record of its flight from armi
 - `sources`: the versions and provenance of the geozone data covering the track.
 - `operator` and `aircraft`, `null` unless [operator details](#operator-details) are included.
 
+When the record can't be written, for lack of a _Telemetry_ folder or because its file can't be written, a message says so with the vehicle and the reason, rather than the record missing unnoticed.
+
 Records are kept like the alert logs, for the time set in **Keep alert logs and flight records**.
 
 ## Settings Reference {#settings-reference}

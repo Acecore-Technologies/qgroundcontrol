@@ -145,7 +145,9 @@ void init()
     manager->watchNetwork();
     manager->init();
     (void) GeoZoneMonitor::instance();
-    (void) GeoZoneFlightRecorder::instance();
+    (void) QObject::connect(GeoZoneFlightRecorder::instance(), &GeoZoneFlightRecorder::recordFailed, app, [app](const QString &message) {
+        app->showAppMessage(message, QCoreApplication::translate("GeoZoneModule", "Geozones"));
+    });
     (void) GeoZoneConformance::instance();
 }
 

@@ -239,17 +239,22 @@ QString GeoZoneFlightRecorder::finish(int vehicleId)
         flight.track.append(*flight.latest);
     }
 
+    // The flight is over either way: a record which can't be written is reported rather than lost silently
+    const auto failed = [this, &flight](const QString &path, const QString &reason) {
+        qCWarning(GeoZoneMonitorLog) << "Unable to write the geozone flight record of vehicle" << flight.vehicleId << path << reason;
+        emit recordFailed(tr("The geozone record of the flight of vehicle %1 couldn't be written: %2").arg(flight.vehicleId).arg(reason));
+        return QString();
+    };
     const QString path = recordFilePath(flight);
     if (path.isEmpty()) {
-        return QString();
+        return failed(path, tr("no telemetry folder is set"));
     }
     (void) QDir().mkpath(QFileInfo(path).absolutePath());
     // A record is written each flight, a good time to delete those past the retention
     (void) removeOldRecords(flight.end.date(), retentionDays());
     QString errorString;
     if (!GeoZoneMissionExport::writeFile(path, QJsonDocument(record(flight)).toJson(QJsonDocument::Indented), errorString)) {
-        qCWarning(GeoZoneMonitorLog) << "Unable to write the geozone flight record" << path << errorString;
-        return QString();
+        return failed(path, errorString);
     }
     qCDebug(GeoZoneMonitorLog) << "Wrote the flight record" << path;
     emit recordWritten(path);

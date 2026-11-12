@@ -813,6 +813,25 @@ void GeoZoneFlightTest::_testFlightRecord()
     QVERIFY(!alerts.isEmpty());
     QCOMPARE(alerts[0][QStringLiteral("event")].toString(), QStringLiteral("entered"));
 
+    // A record which can't be written, here for a file in the way of its folder, is reported
+    QSignalSpy writtenSpy(&recorder, &GeoZoneFlightRecorder::recordWritten);
+    QSignalSpy failedSpy(&recorder, &GeoZoneFlightRecorder::recordFailed);
+    const QString records = recorder.directory();
+    recorder.setDirectory(dir.filePath(QStringLiteral("blocker/records")));
+    recorder.start(vehicleId);
+    environment.addSecs(1);
+    recorder.addPosition(vehicleId, position(kAirport.east, kAirport.north, kAirport.height));
+    QVERIFY(recorder.finish(vehicleId).isEmpty());
+    QVERIFY(!recorder.recording(vehicleId));
+    QVERIFY(writtenSpy.isEmpty());
+    QCOMPARE(failedSpy.count(), 1);
+    QVERIFY2(failedSpy.first().first().toString().startsWith(QStringLiteral("The geozone record of the flight of vehicle 1 couldn't be written: ")),
+             qPrintable(failedSpy.first().first().toString()));
+    // Without a flight, there is nothing to report
+    QVERIFY(recorder.finish(vehicleId).isEmpty());
+    QCOMPARE(failedSpy.count(), 1);
+    recorder.setDirectory(records);
+
     // Records older than the retention are deleted, none when kept forever
     QCOMPARE(GeoZoneFlightRecorder::retentionDays(), 0);
     QFile old(dir.filePath(QStringLiteral("records/GeoZoneFlight-2025-06-15T09-00-00Z-vehicle1.json")));
