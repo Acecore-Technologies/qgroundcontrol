@@ -215,7 +215,7 @@ bool GeoZoneAuthorisation::validFor(const GeoZone *zone) const
 
 bool GeoZoneAuthorisation::ceilingValid(double meters)
 {
-    return std::isfinite(meters) && (meters > 0);
+    return std::isfinite(meters) && (meters > 0) && (meters < GeoZoneVertical::unlimitedSentinel);
 }
 
 bool GeoZoneAuthorisation::limitsValid() const
@@ -499,8 +499,11 @@ QString GeoZoneAuthorisations::_readInput(const QVariant &zone, const QString &p
         if (!ok) {
             value = ceiling.toDouble(&ok);
         }
-        if (!ok || !GeoZoneAuthorisation::ceilingValid(value * unitMeters())) {
+        if (!ok || !(value > 0)) {
             return tr("Enter the ceiling as a height, like 120.");
+        }
+        if (!GeoZoneAuthorisation::ceilingValid(value * unitMeters())) {
+            return tr("The ceiling is too high. Leave it empty when the permit has none.");
         }
         authorisation.ceiling = value * unitMeters();
         authorisation.ceilingAboveGround = aboveGround(info.zone());

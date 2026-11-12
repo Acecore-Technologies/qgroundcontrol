@@ -15,6 +15,7 @@
 #include "GeoZoneBriefing.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneVertical.h"
 
 using namespace GeoZoneTestHelpers;
 
@@ -397,6 +398,53 @@ void GeoZoneEvaluatorTest::_testAuthorisationLimits()
         json.insert(QStringLiteral("validTo"), QStringLiteral("2026-06-01T00:00:00Z"));
         QVERIFY(!GeoZoneAuthorisation::fromJson(json));
     }
+}
+
+void GeoZoneEvaluatorTest::_testAuthorisationCeiling()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("CTR"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+    }), errorString), qPrintable(errorString));
+    const GeoZone *const zone = zones.zoneList().constFirst();
+    const QVariant zoneInfo = QVariant::fromValue(GeoZoneInfo(zone));
+    GeoZoneAuthorisations authorisations{ QString() };
+    const auto authorise = [&authorisations, &zoneInfo](const QString &ceiling) {
+        return authorisations.authorise(zoneInfo, QStringLiteral("P-1"), QString(), QString(), { { QStringLiteral("ceiling"), ceiling } });
+    };
+    const auto shownCeiling = [&authorisations, &zoneInfo]() { return authorisations.authorisationOf(zoneInfo).value(QStringLiteral("ceiling")).toString(); };
+
+    // From the height published for zones without ceiling a ceiling would limit nothing, and huge ones can't be shown
+    for (const char *const ceiling : { "1e300", "1e9", "100000", "99999", "inf", "nan", "0", "-120" }) {
+        QVERIFY2(!authorise(QString::fromLatin1(ceiling)).isEmpty(), ceiling);
+    }
+    QCOMPARE(authorisations.count(), 0);
+    QCOMPARE(authorise(QStringLiteral("99998")), QString());
+    QCOMPARE(shownCeiling(), QStringLiteral("99998"));
+    QVERIFY(GeoZonePolicy::alerts().excludingAuthorised(&authorisations).authorisedAt(zone, GeoZone::Position{ center, 99997 }));
+    QVERIFY(!GeoZonePolicy::alerts().excludingAuthorised(&authorisations).authorisedAt(zone, GeoZone::Position{ center, 100500 }));
+    {
+        // In the units shown
+        const auto feet = _setVerticalUnits(true);
+        QVERIFY(!authorise(QStringLiteral("328084")).isEmpty());
+        QCOMPARE(authorise(QStringLiteral("328000")), QString());
+        QCOMPARE(shownCeiling(), QStringLiteral("328000"));
+    }
+
+    // Read the same
+    QJsonObject json = authorisations.authorisations().constFirst().toJson();
+    QVERIFY(GeoZoneAuthorisation::fromJson(json));
+    for (const double ceiling : { 1e300, 1e9, 99999.0 }) {
+        json.insert(QStringLiteral("ceiling"), ceiling);
+        QVERIFY2(!GeoZoneAuthorisation::fromJson(json), qPrintable(QString::number(ceiling)));
+    }
+    GeoZoneAuthorisation unlimited = authorisations.authorisations().constFirst();
+    unlimited.ceiling = GeoZoneVertical::unlimitedSentinel;
+    QVERIFY(!unlimited.limitsValid());
 }
 
 void GeoZoneEvaluatorTest::_testProhibitedAuthorisations()

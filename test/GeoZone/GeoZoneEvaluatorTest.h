@@ -24,6 +24,7 @@ private slots:
     void _testAuthorisationScope();
     void _testAuthorisationLimits_data();
     void _testAuthorisationLimits();
+    void _testAuthorisationCeiling();
     void _testProhibitedAuthorisations();
     void _testAuthorisationFile();
     void _testGreatCircles();

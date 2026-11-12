@@ -76,7 +76,8 @@ struct GeoZoneAuthorisation
     ///         hasPermitAndEnd. Notifications authorise nothing and need neither.
     bool validFor(const GeoZone *zone) const;
 
-    /// @return true for a ceiling an authorisation can have: a height above 0
+    /// @return true for a ceiling an authorisation can have: a height above 0 and below the one published for zones
+    ///         without ceiling, GeoZoneVertical::unlimitedSentinel, from which a ceiling doesn't limit anything
     static bool ceilingValid(double meters);
     /// @return true if the limits can be applied: the end after the start, the ceiling a valid one, the area a polygon
     ///         of valid vertices or a circle with a radius, and the daily hours both there or none. authorise() and

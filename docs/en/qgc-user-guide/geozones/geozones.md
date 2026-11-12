@@ -325,7 +325,7 @@ A **prohibited** zone can only be authorised with the permit number or reference
 
 A permit is often limited. The optional scope fields of the form limit the authorisation to what the permit allows; left empty, it covers the whole zone at every altitude and time:
 
-- **Ceiling**: the highest altitude allowed, in the units of the application, above ground when the zone has limits above ground and above mean sea level otherwise (the label says which). The mission check warns when the flight rises above it inside the zone (like "CTR: authorised up to 120 m AGL, the flight reaches 150 m AGL."), or when the height flown there isn't known, like above ground without terrain data.
+- **Ceiling**: the highest altitude allowed, in the units of the application, above ground when the zone has limits above ground and above mean sea level otherwise (the label says which). The mission check warns when the flight rises above it inside the zone (like "CTR: authorised up to 120 m AGL, the flight reaches 150 m AGL."), or when the height flown there isn't known, like above ground without terrain data. A ceiling of 99,999 m or more, the height published for zones without ceiling, isn't accepted: leave the field empty when the permit has none.
 - **Daily hours**: the local times the flight must be within, like 08:00 and 18:00 (they can span midnight). They are checked for the whole flight with **Check zones at the flight time**, otherwise now.
 - **Aircraft**: the registration or description of the aircraft, for information.
 - **Only within the mission area**: limits the authorisation to the area of the mission planned in the Plan View, its bounds widened by 250 m. The mission check warns when the flight leaves it inside the zone.
