@@ -285,6 +285,12 @@ public:
     Handler handler;
     QList<QByteArray> requestedPaths;       ///< With the query
     QList<QByteArray> requests;             ///< Request line, headers and body
+    QSet<QByteArray> unsizedPaths;          ///< Paths answered without Content-Length, their content ends with the connection
+
+    /// @return The last request of the path, with or without its query, empty when it wasn't requested
+    QByteArray lastRequest(const QByteArray &path) const;
+    /// @return How many requests had the header with the value, like the conditional requests with an ETag
+    int requestCountWith(const QByteArray &headerName, const QByteArray &value) const;
 
 private:
     void _respond(QTcpSocket *socket, const QByteArray &target, const QByteArray &request);

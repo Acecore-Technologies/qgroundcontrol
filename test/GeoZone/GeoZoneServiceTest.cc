@@ -346,14 +346,16 @@ void GeoZoneServiceTest::_testServiceOAuth2()
     manager.repository()->refreshFeeds();
     QTRY_VERIFY(!manager.repository()->busy());
     QCOMPARE(tokenRequests, 2);
-    QVERIFY(manager.repository()->source(url)->errorString().isEmpty());
+    const GeoZoneSource *const tokenFeed = manager.repository()->source(url);
+    QVERIFY(tokenFeed);
+    QCOMPARE(tokenFeed->errorString(), QString());
 
     // A token the server no longer accepts is replaced
     currentToken = "revoked";
     manager.repository()->refreshFeeds();
     QTRY_VERIFY(!manager.repository()->busy());
     QCOMPARE(tokenRequests, 3);
-    QVERIFY(manager.repository()->source(url)->errorString().isEmpty());
+    QCOMPARE(tokenFeed->errorString(), QString());
 
     // An expired token is replaced before the download
     environment.addSecs(3600);
@@ -362,7 +364,7 @@ void GeoZoneServiceTest::_testServiceOAuth2()
     QTRY_VERIFY(!manager.repository()->busy());
     QCOMPARE(tokenRequests, 4);
     QCOMPARE(server.requests.count(), requests + 2);
-    QVERIFY(manager.repository()->source(url)->errorString().isEmpty());
+    QCOMPARE(tokenFeed->errorString(), QString());
 
     QVERIFY(!_directoryContent(storageDir.path()).contains("client-s3cret"));
     QVERIFY(!_directoryContent(storageDir.path()).contains("token-"));
@@ -618,7 +620,9 @@ void GeoZoneServiceTest::_testServiceAreaOfInterest()
         manager.addService(server.url(QStringLiteral("/uas-zones")), ed318.toVariantMap(), QString());
         QVERIFY(addedSpy.wait(10000));
         QTRY_VERIFY(!manager.repository()->busy());
-        const QGeoRectangle ed318Area = manager.repository()->source(server.url(QStringLiteral("/uas-zones")))->area();
+        const GeoZoneSource *const ed318Feed = manager.repository()->source(server.url(QStringLiteral("/uas-zones")));
+        QVERIFY(ed318Feed);
+        const QGeoRectangle ed318Area = ed318Feed->area();
         QVERIFY(ed318Area.contains(QGeoCoordinate(48.0, 9.0)));
         const QJsonObject geometry = query.value("geometry").toObject();
         QCOMPARE(geometry.value("type").toString(), QStringLiteral("Polygon"));
@@ -655,6 +659,7 @@ void GeoZoneServiceTest::_testServiceAreaOfInterest()
     QVERIFY(limitedSpy.wait(10000));
     QTRY_VERIFY(!limitedManager.repository()->busy());
     const GeoZoneSource *const limitedFeed = limitedManager.repository()->source(limitedUrl);
+    QVERIFY(limitedFeed);
     QVERIFY(limitedFeed->area().contains(QGeoCoordinate(47.5, 8.5)));
     QVERIFY(GeoZoneService::areaKm2(limitedFeed->area()) <= 9.5);
     QVERIFY(GeoZoneService::areaKm2(limitedFeed->area()) > 9);
@@ -1075,6 +1080,7 @@ void GeoZoneServiceTest::_testOpenAipService()
     QVERIFY(server.requestedPaths[1].endsWith("&limit=4&page=2"));
     QCOMPARE(manager.zoneCount(), 6);
     const GeoZoneSource *const source = manager.repository()->source(url);
+    QVERIFY(source);
     QCOMPARE(source->format(), GeoZoneParser::Format::OpenAip);
     QCOMPARE(source->name(), QStringLiteral("Airspaces (OpenAIP, unofficial)"));
     QCOMPARE(source->provider(), QStringLiteral("OpenAIP (unofficial, CC BY-NC 4.0)"));
@@ -1143,9 +1149,10 @@ void GeoZoneServiceTest::_testUrlKeysNotLogged()
         repository->feedCatalogue()->setUrl(catalogueUrl);
         repository->feedCatalogue()->init();
         QTRY_VERIFY_WITH_TIMEOUT(repository->feedCatalogue()->checkedAt().isValid(), 10000);
-        QVERIFY(repository->source(url));
-        QVERIFY(!repository->source(url)->errorString().isEmpty());
-        messages.append(repository->source(url)->errorString());
+        const GeoZoneSource *const failing = repository->source(url);
+        QVERIFY(failing);
+        QVERIFY(!failing->errorString().isEmpty());
+        messages.append(failing->errorString());
     }
     const QString logged = log.text();
     QVERIFY(logged.contains(QStringLiteral("Downloading")));

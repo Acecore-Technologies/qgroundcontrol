@@ -402,6 +402,10 @@ void TestFeedServer::_respond(QTcpSocket *socket, const QByteArray &target, cons
     } else if (path == "/hang") {
         return;
     }
+    if (unsizedPaths.contains(path)) {
+        _answer(socket, "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nConnection: close\r\n" + extraHeaders + "\r\n" + content);
+        return;
+    }
     _write(socket, status, content, extraHeaders);
 }
 
@@ -417,6 +421,21 @@ void TestFeedServer::_answer(QTcpSocket *socket, const QByteArray &response)
     socket->setProperty("answered", true);
     (void) socket->write(response);
     socket->disconnectFromHost();
+}
+
+QByteArray TestFeedServer::lastRequest(const QByteArray &path) const
+{
+    for (qsizetype i = requests.count() - 1; i >= 0; i--) {
+        if ((requestedPaths[i] == path) || (requestedPaths[i].split('?').first() == path)) {
+            return requests[i];
+        }
+    }
+    return QByteArray();
+}
+
+int TestFeedServer::requestCountWith(const QByteArray &headerName, const QByteArray &value) const
+{
+    return static_cast<int>(std::count_if(requests.cbegin(), requests.cend(), [&](const QByteArray &request) { return header(request, headerName) == value; }));
 }
 #endif
 
