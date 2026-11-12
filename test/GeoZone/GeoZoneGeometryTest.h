@@ -51,6 +51,9 @@ private slots:
     void _testGreatCircleEdges_data();
     void _testGreatCircleEdges();
     void _testGreatCirclePaths();
+    void _testGreatCircleBounds_data();
+    void _testGreatCircleBounds();
+    void _testPathEntryPieces();
     void _testMercatorEdges();
     void _testProjectionContinuity();
     void _testConcurrentQueries();

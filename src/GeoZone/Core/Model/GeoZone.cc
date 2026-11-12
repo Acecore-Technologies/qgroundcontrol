@@ -39,6 +39,10 @@ GeoZone::Ring continuousRing(const GeoZone::Ring &ring, double referenceLongitud
     return result;
 }
 
+/// Degrees by which the bounds of a great circle are widened in longitude, far more than the rounding of the points
+/// interpolated on it, see GeoZoneGeometry::greatCircleLatitudes
+constexpr double kLongitudeMargin = 1e-9;
+
 GeoZone::Data continuousData(const GeoZone::Data &data)
 {
     GeoZone::Data result = data;
@@ -335,22 +339,38 @@ QList<GeoZoneGeometry::Interval> GeoZone::horizontalIntervals(qsizetype volumeIn
     if (!from.isValid() || !to.isValid()) {
         return {};
     }
+    return _pieceIntervals(volumeIndex, _greatCirclePieces(from, to));
+}
+
+GeoZone::GreatCirclePieces GeoZone::_greatCirclePieces(const QGeoCoordinate &from, const QGeoCoordinate &to)
+{
     const QPointF a(from.longitude(), from.latitude());
     const QPointF b(to.longitude(), to.latitude());
-    const QList<double> fractions = GeoZoneGeometry::greatCircleFractions(a, b);
+    GreatCirclePieces pieces;
+    pieces.fractions = GeoZoneGeometry::greatCircleFractions(a, b);
+    pieces.coordinates.reserve(pieces.fractions.count());
+    pieces.coordinates.append(from);
+    for (qsizetype i = 1; i < (pieces.fractions.count() - 1); i++) {
+        pieces.coordinates.append(toCoordinate(GeoZoneGeometry::greatCircleInterpolate(a, b, pieces.fractions[i])));
+    }
+    pieces.coordinates.append(to);
+    return pieces;
+}
+
+QList<GeoZoneGeometry::Interval> GeoZone::_pieceIntervals(qsizetype volumeIndex, const GreatCirclePieces &pieces) const
+{
+    const QList<double> &fractions = pieces.fractions;
     if (fractions.count() <= 2) {
-        return _straightIntervals(volumeIndex, from, to);
+        return _straightIntervals(volumeIndex, pieces.coordinates.constFirst(), pieces.coordinates.constLast());
     }
 
     // Pieces of the great circle, with their intervals scaled to fractions of the whole
     QList<GeoZoneGeometry::Interval> intervals;
-    QGeoCoordinate pieceFrom = from;
     for (qsizetype i = 1; i < fractions.count(); i++) {
-        const QGeoCoordinate pieceTo = (i == (fractions.count() - 1)) ? to : toCoordinate(GeoZoneGeometry::greatCircleInterpolate(a, b, fractions[i]));
         const auto scaled = [&fractions, i](double fraction) {
             return (fraction <= 0) ? fractions[i - 1] : ((fraction >= 1) ? fractions[i] : (fractions[i - 1] + ((fractions[i] - fractions[i - 1]) * fraction)));
         };
-        for (const GeoZoneGeometry::Interval &interval : _straightIntervals(volumeIndex, pieceFrom, pieceTo)) {
+        for (const GeoZoneGeometry::Interval &interval : _straightIntervals(volumeIndex, pieces.coordinates[i - 1], pieces.coordinates[i])) {
             const GeoZoneGeometry::Interval whole{ scaled(interval.first), scaled(interval.second) };
             if (!intervals.isEmpty() && (whole.first <= intervals.last().second)) {
                 intervals.last().second = (std::max)(intervals.last().second, whole.second);
@@ -358,7 +378,6 @@ QList<GeoZoneGeometry::Interval> GeoZone::horizontalIntervals(qsizetype volumeIn
                 intervals.append(whole);
             }
         }
-        pieceFrom = pieceTo;
     }
     return intervals;
 }
@@ -529,27 +548,28 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
             continue;
         }
         // The segment follows the great circle the shorter way, which may cross the antimeridian and bulge towards the
-        // pole beyond the bounds of its ends
+        // pole beyond the bounds of its ends. Most segments are left out by the bounds of the great circle, before it
+        // is cut into the pieces the volumes are checked with.
         const QPointF a(from.coordinate.longitude(), from.coordinate.latitude());
         const QPointF b(to.coordinate.longitude(), to.coordinate.latitude());
-        const QList<double> fractions = GeoZoneGeometry::greatCircleFractions(a, b);
-        QList<QGeoCoordinate> greatCircle = { from.coordinate };
-        for (qsizetype k = 1; k < (fractions.count() - 1); k++) {
-            greatCircle.append(toCoordinate(GeoZoneGeometry::greatCircleInterpolate(a, b, fractions[k])));
-        }
-        greatCircle.append(to.coordinate);
-        if (!_box.intersects(GeoZoneBox::fromPath(greatCircle))) {
+        const auto [south, north] = GeoZoneGeometry::greatCircleLatitudes(a, b);
+        const auto [west, east] = GeoZoneBox::longitudeSpan(a.x(), b.x());
+        if (!_box.intersects(GeoZoneBox(south, west - kLongitudeMargin, north, east + kLongitudeMargin))) {
             continue;
         }
 
         // The earliest fraction of the segment inside a volume horizontally and vertically
+        std::optional<GreatCirclePieces> pieces;
         double entry = qInf();
         for (qsizetype v = 0; v < _data.volumes.count(); v++) {
             const auto vertical = GeoZoneVertical::interval(_data.volumes[v], from, to);
             if (!vertical || (vertical->first >= entry)) {
                 continue;
             }
-            for (const GeoZoneGeometry::Interval &interval : horizontalIntervals(v, from.coordinate, to.coordinate)) {
+            if (!pieces) {
+                pieces = _greatCirclePieces(from.coordinate, to.coordinate);
+            }
+            for (const GeoZoneGeometry::Interval &interval : _pieceIntervals(v, *pieces)) {
                 if ((interval.second >= vertical->first) && (interval.first <= vertical->second)) {
                     entry = (std::min)(entry, (std::max)(interval.first, vertical->first));
                     break;
@@ -568,7 +588,7 @@ std::optional<GeoZone::PathEntry> GeoZone::pathEntry(const QList<Position> &path
         result.fraction = entry;
         if ((entry <= 0) || (entry >= 1)) {
             result.position.coordinate = (entry <= 0) ? from.coordinate : to.coordinate;
-        } else if (fractions.count() > 2) {
+        } else if (pieces->fractions.count() > 2) {
             result.position.coordinate = toCoordinate(GeoZoneGeometry::greatCircleInterpolate(a, b, entry));
         } else {
             // The projection is affine in latitude and longitude, so the entry is on the segment the containment tests use

@@ -11,6 +11,7 @@
 #include "GeoZonePredicates.h"
 #include "GeoZoneProjection.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace GeoZoneGeometry {
@@ -32,6 +33,16 @@ Vector3 _toVector(const QPointF &lonLat)
     const double latitude = lonLat.y() * kDegreesToRadians;
     const double longitude = lonLat.x() * kDegreesToRadians;
     return { std::cos(latitude) * std::cos(longitude), std::cos(latitude) * std::sin(longitude), std::sin(latitude) };
+}
+
+Vector3 _cross(const Vector3 &a, const Vector3 &b)
+{
+    return { (a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x) };
+}
+
+double _dot(const Vector3 &a, const Vector3 &b)
+{
+    return (a.x * b.x) + (a.y * b.y) + (a.z * b.z);
 }
 
 /// Fast upper bound of greatCircleDeviation for short edges. In latitude and longitude great circles curve away from
@@ -107,6 +118,39 @@ QPointF greatCircleInterpolate(const QPointF &from, const QPointF &to, double fr
     const double longitude = std::atan2(point.y, point.x) / kDegreesToRadians;
     const double latitude = std::atan2(point.z, std::hypot(point.x, point.y)) / kDegreesToRadians;
     return QPointF(longitude + (360.0 * std::round((straight.x() - longitude) / 360.0)), latitude);
+}
+
+std::pair<double, double> greatCircleLatitudes(const QPointF &from, const QPointF &to)
+{
+    // Far more than the rounding of the points interpolated on the great circle, about 0.1 mm
+    constexpr double margin = 1e-9;
+    double south = (std::min)(from.y(), to.y()) - margin;
+    double north = (std::max)(from.y(), to.y()) + margin;
+    const Vector3 a = _toVector(from);
+    const Vector3 b = _toVector(to);
+    const Vector3 normal = _cross(a, b);
+    const double sine = std::sqrt(_dot(normal, normal));
+    // The same or opposite points have no single great circle, they are joined straight, see greatCircleInterpolate
+    if (sine < 1e-12) {
+        return { south, north };
+    }
+    // The whole great circle is closest to the north pole where the pole projects onto its plane, at the latitude
+    // whose sine is the length of that projection, and closest to the south pole opposite
+    const double poleOffPlane = normal.z / sine;
+    const Vector3 vertex{ -poleOffPlane * normal.x / sine, -poleOffPlane * normal.y / sine, 1 - (poleOffPlane * poleOffPlane) };
+    const double vertexLatitude = std::asin(std::sqrt(std::clamp(vertex.z, 0.0, 1.0))) / kDegreesToRadians;
+    // A point of the great circle is between its ends when the turns from the start to it and from it to the end go
+    // the way the turn from the start to the end does
+    const auto between = [&a, &b, &normal](const Vector3 &point) {
+        return (_dot(_cross(a, point), normal) >= 0) && (_dot(_cross(point, b), normal) >= 0);
+    };
+    if (between(vertex)) {
+        north = (std::max)(north, vertexLatitude + margin);
+    }
+    if (between(Vector3{ -vertex.x, -vertex.y, -vertex.z })) {
+        south = (std::min)(south, -vertexLatitude - margin);
+    }
+    return { south, north };
 }
 
 double greatCircleDeviation(const QPointF &from, const QPointF &to)

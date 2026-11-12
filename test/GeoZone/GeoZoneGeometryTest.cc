@@ -2163,6 +2163,151 @@ void GeoZoneGeometryTest::_testGreatCirclePaths()
     }
 }
 
+void GeoZoneGeometryTest::_testGreatCircleBounds_data()
+{
+    QTest::addColumn<QPointF>("from");   ///< Longitude and latitude
+    QTest::addColumn<QPointF>("to");
+    QTest::addColumn<bool>("bulges");    ///< Beyond the latitudes of its ends
+
+    QTest::newRow("along a parallel") << QPointF(0, 60) << QPointF(1, 60) << true;
+    QTest::newRow("a quarter around") << QPointF(0, 60) << QPointF(90, 60) << true;
+    QTest::newRow("across the antimeridian") << QPointF(-100, 50) << QPointF(100, 50) << true;
+    QTest::newRow("southern") << QPointF(170, -60) << QPointF(-170, -60) << true;
+    QTest::newRow("over the pole") << QPointF(0, 80) << QPointF(180, 80) << true;
+    QTest::newRow("uneven ends") << QPointF(0, 60) << QPointF(40, 58) << true;
+    QTest::newRow("descending") << QPointF(0, 60) << QPointF(40, 50) << false;
+    QTest::newRow("meridian") << QPointF(8, 47) << QPointF(8, 48) << false;
+    QTest::newRow("equator") << QPointF(0, 0) << QPointF(40, 0) << false;
+    QTest::newRow("climbing") << QPointF(10, 20) << QPointF(20, 45) << false;
+    QTest::newRow("across the equator") << QPointF(10, -30) << QPointF(60, 50) << false;
+    QTest::newRow("short") << QPointF(8, 47) << QPointF(8.001, 47.0005) << false;
+    QTest::newRow("same point") << QPointF(5, 5) << QPointF(5, 5) << false;
+    QTest::newRow("opposite points") << QPointF(0, 10) << QPointF(180, -10) << false;
+}
+
+void GeoZoneGeometryTest::_testGreatCircleBounds()
+{
+    QFETCH(QPointF, from);
+    QFETCH(QPointF, to);
+    QFETCH(bool, bulges);
+
+    double south = qInf();
+    double north = -qInf();
+    constexpr int samples = 4000;
+    for (int i = 0; i <= samples; i++) {
+        const double latitude = GeoZoneGeometry::greatCircleInterpolate(from, to, static_cast<double>(i) / samples).y();
+        south = (std::min)(south, latitude);
+        north = (std::max)(north, latitude);
+    }
+    // The bounds hold every point of the great circle, and are as tight as the samples tell
+    const std::pair<double, double> bounds = GeoZoneGeometry::greatCircleLatitudes(from, to);
+    QCOMPARE_LE(bounds.first, south);
+    QCOMPARE_GE(bounds.second, north);
+    QCOMPARE_GE(bounds.first, south - 1e-4);
+    QCOMPARE_LE(bounds.second, north + 1e-4);
+    const double endsSouth = (std::min)(from.y(), to.y());
+    const double endsNorth = (std::max)(from.y(), to.y());
+    QCOMPARE(((endsSouth - bounds.first) > 1e-6) || ((bounds.second - endsNorth) > 1e-6), bulges);
+    // The same both ways
+    const std::pair<double, double> back = GeoZoneGeometry::greatCircleLatitudes(to, from);
+    QVERIFY(qAbs(back.first - bounds.first) < 1e-9);
+    QVERIFY(qAbs(back.second - bounds.second) < 1e-9);
+}
+
+void GeoZoneGeometryTest::_testPathEntryPieces()
+{
+    // The entry of a segment as the volumes tell it one by one, each cutting the great circle into pieces itself
+    const auto reference = [](const GeoZone &zone, const GeoZone::Position &from, const GeoZone::Position &to) {
+        double entry = qInf();
+        const QList<GeoZone::Volume> &volumes = zone.data().volumes;
+        for (qsizetype v = 0; v < volumes.count(); v++) {
+            const auto vertical = GeoZoneVertical::interval(volumes[v], from, to);
+            if (!vertical) {
+                continue;
+            }
+            for (const GeoZoneGeometry::Interval &interval : zone.horizontalIntervals(v, from.coordinate, to.coordinate)) {
+                if ((interval.second >= vertical->first) && (interval.first <= vertical->second)) {
+                    entry = (std::min)(entry, (std::max)(interval.first, vertical->first));
+                    break;
+                }
+            }
+        }
+        return entry;
+    };
+    const auto square = [](const QGeoCoordinate &center, double halfSize) {
+        return GeoZone::toRing({ center.atDistanceAndAzimuth(halfSize * M_SQRT2, 45), center.atDistanceAndAzimuth(halfSize * M_SQRT2, 135),
+                                 center.atDistanceAndAzimuth(halfSize * M_SQRT2, 225), center.atDistanceAndAzimuth(halfSize * M_SQRT2, 315) });
+    };
+    // Zones of a polygon from 500 m AMSL up, a circle up to 300 m, and a polygon at all altitudes, at a middle and a
+    // high latitude and across the antimeridian
+    const auto zoneAt = [&square](const QGeoCoordinate &center) {
+        GeoZone::Volume high{ false, { square(center, 20000) } };
+        high.lowerLimit = 500;
+        high.lowerReference = GeoZone::VerticalReference::MeanSeaLevel;
+        GeoZone::Volume low;
+        low.isCircle = true;
+        low.center = center.atDistanceAndAzimuth(30000, 90);
+        low.radius = 15000;
+        low.upperLimit = 300;
+        low.upperReference = GeoZone::VerticalReference::MeanSeaLevel;
+        const GeoZone::Volume all{ false, { square(center.atDistanceAndAzimuth(40000, 180), 5000) } };
+        GeoZone::Data data;
+        data.volumes = { high, low, all };
+        return data;
+    };
+    quint32 seed = 2029;
+    const auto random = [&seed]() {
+        seed = (seed * 1103515245u) + 12345u;
+        return static_cast<double>((seed >> 8) & 0xFFFF) / 0xFFFF;
+    };
+    int entered = 0;
+    int subdivided = 0;
+    for (const QGeoCoordinate &center : { QGeoCoordinate(47, 8), QGeoCoordinate(84, 20), QGeoCoordinate(-60, 179.9) }) {
+        const GeoZone zone(zoneAt(center));
+        for (int i = 0; i < 400; i++) {
+            // Short legs around the zone and legs of hundreds of kilometers passing it, level, climbing and unknown
+            const double reach = (i % 4 == 0) ? 600000 : ((i % 4 == 1) ? 150000 : 40000);
+            const auto position = [&]() {
+                GeoZone::Position result{ center.atDistanceAndAzimuth(random() * reach, random() * 360) };
+                result.altitudeAMSL = (i % 7 == 0) ? qQNaN() : (random() * 1000);
+                return result;
+            };
+            const GeoZone::Position from = position();
+            const GeoZone::Position to = position();
+            const double expected = reference(zone, from, to);
+            const std::optional<GeoZone::PathEntry> entry = zone.pathEntry({ from, to });
+            const QByteArray leg = QStringLiteral("%1,%2 to %3,%4").arg(from.coordinate.latitude(), 0, 'f', 6).arg(from.coordinate.longitude(), 0, 'f', 6)
+                                       .arg(to.coordinate.latitude(), 0, 'f', 6).arg(to.coordinate.longitude(), 0, 'f', 6).toUtf8();
+            QVERIFY2(entry.has_value() == std::isfinite(expected), leg.constData());
+            if (entry) {
+                QVERIFY2(entry->fraction == expected, leg.constData());
+                entered++;
+            }
+            const QPointF a(from.coordinate.longitude(), from.coordinate.latitude());
+            const QPointF b(to.coordinate.longitude(), to.coordinate.latitude());
+            subdivided += (GeoZoneGeometry::greatCircleFractions(a, b).count() > 2) ? 1 : 0;
+        }
+    }
+    // Both kinds of legs, entering and passing, were compared
+    QCOMPARE_GT(entered, 100);
+    QCOMPARE_LT(entered, 1100);
+    QCOMPARE_GT(subdivided, 300);
+
+    // A leg along the 60th parallel over ten degrees of longitude, whose great circle passes 10 km north of it halfway:
+    // a zone there is entered although it is north of both ends, one on the parallel isn't
+    const QPointF west(0, 60);
+    const QPointF east(10, 60);
+    const QGeoCoordinate halfway = GeoZone::toCoordinate(GeoZoneGeometry::greatCircleInterpolate(west, east, 0.5));
+    QCOMPARE_GT(halfway.distanceTo(QGeoCoordinate(60, 5)), 10000.0);
+    GeoZone::Data bulge;
+    bulge.volumes.append(GeoZone::Volume{ false, { square(halfway, 500) } });
+    const QList<GeoZone::Position> leg = { GeoZone::Position{ GeoZone::toCoordinate(west) }, GeoZone::Position{ GeoZone::toCoordinate(east) } };
+    QVERIFY(GeoZone(bulge).intersectsPath(leg));
+    GeoZone::Data parallel;
+    parallel.volumes.append(GeoZone::Volume{ false, { square(QGeoCoordinate(60, 5), 500) } });
+    QVERIFY(!GeoZone(parallel).intersectsPath(leg));
+}
+
 void GeoZoneGeometryTest::_testMercatorEdges()
 {
     // Maps draw in mercator, where edges straight in latitude and longitude curve, so long ones get points following

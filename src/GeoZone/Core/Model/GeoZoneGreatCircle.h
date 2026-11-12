@@ -12,6 +12,8 @@
 #include <QtCore/QList>
 #include <QtCore/QPointF>
 
+#include <utility>
+
 /// Great circles (geodesics) of geozone edges and of the legs of paths, see GeoZoneGeometry.h
 namespace GeoZoneGeometry {
 
@@ -25,6 +27,12 @@ inline constexpr int kMaxGreatCircleSubdivisions = 10;
 /// @return The point at the fraction of the great circle from one point to another, x longitude and y latitude in
 ///         degrees. Its longitude continues from the start's the shorter way, so it may be beyond 180 degrees.
 QPointF greatCircleInterpolate(const QPointF &from, const QPointF &to, double fraction);
+
+/// @return South and north latitudes in degrees which the great circle from one point to another stays between, x
+///         longitude and y latitude in degrees: those of its ends, or that of the point between them where it comes
+///         closest to a pole, widened by a rounding margin. Its longitudes are between those of its ends the shorter
+///         way. Much cheaper than greatCircleFractions, to leave out what the great circle can't reach.
+std::pair<double, double> greatCircleLatitudes(const QPointF &from, const QPointF &to);
 
 /// @return Largest distance in meters between the great circle between the points and the edge straight in latitude
 ///         and longitude the shorter way around, sampled at a quarter, half and three quarters of the great circle

@@ -314,6 +314,15 @@ private:
     const Projected &_projected() const;
     /// @return Fractions of the straight segment between the coordinates inside the volume, see horizontalIntervals
     QList<GeoZoneGeometry::Interval> _straightIntervals(qsizetype volumeIndex, const QGeoCoordinate &from, const QGeoCoordinate &to) const;
+    /// The great circle between two coordinates as the pieces straight in latitude and longitude which the queries
+    /// check for it, see horizontalIntervals. The same for all volumes and zones.
+    struct GreatCirclePieces {
+        QList<double> fractions;            ///< Of the great circle at the ends of the pieces, from 0 to 1
+        QList<QGeoCoordinate> coordinates;  ///< There
+    };
+    static GreatCirclePieces _greatCirclePieces(const QGeoCoordinate &from, const QGeoCoordinate &to);
+    /// @return Fractions of the great circle of the pieces inside the volume, see horizontalIntervals
+    QList<GeoZoneGeometry::Interval> _pieceIntervals(qsizetype volumeIndex, const GreatCirclePieces &pieces) const;
 
     const Data _data;
     QList<GeoZoneBox> _volumeBoxes; ///< Outer ring extents of the polygon volumes, invalid for circles
