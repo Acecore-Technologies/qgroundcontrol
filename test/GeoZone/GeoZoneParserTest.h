@@ -74,4 +74,5 @@ private slots:
     void _testDatasetLinkScope();
     void _testCatalogueMembers();
     void _testCatalogueFileFeed();
+    void _testCatalogueVersionAndAreaUrl();
 };

@@ -3402,4 +3402,43 @@ void GeoZoneParserTest::_testCatalogueFileFeed()
     }
 }
 
+void GeoZoneParserTest::_testCatalogueVersionAndAreaUrl()
+{
+    GeoZoneFeedCatalogue::Catalogue parsed;
+    QString errorString;
+    const auto withVersion = [](const QByteArray &version) {
+        return QByteArray(R"({ "version": )" + version + R"(, "feeds": [ { "id": "a", "name": "A", "url": "https://zones.example.com/a.json" } ] })");
+    };
+
+    // The version is compared as the number it is: one which is no integer isn't taken for the default version 1
+    for (const QByteArray &version : { QByteArray("1"), QByteArray("1.0") }) {
+        QVERIFY2(GeoZoneFeedCatalogue::parse(withVersion(version), QStringLiteral("feeds.json"), parsed, errorString), version.constData());
+        QCOMPARE(parsed.feeds.count(), 1);
+    }
+    for (const QByteArray &version : { QByteArray("2.5"), QByteArray("1.5"), QByteArray("0"), QByteArray("-1"), QByteArray("\"1\""), QByteArray("true") }) {
+        QVERIFY2(!GeoZoneFeedCatalogue::parse(withVersion(version), QStringLiteral("feeds.json"), parsed, errorString), version.constData());
+        QCOMPARE(errorString, QStringLiteral("Its version must be a whole number, 1 for this format."));
+        QCOMPARE(parsed.entryCount(), 0);
+    }
+    QVERIFY(!GeoZoneFeedCatalogue::parse(withVersion("2"), QStringLiteral("feeds.json"), parsed, errorString));
+    QCOMPARE(errorString, QStringLiteral("The catalogue has version 2, this QGroundControl reads version 1."));
+    QVERIFY(!GeoZoneFeedCatalogue::parse(withVersion("1e10"), QStringLiteral("feeds.json"), parsed, errorString));
+    QCOMPARE(errorString, QStringLiteral("The catalogue has version 10000000000, this QGroundControl reads version 1."));
+
+    // The zones of an area are downloaded from a web server, as the warning says: a file has no areas to ask for
+    QVERIFY2(GeoZoneFeedCatalogue::parse(R"json({ "feeds": [
+        { "id": "file-area", "name": "File area", "areaUrl": "file:///data/zones?bbox={bbox}" },
+        { "id": "ftp-area", "name": "FTP area", "areaUrl": "ftp://zones.example.com/zones?bbox={bbox}" },
+        { "id": "web-area", "name": "Web area", "areaUrl": "https://zones.example.com/zones?bbox={bbox}" },
+        { "id": "file-feed", "name": "File feed", "url": "file:///data/zones.json" } ] })json", QStringLiteral("feeds.json"), parsed, errorString), qPrintable(errorString));
+    QCOMPARE(parsed.feeds.count(), 2);
+    QCOMPARE(parsed.feeds[0].id, QStringLiteral("web-area"));
+    QCOMPARE(parsed.feeds[1].id, QStringLiteral("file-feed"));
+    const QStringList expected = {
+        QStringLiteral("Feed file-area: Its areaUrl must be an https or http address with an area placeholder like {bbox}. It is left out."),
+        QStringLiteral("Feed ftp-area: Its areaUrl must be an https or http address with an area placeholder like {bbox}. It is left out."),
+    };
+    QCOMPARE(parsed.warnings, expected);
+}
+
 GEOZONE_TEST(GeoZoneParserTest)

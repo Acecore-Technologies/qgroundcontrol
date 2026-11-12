@@ -19,6 +19,7 @@
 #include <QtCore/QUrl>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -27,14 +28,20 @@ QString _string(const QJsonObject &object, const char *key)
     return object.value(QLatin1String(key)).toString().trimmed();
 }
 
-/// @return true for the addresses feeds are downloaded or read from
-bool _supportedUrl(const QString &url)
+/// @return true for the addresses of a web server
+bool _webUrl(const QString &url)
 {
     // Templates are parsed with their placeholders, which QUrl accepts in tolerant mode
     const QUrl parsed(url);
     const QString scheme = parsed.scheme().toLower();
-    return parsed.isValid() && ((((scheme == QStringLiteral("https")) || (scheme == QStringLiteral("http"))) && !parsed.host().isEmpty()) ||
-                                (scheme == QStringLiteral("file")));
+    return parsed.isValid() && ((scheme == QStringLiteral("https")) || (scheme == QStringLiteral("http"))) && !parsed.host().isEmpty();
+}
+
+/// @return true for the addresses feeds are downloaded or read from
+bool _supportedUrl(const QString &url)
+{
+    const QUrl parsed(url);
+    return _webUrl(url) || (parsed.isValid() && (parsed.scheme().toLower() == QStringLiteral("file")));
 }
 
 /// What a member of a catalogue must be: one of another type would be read as its default, like "enabled": "false"
@@ -147,13 +154,15 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
         errorString = tr("Not a feed catalogue: its fileType is %1 rather than %2.").arg(type, QLatin1String(fileType));
         return false;
     }
+    // Compared as the number it is: 2.5 or 1e10 are no integers, as which they would read as the default
     const QJsonValue versionValue = root.value(QStringLiteral("version"));
-    if (!versionValue.isUndefined() && (!versionValue.isDouble() || (versionValue.toDouble() < 1))) {
-        errorString = tr("Its version must be a number, 1 for this format.");
+    const double versionNumber = versionValue.toDouble(version);
+    if (!versionValue.isUndefined() && (!versionValue.isDouble() || (versionNumber < 1) || (versionNumber != std::floor(versionNumber)))) {
+        errorString = tr("Its version must be a whole number, 1 for this format.");
         return false;
     }
-    if (versionValue.toInt(1) > version) {
-        errorString = tr("The catalogue has version %1, this QGroundControl reads version %2.").arg(versionValue.toInt()).arg(version);
+    if (versionNumber > version) {
+        errorString = tr("The catalogue has version %1, this QGroundControl reads version %2.").arg(QString::number(versionNumber, 'f', 0)).arg(version);
         return false;
     }
     const QJsonValue feedsValue = root.value(QStringLiteral("feeds"));
@@ -243,7 +252,7 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
             problem = tr("It has neither a url nor an areaUrl.");
         } else if (!service.feedUrl.isEmpty() && !_supportedUrl(service.feedUrl)) {
             problem = tr("Its url isn't an https, http or file address.");
-        } else if (!service.areaUrlTemplate.isEmpty() && (!_supportedUrl(service.areaUrlTemplate) || !GeoZoneService::hasAreaPlaceholders(service.areaUrlTemplate))) {
+        } else if (!service.areaUrlTemplate.isEmpty() && (!_webUrl(service.areaUrlTemplate) || !GeoZoneService::hasAreaPlaceholders(service.areaUrlTemplate))) {
             problem = tr("Its areaUrl must be an https or http address with an area placeholder like {bbox}.");
         } else if (!formatOk) {
             problem = tr("Its format %1 is unknown.").arg(_string(entry, "format"));
