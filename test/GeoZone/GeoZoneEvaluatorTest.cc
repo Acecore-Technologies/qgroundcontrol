@@ -318,6 +318,83 @@ void GeoZoneEvaluatorTest::_testAuthorisationScope()
     QVERIFY(unlimited && !unlimited->limitsPath() && !unlimited->hasDailyHours());
 }
 
+void GeoZoneEvaluatorTest::_testAuthorisationScopeKept()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("CTR"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+        _circleFeature(QStringLiteral("TMA"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2000, 90), 300),
+    });
+    QVERIFY2(zones.loadFile(fileName, errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 2);
+    const GeoZone *zone = zones.zoneList().constFirst();
+    const GeoZone *const other = zones.zoneList().constLast();
+    QVERIFY(!zone->data().contentHash.isEmpty());
+    GeoZoneAuthorisation authorisation;
+    authorisation.zoneKey = GeoZoneAuthorisations::zoneKey(zone);
+    authorisation.ceiling = 120;
+    const GeoZone::Position low{ center, 100 };
+
+    // The scope of a zone is made once for the positions checked against it
+    const std::shared_ptr<const GeoZone> scope = authorisation.scopeZone(zone);
+    QVERIFY(scope);
+    QVERIFY(authorisation.scopeContains(zone, low));
+    QVERIFY(!authorisation.scopeContains(zone, GeoZone::Position{ center, 150 }));
+    QCOMPARE(authorisation.scopeZone(zone).get(), scope.get());
+
+    // and again when its limits or its zone change
+    authorisation.ceiling = 50;
+    const std::shared_ptr<const GeoZone> lower = authorisation.scopeZone(zone);
+    QVERIFY(lower.get() != scope.get());
+    QVERIFY(!authorisation.scopeContains(zone, low));
+    authorisation.ceilingAboveGround = true;
+    QVERIFY(authorisation.scopeZone(zone).get() != lower.get());
+    authorisation.ceiling.reset();
+    authorisation.ceilingAboveGround = false;
+    authorisation.area = { QGeoCoordinate(47.01, 7.98), QGeoCoordinate(47.01, 8), QGeoCoordinate(46.99, 8), QGeoCoordinate(46.99, 7.98) };
+    const std::shared_ptr<const GeoZone> western = authorisation.scopeZone(zone);
+    QVERIFY(authorisation.scopeContains(zone, GeoZone::Position{ center.atDistanceAndAzimuth(100, 270), 100 }));
+    QVERIFY(!authorisation.scopeContains(zone, GeoZone::Position{ center.atDistanceAndAzimuth(100, 90), 100 }));
+    QCOMPARE(authorisation.scopeZone(zone).get(), western.get());
+    authorisation.areaCircle = QGeoCircle(center.atDistanceAndAzimuth(100, 90), 50);
+    QVERIFY(authorisation.scopeZone(zone).get() != western.get());
+    QVERIFY(authorisation.scopeContains(zone, GeoZone::Position{ center.atDistanceAndAzimuth(100, 90), 100 }));
+    authorisation.area.clear();
+    authorisation.areaCircle = QGeoCircle();
+    const std::shared_ptr<const GeoZone> whole = authorisation.scopeZone(zone);
+    QVERIFY(authorisation.scopeContains(zone, low));
+    const std::shared_ptr<const GeoZone> otherScope = authorisation.scopeZone(other);
+    QVERIFY(otherScope.get() != whole.get());
+    QVERIFY(!authorisation.scopeContains(other, low));
+    QVERIFY(authorisation.scopeContains(zone, low));
+
+    // It is no part of the authorisation, whose copies make their own
+    const GeoZoneAuthorisation copy = authorisation;
+    QCOMPARE(copy, authorisation);
+    const std::shared_ptr<const GeoZone> kept = authorisation.scopeZone(zone);
+    QVERIFY(copy.scopeZone(zone).get() != kept.get());
+    QCOMPARE(copy, authorisation);
+    QCOMPARE(GeoZoneAuthorisation::fromJson(authorisation.toJson()), authorisation);
+
+    // A zone whose content changed is another one for the scope, whatever its address: the scope follows it
+    authorisation.ceiling = 120;
+    const GeoZone::Position east{ center.atDistanceAndAzimuth(100, 90), 100 };
+    QVERIFY(authorisation.scopeContains(zone, east));
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("CTR"), QStringLiteral("REQ_AUTHORISATION"), center, 50),
+        _circleFeature(QStringLiteral("TMA"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2000, 90), 300),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 2);
+    zone = zones.zoneList().constFirst();
+    QCOMPARE(zone->identifier(), QStringLiteral("CTR"));
+    QVERIFY(!authorisation.scopeContains(zone, east));
+    QVERIFY(authorisation.scopeContains(zone, low));
+}
+
 void GeoZoneEvaluatorTest::_testAuthorisationLimits_data()
 {
     QTest::addColumn<QString>("key");

@@ -22,6 +22,7 @@ private slots:
     void _testAltitudes();
     void _testUnknownTerrain();
     void _testAuthorisationScope();
+    void _testAuthorisationScopeKept();
     void _testAuthorisationLimits_data();
     void _testAuthorisationLimits();
     void _testAuthorisationCeiling();

@@ -14,6 +14,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QMutex>
 #include <QtCore/QTime>
 #include <QtPositioning/QGeoCircle>
 #include <QtPositioning/QGeoCoordinate>
@@ -61,7 +62,7 @@ struct GeoZoneAuthorisation
     /// @return true if the scope limits where the flight may go in the zone: a ceiling or an area
     bool limitsPath() const { return ceiling.has_value() || hasArea(); }
     /// @return The part of the zone the scope allows flying in: the area, or the zone's horizontal extent, below the
-    ///         ceiling and without floor. Null without zone.
+    ///         ceiling and without floor. Null without zone. Kept for the next call, see ScopeCache.
     std::shared_ptr<const GeoZone> scopeZone(const GeoZone *zone) const;
     /// @return true if the position is inside the area and below the ceiling of the scope. An unknown altitude, or
     ///         terrain for a ceiling above ground, isn't below the ceiling.
@@ -89,6 +90,27 @@ struct GeoZoneAuthorisation
     ///         limitsValid: taken as no limit it would authorise more than the permit does, or for the authorisation
     ///         of a prohibited zone without permit reference or end, see validFor
     static std::optional<GeoZoneAuthorisation> fromJson(const QJsonObject &json);
+
+    /// The scope zone of the zone it was last asked for, which every position checked against the scope asks for:
+    /// reused while the zone, recognized by its content, and the limits it was made from are the same. It is no part
+    /// of the authorisation: any two compare equal, and a copy starts without, so that the copies given to other
+    /// threads make their own.
+    struct ScopeCache {
+        ScopeCache() = default;
+        ScopeCache(const ScopeCache &) {}
+        ScopeCache &operator=(const ScopeCache &) { return *this; }
+        friend bool operator==(const ScopeCache &, const ScopeCache &) { return true; }
+
+        QMutex mutex;
+        const GeoZone *zone = nullptr;
+        QByteArray zoneHash;            ///< GeoZone::Data::contentHash, zones without one aren't kept
+        std::optional<double> ceiling;
+        bool ceilingAboveGround = false;
+        QList<QGeoCoordinate> area;
+        QGeoCircle areaCircle;
+        std::shared_ptr<const GeoZone> scope;
+    };
+    mutable ScopeCache scopeCache;
 
     friend bool operator==(const GeoZoneAuthorisation &, const GeoZoneAuthorisation &) = default;
 };

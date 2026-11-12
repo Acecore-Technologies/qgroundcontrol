@@ -19,6 +19,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QLocale>
+#include <QtCore/QMutexLocker>
 #include <QtCore/QSaveFile>
 
 #include <algorithm>
@@ -110,6 +111,13 @@ std::shared_ptr<const GeoZone> GeoZoneAuthorisation::scopeZone(const GeoZone *zo
     if (!zone) {
         return nullptr;
     }
+    // Making the zone, and projecting it for its first query, costs far more than a query
+    const QMutexLocker locker(&scopeCache.mutex);
+    const QByteArray zoneHash = zone->data().contentHash;
+    if (scopeCache.scope && !zoneHash.isEmpty() && (scopeCache.zone == zone) && (scopeCache.zoneHash == zoneHash) && (scopeCache.ceiling == ceiling) &&
+        (scopeCache.ceilingAboveGround == ceilingAboveGround) && (scopeCache.area == area) && (scopeCache.areaCircle == areaCircle)) {
+        return scopeCache.scope;
+    }
     GeoZone::Volume limits;
     if (ceiling) {
         limits.upperLimit = *ceiling;
@@ -142,7 +150,15 @@ std::shared_ptr<const GeoZone> GeoZoneAuthorisation::scopeZone(const GeoZone *zo
     data.name = zone->name();
     data.restriction = zone->restriction();
     data.volumes = volumes;
-    return std::make_shared<const GeoZone>(data);
+    const std::shared_ptr<const GeoZone> scope = std::make_shared<const GeoZone>(data);
+    scopeCache.zone = zone;
+    scopeCache.zoneHash = zoneHash;
+    scopeCache.ceiling = ceiling;
+    scopeCache.ceilingAboveGround = ceilingAboveGround;
+    scopeCache.area = area;
+    scopeCache.areaCircle = areaCircle;
+    scopeCache.scope = zoneHash.isEmpty() ? nullptr : scope;
+    return scope;
 }
 
 bool GeoZoneAuthorisation::scopeContains(const GeoZone *zone, const GeoZone::Position &position) const
