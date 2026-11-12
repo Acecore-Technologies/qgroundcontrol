@@ -69,29 +69,52 @@ Rectangle {
     readonly property real _actionsWidth:   [ routeButton, fenceButton, exportButton, detailsButton ].filter(button => button.visible)
                                                 .reduce((width, button) => width + button.implicitWidth + actionFlow.spacing, -actionFlow.spacing)
 
-    /// @return The entries of the mission check with any of the kinds. A zone loaded from overlapping sources is listed
-    ///         once, with the labels of all its entries.
-    function _entries(kind) {
-        const entries = []
+    // The entries of the mission check by kind, see GeoZoneMissionCheck::Kind, grouped once when they change rather
+    // than by each of the bindings of the summary and the details. A zone loaded from overlapping sources is listed once
+    // per kind, with the labels of all its entries.
+    readonly property var _entriesByKind: {
+        const byKind = {}
         const byKey = {}
         for (const entry of check.zones) {
-            if (!(entry.kind & kind)) {
-                continue
+            const zoneKey = entry.zone.displayName + "\u001F" + entry.zone.restriction
+            for (let kind = 1; kind <= entry.kind; kind <<= 1) {
+                if (!(entry.kind & kind)) {
+                    continue
+                }
+                const key = kind + "\u001F" + zoneKey
+                const existing = byKey[key]
+                if (existing) {
+                    existing.labels = existing.labels.concat(entry.labels.filter(label => !existing.labels.includes(label)))
+                    continue
+                }
+                byKey[key] = { zone: entry.zone, kind: entry.kind, labels: entry.labels.slice(), approximationTexts: entry.approximationTexts }
+                if (!byKind[kind]) {
+                    byKind[kind] = []
+                }
+                byKind[kind].push(byKey[key])
             }
-            const key = entry.zone.displayName + "\u001F" + entry.zone.restriction
-            const existing = byKey[key]
-            if (existing) {
-                existing.labels = existing.labels.concat(entry.labels.filter(label => !existing.labels.includes(label)))
-                continue
-            }
-            byKey[key] = { zone: entry.zone, kind: entry.kind, labels: entry.labels.slice(), approximationTexts: entry.approximationTexts }
-            entries.push(byKey[key])
         }
-        return entries
+        return byKind
+    }
+    // The restricted zones entered by restriction, see GeoZone::Restriction
+    readonly property var _restrictedByRestriction: {
+        const byRestriction = {}
+        for (const entry of _entries(GeoZoneMissionCheck.Crossed)) {
+            if (!byRestriction[entry.zone.restriction]) {
+                byRestriction[entry.zone.restriction] = []
+            }
+            byRestriction[entry.zone.restriction].push(entry)
+        }
+        return byRestriction
+    }
+
+    /// @return The entries of the mission check of the kind, one of GeoZoneMissionCheck::Kind
+    function _entries(kind) {
+        return _entriesByKind[kind] || []
     }
 
     function _restricted(restriction) {
-        return _entries(GeoZoneMissionCheck.Crossed).filter(entry => entry.zone.restriction === restriction)
+        return _restrictedByRestriction[restriction] || []
     }
 
     /// Names of the entries' zones, with the paths only entering them like "the loiter at item 3"
