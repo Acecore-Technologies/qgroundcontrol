@@ -186,8 +186,10 @@ public:
     void setErrorString(const QString &errorString);
 
     /// Re-evaluates expiry and staleness against the specified UTC time, using the outdated data age of
-    /// GeoZoneEnvironment::sourceSettings, or liveStaleHours for live data. Data without an issue date downloaded
-    /// from a server is as old as the server last confirmed it.
+    /// GeoZoneEnvironment::sourceSettings, or liveStaleHours for live data. Data downloaded from a server is as old as
+    /// the server last confirmed it (checkedAt), whatever its issue date, which is only shown. Files are as old as
+    /// their issue date, or their file date without one. The validity period and the AIRAC cycle of the data apply
+    /// to both.
     void updateValidity(const QDateTime &now);
 
     /// @return Temporary flight restrictions which change during the day, downloaded and outdated sooner

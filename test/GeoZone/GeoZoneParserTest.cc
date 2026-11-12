@@ -1200,10 +1200,10 @@ void GeoZoneParserTest::_testParseFaaTfr()
     QVERIFY(!scheduler.isDue(source, now.addSecs(10 * 60)));
     QVERIFY(scheduler.isDue(source, now.addSecs(16 * 60)));
 
-    // Restrictions change during the day, so the list is outdated after hours rather than weeks
-    source.updateValidity(result.issued.addSecs(3600));
+    // Restrictions change during the day, so the list is outdated hours rather than weeks after its server last sent it
+    source.updateValidity(now.addSecs(3600));
     QVERIFY(source.validityText().isEmpty());
-    source.updateValidity(result.issued.addSecs(3 * 3600));
+    source.updateValidity(now.addSecs(3 * 3600));
     QCOMPARE(source.validityText(), QStringLiteral("Data is 3 hour(s) old"));
 
     // The NOTAM details give the times and altitudes of their TFRs, which apply at all times and altitudes without

@@ -47,8 +47,8 @@ void GeoZoneManagerTest::_testManagerStartup()
     QVERIFY(indexFile.write(QJsonDocument(index).toJson()) > 0);
     indexFile.close();
 
-    // Startup loads the stored copy, refreshes due feeds, then reports outdated data once: the test file was
-    // issued months ago
+    // Startup loads the stored copy and refreshes due feeds. The test file was issued months ago, but its server
+    // just sent it again: nothing is outdated
     GeoZoneManager manager(storageDir.path());
     QSignalSpy outdatedSpy(&manager, &GeoZoneManager::outdatedDataFound);
     manager.init();
@@ -57,8 +57,8 @@ void GeoZoneManagerTest::_testManagerStartup()
     QTRY_VERIFY(!manager.repository()->busy());
     QCOMPARE(manager.zoneCount(), 3);
     QVERIFY(manager.repository()->source(url)->loadedAt() > downloaded.addDays(1));
-    QTRY_COMPARE(outdatedSpy.count(), 1);
-    QVERIFY(outdatedSpy.first()[0].toString().contains(QStringLiteral("days old")));
+    QCOMPARE(manager.repository()->validityWarning(), QString());
+    QCOMPARE(outdatedSpy.count(), 0);
 }
 
 void GeoZoneManagerTest::_testSettings()

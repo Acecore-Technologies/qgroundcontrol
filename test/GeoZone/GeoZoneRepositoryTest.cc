@@ -21,6 +21,9 @@ using namespace GeoZoneTestHelpers;
 
 namespace {
 
+/// Longest a download from the local test server, the load of its zones or another step of a test may take
+constexpr int stepTimeoutMSecs = 10000;
+
 /// A format whose documents name the companion document of each feature by its "detail" property
 class DetailFormat : public GeoZoneFormat
 {
@@ -1436,6 +1439,109 @@ void GeoZoneRepositoryTest::_testSourceValidity()
     scheduler.refreshSucceeded(feed.key(), -1);
     QVERIFY(!scheduler.retryAt(feed.key()).isValid());
     QVERIFY(!scheduler.isDue(feed, now.addSecs(60)));
+}
+
+void GeoZoneRepositoryTest::_testFeedAgeFromLastCheck()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2027, 1, 10), QTime(12, 0)));
+    const QDateTime now = environment.now();
+    const QString issuedText = QStringLiteral("issued %1").arg(now.addDays(-90).toString(QStringLiteral("yyyy-MM-dd")));
+
+    // A feed whose data was issued months ago, like the ED-318 file of Sweden, is current when its server just sent it
+    const QString feedUrl = QStringLiteral("https://example.com/zones.json");
+    GeoZoneSource feed(feedUrl, feedUrl);
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::ED318;
+    result.issued = now.addDays(-90);
+    feed.setResult(result, now, now);
+    QCOMPARE(feed.validityText(), QString());
+    QVERIFY(!feed.invalid());
+    // The issue date is shown as information
+    QCOMPARE(feed.dataDate(), result.issued);
+    QVERIFY2(feed.detailsText().contains(issuedText), qPrintable(feed.detailsText()));
+    // It is outdated once its server didn't confirm it for longer than the outdated age, 7 days by default
+    feed.updateValidity(now.addDays(7));
+    QCOMPARE(feed.validityText(), QString());
+    feed.updateValidity(now.addDays(8));
+    QCOMPARE(feed.validityText(), QStringLiteral("Data is 8 days old"));
+    QVERIFY(feed.invalid());
+    environment.addSecs(8 * 24 * 3600);
+    feed.setCheckedAt(environment.now());
+    QCOMPARE(feed.validityText(), QString());
+    environment.setNow(now);
+
+    // The validity period of the data still counts right after a download
+    result.validTo = now.addDays(-2);
+    feed.setResult(result, now, now);
+    QVERIFY2(feed.validityText().startsWith(QStringLiteral("Expired on")), qPrintable(feed.validityText()));
+    result.validTo = QDateTime();
+    result.validFrom = now.addDays(2);
+    feed.setResult(result, now, now);
+    QVERIFY2(feed.validityText().startsWith(QStringLiteral("Not valid until")), qPrintable(feed.validityText()));
+
+    // Live restrictions are outdated two hours after their server last confirmed them, whenever they were issued
+    GeoZoneSource live(feedUrl, feedUrl);
+    result = GeoZoneParser::Result();
+    result.format = GeoZoneParser::Format::FaaTfr;
+    result.issued = now.addSecs(-10 * 3600);
+    live.setResult(result, now, now);
+    QVERIFY(live.isLive());
+    QCOMPARE(live.validityText(), QString());
+    live.updateValidity(now.addSecs(3 * 3600));
+    QCOMPARE(live.validityText(), QStringLiteral("Data is 3 hour(s) old"));
+
+    // A file is as old as its issue date, however recently it was loaded
+    GeoZoneSource file(QStringLiteral("zones.json"), QString());
+    result = GeoZoneParser::Result();
+    result.format = GeoZoneParser::Format::ED318;
+    result.issued = now.addDays(-90);
+    file.setResult(result, now, now);
+    QCOMPARE(file.validityText(), QStringLiteral("Data is 90 days old"));
+
+    // The test feed was issued in August 2026: just downloaded, it is current
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const QString url = server.url(QStringLiteral("/ok"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.repository()->addUrl(url);
+        QVERIFY(addedSpy.wait(stepTimeoutMSecs));
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.repository()->busy(), stepTimeoutMSecs);
+        const GeoZoneSource *const added = manager.repository()->source(url);
+        QVERIFY(added);
+        QCOMPARE(added->dataDate(), _utc(QDate(2026, 8, 13), QTime(0, 0)));
+        QCOMPARE(added->validityText(), QString());
+        QCOMPARE(manager.repository()->validityWarning(), QString());
+        QVERIFY(!manager.repository()->dataInvalid());
+    }
+
+    // A month later the server sends the same data at startup: nothing is reported as outdated
+    environment.addSecs(30 * 24 * 3600);
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy outdatedSpy(&manager, &GeoZoneManager::outdatedDataFound);
+        manager.init();
+        QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, 2, stepTimeoutMSecs);
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.repository()->busy(), stepTimeoutMSecs);
+        QCOMPARE(manager.repository()->validityWarning(), QString());
+        QCOMPARE(outdatedSpy.count(), 0);
+    }
+
+    // Another month later the server fails: the copy it last confirmed a month ago is reported, once
+    environment.addSecs(30 * 24 * 3600);
+    server.okPathStatus = "500 Internal Server Error";
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy outdatedSpy(&manager, &GeoZoneManager::outdatedDataFound);
+    manager.init();
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, 3, stepTimeoutMSecs);
+    QTRY_COMPARE_WITH_TIMEOUT(outdatedSpy.count(), 1, stepTimeoutMSecs);
+    QVERIFY2(outdatedSpy.first()[0].toString().contains(QStringLiteral("Data is 30 days old")), qPrintable(outdatedSpy.first()[0].toString()));
+    QVERIFY(manager.repository()->dataInvalid());
+    QCOMPARE(manager.zoneCount(), 3);
 }
 
 void GeoZoneRepositoryTest::_testDownloadSizeLimit()

@@ -537,7 +537,9 @@ void GeoZoneSource::updateValidity(const QDateTime &now)
     const GeoZoneEnvironment::SourceSettings settings = GeoZoneEnvironment::sourceSettings();
     QString text;
     if (loaded()) {
-        const QDateTime date = (!_issued.isValid() && _isDownloaded() && _checkedAt.isValid()) ? _checkedAt : dataDate();
+        // A feed is as old as its server last confirmed it, whatever the issue date of its data: a dataset issued months
+        // ago is current while its server still publishes it. Files are as old as their issue date, or their file date.
+        const QDateTime date = (_isDownloaded() && _checkedAt.isValid()) ? _checkedAt : dataDate();
         if (_validTo.isValid() && (_validTo < now)) {
             text = tr("Expired on %1").arg(_formatDate(_validTo));
         } else if (_validFrom.isValid() && (_validFrom > now)) {
