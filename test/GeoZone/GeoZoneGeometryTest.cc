@@ -325,6 +325,99 @@ void GeoZoneGeometryTest::_testScheduleTimeZones()
     QCOMPARE(restored.startTime, period.startTime);
 }
 
+void GeoZoneGeometryTest::_testDailyWindowEnds_data()
+{
+    QTest::addColumn<QString>("day");
+    QTest::addColumn<QString>("startTime");
+    QTest::addColumn<QString>("endTime");
+    QTest::addColumn<QDateTime>("time");
+    QTest::addColumn<bool>("active");
+    QTest::addColumn<QByteArray>("timeZone");    ///< Of the times instead of UTC, empty without
+
+    const QDate monday(2026, 6, 1);
+    const QDate tuesday = monday.addDays(1);
+    const auto at = [](const QDate &date, int hour, int minute, int second = 0, int msec = 0) {
+        return QDateTime(date, QTime(hour, minute, second, msec), QTimeZone::UTC);
+    };
+    // However the end of the day is published, the zone applies up to midnight, when the next day's period starts
+    QTest::newRow("24:00 last second") << "ANY" << "00:00Z" << "24:00Z" << at(monday, 23, 59, 59, 500) << true << QByteArray();
+    QTest::newRow("24:00 last millisecond") << "ANY" << "00:00Z" << "24:00Z" << at(monday, 23, 59, 59, 999) << true << QByteArray();
+    QTest::newRow("24:00 midnight") << "ANY" << "00:00Z" << "24:00Z" << at(tuesday, 0, 0) << true << QByteArray();
+    QTest::newRow("23:59:59 last second") << "ANY" << "00:00Z" << "23:59:59Z" << at(monday, 23, 59, 59, 500) << true << QByteArray();
+    QTest::newRow("23:59:59.99 last second") << "ANY" << "00:00:00.00Z" << "23:59:59.99Z" << at(monday, 23, 59, 59, 995) << true << QByteArray();
+    QTest::newRow("23:59 last minute") << "ANY" << "00:00Z" << "23:59Z" << at(monday, 23, 59, 30) << true << QByteArray();
+    QTest::newRow("23:59 last millisecond") << "ANY" << "00:00Z" << "23:59Z" << at(monday, 23, 59, 59, 999) << true << QByteArray();
+    // Only on its day
+    QTest::newRow("24:00 monday") << "MON" << "00:00Z" << "24:00Z" << at(monday, 23, 59, 59, 999) << true << QByteArray();
+    QTest::newRow("24:00 tuesday") << "MON" << "00:00Z" << "24:00Z" << at(tuesday, 0, 0) << false << QByteArray();
+    QTest::newRow("24:00 sunday") << "MON" << "00:00Z" << "24:00Z" << at(monday.addDays(-1), 23, 59, 59, 999) << false << QByteArray();
+    QTest::newRow("24:00 offset") << "SUN" << "00:00+01:00" << "24:00+01:00" << at(QDate(2026, 3, 29), 22, 59, 59, 500) << true << QByteArray();
+    QTest::newRow("24:00 offset after") << "SUN" << "00:00+01:00" << "24:00+01:00" << at(QDate(2026, 3, 29), 23, 0) << false << QByteArray();
+    // The Sunday daylight saving time begins on is an hour shorter in Zurich, from 23:00 to 22:00 UTC
+    const QByteArray zurich("Europe/Zurich");
+    QTest::newRow("24:00 short day start") << "SUN" << "00:00Z" << "24:00Z" << at(QDate(2026, 3, 28), 23, 0) << true << zurich;
+    QTest::newRow("24:00 short day last second") << "SUN" << "00:00Z" << "24:00Z" << at(QDate(2026, 3, 29), 21, 59, 59, 500) << true << zurich;
+    QTest::newRow("24:00 short day after") << "SUN" << "00:00Z" << "24:00Z" << at(QDate(2026, 3, 29), 22, 0) << false << zurich;
+    QTest::newRow("00:00-00:00 short day last second") << "SUN" << "00:00Z" << "00:00Z" << at(QDate(2026, 3, 29), 21, 59, 59, 500) << true << zurich;
+
+    // Equal start and end times are a whole day, from midnight or from another time
+    QTest::newRow("00:00-00:00 noon") << "ANY" << "00:00Z" << "00:00Z" << at(monday, 12, 0) << true << QByteArray();
+    QTest::newRow("00:00-00:00 last second") << "ANY" << "00:00Z" << "00:00Z" << at(monday, 23, 59, 59, 500) << true << QByteArray();
+    QTest::newRow("00:00-00:00 monday") << "MON" << "00:00Z" << "00:00Z" << at(monday, 18, 0) << true << QByteArray();
+    QTest::newRow("00:00-00:00 tuesday") << "MON" << "00:00Z" << "00:00Z" << at(tuesday, 0, 0, 1) << false << QByteArray();
+    QTest::newRow("08:00-08:00 before") << "ANY" << "08:00Z" << "08:00Z" << at(monday, 7, 0) << true << QByteArray();
+    QTest::newRow("08:00-08:00 monday") << "MON" << "08:00Z" << "08:00Z" << at(tuesday, 7, 0) << true << QByteArray();
+    QTest::newRow("08:00-08:00 monday before") << "MON" << "08:00Z" << "08:00Z" << at(monday, 7, 0) << false << QByteArray();
+    QTest::newRow("08:00-08:00 tuesday") << "MON" << "08:00Z" << "08:00Z" << at(tuesday, 8, 0, 1) << false << QByteArray();
+    QTest::newRow("no start-00:00") << "ANY" << "" << "00:00Z" << at(monday, 12, 0) << true << QByteArray();
+
+    // Other end times stand for their second: a period starting at the next one follows without a gap
+    QTest::newRow("end second") << "ANY" << "08:00Z" << "11:59:59Z" << at(monday, 11, 59, 59, 900) << true << QByteArray();
+    QTest::newRow("after end second") << "ANY" << "08:00Z" << "11:59:59Z" << at(monday, 12, 0) << false << QByteArray();
+    QTest::newRow("end minute") << "ANY" << "08:00Z" << "17:00Z" << at(monday, 17, 0, 0, 500) << true << QByteArray();
+    QTest::newRow("after end minute") << "ANY" << "08:00Z" << "17:00Z" << at(monday, 17, 0, 1) << false << QByteArray();
+    QTest::newRow("before start") << "ANY" << "08:00Z" << "17:00Z" << at(monday, 7, 59, 59, 999) << false << QByteArray();
+    // Ends before the start still wrap past midnight, to the end of the next day in its last minute
+    QTest::newRow("wrap") << "MON" << "22:00Z" << "02:00Z" << at(tuesday, 2, 0, 0, 500) << true << QByteArray();
+    QTest::newRow("after wrap") << "MON" << "22:00Z" << "02:00Z" << at(tuesday, 2, 0, 1) << false << QByteArray();
+    QTest::newRow("wrap in last minute") << "MON" << "23:59:30Z" << "23:59:00Z" << at(tuesday, 12, 0) << true << QByteArray();
+    QTest::newRow("wrap in last minute before") << "MON" << "23:59:30Z" << "23:59:00Z" << at(monday, 23, 59, 29) << false << QByteArray();
+}
+
+void GeoZoneGeometryTest::_testDailyWindowEnds()
+{
+    QFETCH(QString, day);
+    QFETCH(QString, startTime);
+    QFETCH(QString, endTime);
+    QFETCH(QDateTime, time);
+    QFETCH(bool, active);
+    QFETCH(QByteArray, timeZone);
+
+    QJsonObject daily{ { "day", QJsonArray{ day } }, { "endTime", endTime } };
+    if (!startTime.isEmpty()) {
+        daily.insert(QStringLiteral("startTime"), startTime);
+    }
+    QJsonObject feature = _circleFeature(QStringLiteral("T"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47.37, 8.54), 100);
+    feature.insert(QStringLiteral("applicability"), QJsonArray{ QJsonObject{ { "permanent", "NO" }, { "schedule", QJsonArray{ daily } } } });
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(QJsonDocument(QJsonObject{ { "features", QJsonArray{ feature } } }).toJson(), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 1);
+    QCOMPARE(result.zones[0].applicability.count(), 1);
+    QCOMPARE(result.zones[0].applicability[0].schedule.count(), 1);
+    if (!timeZone.isEmpty()) {
+        const QTimeZone publishedTimeZone(timeZone);
+        QVERIFY(publishedTimeZone.isValid());
+        result.zones[0].applicability[0].schedule[0].timeZone = publishedTimeZone;
+    }
+
+    const GeoZone zone(result.zones.constFirst());
+    QCOMPARE(zone.isActiveAt(time), active);
+    // The checks of an interval and of a time agree
+    QCOMPARE(zone.isActiveDuring(time, time), active);
+    QCOMPARE(zone.isActiveThroughout(time, time), active);
+}
+
 void GeoZoneGeometryTest::_testOutwardSimplification()
 {
     const auto verifyEncloses = [](const QList<QGeoCoordinate> &original, const QList<QGeoCoordinate> &simplified, double tolerance) {

@@ -27,7 +27,10 @@ class GeoZoneSchedule
 public:
     struct DailyPeriod {
         QList<int> days;        ///< Qt::DayOfWeek values, empty for any day
-        QTime startTime;        ///< Invalid when not given or given as a daylight event. Ends before the start wrap past midnight.
+        QTime startTime;        ///< Invalid when not given or given as a daylight event
+        /// The period applies through the second of its end time, and to the end of the day when that is 23:59 or
+        /// later. Ends before the start wrap past midnight, and an end at the start is a day later: 00:00 to 00:00 is
+        /// the whole day.
         QTime endTime;
         int utcOffsetSecs = 0;  ///< Offset from UTC of the days and times as published, without time zone
         /// Time zone of the days and times when published in local time, whose offset changes with daylight saving

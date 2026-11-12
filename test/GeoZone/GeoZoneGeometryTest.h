@@ -21,6 +21,8 @@ private slots:
     void _testIsActiveDuring();
     void _testScheduleTimeZones_data();
     void _testScheduleTimeZones();
+    void _testDailyWindowEnds_data();
+    void _testDailyWindowEnds();
     void _testOutwardSimplification();
     void _testSpatialIndex();
     void _testExclusionShapes();

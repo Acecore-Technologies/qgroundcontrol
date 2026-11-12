@@ -163,8 +163,24 @@ SunEvent _sunEvent(const QString &event, const QDate &date, const QGeoCoordinate
     return result;
 }
 
+/// End times from this time of day on stand for the end of the day: days are published as ending at 23:59, 23:59:59
+/// or 24:00, which the parsers read as 23:59:59
+constexpr QTime kLastMinuteOfDay = QTime::fromMSecsSinceStartOfDay(((23 * 60) + 59) * 60 * 1000);
+
+/// @return UTC time a daily period ending at its end time on the date applies until. A published time stands for its
+///         whole second, and one in the last minute of the day for the end of the day, so that a period followed by
+///         one starting at the next second, or at midnight, leaves no time in between.
+QDateTime _endTimeUtc(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, Reading reading)
+{
+    if (period.endTime >= kLastMinuteOfDay) {
+        return _toUtc(period, date.addDays(1), QTime(0, 0), reading).addMSecs(-1);
+    }
+    return _toUtc(period, date, period.endTime, reading).addMSecs(999 - period.endTime.msec());
+}
+
 /// @return UTC start and end of a daily period on the date in the period's time zone or offset, nothing when it
-///         doesn't apply that day. Ends before the start wrap past midnight.
+///         doesn't apply that day. Ends before the start wrap past midnight, and so do ends at the start when both
+///         are times of day: 00:00 to 00:00 is the whole day. See _endTimeUtc for the end.
 std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedule::DailyPeriod &period, const QDate &date, const QGeoCoordinate &location,
                                                             Reading reading)
 {
@@ -210,8 +226,13 @@ std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedul
         // No daylight, or no darkness, that day
         return std::nullopt;
     }
-    if (end < start) {
-        end = (!period.endEvent.isEmpty() || !period.endTime.isValid()) ? end.addDays(1) : _toUtc(period, date.addDays(1), period.endTime, reading);
+    const bool endsAtTime = period.endEvent.isEmpty() && period.endTime.isValid();
+    // A period from a time of day, or the start of the day, to the same time is a day long rather than an instant
+    const bool wraps = (end < start) || (endsAtTime && period.startEvent.isEmpty() && (end == start));
+    if (endsAtTime) {
+        end = _endTimeUtc(period, wraps ? date.addDays(1) : date, reading);
+    } else if (wraps) {
+        end = end.addDays(1);
     }
     return std::make_pair(start, end);
 }
