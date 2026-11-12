@@ -30,6 +30,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         GeoZonePreflightCheck.h
         GeoZoneRemoteId.cc
         GeoZoneRemoteId.h
+        GeoZoneTrafficMonitor.cc
+        GeoZoneTrafficMonitor.h
         GeoZoneVehicleMonitor.cc
         GeoZoneVehicleMonitor.h
         GeoZoneVehicleThresholds.cc

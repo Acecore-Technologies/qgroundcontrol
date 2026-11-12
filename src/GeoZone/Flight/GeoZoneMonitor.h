@@ -34,6 +34,7 @@
 #include "GeoZoneAwareness.h"
 #include "GeoZonePermits.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneTrafficMonitor.h"
 #include "GeoZoneVehicleMonitor.h"
 
 #include <functional>
@@ -59,8 +60,8 @@ class Vehicle;
 /// announcements are spoken when spoken alerts are on. A vehicle comes near a zone within its alert thresholds, which
 /// the manufacturer's profile of its vehicle class defines at its speed and position accuracy (GeoZoneAlertThresholds)
 /// and the pilot can only widen in GeoZoneSettings.
-/// The ADS-B and Remote ID traffic around the active vehicle is checked against the zones too, with a
-/// GeoZoneAlertTracker per aircraft, so the pilot sees which aircraft are in or near zones.
+/// The ADS-B and Remote ID traffic around the active vehicle is checked against the zones too, by a
+/// GeoZoneTrafficMonitor, so the pilot sees which aircraft are in or near zones.
 /// The alerts shown to the pilot are kept in a GeoZoneAlertModel with what can be done about them. An alert of a
 /// vehicle approaching or entering a restricted zone asks whether the pilot has the permission to fly there: confirming
 /// it (approveAlert()) acknowledges the alert and ends the alerts and repeats about the zone until the vehicle leaves
@@ -126,10 +127,10 @@ public:
     static constexpr const char *fenceAlertKey = "fence";   ///< Stands for the zone of the fence alerts of a vehicle, see GeoZoneAlertArbiter::Alert::zoneKey
     static constexpr const char *awarenessAlertKey = "geo-awareness";   ///< ... and of its geo-awareness alerts
     static constexpr const char *permissionQuestion = "Do you have legal permission to fly here?";    ///< As logged, see approveAlert()
-    static constexpr int maxTrafficAircraft = 100;          ///< Checked at a time, the closest to the active vehicle
+    static constexpr int maxTrafficAircraft = GeoZoneTrafficMonitor::maxAircraft;   ///< Checked at a time, the closest to the active vehicle
     static constexpr int armingAlertIntervalMSecs = 10000;  ///< Arming attempts within this are alerted once, see OnGround
     /// Meters around the active vehicle within which the traffic is checked
-    static constexpr double trafficRadius() { return 10000; }
+    static constexpr double trafficRadius() { return GeoZoneTrafficMonitor::radius; }
 
     /// An alert of a vehicle about a zone, or what the pilot was shown and answered about an alert
     struct AlertEvent {
@@ -228,17 +229,7 @@ public:
     };
 
     /// An aircraft of the ADS-B or Remote ID traffic
-    struct Aircraft {
-        quint32 address = 0;                ///< ICAO address, identifies the aircraft
-        QString callsign;
-        QGeoCoordinate coordinate;          ///< With the altitude AMSL when known
-        double heading = qQNaN();           ///< Degrees
-        double speed = qQNaN();             ///< Meters per second over ground
-        double verticalSpeed = 0;           ///< Meters per second, up positive
-
-        /// @return Callsign, or the ICAO address without
-        QString label() const;
-    };
+    using Aircraft = GeoZoneTrafficMonitor::Aircraft;
 
     using Velocity = GeoZoneAlertTracker::Velocity;
     /// @return Monotonic milliseconds
@@ -353,7 +344,7 @@ public:
     GeoZoneAwareness::Status awarenessStatus(const GeoZoneVehicleMonitor *monitor) const;
     /// Monitor of the active vehicle, or of the positions of activeVehicleId() without, null when not monitored
     GeoZoneVehicleMonitor *activeMonitor() const { return _activeMonitor; }
-    QVariantList traffic() const;
+    QVariantList traffic() const { return _trafficMonitor.toVariantList(); }
     GeoZoneGuidedCheck *guidedCheck() const { return _guidedCheck; }
     /// Alerts of the session, which only the application monitor logs
     GeoZoneAlertHistory *alertHistory() const { return _alertHistory; }
@@ -461,14 +452,7 @@ private:
     void _logFenceEvent(GeoZoneVehicleMonitor *monitor, AlertEvent::Kind kind, int alertId, const QString &message);
 
     AlertEvent _alertEvent(const GeoZone *zone, AlertEvent::Kind kind, bool inside, double distance, double timeToEntry, const GeoZone::Position &position, int vehicleId, const QString &traffic = QString());
-    /// Aircraft in or near a zone, with the most restrictive one
-    struct ZoneTraffic {
-        Aircraft aircraft;
-        GeoZoneAlertTracker::Nearby nearby;
-    };
-    void _evaluateADSBTraffic();
-    void _setTraffic(const QList<ZoneTraffic> &traffic);
-    /// Forgets the aircraft and their states
+    /// Forgets the aircraft of the traffic and their states
     void _clearTraffic();
     /// @return Meters to climb above the zone by climbClearance, NaN when it has no known ceiling at the vehicle
     static double _climbHeight(const GeoZoneVehicleMonitor *monitor, const GeoZone *zone);
@@ -517,9 +501,8 @@ private:
     mutable std::optional<Settings> _settings;  ///< Of GeoZoneSettings, until they change
     mutable std::optional<GeoZonePolicy> _policy;   ///< Until the zones change
     QPointer<GeoZoneVehicleMonitor> _activeMonitor;
-    QHash<quint32, GeoZoneAlertTracker> _trafficTrackers;  ///< By ICAO address
+    GeoZoneTrafficMonitor _trafficMonitor;      ///< The traffic around the active vehicle
     QHash<int, GeoZoneActivationTracker> _activationTrackers;   ///< By GeoZoneVehicleMonitor::key
-    QList<ZoneTraffic> _traffic;
     GeoZoneGuidedCheck *_guidedCheck = nullptr;
     GeoZoneAlertHistory *_alertHistory = nullptr;
     GeoZoneAlertModel *_alertModel = nullptr;
