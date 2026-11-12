@@ -233,6 +233,209 @@ void GeoZoneRoutePlannerTest::_testRoutePlanner()
     QVERIFY(!climbSuggestions.constLast().toMap().contains(QStringLiteral("suggestedMaxAltitude")));
 }
 
+namespace {
+
+/// @return Index of the first suggestion of the kind which can be applied, -1 without
+int applicableSuggestion(const GeoZoneRoutePlanner &planner, const QString &kind)
+{
+    const QVariantList suggestions = planner.suggestions();
+    for (int i = 0; i < suggestions.count(); i++) {
+        const QVariantMap suggestion = suggestions[i].toMap();
+        if (suggestion[QStringLiteral("canApply")].toBool() && (suggestion[QStringLiteral("kind")].toString() == kind)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/// @return true once the altitudes of the legs of the mission are known
+bool legAltitudesKnown(MissionController *missionController)
+{
+    const QList<GeoZoneMissionPath::Leg> legs = GeoZoneMissionReader::path(missionController).legs();
+    return !legs.isEmpty() && !qIsNaN(legs.constLast().segment.fromAltitudeAMSL) && !qIsNaN(legs.constLast().segment.toAltitudeAMSL);
+}
+
+} // namespace
+
+void GeoZoneRoutePlannerTest::_testMissionChanges()
+{
+    ScopedEnvironment environment;
+    environment.setTerrain(0.0);
+    // A leg at 450 m above the sea through a zone up to 500 m, which a detour or a climb avoids
+    const QGeoCoordinate center(0.5, -25);
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(2000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(2000, 90);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300), 0, QStringLiteral("AMSL"), 500, QStringLiteral("AMSL")) }), errorString),
+             qPrintable(errorString));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    QmlObjectListModel *const visualItems = missionController->visualItems();
+    visualItems->value<MissionSettingsItem*>(0)->setInitialHomePosition(QGeoCoordinate(west.latitude(), west.longitude(), 400));
+    const auto addWaypoint = [missionController, visualItems](const QGeoCoordinate &coordinate) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, visualItems->count()));
+        if (item) {
+            item->setAltitudeMode(QGroundControlQmlGlobal::AltitudeModeAbsolute);
+            item->altitude()->setRawValue(450);
+        }
+        return item;
+    };
+    QVERIFY(addWaypoint(west));
+    QVERIFY(addWaypoint(east));
+    QTRY_VERIFY(legAltitudesKnown(missionController));
+    QCOMPARE(visualItems->count(), 3);
+
+    GeoZoneRoutePlanner planner(&manager);
+    planner.setMissionController(missionController);
+    planner.setMaxAltitude(1000);
+    planner.update();
+    QVERIFY(applicableSuggestion(planner, QStringLiteral("detour")) >= 0);
+    QVERIFY(applicableSuggestion(planner, QStringLiteral("climb")) >= 0);
+
+    // The suggestions refer to the items of the mission by index: an item added before them drops them at once, before
+    // the mission controller recalculates the flight path
+    QVERIFY(missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(3000, 0), 1));
+    QVERIFY(planner.suggestions().isEmpty());
+    QVERIFY(!planner.applySuggestion(0));
+    QCOMPARE(visualItems->count(), 4);
+    missionController->removeVisualItem(1);
+    QCOMPARE(visualItems->count(), 3);
+    QTRY_VERIFY(legAltitudesKnown(missionController));
+
+    // A search in progress is of the mission as it was: its suggestions never come
+    planner.startUpdate();
+    QVERIFY(planner.busy());
+    missionController->removeVisualItem(2);
+    QVERIFY(!planner.busy());
+    QVERIFY(_settleWorkers());
+    QVERIFY(planner.suggestions().isEmpty());
+    QVERIFY(addWaypoint(east));
+    QTRY_VERIFY(legAltitudesKnown(missionController));
+
+    // While the suggestions are shown, they are searched again once the changes settle, and the dialog shows it meanwhile
+    planner.setActive(true);
+    QTRY_VERIFY(!planner.busy());
+    QVERIFY(applicableSuggestion(planner, QStringLiteral("detour")) >= 0);
+    qobject_cast<SimpleMissionItem*>(visualItems->get(2))->altitude()->setRawValue(460);
+    QTRY_VERIFY(planner.busy());
+    QVERIFY(planner.suggestions().isEmpty());
+    QTRY_VERIFY(!planner.busy());
+    QVERIFY(applicableSuggestion(planner, QStringLiteral("detour")) >= 0);
+    planner.setActive(false);
+
+    // Should a change of the mission go unnoticed, a suggestion is still only applied to the items it was made for
+    planner.update();
+    const int climb = applicableSuggestion(planner, QStringLiteral("climb"));
+    const int detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    QVERIFY((climb >= 0) && (detour >= 0));
+    QSignalSpy failedSpy(&planner, &GeoZoneRoutePlanner::applyFailed);
+    {
+        const QSignalBlocker missionBlocker(missionController);
+        const QSignalBlocker itemsBlocker(visualItems);
+        missionController->removeVisualItem(1);
+    }
+    QCOMPARE(visualItems->count(), 2);
+    QCOMPARE(planner.suggestions().count() > climb, true);
+    SimpleMissionItem *const remaining = qobject_cast<SimpleMissionItem*>(visualItems->get(1));
+    QVERIFY(remaining);
+    const double altitude = remaining->altitude()->rawValue().toDouble();
+    QVERIFY(!planner.applySuggestion(climb));
+    QCOMPARE(failedSpy.count(), 1);
+    QVERIFY(!planner.applySuggestion(detour));
+    QCOMPARE(failedSpy.count(), 2);
+    QVERIFY2(failedSpy[1][0].toString().contains(QStringLiteral("The mission changed")), qPrintable(failedSpy[1][0].toString()));
+    QCOMPARE(visualItems->count(), 2);
+    QCOMPARE(remaining->altitude()->rawValue().toDouble(), altitude);
+}
+
+void GeoZoneRoutePlannerTest::_testDetourAltitudes()
+{
+    // The altitude of an item in each altitude mode
+    const double nan = qQNaN();
+    const auto inMode = [nan](int mode, double altitudeAMSL, double homeAltitudeAMSL, double terrainAMSL) {
+        return GeoZoneRoutePlanner::altitudeInMode(mode, altitudeAMSL, homeAltitudeAMSL, terrainAMSL).value_or(nan);
+    };
+    QCOMPARE(inMode(QGroundControlQmlGlobal::AltitudeModeAbsolute, 450, nan, nan), 450.0);
+    QCOMPARE(inMode(QGroundControlQmlGlobal::AltitudeModeRelative, 450, 400, nan), 50.0);
+    QCOMPARE(inMode(QGroundControlQmlGlobal::AltitudeModeCalcAboveTerrain, 450, 400, 420), 30.0);
+    QCOMPARE(inMode(QGroundControlQmlGlobal::AltitudeModeTerrainFrame, 450, 400, 420), 30.0);
+    // Unknown where what the mode refers to is, and in the modes which aren't those of an item, like one read from a file
+    QVERIFY(qIsNaN(inMode(QGroundControlQmlGlobal::AltitudeModeAbsolute, nan, 400, 420)));
+    QVERIFY(qIsNaN(inMode(QGroundControlQmlGlobal::AltitudeModeRelative, 450, nan, 420)));
+    QVERIFY(qIsNaN(inMode(QGroundControlQmlGlobal::AltitudeModeCalcAboveTerrain, 450, 400, nan)));
+    QVERIFY(qIsNaN(inMode(QGroundControlQmlGlobal::AltitudeModeTerrainFrame, 450, 400, nan)));
+    QVERIFY(qIsNaN(inMode(QGroundControlQmlGlobal::AltitudeModeMixed, 450, 400, 420)));
+    QVERIFY(qIsNaN(inMode(QGroundControlQmlGlobal::AltitudeModeNone, 450, 400, 420)));
+    QVERIFY(qIsNaN(inMode(42, 450, 400, 420)));
+    QVERIFY(qIsNaN(inMode(-1, 450, 400, 420)));
+
+    ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(2000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(2000, 90);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+
+    // A leg climbing from 450 m to 490 m above mean sea level, in a mission whose new waypoints are above the terrain,
+    // which isn't known
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    QmlObjectListModel *const visualItems = missionController->visualItems();
+    missionController->setGlobalAltitudeMode(QGroundControlQmlGlobal::AltitudeModeCalcAboveTerrain);
+    for (const auto &[coordinate, altitude] : { std::make_pair(west, 450.0), std::make_pair(east, 490.0) }) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, visualItems->count()));
+        QVERIFY(item);
+        item->setAltitudeMode(QGroundControlQmlGlobal::AltitudeModeAbsolute);
+        item->altitude()->setRawValue(altitude);
+    }
+    QTRY_VERIFY(legAltitudesKnown(missionController));
+
+    GeoZoneRoutePlanner planner(&manager);
+    planner.setMissionController(missionController);
+    planner.update();
+    int detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    QVERIFY(detour >= 0);
+
+    // The waypoints can't be given the altitudes the detour was checked at: none is inserted, and the dialog tells why
+    QSignalSpy failedSpy(&planner, &GeoZoneRoutePlanner::applyFailed);
+    QVERIFY(!planner.applySuggestion(detour));
+    QCOMPARE(failedSpy.count(), 1);
+    QVERIFY2(failedSpy[0][0].toString().contains(QStringLiteral("The detour wasn't inserted")), qPrintable(failedSpy[0][0].toString()));
+    QCOMPARE(visualItems->count(), 3);
+
+    // With the terrain at the waypoints they are, above it
+    environment.setTerrain(420.0);
+    planner.update();
+    detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    QVERIFY(detour >= 0);
+    QVERIFY(planner.applySuggestion(detour));
+    QCOMPARE(failedSpy.count(), 1);
+    QVERIFY(visualItems->count() > 3);
+    double previous = 450;
+    for (int i = 2; i < (visualItems->count() - 1); i++) {
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(visualItems->get(i));
+        QVERIFY(item);
+        QCOMPARE(item->altitudeMode(), QGroundControlQmlGlobal::AltitudeModeCalcAboveTerrain);
+        // Between those of the ends of the leg, rising along the detour
+        const double altitudeAMSL = item->altitude()->rawValue().toDouble() + 420;
+        QVERIFY2((altitudeAMSL > previous) && (altitudeAMSL < 490), qPrintable(QString::number(altitudeAMSL)));
+        previous = altitudeAMSL;
+    }
+}
+
 void GeoZoneRoutePlannerTest::_testRoutePlannerWorker()
 {
     ScopedEnvironment environment;
@@ -283,6 +486,8 @@ void GeoZoneRoutePlannerTest::_testRoutePlannerWorker()
     const QVariantList synchronous = planner.suggestions();
     QVERIFY(synchronous.count() >= 3);
     QVERIFY(!planner.busy());
+    // The mission stays as it is: what the mission controller recalculates later would drop the searches as outdated
+    const QSignalBlocker missionBlocker(missionController);
 
     // On a worker thread, with the same result
     QSignalSpy busySpy(&planner, &GeoZoneRoutePlanner::busyChanged);

@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QVariantList>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -27,6 +28,7 @@ class GeoZoneAuthorisations;
 class GeoZoneManager;
 class GeoZoneMissionWorker;
 class MissionController;
+class VisualMissionItem;
 
 /// Suggests how the legs of a mission between waypoints can avoid the restricted zones they enter, see
 /// GeoZoneRouteSearch: a detour around the zones, which can be inserted as waypoints, or climbing over or descending
@@ -34,6 +36,9 @@ class MissionController;
 /// listed with why the ways that don't work don't.
 /// The routes are searched on a worker thread with a snapshot of the zones, except for update, while the dialog
 /// shows the progress and can cancel it. A new computation cancels the one in progress.
+/// Suggestions refer to the items of the mission they were searched for: a change of the mission or of the zones drops
+/// them at once, with the search in progress, and they are searched again once the changes settle. A suggestion is
+/// only applied to the items it was made for.
 class GeoZoneRoutePlanner : public QObject
 {
     Q_OBJECT
@@ -52,7 +57,7 @@ class GeoZoneRoutePlanner : public QObject
     Q_PROPERTY(double               verticalMargin      READ verticalMargin                                 CONSTANT FINAL)       ///< Meters, see floorMargin
     /// Meters above the terrain that climbs over zones may reach
     Q_PROPERTY(double               maxAltitude         READ maxAltitude        WRITE setMaxAltitude        NOTIFY maxAltitudeChanged FINAL)
-    /// The suggestions are being computed
+    /// The suggestions are being computed, or will be once the changes of the mission or the zones settle
     Q_PROPERTY(bool                 busy                READ busy                                           NOTIFY busyChanged FINAL)
     Q_PROPERTY(double               progress            READ progress                                       NOTIFY progressChanged FINAL)    ///< From 0 to 1 while busy
     /// Why there are no suggestions though legs may enter zones, like a cancelled computation, empty otherwise
@@ -93,10 +98,17 @@ public:
     /// Stops the computation in progress, leaving no suggestions
     Q_INVOKABLE void cancel();
 
-    /// Inserts the waypoints of a detour into the mission or changes the altitudes of the waypoints of a leg, then
-    /// computes the suggestions again
-    /// @return true if the mission changed
+    /// Inserts the waypoints of a detour into the mission, at the altitudes the detour was checked at, or changes the
+    /// altitudes of the waypoints of a leg, then computes the suggestions again
+    /// @return true if the mission changed. false when there is nothing to apply, or, with applyFailed telling why,
+    ///         when the mission isn't the one the suggestion was made for or the altitudes can't be set: the mission
+    ///         is then left as it was.
     Q_INVOKABLE bool applySuggestion(int index);
+
+    /// @return The altitude an item in the altitude mode (QGroundControlQmlGlobal::AltMode) has at the altitude above
+    ///         mean sea level: above home, above the terrain at the item or above mean sea level. Nothing when what
+    ///         the mode refers to isn't known, and in the modes which aren't those of items.
+    static std::optional<double> altitudeInMode(int altitudeMode, double altitudeAMSL, double homeAltitudeAMSL, double terrainAMSL);
 
     /// @return Waypoints between from and to which keep the margin from all volumes of the zones horizontally, nothing
     ///         if an end is inside them or they surround it. Empty when the straight leg already keeps the margin.
@@ -111,6 +123,8 @@ signals:
     void busyChanged();
     void progressChanged();
     void statusTextChanged();
+    /// A suggestion couldn't be applied, the mission is as it was
+    void applyFailed(const QString &message);
 
 private:
     class Terrain;
@@ -120,6 +134,8 @@ private:
         GeoZoneRouteSearch::Leg leg;
         int fromItemIndex = -1;
         int toItemIndex = -1;
+        QPointer<QObject> fromItem;     ///< The visual items at the indexes when the job was made, only used on the GUI thread
+        QPointer<QObject> toItem;
         int fromSequenceNumber = -1;
         int toSequenceNumber = -1;
     };
@@ -141,6 +157,14 @@ private:
         bool terrainMissing = false;        ///< The search needed terrain which the job didn't have
     };
 
+    /// New altitude of an item of the mission
+    struct ItemAltitude {
+        int itemIndex = -1;
+        QPointer<QObject> item;     ///< The visual item at the index when the suggestion was made
+        int altitudeMode = -1;      ///< Of the item then, which the altitude is in
+        double altitude = 0;
+    };
+
     struct Suggestion {
         QString text;
         QString kind;
@@ -149,9 +173,12 @@ private:
         bool recommended = false;
         bool first = false;
         int insertIndex = -1;               ///< Visual item index where the detour waypoints go, -1 without a detour
+        QPointer<QObject> insertBefore;     ///< The visual item at insertIndex when the suggestion was made, the end of the leg
         QList<QGeoCoordinate> waypoints;
-        QList<double> waypointAltitudes;    ///< Meters AMSL of the waypoints, changing evenly along the detour, NaN when unknown
-        QList<std::pair<int, double>> altitudes;    ///< Visual item indexes with their new altitude in the item's altitude mode
+        /// Meters AMSL the detour was checked at, changing evenly along it, NaN for the detour of a leg at unknown
+        /// altitudes, which was checked at all altitudes
+        QList<double> waypointAltitudes;
+        QList<ItemAltitude> altitudes;      ///< Climbs and descents: the items of the leg with their new altitudes
         double suggestedMaxAltitude = qQNaN();      ///< Last of a leg: meters above the terrain a climb needs beyond maxAltitude, NaN without
     };
 
@@ -164,15 +191,23 @@ private:
     static QList<int> _legsToRetry(const Job &job, const QList<LegResult> &results, int round);
     static void _merge(QList<LegResult> &results, const QList<LegResult> &update);
     void _apply(const Job &job, const QList<LegResult> &results);
-    /// Cancels the computation in progress, whose results are then ignored
+    /// Cancels the computation in progress or scheduled, whose results are then ignored
     void _stop();
+    /// Drops the suggestions and the computation in progress, which are of the mission or the zones as they were, and
+    /// schedules another one
+    void _invalidate();
+    /// @return The visual item at the index of the mission when it is the expected one, null when the mission changed
+    VisualMissionItem *_itemAt(int index, const QPointer<QObject> &expected) const;
+    /// Inserts the waypoints of the detour at the altitudes it was checked at, or none of them
+    /// @return false if their altitudes can't be set
+    bool _insertDetour(const Suggestion &suggestion);
     void _clearSuggestions();
     void _setBusy(bool busy);
     void _setProgress(double progress);
     void _setStatusText(const QString &statusText);
 
     /// @return New altitudes of the leg's items in their altitude modes, empty when they can't be changed
-    QList<std::pair<int, double>> _itemAltitudes(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const;
+    QList<ItemAltitude> _itemAltitudes(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const;
     QString _routeText(const QString &legText, const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const;
     QString _failureText(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const;
     /// @param roundUp Like raised altitudes, down like lowered ones

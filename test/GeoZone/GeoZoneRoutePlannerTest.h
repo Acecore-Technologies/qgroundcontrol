@@ -31,6 +31,8 @@ private slots:
     void cleanupTestCase();
 
     void _testRoutePlanner();
+    void _testMissionChanges();
+    void _testDetourAltitudes();
     void _testRoutePlannerWorker();
 
 private:

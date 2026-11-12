@@ -9,6 +9,7 @@
 
 #include "GeoZoneMissionWorker.h"
 #include "MissionController.h"
+#include "QmlObjectListModel.h"
 
 GeoZoneMissionWorker::GeoZoneMissionWorker(int delayMSecs, QObject *parent)
     : QObject(parent)
@@ -42,12 +43,29 @@ bool GeoZoneMissionWorker::setMissionController(MissionController *missionContro
     invalidate();
     if (_missionController) {
         // Emitted after the flight path or any item coordinate changes, or the mission is replaced
-        (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionWorker::schedule);
-        (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionWorker::schedule);
-        (void) connect(_missionController, &MissionController::missionTimeChanged, this, &GeoZoneMissionWorker::schedule);
-        (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, &GeoZoneMissionWorker::schedule);
+        (void) connect(_missionController, &MissionController::recalcTerrainProfile, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_missionController, &MissionController::missionTimeChanged, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_missionController, &MissionController::plannedHomePositionChanged, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_missionController, &MissionController::visualItemsChanged, this, &GeoZoneMissionWorker::_followVisualItems);
     }
+    _followVisualItems();
     return true;
+}
+
+void GeoZoneMissionWorker::_followVisualItems()
+{
+    if (_visualItems) {
+        (void) disconnect(_visualItems, nullptr, this, nullptr);
+    }
+    _visualItems = _missionController ? _missionController->visualItems() : nullptr;
+    if (_visualItems) {
+        // The controller recalculates the flight path later, the indexes of the items change at once
+        (void) connect(_visualItems, &QAbstractItemModel::rowsInserted, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_visualItems, &QAbstractItemModel::rowsRemoved, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_visualItems, &QAbstractItemModel::rowsMoved, this, &GeoZoneMissionWorker::_missionChanged);
+        (void) connect(_visualItems, &QAbstractItemModel::modelReset, this, &GeoZoneMissionWorker::_missionChanged);
+    }
 }
 
 void GeoZoneMissionWorker::setActive(bool active)
@@ -56,6 +74,12 @@ void GeoZoneMissionWorker::setActive(bool active)
     if (!_active) {
         _timer.stop();
     }
+}
+
+void GeoZoneMissionWorker::_missionChanged()
+{
+    emit missionChanged();
+    schedule();
 }
 
 void GeoZoneMissionWorker::schedule()

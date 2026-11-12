@@ -32,10 +32,14 @@ QGCPopupDialog {
     readonly property real _width: Math.min(ScreenTools.defaultFontPixelWidth * 64, mainWindow.width - ScreenTools.defaultFontPixelWidth * 8)
 
 
+    property string _applyError     ///< Why the last suggestion couldn't be applied, empty when it was
+
     GeoZoneRoutePlanner {
         id:                 planner
         missionController:  root.missionController
         active:             root.visible
+
+        onApplyFailed: (message) => root._applyError = message
     }
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
@@ -111,6 +115,15 @@ QGCPopupDialog {
             }
         }
 
+        QGCLabel {
+            Layout.preferredWidth:  root._width
+            wrapMode:               Text.WordWrap
+            textFormat:             Text.PlainText
+            color:                  qgcPal.warningText
+            text:                   root._applyError
+            visible:                text !== ""
+        }
+
         // One line per way around the zones, or per leg without one, with why the other ways don't work on demand
         Repeater {
             model: planner.suggestions
@@ -150,7 +163,10 @@ QGCPopupDialog {
                     QGCButton {
                         text:       suggestionColumn.modelData.applyText
                         visible:    suggestionColumn.modelData.canApply
-                        onClicked:  planner.applySuggestion(suggestionColumn.index)
+                        onClicked: {
+                            root._applyError = ""
+                            planner.applySuggestion(suggestionColumn.index)
+                        }
                     }
 
                     QGCButton {

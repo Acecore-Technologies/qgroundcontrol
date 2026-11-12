@@ -23,6 +23,7 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QLocale>
+#include <QtCore/QMetaEnum>
 #include <QtCore/QMutex>
 #include <QtCore/QPromise>
 #include <QtCore/QSet>
@@ -157,11 +158,10 @@ GeoZoneRoutePlanner::GeoZoneRoutePlanner(GeoZoneManager *manager, QObject *paren
     _worker->setActive(false);
     (void) connect(_worker, &GeoZoneMissionWorker::triggered, this, &GeoZoneRoutePlanner::startUpdate);
 
-    // Suggestions refer to zones and mission items, so they are dropped when either changes and computed again
-    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, [this]() {
-        _stop();
-        _clearSuggestions();
-    });
+    // Suggestions refer to zones and mission items, so they are dropped at once when either changes, with the search in
+    // progress, and computed again
+    (void) connect(_worker, &GeoZoneMissionWorker::missionChanged, this, &GeoZoneRoutePlanner::_invalidate);
+    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneRoutePlanner::_invalidate);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, _worker, &GeoZoneMissionWorker::schedule);
 }
 
@@ -197,7 +197,7 @@ void GeoZoneRoutePlanner::setMaxAltitude(double maxAltitude)
     }
     _maxAltitude = maxAltitude;
     emit maxAltitudeChanged();
-    _worker->schedule();
+    _invalidate();
 }
 
 MissionController *GeoZoneRoutePlanner::missionController() const
@@ -210,10 +210,8 @@ void GeoZoneRoutePlanner::setMissionController(MissionController *missionControl
     if (!_worker->setMissionController(missionController)) {
         return;
     }
-    _stop();
     emit missionControllerChanged();
-    _clearSuggestions();
-    _worker->schedule();
+    _invalidate();
 }
 
 QVariantList GeoZoneRoutePlanner::suggestions() const
@@ -280,6 +278,7 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
         return job;
     }
 
+    QmlObjectListModel *const visualItems = missionController->visualItems();
     const GeoZoneMissionPath missionPath = GeoZoneMissionReader::path(missionController);
     for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
         const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
@@ -292,7 +291,10 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
         legJob.fromItemIndex = missionLeg.fromItemIndex;
         legJob.toItemIndex = missionLeg.toItemIndex;
         legJob.toSequenceNumber = missionLeg.toSequenceNumber;
-        if (const VisualMissionItem *const fromItem = missionController->visualItems()->value<const VisualMissionItem*>(missionLeg.fromItemIndex)) {
+        // The items the suggestions of the leg are for, null for indexes beyond the mission
+        legJob.fromItem = visualItems ? visualItems->get(missionLeg.fromItemIndex) : nullptr;
+        legJob.toItem = visualItems ? visualItems->get(missionLeg.toItemIndex) : nullptr;
+        if (const VisualMissionItem *const fromItem = qobject_cast<const VisualMissionItem*>(legJob.fromItem.data())) {
             legJob.fromSequenceNumber = fromItem->sequenceNumber();
         }
         legJob.leg.from = GeoZone::Position{ segment.from, segment.fromAltitudeAMSL, segment.terrainAt(0) };
@@ -390,7 +392,6 @@ void GeoZoneRoutePlanner::update()
 void GeoZoneRoutePlanner::startUpdate()
 {
     _worker->stop();
-    _setBusy(false);
     _setStatusText(QString());
     _clearSuggestions();
     const auto job = std::make_shared<const Job>(_makeJob());
@@ -440,8 +441,54 @@ void GeoZoneRoutePlanner::cancel()
 
 void GeoZoneRoutePlanner::_stop()
 {
-    _worker->invalidate();
+    _worker->stop();
     _setBusy(false);
+}
+
+void GeoZoneRoutePlanner::_invalidate()
+{
+    _worker->invalidate();
+    _clearSuggestions();
+    _setStatusText(QString());
+    // Searched again once the changes settle, while active
+    _worker->schedule();
+    _setProgress(0);
+    _setBusy(_worker->scheduled());
+}
+
+VisualMissionItem *GeoZoneRoutePlanner::_itemAt(int index, const QPointer<QObject> &expected) const
+{
+    MissionController *const missionController = _worker->missionController();
+    QmlObjectListModel *const visualItems = missionController ? missionController->visualItems() : nullptr;
+    // Range checked, null beyond the items
+    QObject *const item = visualItems ? visualItems->get(index) : nullptr;
+    return (item && (item == expected.data())) ? qobject_cast<VisualMissionItem*>(item) : nullptr;
+}
+
+std::optional<double> GeoZoneRoutePlanner::altitudeInMode(int altitudeMode, double altitudeAMSL, double homeAltitudeAMSL, double terrainAMSL)
+{
+    // The mode of an item read from a plan file may be none of the modes
+    if (!QMetaEnum::fromType<QGroundControlQmlGlobal::AltMode>().valueToKey(altitudeMode)) {
+        return std::nullopt;
+    }
+    double altitude = qQNaN();
+    switch (static_cast<QGroundControlQmlGlobal::AltMode>(altitudeMode)) {
+    case QGroundControlQmlGlobal::AltitudeModeAbsolute:
+        altitude = altitudeAMSL;
+        break;
+    case QGroundControlQmlGlobal::AltitudeModeRelative:
+        altitude = altitudeAMSL - homeAltitudeAMSL;
+        break;
+    case QGroundControlQmlGlobal::AltitudeModeCalcAboveTerrain:
+    case QGroundControlQmlGlobal::AltitudeModeTerrainFrame:
+        altitude = altitudeAMSL - terrainAMSL;
+        break;
+    case QGroundControlQmlGlobal::AltitudeModeMixed:
+    case QGroundControlQmlGlobal::AltitudeModeNone:
+        // Of the mission or of distances, not of an item
+        break;
+    }
+    return qIsNaN(altitude) ? std::nullopt : std::make_optional(altitude);
 }
 
 void GeoZoneRoutePlanner::_clearSuggestions()
@@ -511,8 +558,9 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
             switch (route.kind) {
             case GeoZoneRouteSearch::Kind::Detour: {
                 suggestion.kind = QStringLiteral("detour");
-                if (!route.waypoints.isEmpty()) {
+                if (!route.waypoints.isEmpty() && _itemAt(legJob.toItemIndex, legJob.toItem)) {
                     suggestion.insertIndex = legJob.toItemIndex;
+                    suggestion.insertBefore = legJob.toItem;
                     suggestion.waypoints = route.waypoints;
                     // Like the detour was checked, the altitude changes evenly from the start to the end
                     double along = legJob.leg.from.coordinate.distanceTo(route.waypoints.constFirst());
@@ -553,7 +601,7 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
     emit suggestionsChanged();
 }
 
-QList<std::pair<int, double>> GeoZoneRoutePlanner::_itemAltitudes(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const
+QList<GeoZoneRoutePlanner::ItemAltitude> GeoZoneRoutePlanner::_itemAltitudes(const LegJob &legJob, const GeoZoneRouteSearch::Route &route) const
 {
     MissionController *const missionController = _worker->missionController();
     if (!missionController) {
@@ -561,32 +609,19 @@ QList<std::pair<int, double>> GeoZoneRoutePlanner::_itemAltitudes(const LegJob &
     }
     const bool climb = (route.kind == GeoZoneRouteSearch::Kind::Climb);
     const double homeAltitude = missionController->plannedHomePosition().altitude();
-    QList<std::pair<int, double>> altitudes;
-    for (const auto &[itemIndex, current, target] : { std::make_tuple(legJob.fromItemIndex, legJob.leg.from.altitudeAMSL, route.fromAltitude),
-                                                      std::make_tuple(legJob.toItemIndex, legJob.leg.to.altitudeAMSL, route.toAltitude) }) {
+    QList<ItemAltitude> altitudes;
+    for (const auto &[itemIndex, expected, current, target] : { std::make_tuple(legJob.fromItemIndex, legJob.fromItem, legJob.leg.from.altitudeAMSL, route.fromAltitude),
+                                                                std::make_tuple(legJob.toItemIndex, legJob.toItem, legJob.leg.to.altitudeAMSL, route.toAltitude) }) {
         if (qIsNaN(target) || (std::abs(target - current) < 0.01)) {
             continue;
         }
-        const SimpleMissionItem *const item = missionController->visualItems()->value<const SimpleMissionItem*>(itemIndex);
-        if (!item) {
-            return {};
-        }
-        double altitude = qQNaN();
-        switch (item->altitudeMode()) {
-        case QGroundControlQmlGlobal::AltitudeModeRelative:
-            altitude = target - homeAltitude;
-            break;
-        case QGroundControlQmlGlobal::AltitudeModeAbsolute:
-            altitude = target;
-            break;
-        default:
-            break;
-        }
-        if (qIsNaN(altitude)) {
+        const SimpleMissionItem *const item = qobject_cast<const SimpleMissionItem*>(_itemAt(itemIndex, expected));
+        const std::optional<double> altitude = item ? altitudeInMode(item->altitudeMode(), target, homeAltitude, item->terrainAltitude()) : std::nullopt;
+        if (!altitude) {
             return {};
         }
         // Whole meters, still clear of the zones
-        altitudes.append({ itemIndex, climb ? std::ceil(altitude - 1e-6) : std::floor(altitude + 1e-6) });
+        altitudes.append(ItemAltitude{ itemIndex, expected, item->altitudeMode(), climb ? std::ceil(*altitude - 1e-6) : std::floor(*altitude + 1e-6) });
     }
     return altitudes;
 }
@@ -686,10 +721,11 @@ QString GeoZoneRoutePlanner::_altitudeText(const LegJob &legJob, double altitude
         return QStringLiteral("%1 %2").arg(roundUp ? std::ceil(value - 1e-6) : std::floor(value + 1e-6)).arg(FactMetaData::appSettingsVerticalDistanceUnitsString());
     };
     MissionController *const missionController = _worker->missionController();
-    const SimpleMissionItem *const item = missionController ? missionController->visualItems()->value<const SimpleMissionItem*>(legJob.toItemIndex) : nullptr;
-    const double homeAltitude = missionController ? missionController->plannedHomePosition().altitude() : qQNaN();
-    if (item && (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeRelative) && !qIsNaN(homeAltitude)) {
-        return tr("%1 above home").arg(rounded(altitudeAMSL - homeAltitude));
+    const SimpleMissionItem *const item = qobject_cast<const SimpleMissionItem*>(_itemAt(legJob.toItemIndex, legJob.toItem));
+    if (item && (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeRelative)) {
+        if (const std::optional<double> aboveHome = altitudeInMode(item->altitudeMode(), altitudeAMSL, missionController->plannedHomePosition().altitude(), qQNaN())) {
+            return tr("%1 above home").arg(rounded(*aboveHome));
+        }
     }
     return tr("%1 AMSL").arg(rounded(altitudeAMSL));
 }
@@ -715,31 +751,72 @@ bool GeoZoneRoutePlanner::applySuggestion(int index)
     if (!missionController || (index < 0) || (index >= _suggestions.count())) {
         return false;
     }
+    // The suggestions are dropped when the mission changes, like while this one is applied
     const Suggestion suggestion = _suggestions[index];
+    const QString missionChanged = tr("The mission changed since the routes were searched. Search them again.");
     if (!suggestion.altitudes.isEmpty()) {
-        for (const auto &[itemIndex, altitude] : suggestion.altitudes) {
-            if (SimpleMissionItem *const item = missionController->visualItems()->value<SimpleMissionItem*>(itemIndex)) {
-                item->altitude()->setRawValue(altitude);
+        // Only the items the altitudes were computed for, in the altitude modes they were computed in
+        QList<SimpleMissionItem*> items;
+        for (const ItemAltitude &itemAltitude : suggestion.altitudes) {
+            SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(_itemAt(itemAltitude.itemIndex, itemAltitude.item));
+            if (!item || (item->altitudeMode() != itemAltitude.altitudeMode)) {
+                emit applyFailed(missionChanged);
+                return false;
             }
+            items.append(item);
+        }
+        for (qsizetype i = 0; i < items.count(); i++) {
+            items[i]->altitude()->setRawValue(suggestion.altitudes[i].altitude);
         }
     } else if ((suggestion.insertIndex >= 0) && !suggestion.waypoints.isEmpty()) {
-        // The new waypoints take the altitude mode of the previous item, and the altitudes the detour was checked at
-        const double homeAltitude = missionController->plannedHomePosition().altitude();
-        for (qsizetype i = 0; i < suggestion.waypoints.count(); i++) {
-            auto *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i)));
-            const double altitude = suggestion.waypointAltitudes.value(i, qQNaN());
-            if (!item || qIsNaN(altitude)) {
-                continue;
-            }
-            if (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeAbsolute) {
-                item->altitude()->setRawValue(altitude);
-            } else if ((item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeRelative) && !qIsNaN(homeAltitude)) {
-                item->altitude()->setRawValue(altitude - homeAltitude);
-            }
+        if (!_itemAt(suggestion.insertIndex, suggestion.insertBefore)) {
+            emit applyFailed(missionChanged);
+            return false;
+        }
+        if (!_insertDetour(suggestion)) {
+            emit applyFailed(tr("The detour wasn't inserted: its waypoints can't be given the altitudes it was checked at, since the "
+                                "terrain or the home altitude they are above isn't known. Try again once the terrain is loaded."));
+            return false;
         }
     } else {
         return false;
     }
     startUpdate();
+    return true;
+}
+
+bool GeoZoneRoutePlanner::_insertDetour(const Suggestion &suggestion)
+{
+    MissionController *const missionController = _worker->missionController();
+    const double homeAltitude = missionController->plannedHomePosition().altitude();
+    QList<VisualMissionItem*> inserted;
+    for (qsizetype i = 0; i < suggestion.waypoints.count(); i++) {
+        // The new waypoints take the altitude mode of the mission or of the previous item
+        VisualMissionItem *const visualItem = missionController->insertSimpleMissionItem(suggestion.waypoints[i], suggestion.insertIndex + static_cast<int>(i));
+        if (visualItem) {
+            inserted.append(visualItem);
+        }
+        // The detour of a leg at unknown altitudes was checked at all altitudes, the waypoints keep the altitude the
+        // mission gives them
+        const double altitudeAMSL = suggestion.waypointAltitudes.value(i, qQNaN());
+        if (visualItem && qIsNaN(altitudeAMSL)) {
+            continue;
+        }
+        SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(visualItem);
+        std::optional<double> altitude;
+        if (item) {
+            const bool aboveTerrain = (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeCalcAboveTerrain) ||
+                                      (item->altitudeMode() == QGroundControlQmlGlobal::AltitudeModeTerrainFrame);
+            altitude = altitudeInMode(item->altitudeMode(), altitudeAMSL, homeAltitude, aboveTerrain ? GeoZoneTerrain::elevationAt(suggestion.waypoints[i]) : qQNaN());
+        }
+        if (!altitude) {
+            // Not at other altitudes than those the detour was checked at
+            for (auto it = inserted.crbegin(); it != inserted.crend(); ++it) {
+                missionController->removeVisualItem(missionController->visualItems()->indexOf(*it));
+            }
+            return false;
+        }
+        item->altitude()->setRawValue(*altitude);
+    }
     return true;
 }

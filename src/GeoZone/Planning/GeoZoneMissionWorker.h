@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QAbstractItemModel>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -26,7 +27,8 @@ class MissionController;
 /// Follows a planned mission and evaluates it on the thread pool, applying the results on the GUI thread, for the
 /// mission check, the altitude profile and the route planner of the Plan View.
 /// Changes of the mission, and those the owner reports with schedule(), settle for a delay before triggered() asks the
-/// owner to start an evaluation with run() or watch(). Each evaluation belongs to a generation: starting another one
+/// owner to start an evaluation with run() or watch(). missionChanged() tells of the changes of the mission at once,
+/// items added to it or removed from it before the controller recalculates its flight path. Each evaluation belongs to a generation: starting another one
 /// or invalidate(), like when the zones or the mission controller change, outdates those running, whose results are
 /// then dropped instead of applied.
 class GeoZoneMissionWorker : public QObject
@@ -121,9 +123,17 @@ public:
 signals:
     /// The scheduled evaluation is due, the owner starts it
     void triggered();
+    /// The mission followed changed, before an evaluation of it is scheduled: the results the owner has, and those of
+    /// the evaluations running, are of the mission as it was
+    void missionChanged();
 
 private:
+    void _missionChanged();
+    /// Follows the list of items of the mission, which the controller can replace
+    void _followVisualItems();
+
     QPointer<MissionController> _missionController;
+    QPointer<QAbstractItemModel> _visualItems;  ///< Of the mission followed
     QTimer _timer;
     bool _active = true;
     quint64 _generation = 1;    ///< Of the evaluations whose results are wanted
