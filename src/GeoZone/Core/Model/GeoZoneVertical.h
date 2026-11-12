@@ -35,7 +35,7 @@ inline constexpr double metersPerFoot = 0.3048;
 inline constexpr double flightLevelMargin = 0.04;
 
 /// Why the comparison of altitudes with the limits of a volume is approximate
-enum Approximation {
+enum Approximation : quint32 {
     TerrainUnknown = 0x1,   ///< A limit above ground where the terrain elevation is unknown, so it doesn't bound the volume
     ReferenceUnknown = 0x2, ///< A limit in an unknown reference, which doesn't bound the volume
     AltitudeUnknown = 0x4,  ///< A limit compared with an unknown altitude, which doesn't bound the volume

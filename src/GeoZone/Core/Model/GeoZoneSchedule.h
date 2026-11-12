@@ -55,6 +55,10 @@ public:
         /// display. What it stands for is decoded by daylightEvent, the only place reading the codes.
         QString startEvent;
         QString endEvent;
+
+        /// Binary serialization, see GeoZoneDataStream
+        friend QDataStream &operator<<(QDataStream &stream, const DailyPeriod &period);
+        friend QDataStream &operator>>(QDataStream &stream, DailyPeriod &period);
     };
 
     struct TimePeriod {
@@ -62,6 +66,10 @@ public:
         QDateTime start;    ///< Invalid when open ended
         QDateTime end;
         QList<DailyPeriod> schedule;
+
+        /// Binary serialization, see GeoZoneDataStream
+        friend QDataStream &operator<<(QDataStream &stream, const TimePeriod &period);
+        friend QDataStream &operator>>(QDataStream &stream, TimePeriod &period);
     };
 
     /// @return true if a period applies at the time. Daylight events are computed at the location. Daily periods
@@ -96,9 +104,3 @@ public:
     /// @return Invalid for other countries, or when the system doesn't have the time zone
     static QTimeZone countryTimeZone(const QString &country, const QGeoCoordinate &location = QGeoCoordinate());
 };
-
-/// Binary serialization, see GeoZoneDataStream
-QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::DailyPeriod &period);
-QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &period);
-QDataStream &operator<<(QDataStream &stream, const GeoZoneSchedule::TimePeriod &period);
-QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::TimePeriod &period);

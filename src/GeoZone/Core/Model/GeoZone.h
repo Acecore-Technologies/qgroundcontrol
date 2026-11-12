@@ -60,13 +60,15 @@ class GeoZone : public QEnableSharedFromThis<GeoZone>
     Q_DISABLE_COPY_MOVE(GeoZone)
 
 public:
-    enum Restriction {
-        Prohibited,
-        ReqAuthorisation,
-        Conditional,
-        NoRestriction,
-        USpace,
-        Unknown,
+    /// Plan files and the parse cache keep the values and QML uses them: they must not change. Unknown stays the
+    /// last, which the readers of the cache check against.
+    enum Restriction : int {
+        Prohibited = 0,
+        ReqAuthorisation = 1,
+        Conditional = 2,
+        NoRestriction = 3,
+        USpace = 4,
+        Unknown = 5,
     };
     Q_ENUM(Restriction)
 
@@ -117,6 +119,11 @@ public:
 
         /// Of the outer ring or the circle, invalid without them
         GeoZoneBox boundingBox() const;
+
+        /// Binary serialization of the volume as parsed, see GeoZoneDataStream. Fields added to it must be serialized
+        /// too.
+        friend QDataStream &operator<<(QDataStream &stream, const Volume &volume);
+        friend QDataStream &operator>>(QDataStream &stream, Volume &volume);
     };
 
     /// Horizontal position with optional altitudes
@@ -150,7 +157,12 @@ public:
         QStringList extendedProperties; ///< Publisher specific properties, one "name: value" line each
         QStringList issues;             ///< Problems found while reading the zone, translated, like an unknown unit
         QByteArray contentHash;         ///< Of the published feature, to recognize changed zones when a source reloads
-    };  // Fields added here must be serialized, see operator<<
+
+        /// Binary serialization of the zone as parsed, see GeoZoneDataStream. Fields added above must be serialized
+        /// too.
+        friend QDataStream &operator<<(QDataStream &stream, const Data &data);
+        friend QDataStream &operator>>(QDataStream &stream, Data &data);
+    };
 
     explicit GeoZone(const Data &data);
 
@@ -193,7 +205,7 @@ public:
         QSharedPointer<const GeoZoneSourceLabel> label;    ///< Of the zone of that source which was left out
         /// @return See sourceText, as it is now
         QString text() const { return label ? label->text() : QString(); }
-        bool operator==(const OtherSource &other) const = default;
+        friend bool operator==(const OtherSource &, const OtherSource &) = default;
     };
     /// Other sources publishing the same zone with the same content, which GeoZoneCatalog keeps once from this zone's
     /// source. Set by GeoZoneCatalog::rebuild, may be read from any thread.
@@ -341,9 +353,3 @@ private:
     mutable std::once_flag _projectedOnce;
     mutable std::unique_ptr<const Projected> _projectedData;
 };
-
-/// Binary serialization of the zones as parsed, see GeoZoneDataStream. Fields added to them must be serialized too.
-QDataStream &operator<<(QDataStream &stream, const GeoZone::Volume &volume);
-QDataStream &operator>>(QDataStream &stream, GeoZone::Volume &volume);
-QDataStream &operator<<(QDataStream &stream, const GeoZone::Data &data);
-QDataStream &operator>>(QDataStream &stream, GeoZone::Data &data);
