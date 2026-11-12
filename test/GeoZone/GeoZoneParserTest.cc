@@ -3473,4 +3473,19 @@ void GeoZoneParserTest::_testPageUrls()
     QCOMPARE(GeoZoneProviders::pageUrl(numbered, pages, 1), QStringLiteral("https://api.example.com/airspaces?search=a%2Bb&limit=100&page=3"));
 }
 
+void GeoZoneParserTest::_testSourceNames()
+{
+    const ScopedEnvironment environment;
+    const QDateTime now = environment.now();
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::ED269;
+
+    // The title of the data of an area is shown as it is, also when it holds what looks like a placeholder
+    const QString areaUrl = QStringLiteral("https://zones.example.com/wfs?REQUEST=GetFeature&BBOX=2.30000,48.00000,2.40000,48.20000");
+    GeoZoneSource area(areaUrl, areaUrl);
+    result.title = QStringLiteral("Zones %2 of %3 (100%1)");
+    area.setResult(result, now, now);
+    QCOMPARE(area.name(), QStringLiteral("Zones %2 of %3 (100%1), area around 48.10, 2.35"));
+}
+
 GEOZONE_TEST(GeoZoneParserTest)

@@ -157,7 +157,8 @@ QString GeoZoneSource::name() const
 
     // Feeds of an area, like the map area downloaded from a WFS or an ArcGIS service, are told apart by where they are
     if (const QGeoRectangle area = GeoZoneProviders::feedArea(_url); area.isValid()) {
-        name = tr("%1, area around %2, %3").arg(name).arg(area.center().latitude(), 0, 'f', 2).arg(area.center().longitude(), 0, 'f', 2);
+        // In one call: the name comes from the data, and may hold a %2 the next call would replace
+        name = tr("%1, area around %2, %3").arg(name, QString::number(area.center().latitude(), 'f', 2), QString::number(area.center().longitude(), 'f', 2));
     }
     return name;
 }
