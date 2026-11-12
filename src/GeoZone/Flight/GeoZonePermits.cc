@@ -59,7 +59,8 @@ QVariant GeoZonePermits::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZonePermits::roleNames() const
 {
-    return {
+    // Built once, the views ask for them again and again
+    static const QHash<int, QByteArray> names = {
         { KeyRole, "key" },
         { ZoneNameRole, "zoneName" },
         { RestrictionTextRole, "restrictionText" },
@@ -67,6 +68,7 @@ QHash<int, QByteArray> GeoZonePermits::roleNames() const
         { OriginTextRole, "originText" },
         { VehicleIdRole, "vehicleId" },
     };
+    return names;
 }
 
 bool GeoZonePermits::applies(const GeoZone *zone)

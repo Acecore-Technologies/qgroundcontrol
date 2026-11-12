@@ -72,7 +72,8 @@ QVariant GeoZoneAlertModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneAlertModel::roleNames() const
 {
-    return {
+    // Built once, the views ask for them again and again
+    static const QHash<int, QByteArray> names = {
         { AlertIdRole, "alertId" },
         { MessageRole, "message" },
         { SeverityRole, "severity" },
@@ -84,6 +85,7 @@ QHash<int, QByteArray> GeoZoneAlertModel::roleNames() const
         { LevelRole, "level" },
         { LevelTextRole, "levelText" },
     };
+    return names;
 }
 
 bool GeoZoneAlertModel::show(const Alert &newAlert)

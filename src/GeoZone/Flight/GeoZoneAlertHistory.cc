@@ -215,7 +215,8 @@ QVariant GeoZoneAlertHistory::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneAlertHistory::roleNames() const
 {
-    return {
+    // Built once, the views ask for them again and again
+    static const QHash<int, QByteArray> names = {
         { TimeRole, "time" },
         { MessageRole, "message" },
         { ZoneNameRole, "zoneName" },
@@ -227,6 +228,7 @@ QHash<int, QByteArray> GeoZoneAlertHistory::roleNames() const
         { EarlierRole, "earlier" },
         { LevelRole, "level" },
     };
+    return names;
 }
 
 int GeoZoneAlertHistory::unacknowledgedCount() const
