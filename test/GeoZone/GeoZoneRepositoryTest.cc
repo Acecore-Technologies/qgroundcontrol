@@ -15,6 +15,7 @@
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QLocale>
+#include <QtCore/QUuid>
 
 using namespace GeoZoneTestHelpers;
 
@@ -122,10 +123,17 @@ void GeoZoneRepositoryTest::_testManagerLoadPersistClear()
         QCOMPARE(storedFiles().count(), 3);
     }
 
-    // Unreferenced files are removed on startup
-    QFile strayFile(QDir(storageDir.path()).filePath(QStringLiteral("stray.json")));
-    QVERIFY(strayFile.open(QIODevice::WriteOnly));
-    strayFile.close();
+    // Unreferenced copies are removed on startup with their caches. The files of others in the folder, which the
+    // store didn't name, are left alone.
+    const QDir storage(storageDir.path());
+    const QString strayCopy = QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json");
+    const QStringList strayFiles = { strayCopy, GeoZoneParseCache::path(strayCopy) };
+    const QStringList otherFiles = { QStringLiteral("stray.json"), QStringLiteral("stray.json.gzc"), QStringLiteral("notes.xml"), QStringLiteral("export.zip"),
+                                     QStringLiteral("authorisations.json.20260615-120000.bak"), QStringLiteral("copy-of-") + strayCopy };
+    for (const QString &name : strayFiles + otherFiles) {
+        QFile file(storage.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
 
     {
         // Stored copies are reloaded in order on startup
@@ -140,7 +148,13 @@ void GeoZoneRepositoryTest::_testManagerLoadPersistClear()
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->key(), GeoZoneLoader::fileKey(ed318File));
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-318"));
         QCOMPARE(manager.sources()->value<GeoZoneSource*>(1)->key(), GeoZoneLoader::fileKey(ed269File));
-        QVERIFY(!strayFile.exists());
+        for (const QString &name : strayFiles) {
+            QVERIFY2(!storage.exists(name), qPrintable(name));
+        }
+        for (const QString &name : otherFiles) {
+            QVERIFY2(storage.exists(name), qPrintable(name));
+            QVERIFY(QFile::remove(storage.filePath(name)));
+        }
         QCOMPARE(storedCaches().count(), 2);
 
         // The parse cache goes with the stored copy
@@ -279,10 +293,13 @@ void GeoZoneRepositoryTest::_testManagerStoreFailures()
     QVERIFY(dir.exists(storedFile));
     QCOMPARE(dir.entryList({ QStringLiteral("*.json") }, QDir::Files).count(), 2);
 
-    // An unreadable index is moved to a backup folder with the stored copies instead of losing them
+    // An unreadable index is moved to a backup folder with the stored copies instead of losing them. Other files stay.
     QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
     QVERIFY(indexFile.write(R"({ "version": 1, "sources": [)") > 0);
     indexFile.close();
+    QFile otherFile(dir.filePath(QStringLiteral("notes.xml")));
+    QVERIFY(otherFile.open(QIODevice::WriteOnly));
+    otherFile.close();
     {
         GeoZoneManager manager(storageDir.path());
         QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
@@ -296,6 +313,8 @@ void GeoZoneRepositoryTest::_testManagerStoreFailures()
     const QDir backupDir(dir.filePath(backups.first()));
     QVERIFY(backupDir.exists(storedFile));
     QVERIFY(backupDir.exists(QStringLiteral("sources.json")));
+    QVERIFY(otherFile.exists());
+    QVERIFY(!backupDir.exists(QStringLiteral("notes.xml")));
 }
 
 void GeoZoneRepositoryTest::_testStoredCopyKeptUntilIndexSaved()

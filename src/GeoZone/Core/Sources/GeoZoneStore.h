@@ -17,9 +17,16 @@
 /// Keeps copies of the geozone sources in a directory, see GeoZoneSourceIndex for the index of their origin, dates
 /// and HTTP validators, and GeoZoneParseCache for the parse caches next to them. Methods only access the files, so a
 /// copy of the store can be used from worker threads.
+///
+/// The directory also holds files of others, like the authorisations, the feed catalogues and what the user puts
+/// there. The store only ever removes or moves the files it names itself, see isStoredFileName, their parse caches
+/// and its index.
 class GeoZoneStore
 {
 public:
+    static constexpr const char *indexFileName = "sources.json";    ///< See GeoZoneSourceIndex
+    static constexpr const char *legacyFileName = "geozones.json";  ///< The single copy kept by earlier versions
+
     explicit GeoZoneStore(const QString &dir);
 
     QString dir() const { return _dir; }
@@ -31,6 +38,8 @@ public:
     static QString fileSuffix(const QString &filePath);
     /// Name filters of the stored copies
     static QStringList fileNameFilters();
+    /// @return true for the name of a stored copy as the store names them, see newFileName, and for legacyFileName
+    static bool isStoredFileName(const QString &fileName);
 
     /// Moves the index and the stored copies to a new subdirectory, keeping them for the user when the index is unreadable
     /// @return Path of the subdirectory, empty if nothing could be moved
@@ -46,9 +55,10 @@ public:
     QString downloadDir() const;
     /// Removes downloads left by a previous session
     void clearDownloads() const;
-    /// Removes a stored copy with its parse cache, see GeoZoneParseCache
+    /// Removes a stored copy with its parse cache, see GeoZoneParseCache. Of a file the store didn't name, see
+    /// isStoredFileName, only the cache is removed.
     void removeFile(const QString &fileName) const;
-    /// Removes stored copies which aren't referenced, and parse caches of files which aren't
+    /// Removes the stored copies which aren't referenced, with their parse caches. Other files are left alone.
     void removeOrphanFiles(const QSet<QString> &referencedFileNames) const;
 
 private:

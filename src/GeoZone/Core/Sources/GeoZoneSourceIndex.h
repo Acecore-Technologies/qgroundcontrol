@@ -100,8 +100,8 @@ public:
     /// so they are kept for the next start. Does nothing when read only.
     bool save(const QStringList &keys, QString &errorString);
 
-    static constexpr const char *indexFileName = "sources.json";
-    static constexpr const char *legacyFileName = "geozones.json";
+    static constexpr const char *indexFileName = GeoZoneStore::indexFileName;
+    static constexpr const char *legacyFileName = GeoZoneStore::legacyFileName;
     static constexpr const char *legacySettingsGroup = "GeoZoneManager";
     static constexpr const char *legacySourceNameKey = "sourceName";
     static constexpr int version = 1;

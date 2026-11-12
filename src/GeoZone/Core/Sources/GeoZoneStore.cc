@@ -8,28 +8,18 @@
  ****************************************************************************/
 
 #include "GeoZoneStore.h"
-#include "GeoZoneAuthorisations.h"
 #include "GeoZoneEnvironment.h"
-#include "GeoZoneFeedCatalogueLoader.h"
 #include "GeoZoneParseCache.h"
 #include "GeoZoneSource.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QUuid>
 
 namespace {
-
-/// @return true for the files of the folder which aren't stored copies of sources: the authorisations and the feed
-///         catalogues
-bool otherFile(const QString &fileName)
-{
-    static const QStringList names = { QLatin1String(GeoZoneAuthorisations::fileName), QLatin1String(GeoZoneFeedCatalogue::fileName),
-                                       QLatin1String(GeoZoneFeedCatalogueLoader::cacheFileName) };
-    return names.contains(fileName);
-}
 
 bool saveFile(const QString &path, const QByteArray &bytes, QString &errorString)
 {
@@ -77,6 +67,13 @@ QStringList GeoZoneStore::fileNameFilters()
     return { QStringLiteral("*.json"), QStringLiteral("*.xml"), QStringLiteral("*.zip") };
 }
 
+bool GeoZoneStore::isStoredFileName(const QString &fileName)
+{
+    // A UUID without braces and the suffix of the content, see newFileName
+    static const QRegularExpression pattern(QStringLiteral("\\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(json|xml|zip)\\z"));
+    return (fileName == QLatin1String(legacyFileName)) || pattern.match(fileName).hasMatch();
+}
+
 QString GeoZoneStore::moveToBackup() const
 {
     QDir dir(_dir);
@@ -87,7 +84,7 @@ QString GeoZoneStore::moveToBackup() const
 
     bool moved = false;
     for (const QString &fileName : dir.entryList(fileNameFilters(), QDir::Files)) {
-        if (!otherFile(fileName)) {
+        if (isStoredFileName(fileName) || (fileName == QLatin1String(indexFileName))) {
             moved = dir.rename(fileName, QStringLiteral("%1/%2").arg(backupName, fileName)) || moved;
             GeoZoneParseCache::remove(dir.filePath(fileName));
         }
@@ -156,24 +153,25 @@ void GeoZoneStore::clearDownloads() const
 
 void GeoZoneStore::removeFile(const QString &fileName) const
 {
-    if (!fileName.isEmpty()) {
-        (void) QFile::remove(path(fileName));
-        GeoZoneParseCache::remove(path(fileName));
+    if (fileName.isEmpty()) {
+        return;
     }
+    // The index may name a file of the folder which the store didn't make: it isn't the store's to remove
+    if (isStoredFileName(fileName)) {
+        (void) QFile::remove(path(fileName));
+    }
+    GeoZoneParseCache::remove(path(fileName));
 }
 
 void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) const
 {
+    // Only what the store named itself: the directory also has files of others
     const QDir dir(_dir);
-    for (const QString &fileName : dir.entryList(fileNameFilters(), QDir::Files)) {
-        if (!otherFile(fileName) && !referencedFileNames.contains(fileName)) {
-            qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
-            (void) QFile::remove(dir.filePath(fileName));
-        }
-    }
-    // Caches of the files removed, or left by an interrupted removal
     for (const QString &fileName : dir.entryList(QDir::Files)) {
-        if (GeoZoneParseCache::isCacheFileName(fileName) && !referencedFileNames.contains(QFileInfo(fileName).completeBaseName())) {
+        // The copies, and the caches of those removed or left by an interrupted removal
+        const QString copyName = GeoZoneParseCache::isCacheFileName(fileName) ? QFileInfo(fileName).completeBaseName() : fileName;
+        if (isStoredFileName(copyName) && !referencedFileNames.contains(copyName)) {
+            qCDebug(GeoZoneSourceLog) << "Removing unreferenced geozone file" << fileName;
             (void) QFile::remove(dir.filePath(fileName));
         }
     }

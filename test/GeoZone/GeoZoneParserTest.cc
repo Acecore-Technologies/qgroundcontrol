@@ -3151,14 +3151,18 @@ void GeoZoneParserTest::_testParseCacheValidation()
     QVERIFY(!QFile::exists(store.path(fileJob.storedFileName)));
     QVERIFY(!QFile::exists(GeoZoneParseCache::path(store.path(fileJob.storedFileName))));
 
-    // Caches of files which aren't stored anymore are removed with the unreferenced files
-    QVERIFY(store.writeFile(QStringLiteral("orphan.json.gzc"), "cache", errorString));
+    // Caches of copies which aren't stored anymore are removed with the unreferenced copies, not those of other files
+    const QString orphanCache = GeoZoneParseCache::path(GeoZoneStore::newFileName(sourcePath));
+    QVERIFY(store.writeFile(orphanCache, "cache", errorString));
+    QVERIFY(store.writeFile(QStringLiteral("other.json.gzc"), "cache", errorString));
     store.removeOrphanFiles({ QStringLiteral("zones.json") });
     QVERIFY(QFile::exists(cachePath));
-    QVERIFY(!QFile::exists(store.path(QStringLiteral("orphan.json.gzc"))));
+    QVERIFY(!QFile::exists(store.path(orphanCache)));
+    QVERIFY(QFile::remove(store.path(QStringLiteral("other.json.gzc"))));
+    // Of a file the store didn't name, only the cache is its to remove
     store.removeFile(QStringLiteral("zones.json"));
     QVERIFY(!QFile::exists(cachePath));
-    QVERIFY(QDir(dir.path()).entryList(QDir::Files).isEmpty());
+    QCOMPARE(QDir(dir.path()).entryList(QDir::Files), QStringList{ QStringLiteral("zones.json") });
 
     // Feeds from servers have no file to read before their download, which names the stored copy
     QTest::failOnWarning(QRegularExpression(QStringLiteral("No file name specified")));
