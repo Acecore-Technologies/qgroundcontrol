@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZoneManager.h"
+#include "GeoZoneAlertTracker.h"
 #include "GeoZoneDisplay.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneOperatorZones.h"
@@ -25,6 +26,7 @@
 
 #include <QtCore/qapplicationstatic.h>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -32,10 +34,13 @@
 #include <QtCore/QSaveFile>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
+#include <QtCore/QtMath>
 #include <QtCore/QUrl>
 #include <QtNetwork/QNetworkInformation>
 
 #include <algorithm>
+#include <cmath>
+#include <memory>
 
 QGC_LOGGING_CATEGORY(GeoZoneManagerLog, "qgc.geozone.geozonemanager")
 
@@ -182,8 +187,31 @@ void GeoZoneManager::_activeVehicleChanged(Vehicle *vehicle)
         _repository->setVehiclePosition(QGeoCoordinate());
         return;
     }
-    _vehicleConnection = connect(vehicle, &Vehicle::coordinateChanged, _repository, &GeoZoneSourceRepository::setVehiclePosition);
-    _repository->setVehiclePosition(vehicle->coordinate());
+    // The zones ahead of the vehicle are downloaded before it reaches them, see GeoZoneAreaOfInterest: by its velocity
+    // from its positions, and by the ground speed it reports when that is higher or the positions are too few
+    struct Motion {
+        GeoZoneVelocityEstimator estimator;
+        QElapsedTimer clock;
+    };
+    const std::shared_ptr<Motion> motion = std::make_shared<Motion>();
+    motion->clock.start();
+    const auto moved = [this, vehicle, motion](const QGeoCoordinate &coordinate) {
+        double speed = 0;
+        double course = qQNaN();
+        if (coordinate.isValid()) {
+            const GeoZoneAlertTracker::Velocity velocity = motion->estimator.add(motion->clock.elapsed(), GeoZone::Position{ coordinate });
+            if (velocity.valid && (velocity.groundSpeed() >= GeoZoneAlertTracker::minPredictionSpeed)) {
+                speed = velocity.groundSpeed();
+                course = qRadiansToDegrees(std::atan2(velocity.east, velocity.north));
+            }
+        }
+        if (const double reported = vehicle->groundSpeed()->rawValue().toDouble(); std::isfinite(reported)) {
+            speed = (std::max)(speed, reported);
+        }
+        _repository->setVehiclePosition(coordinate, speed, course);
+    };
+    _vehicleConnection = connect(vehicle, &Vehicle::coordinateChanged, _repository, moved);
+    moved(vehicle->coordinate());
 }
 
 QStringList GeoZoneManager::fileDialogFilters() const

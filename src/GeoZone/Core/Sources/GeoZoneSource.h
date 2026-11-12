@@ -139,8 +139,13 @@ public:
     /// @return Why the last refresh failed, otherwise incompleteText: data known to miss zones counts as a failed
     ///         refresh, for geo-awareness too
     QString errorString() const { return _errorString.isEmpty() ? incompleteText() : _errorString; }
-    /// @return Why the data loaded misses zones, like those a WFS left out beyond its limit, empty when it is complete
+    /// @return Why the data loaded misses zones, like those a WFS left out beyond its limit or the part of the area
+    ///         of interest its service can't answer (areaShortfall), empty when it is complete
     QString incompleteText() const;
+    /// Why the area downloaded leaves out part of the area of interest, like a mission larger than the area the
+    /// service answers, empty when it covers it
+    QString areaShortfall() const { return _areaShortfall; }
+    void setAreaShortfall(const QString &text);
     bool enabled() const { return _enabled; }
     QString changesText() const { return _changes.summary(); }
     QString changesDetails() const { return _changes.details(); }
@@ -277,6 +282,7 @@ private:
     GeoZoneService _service;
     bool _credentialsMissing = false;
     QGeoRectangle _area;
+    QString _areaShortfall;
     GeoZoneProvenance _provenance;
     bool _integrityFailed = false;
 

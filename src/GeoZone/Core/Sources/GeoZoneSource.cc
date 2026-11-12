@@ -209,7 +209,26 @@ QString GeoZoneSource::warningText() const
 
 QString GeoZoneSource::incompleteText() const
 {
-    return (_missingCount > 0) ? tr("The download is incomplete: %n zone(s) are missing.", nullptr, _missingCount) : QString();
+    QStringList parts;
+    if (_missingCount > 0) {
+        parts.append(tr("The download is incomplete: %n zone(s) are missing.", nullptr, _missingCount));
+    }
+    if (!_areaShortfall.isEmpty()) {
+        parts.append(_areaShortfall);
+    }
+    return parts.join(QLatin1Char(' '));
+}
+
+void GeoZoneSource::setAreaShortfall(const QString &text)
+{
+    if (text == _areaShortfall) {
+        return;
+    }
+    const QString previousError = errorString();
+    _areaShortfall = text;
+    if (errorString() != previousError) {
+        emit errorStringChanged();
+    }
 }
 
 QString GeoZoneSource::_dateText() const

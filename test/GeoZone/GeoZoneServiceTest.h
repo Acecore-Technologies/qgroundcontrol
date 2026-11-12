@@ -27,5 +27,6 @@ private slots:
     void _testEd318Service();
     void _testServiceAreaOfInterest();
     void _testMapViewAreaOfInterest();
+    void _testAreaLookAhead();
     void _testCredentials();
 };

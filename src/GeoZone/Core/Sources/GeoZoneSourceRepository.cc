@@ -23,6 +23,8 @@
 #include <QtCore/QScopeGuard>
 #include <QtCore/QUrl>
 
+#include <cmath>
+
 GeoZoneSourceRepository::GeoZoneSourceRepository(const QString &storageDir, QObject *parent)
     : QObject(parent)
     , _store(storageDir)
@@ -228,14 +230,17 @@ void GeoZoneSourceRepository::_updateCredentialsMissing(const QString &key)
 
 void GeoZoneSourceRepository::setMissionArea(const void *owner, const QGeoRectangle &area)
 {
-    if (_areaOfInterest.setMissionArea(owner, area)) {
+    // Without the mission, a service answering small areas may answer the rest of the area of interest again
+    const bool removed = !area.isValid() && _areaOfInterest.hasMissionArea(owner);
+    if (_areaOfInterest.setMissionArea(owner, area) || removed) {
         _checkAreas();
     }
 }
 
-void GeoZoneSourceRepository::setVehiclePosition(const QGeoCoordinate &position)
+void GeoZoneSourceRepository::setVehiclePosition(const QGeoCoordinate &position, double groundSpeed, double course)
 {
-    if (_areaOfInterest.setVehiclePosition(position)) {
+    const bool had = _areaOfInterest.hasVehicle();
+    if (_areaOfInterest.setVehiclePosition(position, groundSpeed, course) || had) {
         _checkAreas();
     }
 }
@@ -264,16 +269,27 @@ void GeoZoneSourceRepository::setFollowView(bool follow)
 
 void GeoZoneSourceRepository::_checkAreas()
 {
-    if (!_areaOfInterest.follow() || !areaOfInterest().isValid()) {
-        return;
-    }
+    const bool follow = _areaOfInterest.follow() && areaOfInterest().isValid();
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     for (GeoZoneSource *const source : std::as_const(_sources)) {
-        if (!source->isFeed() || !source->service().areaOfInterest || !source->enabled() || source->busy() || source->credentialsMissing()) {
+        if (!source->isFeed() || !source->service().areaOfInterest) {
             continue;
         }
-        // The map view is left out for services answering smaller areas, see GeoZoneAreaOfInterest
-        if (const QGeoRectangle interest = _areaOfInterest.interest(source->service().maxAreaKm2);
+        // The map view is left out for services answering smaller areas, then the missions, see GeoZoneAreaOfInterest
+        const double maxAreaKm2 = source->service().maxAreaKm2;
+        QString shortfall;
+        if (follow && _areaOfInterest.missionsCut(maxAreaKm2)) {
+            const QString areaKm2 = QString::number(std::ceil(GeoZoneService::areaKm2(_areaOfInterest.missionsAndVehicle())), 'f', 0);
+            const QString maxKm2 = QString::number(maxAreaKm2, 'f', 0);
+            shortfall = _areaOfInterest.hasVehicle() ?
+                tr("The area of the mission and the vehicle (%1 km²) is larger than the %2 km² the service answers: only the zones around the vehicle are downloaded.").arg(areaKm2, maxKm2) :
+                tr("The area of the mission (%1 km²) is larger than the %2 km² the service answers: only the zones around its center are downloaded.").arg(areaKm2, maxKm2);
+        }
+        source->setAreaShortfall(shortfall);
+        if (!follow || !source->enabled() || source->busy() || source->credentialsMissing()) {
+            continue;
+        }
+        if (const QGeoRectangle interest = _areaOfInterest.interest(maxAreaKm2);
             !interest.isValid() || (source->area().isValid() && source->area().contains(interest))) {
             continue;
         }
@@ -284,6 +300,15 @@ void GeoZoneSourceRepository::_checkAreas()
         qCDebug(GeoZoneSourceLog) << "The area of interest left the area of" << source->key();
         _download(source->key(), GeoZoneLoader::Request::Automatic);
     }
+}
+
+bool GeoZoneSourceRepository::_vehicleUncovered(const GeoZoneSource &source) const
+{
+    if (!source.isFeed() || !source.service().areaOfInterest || !_areaOfInterest.follow() || !_areaOfInterest.hasVehicle()) {
+        return false;
+    }
+    const QGeoRectangle interest = _areaOfInterest.interest(source.service().maxAreaKm2);
+    return interest.isValid() && !(source.area().isValid() && source.area().contains(interest));
 }
 
 void GeoZoneSourceRepository::setNetwork(GeoZoneRefreshScheduler::Network network)
@@ -428,6 +453,10 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         existing->setErrorString(error);
         existing->setIntegrityFailed(result.integrity == GeoZoneProvenance::Integrity::Failed);
         _scheduler->refreshFailed(*existing, result.unreachable);
+        // The vehicle flies on: the zones around it are asked for again sooner than a feed is retried
+        if (_vehicleUncovered(*existing)) {
+            _scheduler->retryWithin(existing->key(), areaRetrySecs);
+        }
         _updateNextCheck(existing);
     }
     if (!existing) {

@@ -140,6 +140,18 @@ void GeoZoneRefreshScheduler::refreshFailed(const GeoZoneSource &source, bool un
     state.retryAt = GeoZoneEnvironment::currentDateTimeUtc().addSecs(std::llround(delay * jitter));
 }
 
+void GeoZoneRefreshScheduler::retryWithin(const QString &key, int secs)
+{
+    const auto it = _states.find(key);
+    if (it == _states.end()) {
+        return;
+    }
+    const QDateTime latest = GeoZoneEnvironment::currentDateTimeUtc().addSecs(secs);
+    if (it->retryAt.isValid() && (it->retryAt > latest)) {
+        it->retryAt = latest;
+    }
+}
+
 qint64 GeoZoneRefreshScheduler::maxAgeSecsOf(const QHash<QByteArray, QByteArray> &headers)
 {
     const auto httpDate = [](const QByteArray &value) {

@@ -65,6 +65,8 @@ public:
     /// @param unreachable No server answered, see GeoZoneDownloader::Result::unreachable: the refresh is retried when
     ///                    the network comes back, and at least every maxUnreachableRetrySecs
     void refreshFailed(const GeoZoneSource &source, bool unreachable = false);
+    /// Retries a failed refresh within the seconds when its retry is later, like the zones around a vehicle in flight
+    void retryWithin(const QString &key, int secs);
     void remove(const QString &key);
 
     Network network() const { return _network; }

@@ -14,10 +14,17 @@
 #include "GeoZoneTestHelpers.h"
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QRegularExpression>
 
 using namespace GeoZoneTestHelpers;
 
 namespace {
+
+/// @return The surroundings of a vehicle standing at the position, which are part of the area of interest
+QGeoRectangle vehicleArea(const QGeoCoordinate &position)
+{
+    return GeoZoneAreaOfInterest::expanded(QGeoRectangle(position, position), GeoZoneAreaOfInterest::minLookAheadMeters);
+}
 
 /// Captures the messages logged while in scope, with the debug messages of the geozone categories enabled
 class ScopedLogCapture
@@ -564,11 +571,12 @@ void GeoZoneServiceTest::_testServiceAreaOfInterest()
         GeoZoneSource *const feed = manager.repository()->source(url);
         QVERIFY(feed);
         QVERIFY(feed->followsArea());
-        const QGeoRectangle area = GeoZoneAreaOfInterest::expanded(QGeoRectangle(QGeoCoordinate(47.0, 8.0), QGeoCoordinate(47.0, 8.0)), GeoZoneAreaOfInterest::margin);
+        // with the look-ahead of a slow vehicle and the margin around it
+        const QGeoRectangle area = GeoZoneAreaOfInterest::expanded(vehicleArea(QGeoCoordinate(47.0, 8.0)), GeoZoneAreaOfInterest::margin);
         QCOMPARE(feed->area(), area);
-        QVERIFY(std::abs(area.height() - (10000.0 / 111320)) < 1e-6);
+        QVERIFY(std::abs(area.height() - (14000.0 / 111320)) < 1e-6);
         QCOMPARE(requestedUrl(), GeoZoneService::resolve(url, area, QDateTime(), QDateTime()));
-        QVERIFY2(requestedUrl().contains(QStringLiteral("&lat=47.00000&radius=7.1")), qPrintable(requestedUrl()));
+        QVERIFY2(requestedUrl().contains(QRegularExpression(QStringLiteral("&lat=47\\.00000&radius=(9\\.9|10\\.0)$"))), qPrintable(requestedUrl()));
 
         // Moving within the area downloads nothing, leaving it downloads the new area
         const int requests = server.requestCount;
@@ -586,7 +594,7 @@ void GeoZoneServiceTest::_testServiceAreaOfInterest()
         const QGeoRectangle missionArea(QGeoCoordinate(47.3, 7.9), QGeoCoordinate(47.2, 8.1));
         manager.repository()->setMissionArea(&mission, missionArea);
         QTRY_VERIFY(!manager.repository()->busy());
-        QCOMPARE(repository->areaOfInterest(), QGeoRectangle(QGeoCoordinate(47.3, 7.9), QGeoCoordinate(47.1, 8.1)));
+        QCOMPARE(repository->areaOfInterest(), missionArea.united(vehicleArea(QGeoCoordinate(47.1, 8.0))));
         QVERIFY(feed->area().contains(repository->areaOfInterest()));
         QCOMPARE(server.requestCount, requests + 2);
 
@@ -656,6 +664,7 @@ void GeoZoneServiceTest::_testServiceAreaOfInterest()
     QVERIFY2(limitedFeed->errorString().contains(QStringLiteral("is larger than the 10 km² the service answers")), qPrintable(limitedFeed->errorString()));
     QCOMPARE(limitedFeed->zoneCount(), 3);
     limitedManager.repository()->setMissionArea(&largeMission, QGeoRectangle());
+    QCOMPARE(limitedFeed->errorString(), QString());
 
     // Across the antimeridian
     const QGeoRectangle crossing = GeoZoneAreaOfInterest::expanded(QGeoRectangle(QGeoCoordinate(-17.0, 179.99), QGeoCoordinate(-17.0, 179.99)), 5000);
@@ -725,11 +734,11 @@ void GeoZoneServiceTest::_testMapViewAreaOfInterest()
     QTRY_COMPARE(server.requestCount, requests + 3);
     QTRY_VERIFY(!repository->busy());
     repository->setVehiclePosition(QGeoCoordinate(47.4, 8.9));
-    QCOMPARE(repository->areaOfInterest(), QGeoRectangle(QGeoCoordinate(47.5, 8.4), QGeoCoordinate(47.3, 8.9)));
+    QCOMPARE(repository->areaOfInterest(), zurich.united(vehicleArea(QGeoCoordinate(47.4, 8.9))));
     QTRY_COMPARE(server.requestCount, requests + 4);
     QTRY_VERIFY(!repository->busy());
     manager.setMapView(QGeoRectangle(QGeoCoordinate(39.0, -77.2), QGeoCoordinate(38.8, -76.9)));
-    QTRY_COMPARE(repository->areaOfInterest(), QGeoRectangle(QGeoCoordinate(47.4, 8.9), QGeoCoordinate(47.4, 8.9)));
+    QTRY_COMPARE(repository->areaOfInterest(), vehicleArea(QGeoCoordinate(47.4, 8.9)));
     QTest::qWait(500);
     QVERIFY(!repository->busy());
     QCOMPARE(server.requestCount, requests + 4);
@@ -751,9 +760,156 @@ void GeoZoneServiceTest::_testMapViewAreaOfInterest()
     const QGeoRectangle limited = area.interest(10);
     QVERIFY(GeoZoneService::areaKm2(limited) <= 9.5 + 1e-6);
     QVERIFY(limited.contains(zurich.center()));
+    // and the surroundings of the vehicle rather than the view
     (void) area.setVehiclePosition(QGeoCoordinate(47.4, 8.5));
-    QCOMPARE(area.interest(10), QGeoRectangle(QGeoCoordinate(47.4, 8.5), QGeoCoordinate(47.4, 8.5)));
+    QVERIFY(area.interest(10).contains(QGeoCoordinate(47.4, 8.5)));
+    QVERIFY(vehicleArea(QGeoCoordinate(47.4, 8.5)).contains(area.interest(10)));
     QCOMPARE(area.interest(), zurich);
+}
+
+void GeoZoneServiceTest::_testAreaLookAhead()
+{
+    using Area = GeoZoneAreaOfInterest;
+    const QGeoCoordinate start(47.0, 8.0);
+    const auto north = [&start](double meters) { return start.atDistanceAndAzimuth(meters, 0); };
+    /// Meters from the position to the nearest edge of the area
+    const auto toEdge = [](const QGeoRectangle &area, const QGeoCoordinate &position) {
+        const QGeoCoordinate northEdge(area.topLeft().latitude(), position.longitude());
+        const QGeoCoordinate southEdge(area.bottomRight().latitude(), position.longitude());
+        const QGeoCoordinate westEdge(position.latitude(), area.topLeft().longitude());
+        const QGeoCoordinate eastEdge(position.latitude(), area.bottomRight().longitude());
+        return area.contains(position) ? (std::min)({ position.distanceTo(northEdge), position.distanceTo(southEdge), position.distanceTo(westEdge), position.distanceTo(eastEdge) }) : 0.0;
+    };
+
+    // A slow or standing vehicle needs the zones 2 km around it, a fast one those it reaches in 90 s
+    Area area;
+    QVERIFY(area.setVehiclePosition(start));
+    QCOMPARE(area.lookAheadMeters(), 2000.0);
+    QVERIFY(area.setVehiclePosition(start, 10, 0));
+    QCOMPARE(area.lookAheadMeters(), 2000.0);
+    QVERIFY(area.setVehiclePosition(start, 50, 0));
+    QCOMPARE(area.lookAheadMeters(), 4500.0);
+    // An implausible or unknown speed doesn't ask for a country, or for nothing
+    QVERIFY(area.setVehiclePosition(start, 1e6, 0));
+    QCOMPARE(area.lookAheadMeters(), Area::lookAheadSecs * Area::maxSpeed);
+    QVERIFY(area.setVehiclePosition(start, qQNaN(), qQNaN()));
+    QCOMPARE(area.lookAheadMeters(), 2000.0);
+
+    // The area downloaded is asked for again while the vehicle is still a look-ahead away from its edge, whatever
+    // its direction: at 15 m/s, flying north, east and back
+    for (const double speed : { 0.0, 15.0, 30.0, 50.0 }) {
+        for (const double course : { 0.0, 90.0, 225.0 }) {
+            QGeoCoordinate position = start;
+            (void) area.setVehiclePosition(position, speed, course);
+            QGeoRectangle downloaded = area.requestArea(QGeoRectangle(), 0);
+            int downloads = 0;
+            for (int second = 0; second < 1800; second++) {
+                position = position.atDistanceAndAzimuth((std::max)(speed, 5.0), course);
+                (void) area.setVehiclePosition(position, speed, course);
+                const QGeoRectangle requested = area.requestArea(downloaded, 0);
+                if (requested != downloaded) {
+                    // Asked for again, with the look-ahead still inside the area downloaded before
+                    QVERIFY2(toEdge(downloaded, position) >= ((0.99 * area.lookAheadMeters()) - (2 * (std::max)(speed, 5.0))),
+                             qPrintable(QStringLiteral("speed %1 course %2: %3 m to the edge").arg(speed).arg(course).arg(toEdge(downloaded, position))));
+                    downloaded = requested;
+                    downloads++;
+                }
+                // The position the vehicle reaches in 90 s is part of the area of interest
+                QVERIFY(area.interest().contains(position.atDistanceAndAzimuth(speed * Area::lookAheadSecs, course)));
+                QVERIFY(downloaded.contains(area.interest()));
+            }
+            // without downloading every few seconds
+            QVERIFY2((downloads >= 1) && (downloads <= 20), qPrintable(QStringLiteral("speed %1 course %2: %3 downloads").arg(speed).arg(course).arg(downloads)));
+        }
+    }
+
+    // A service answering small areas is never asked for more: the look-ahead and the margin shrink together
+    for (const double maxAreaKm2 : { 10.0, 100.0, 1000.0 }) {
+        (void) area.setVehiclePosition(start, 50, 0);
+        const QGeoRectangle requested = area.requestArea(QGeoRectangle(), maxAreaKm2);
+        QVERIFY2(GeoZoneService::areaKm2(requested) <= maxAreaKm2, qPrintable(QString::number(GeoZoneService::areaKm2(requested))));
+        QVERIFY(requested.contains(area.interest(maxAreaKm2)));
+        QVERIFY(area.interest(maxAreaKm2).contains(start));
+        QVERIFY(toEdge(requested, start) > 0);
+        QVERIFY(!area.missionsCut(maxAreaKm2));
+    }
+
+    // A mission larger than the service answers doesn't take the zones around the vehicle away, and isn't asked for
+    const QObject mission;
+    const QGeoRectangle missionArea(QGeoCoordinate(47.4, 7.8), QGeoCoordinate(47.1, 8.2));
+    QVERIFY(GeoZoneService::areaKm2(missionArea) > 500);
+    QVERIFY(area.setMissionArea(&mission, missionArea));
+    (void) area.setVehiclePosition(start, 15, 0);
+    QGeoRectangle requested = area.requestArea(QGeoRectangle(), 100);
+    QVERIFY2(GeoZoneService::areaKm2(requested) <= 100, qPrintable(QString::number(GeoZoneService::areaKm2(requested))));
+    QVERIFY(requested.contains(start));
+    QVERIFY(area.missionsCut(100));
+    QVERIFY(toEdge(requested, start) >= 2000);
+    // Without the vehicle, the center of the mission is
+    (void) area.setVehiclePosition(QGeoCoordinate());
+    requested = area.requestArea(QGeoRectangle(), 100);
+    QVERIFY2(GeoZoneService::areaKm2(requested) <= 100, qPrintable(QString::number(GeoZoneService::areaKm2(requested))));
+    QVERIFY(requested.contains(missionArea.center()));
+    QVERIFY(area.missionsCut(100));
+    // A service answering the whole of it gets both
+    (void) area.setVehiclePosition(start, 15, 0);
+    QVERIFY(!area.missionsCut(0));
+    QVERIFY(area.requestArea(QGeoRectangle(), 0).contains(missionArea));
+    QVERIFY(area.requestArea(QGeoRectangle(), 0).contains(start));
+
+    // The repository downloads the zones ahead of the vehicle, and again before it reaches the edge
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString url = server.url(QStringLiteral("/zones?bbox={bbox}"));
+    GeoZoneManager manager(storageDir.path());
+    GeoZoneSourceRepository *const repository = manager.repository();
+    repository->setFollowArea(true);
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    repository->setVehiclePosition(start, 50, 0);
+    manager.addService(url, GeoZoneService().toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!repository->busy());
+    const GeoZoneSource *const feed = repository->source(url);
+    QVERIFY(feed);
+    // 4.5 km around the vehicle and the position it reaches 4.5 km north, with the margin of 5 km
+    QVERIFY(feed->area().contains(north(13900)));
+    QVERIFY(!feed->area().contains(north(14100)));
+    QVERIFY(feed->area().contains(north(-9400)));
+    QVERIFY(!feed->area().contains(north(-9600)));
+    int requests = server.requestCount;
+    repository->setVehiclePosition(north(4500), 50, 0);
+    QVERIFY(!repository->busy());
+    // 5.5 km further, the vehicle is still 8.5 km from the edge: the area ahead is asked for
+    const QGeoRectangle before = feed->area();
+    repository->setVehiclePosition(north(5500), 50, 0);
+    QVERIFY(repository->busy());
+    QVERIFY(toEdge(before, north(5500)) > 8000);
+    QTRY_VERIFY(!repository->busy());
+    QCOMPARE(server.requestCount, requests + 1);
+    QVERIFY(feed->area().contains(north(5500 + 13900)));
+
+    // A download which fails while the vehicle flies on is tried again within a minute, not after the minutes a
+    // failed feed waits
+    server.files.remove("/zones");
+    server.handler = [](const QByteArray &, QByteArray &status, QByteArray &, QByteArray &) { status = "503 Service Unavailable"; return true; };
+    requests = server.requestCount;
+    repository->setVehiclePosition(north(11000), 50, 0);
+    QTRY_COMPARE(server.requestCount, requests + 1);
+    QTRY_VERIFY(!repository->busy());
+    QVERIFY(!feed->errorString().isEmpty());
+    const QDateTime retryAt = repository->scheduler()->retryAt(url);
+    QVERIFY(retryAt.isValid());
+    QVERIFY2(environment.now().secsTo(retryAt) <= GeoZoneSourceRepository::areaRetrySecs, qPrintable(retryAt.toString(Qt::ISODate)));
+    repository->setVehiclePosition(north(11500), 50, 0);
+    QVERIFY(!repository->busy());
+    environment.addSecs(GeoZoneSourceRepository::areaRetrySecs + 1);
+    repository->setVehiclePosition(north(11600), 50, 0);
+    QTRY_COMPARE(server.requestCount, requests + 2);
+    QTRY_VERIFY(!repository->busy());
 }
 
 void GeoZoneServiceTest::_testCredentials()

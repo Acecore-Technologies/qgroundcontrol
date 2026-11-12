@@ -91,14 +91,22 @@ public:
     /// @param owner Identifies the mission, like the mission check following it
     /// @param area Invalid when the mission has no flight path
     void setMissionArea(const void *owner, const QGeoRectangle &area);
-    /// Sets the position of the active vehicle, part of the area of interest, invalid without vehicle
-    void setVehiclePosition(const QGeoCoordinate &position);
+    /// Sets the position of the active vehicle, whose surroundings are part of the area of interest and look ahead by
+    /// its speed, see GeoZoneAreaOfInterest: the zones are downloaded again before it reaches the edge of the area
+    /// downloaded
+    /// @param position Invalid without vehicle
+    /// @param groundSpeed Meters per second, 0 when unknown
+    /// @param course Direction of the flight over the ground in degrees from north, NaN when unknown
+    void setVehiclePosition(const QGeoCoordinate &position, double groundSpeed = 0, double course = qQNaN());
     /// Sets the visible region of the map shown, part of the area of interest when it fits with the missions and the
     /// vehicle, see GeoZoneAreaOfInterest
     /// @param area Invalid to forget it
     void setViewArea(const QGeoRectangle &area);
-    /// @return Bounds of the planned missions, the vehicle and the map view, invalid without any
+    /// @return Bounds of the planned missions, the surroundings of the vehicle and the map view, invalid without any
     QGeoRectangle areaOfInterest() const { return _areaOfInterest.area(); }
+    /// Longest wait before a failed download is tried again while the area downloaded doesn't cover the surroundings
+    /// of the vehicle, rather than the retries of GeoZoneRefreshScheduler: the look-ahead leaves time for it
+    static constexpr int areaRetrySecs = 60;
     /// When false, the feeds keep the area they were downloaded for
     void setFollowArea(bool follow);
     /// When false, the map view is left out of the area of interest
@@ -223,8 +231,11 @@ private:
     /// Sets the service of a source, forgetting its secret and token when the service sends them elsewhere
     void _setService(const QString &key, const GeoZoneService &service);
     void _updateCredentialsMissing(const QString &key);
-    /// Downloads the feeds taking the area of interest again whose area doesn't cover it
+    /// Downloads the feeds taking the area of interest again whose area doesn't cover it, and reports on those whose
+    /// service can't answer the missions, see GeoZoneSource::areaShortfall
     void _checkAreas();
+    /// @return true when the feed follows the area of interest and its area doesn't cover the surroundings of the vehicle
+    bool _vehicleUncovered(const GeoZoneSource &source) const;
 
     GeoZoneStore _store;
     GeoZoneSourceIndex _index;
