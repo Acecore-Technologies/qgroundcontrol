@@ -220,8 +220,9 @@ bool _near(double value, double expected, double tolerance)
     return false;
 }
 
-QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet)
+QScopeGuard<std::function<void()>> _setVerticalUnits(VerticalUnits units)
 {
+    const bool feet = (units == VerticalUnits::Feet);
 #ifdef GEOZONE_CORE_TEST
     const GeoZoneEnvironment::Hooks saved = GeoZoneEnvironment::hooks();
     GeoZoneEnvironment::Hooks hooks = saved;

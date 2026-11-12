@@ -1802,7 +1802,7 @@ void GeoZoneGeometryTest::_testFlightLevels()
 
     ScopedEnvironment environment;
     environment.setQnh(qnh);
-    const auto meters = _setVerticalUnits(false);
+    const auto meters = _setVerticalUnits(VerticalUnits::Meters);
     QCOMPARE(GeoZoneEnvironment::qnhHPa(), qnh);
     QVERIFY(qAbs(GeoZoneVertical::pressureAltitudeToAMSL(9500 * 0.3048, qnh) - floorAMSL) < 0.01);
 

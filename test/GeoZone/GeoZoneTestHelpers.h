@@ -181,9 +181,15 @@ double _pathClearance(const QList<QGeoCoordinate> &path, const QList<const GeoZo
 /// @return true if the value is within the tolerance of the expected one, which is logged otherwise
 bool _near(double value, double expected, double tolerance = 1);
 
+/// Units heights are shown in, see _setVerticalUnits
+enum class VerticalUnits {
+    Meters,
+    Feet,
+};
+
 /// Shows heights in feet or in meters until the returned guard restores the previous units: those of the
 /// QGroundControl settings, or of GeoZoneEnvironment without the application
-QScopeGuard<std::function<void()>> _setVerticalUnits(bool feet);
+QScopeGuard<std::function<void()>> _setVerticalUnits(VerticalUnits units);
 
 /// Loads files into the sources of a repository and indexes the enabled ones in a catalog, like GeoZoneManager, with
 /// the GeoZoneCore library only

@@ -529,7 +529,7 @@ void GeoZoneEvaluatorTest::_testAuthorisationCeiling()
     QVERIFY(!GeoZonePolicy::alerts().excludingAuthorised(&authorisations).authorisedAt(zone, GeoZone::Position{ center, 100500 }));
     {
         // In the units shown
-        const auto feet = _setVerticalUnits(true);
+        const auto feet = _setVerticalUnits(VerticalUnits::Feet);
         QVERIFY(!authorise(QStringLiteral("328084")).isEmpty());
         QCOMPARE(authorise(QStringLiteral("328000")), QString());
         QCOMPARE(shownCeiling(), QStringLiteral("328000"));

@@ -2371,7 +2371,7 @@ void GeoZoneParserTest::_testDisplayText()
     QCOMPARE(ed269.zones.count(), 3);
 
     // Each volume on a line, see _testLimitTexts for the units
-    const auto meters = _setVerticalUnits(false);
+    const auto meters = _setVerticalUnits(VerticalUnits::Meters);
     const GeoZone prohibited(ed269.zones[0]);
     QCOMPARE(GeoZoneText::verticalLimits(prohibited.data()), QStringLiteral("GND - 120 m AGL\n120 m AGL - Unlimited"));
     QCOMPARE(GeoZoneSchedule::text(prohibited.data().applicability), QStringLiteral("Permanent"));
@@ -2433,7 +2433,7 @@ void GeoZoneParserTest::_testLimitTexts()
     volume.setReferences(lowerReference, upperReference);
     GeoZone::Data data;
     data.volumes.append(volume);
-    const auto units = _setVerticalUnits(shownInFeet);
+    const auto units = _setVerticalUnits(shownInFeet ? VerticalUnits::Feet : VerticalUnits::Meters);
     QCOMPARE(GeoZoneText::verticalLimits(data), text);
 }
 
@@ -2452,7 +2452,7 @@ void GeoZoneParserTest::_testFlightLevelQnh()
     const QByteArray document = QJsonDocument(QJsonObject{ { "features", QJsonArray{ feature } } }).toJson(QJsonDocument::Compact);
 
     ScopedEnvironment environment;
-    const auto meters = _setVerticalUnits(false);
+    const auto meters = _setVerticalUnits(VerticalUnits::Meters);
     const auto parse = [&document]() {
         GeoZoneParser::Result result;
         QString errorString;
