@@ -36,6 +36,10 @@ class Vehicle;
 /// Once the vehicle is past the fence nothing is predicted any more: outside() then tells that its position is outside
 /// the fence, which GeoZoneVehicleMonitor takes as the breach of autopilots which don't report theirs, like PX4.
 ///
+/// QGroundControl forgets the fence of the vehicle when its upload, download or removal fails, while the vehicle may
+/// keep the fence it had. The fence is then unknown, see fenceUnknown: the warning keeps the fence it knew, and reads
+/// the fence back from the vehicle once no plan transfer is in progress.
+///
 /// The pilot overrides the fence action by changing the flight mode, which takeControl() does with the mode the pilot
 /// flies in for the vehicle type, or on ArduPilot by disabling the fence (MAV_CMD_DO_FENCE_ENABLE).
 class GeoZoneFenceWarning : public QObject
@@ -51,6 +55,7 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(QVariantList     path            READ path               NOTIFY warningChanged FINAL)    ///< From the vehicle to the intersection, empty when inactive
     Q_PROPERTY(bool             outside         READ outside            NOTIFY outsideChanged FINAL)    ///< The vehicle is outside its fence
     Q_PROPERTY(bool             enabled         READ enabled            NOTIFY configChanged FINAL)     ///< The vehicle's fence is enabled and has boundaries
+    Q_PROPERTY(bool             fenceUnknown    READ fenceUnknown       NOTIFY fenceUnknownChanged FINAL)   ///< The fence the vehicle stores couldn't be read
     Q_PROPERTY(QString          actionText      READ actionText         NOTIFY configChanged FINAL)     ///< Manoeuvre of the vehicle at a breach, like "RTL or land"
     Q_PROPERTY(QString          overrideText    READ overrideText       NOTIFY configChanged FINAL)     ///< How the pilot overrides it
     Q_PROPERTY(QString          takeControlMode READ takeControlMode    NOTIFY configChanged FINAL)     ///< Flight mode takeControl() switches to, empty when there is none
@@ -69,6 +74,8 @@ public:
     /// The vehicle counts as outside its fence until it has been back inside for this long, so that a position at the
     /// boundary isn't a new breach with every message
     static constexpr int outsideEndDelayMSecs = 2000;
+    /// Times the fence is read back from the vehicle after a failed transfer, until a transfer succeeds
+    static constexpr int maxFenceReloads = 3;
 
     enum class Firmware {
         Other,
@@ -82,6 +89,12 @@ public:
         Plane,      ///< Fixed wings and VTOLs in forward flight
         Rover,      ///< Rovers and boats
         Sub,
+    };
+
+    /// The polygons and circles the vehicle stores
+    struct StoredFence {
+        QList<GeoZoneFencePrediction::Fence::Polygon> polygons;
+        QList<GeoZoneFencePrediction::Fence::Circle> circles;
     };
 
     /// What the vehicle's fence is and does
@@ -104,6 +117,10 @@ public:
     ///         FENCE_OPTIONS; PX4 GF_MAX_HOR_DIST, GF_MAX_VER_DIST) and whether it is enabled (ArduPilot FENCE_ENABLE,
     ///         or FENCE_AUTOENABLE while armed; PX4 unless GF_ACTION is None)
     static Config vehicleConfig(Vehicle *vehicle);
+    /// @param stored Instead of the polygons and circles of the vehicle's GeoFenceManager
+    static Config vehicleConfig(Vehicle *vehicle, const StoredFence &stored);
+    /// @return The polygons and circles of the vehicle's GeoFenceManager, as read from or sent to the vehicle last
+    static StoredFence storedFence(Vehicle *vehicle);
     /// Uses the config instead of the vehicle's, like tests do
     void setConfig(const Config &config);
     const Config &config() const { return _config; }
@@ -133,6 +150,9 @@ public:
     QString intersectionText() const;
     QVariantList path() const;
     bool enabled() const { return _config.enabled && !_config.fence.isEmpty(); }
+    /// The last transfer of the fence failed, so the vehicle may store another fence than its GeoFenceManager has: the
+    /// one it had before a rejected upload, or one which couldn't be read. Until a transfer succeeds.
+    bool fenceUnknown() const { return _fenceUnknown; }
     QString actionText() const { return actionText(_config.firmware, _config.vehicleClass, _config.action); }
     QString overrideText() const { return overrideText(_config); }
     QString takeControlMode() const { return _config.takeControlMode; }
@@ -167,11 +187,16 @@ signals:
     void warningEnded();
     void outsideChanged();
     void configChanged();
+    void fenceUnknownChanged();
     void commandTextChanged();
 
 private:
     void _connectVehicle();
     void _updateConfig();
+    /// A transfer of the fence to or from the vehicle, or its removal, ended
+    void _fenceTransferred(bool failed);
+    /// Reads the fence back from the vehicle while it is unknown, once no plan transfer is in progress
+    void _reloadFence();
     void _evaluate(const QGeoCoordinate &coordinate, double altitude, const Velocity &velocity, qint64 msecs);
     void _setBreach(const std::optional<GeoZoneFencePrediction::Breach> &breach);
     /// @param msecs Time of the position, negative to end it without delay
@@ -185,6 +210,10 @@ private:
     double _warningTime = defaultWarningTime;
     bool _fixedConfig = false;
     QObject *_parameterConnections = nullptr;   ///< Receiver of the fence parameters' changes, replaced to disconnect them
+    StoredFence _storedFence;                   ///< Of the last transfer which succeeded
+    bool _fenceUnknown = false;
+    bool _fenceTransferError = false;           ///< The fence transfer in progress reported an error
+    int _fenceReloads = 0;                      ///< Since the last transfer which succeeded
     std::optional<GeoZoneFencePrediction::Breach> _breach;
     std::optional<GeoZoneFencePrediction::Boundary> _outside;
     qint64 _insideMSecs = -1;                   ///< Since when the vehicle is back inside while _outside lasts, -1 otherwise

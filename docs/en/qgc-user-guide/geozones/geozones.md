@@ -511,7 +511,7 @@ With the pre-flight checklist turned on (_Application Settings > Fly View > Use 
 
 - **Geozone data**: zones are loaded and no source is [outdated](#managing-sources), or expired when outdated data is treated as invalid.
 - **Mission**: the mission on the vehicle enters no restricted zone, or only zones with an [authorisation](#authorisations) covering the [planned start](#flight-time) (at any time without one). A prohibited zone fails the check.
-- **Fence**: the vehicle's fence is the one an upload of the [fence import](#add-geozones-to-the-geofence) verified, its fences from geozones were made from data which hasn't changed since, and it excludes the prohibited zones the mission enters. A fence uploaded otherwise is reported as not verified. The [zones the import left out](#zones-not-fenced) are listed as a warning.
+- **Fence**: the vehicle's fence is the one an upload of the [fence import](#add-geozones-to-the-geofence) verified, its fences from geozones were made from data which hasn't changed since, and it excludes the prohibited zones the mission enters. A fence uploaded otherwise is reported as not verified. The [zones the import left out](#zones-not-fenced) are listed as a warning. After a fence upload the vehicle rejected, or a fence download which failed, the item warns that the fence on the vehicle is unknown, rather than telling there is none, until the fence was read back.
 - **QNH**: limits published as flight levels within 1 km of the mission and 300 m of its altitudes are converted with a [QNH](#settings-reference) other than the standard pressure.
 - **Remote ID**: when the mission enters U-space airspace, the operator ID is set (and valid in the EU) in _Application Settings > Remote ID_ and the vehicle's Remote ID reports it is ready to arm.
 - **Take-off position**: the vehicle on the ground isn't inside a restricted zone (see [On the Ground Inside a Zone](#on-the-ground)). Inside a prohibited zone the item fails; inside another restricted zone it warns until you confirm the permission to fly there.
@@ -687,6 +687,8 @@ When the vehicle would reach the fence within the pilot reaction time of its [al
 - the estimated **time** to the fence and the **distance** to it along the direction of travel, counting down;
 - the estimated **intersection point**, as coordinates and altitude above home in the popup, and as a red mark with a red line from the vehicle on the Fly View map;
 - how to [override](#override-fence-action) the manoeuvre.
+
+When the vehicle rejects a fence upload, or a download or removal of the fence fails, _QGroundControl_ no longer has the vehicle's fence, while the vehicle usually keeps the one it had. The warning then keeps checking against the fence it knew, and reads the fence back from the vehicle once no plan transfer is in progress (up to 3 times, until a transfer succeeds).
 
 The warning is spoken once and logged in the [alert log](#alert-log) (`fence_warning`, with the boundary, the distance, the time to the fence and the fence action). It ends when the vehicle no longer heads for the fence within 10 seconds, or breaches it. The prediction assumes a straight path at the current velocity: turns, braking and wind change it.
 

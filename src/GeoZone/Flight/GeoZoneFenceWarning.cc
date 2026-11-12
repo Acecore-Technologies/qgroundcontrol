@@ -12,9 +12,11 @@
 #include "FactMetaData.h"
 #include "GeoFenceManager.h"
 #include "GeoZoneMonitor.h"
+#include "MissionManager.h"
 #include "ParameterManager.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
+#include "RallyPointManager.h"
 #include "Vehicle.h"
 
 #include <QtCore/QElapsedTimer>
@@ -83,9 +85,31 @@ void GeoZoneFenceWarning::_connectVehicle()
         return;
     }
     const auto update = [this]() { _updateConfig(); };
+    // While the fence is unknown it is read back once the transfers of a plan are done, after their completion was
+    // handled, which may start the next transfer
+    const auto reload = [this](bool inProgress) {
+        if (!inProgress && _fenceUnknown) {
+            QTimer::singleShot(0, this, &GeoZoneFenceWarning::_reloadFence);
+        }
+    };
     if (GeoFenceManager *const fenceManager = vehicle->geoFenceManager()) {
-        (void) connect(fenceManager, &GeoFenceManager::loadComplete, this, update);
-        (void) connect(fenceManager, &GeoFenceManager::sendComplete, this, update);
+        // A download ends with loadComplete whether or not it failed, after reporting its errors
+        (void) connect(fenceManager, &GeoFenceManager::inProgressChanged, this, [this, reload](bool inProgress) {
+            if (inProgress) {
+                _fenceTransferError = false;
+            }
+            reload(inProgress);
+        });
+        (void) connect(fenceManager, &GeoFenceManager::error, this, [this]() { _fenceTransferError = true; });
+        (void) connect(fenceManager, &GeoFenceManager::loadComplete, this, [this]() { _fenceTransferred(_fenceTransferError); });
+        (void) connect(fenceManager, &GeoFenceManager::sendComplete, this, [this](bool error) { _fenceTransferred(error); });
+        (void) connect(fenceManager, &GeoFenceManager::removeAllComplete, this, [this](bool error) { _fenceTransferred(error); });
+    }
+    if (MissionManager *const missionManager = vehicle->missionManager()) {
+        (void) connect(missionManager, &MissionManager::inProgressChanged, this, reload);
+    }
+    if (RallyPointManager *const rallyPointManager = vehicle->rallyPointManager()) {
+        (void) connect(rallyPointManager, &RallyPointManager::inProgressChanged, this, reload);
     }
     (void) connect(vehicle, &Vehicle::homePositionChanged, this, update);
     (void) connect(vehicle, &Vehicle::armedChanged, this, update);
@@ -96,7 +120,63 @@ void GeoZoneFenceWarning::_connectVehicle()
     }
 }
 
+void GeoZoneFenceWarning::_fenceTransferred(bool failed)
+{
+    if (!failed) {
+        _fenceReloads = 0;
+    }
+    if (failed != _fenceUnknown) {
+        _fenceUnknown = failed;
+        qCInfo(GeoZoneMonitorLog) << (failed ? "The fence transfer failed, the fence on the vehicle is unknown" : "The fence on the vehicle is known again");
+        emit fenceUnknownChanged();
+    }
+    _updateConfig();
+    if (failed) {
+        // After the others handled the failure, like the plan upload going on with the rally points
+        QTimer::singleShot(0, this, &GeoZoneFenceWarning::_reloadFence);
+    }
+}
+
+void GeoZoneFenceWarning::_reloadFence()
+{
+    Vehicle *const vehicle = _vehicle;
+    if (!_fenceUnknown || !vehicle || (_fenceReloads >= maxFenceReloads)) {
+        return;
+    }
+    GeoFenceManager *const fenceManager = vehicle->geoFenceManager();
+    const MissionManager *const missionManager = vehicle->missionManager();
+    const RallyPointManager *const rallyPointManager = vehicle->rallyPointManager();
+    // Autopilots transfer one plan type at a time
+    if (!fenceManager || fenceManager->inProgress() || (missionManager && missionManager->inProgress()) || (rallyPointManager && rallyPointManager->inProgress())) {
+        return;
+    }
+    _fenceReloads++;
+    qCInfo(GeoZoneMonitorLog) << "Reading the fence back from the vehicle, attempt" << _fenceReloads;
+    fenceManager->loadFromVehicle();
+}
+
+GeoZoneFenceWarning::StoredFence GeoZoneFenceWarning::storedFence(Vehicle *vehicle)
+{
+    StoredFence stored;
+    GeoFenceManager *const fenceManager = vehicle ? vehicle->geoFenceManager() : nullptr;
+    if (!fenceManager) {
+        return stored;
+    }
+    for (const QGCFencePolygon &polygon : fenceManager->polygons()) {
+        stored.polygons.append({ polygon.coordinateList(), polygon.inclusion() });
+    }
+    for (const QGCFenceCircle &circle : fenceManager->circles()) {
+        stored.circles.append({ QGeoCircle(circle.center(), const_cast<QGCFenceCircle&>(circle).radius()->rawValue().toDouble()), circle.inclusion() });
+    }
+    return stored;
+}
+
 GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle)
+{
+    return vehicleConfig(vehicle, storedFence(vehicle));
+}
+
+GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle, const StoredFence &stored)
 {
     Config config;
     if (!vehicle || vehicle->isOfflineEditingVehicle()) {
@@ -111,17 +191,9 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle)
     }
     GeoZoneFencePrediction::Fence &fence = config.fence;
     fence.home = vehicle->homePosition();
-    const auto addShapes = [vehicle, &fence]() {
-        GeoFenceManager *const fenceManager = vehicle->geoFenceManager();
-        if (!fenceManager) {
-            return;
-        }
-        for (const QGCFencePolygon &polygon : fenceManager->polygons()) {
-            fence.polygons.append({ polygon.coordinateList(), polygon.inclusion() });
-        }
-        for (const QGCFenceCircle &circle : fenceManager->circles()) {
-            fence.circles.append({ QGeoCircle(circle.center(), const_cast<QGCFenceCircle&>(circle).radius()->rawValue().toDouble()), circle.inclusion() });
-        }
+    const auto addShapes = [&stored, &fence]() {
+        fence.polygons = stored.polygons;
+        fence.circles = stored.circles;
     };
     const auto positive = [vehicle](const QString &name) {
         bool ok = false;
@@ -219,7 +291,11 @@ void GeoZoneFenceWarning::_updateConfig()
             }
         }
     }
-    _config = vehicleConfig(vehicle);
+    // While the fence is unknown the vehicle may still enforce the one it had
+    if (!_fenceUnknown) {
+        _storedFence = storedFence(vehicle);
+    }
+    _config = vehicleConfig(vehicle, _storedFence);
     emit configChanged();
     if (!enabled()) {
         _setBreach(std::nullopt);

@@ -881,4 +881,83 @@ void GeoZoneFenceImportTest::_testFenceWarningVehicle()
     }
 }
 
+void GeoZoneFenceImportTest::_testFenceUploadRejected()
+{
+    // A prohibited zone east of the MockLink vehicle, as an exclusion fence of the vehicle
+    const QGeoCoordinate mockPosition(47.397, 8.5455);
+    ZoneOwner zoneParent;
+    GeoZone::Volume volume;
+    volume.rings.append(GeoZone::toRing(_circleRing(mockPosition.atDistanceAndAzimuth(600, 90), 100, 8)));
+    GeoZone::Data data;
+    data.identifier = QStringLiteral("P");
+    data.restriction = GeoZone::Prohibited;
+    data.volumes.append(volume);
+    const QList<const GeoZone*> zones = { zoneParent.add(data) };
+
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    GeoFenceManager *const fenceManager = vehicle->geoFenceManager();
+    GeoZoneMonitor monitor(GeoZoneManager::instance());
+    GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(vehicle);
+    GeoZoneFenceWarning *const warning = vehicleMonitor->fenceWarning();
+    QVERIFY(warning);
+    QVERIFY(!warning->fenceUnknown());
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(masterController.geoFenceController());
+    importer.select(zones, 25);
+    importer.uploadToVehicle();
+    QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Verified, 15000);
+    QTRY_COMPARE(warning->config().fence.polygons.count(), 1);
+    QVERIFY(!warning->fenceUnknown());
+    GeoZonePreflightCheck check(GeoZoneManager::instance());
+    check.setMonitor(&monitor);
+    check.setPlanController(&masterController);
+    QTRY_COMPARE_WITH_TIMEOUT(check.fence().state, GeoZonePreflightCheck::Passed, 5000);
+
+    // The vehicle rejects the next upload, and doesn't answer when the fence is read back at first. The fence manager
+    // has no fence then, while a vehicle keeps the one it had: it is unknown, and the warning keeps the fence it knew.
+    QSignalSpy loadSpy(fenceManager, &GeoFenceManager::loadComplete);
+    const QMetaObject::Connection connection = connect(warning, &GeoZoneFenceWarning::fenceUnknownChanged, vehicle, [this, warning]() {
+        if (warning->fenceUnknown()) {
+            _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailReadRequestListNoResponse, MAV_MISSION_ACCEPTED);
+        }
+    });
+    _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailWriteRequest0ErrorAck, MAV_MISSION_NO_SPACE);
+    importer.uploadToVehicle();
+    QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Failed, 15000);
+    QVERIFY(warning->fenceUnknown());
+    QVERIFY(fenceManager->polygons().isEmpty());
+    QCOMPARE(warning->config().fence.polygons.count(), 1);
+    // The checklist doesn't tell there is no fence, once the mission is checked against the plan's fence again
+    QTRY_VERIFY2_WITH_TIMEOUT(check.fence().text.contains(QStringLiteral("unknown")), qPrintable(check.fence().text), 5000);
+    QCOMPARE(check.fence().state, GeoZonePreflightCheck::Warning);
+    QVERIFY(warning->fenceUnknown());
+
+    // The fence is read back without being asked for once the vehicle answers: the MockLink dropped its fence
+    QTRY_VERIFY_WITH_TIMEOUT(fenceManager->inProgress(), 5000);
+    QCOMPARE(loadSpy.count(), 0);
+    disconnect(connection);
+    _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailNone, MAV_MISSION_ACCEPTED);
+    QTRY_VERIFY_WITH_TIMEOUT(!warning->fenceUnknown(), 15000);
+    QCOMPARE(loadSpy.count(), 1);
+    QVERIFY(warning->config().fence.polygons.isEmpty());
+    QTRY_VERIFY2_WITH_TIMEOUT(check.fence().text.contains(QStringLiteral("changed since it was verified")), qPrintable(check.fence().text), 5000);
+
+    // The item of the checklist, whatever was verified before
+    GeoZonePreflightCheck::FenceInput input;
+    QCOMPARE(GeoZonePreflightCheck::fenceItem(input).state, GeoZonePreflightCheck::NotApplicable);
+    input.vehicleFenceUnknown = true;
+    QCOMPARE(GeoZonePreflightCheck::fenceItem(input).state, GeoZonePreflightCheck::Warning);
+
+    monitor.removeVehicle(vehicle);
+    _disconnectMockLink();
+}
+
 GEOZONE_TEST(GeoZoneFenceImportTest)

@@ -40,6 +40,7 @@ private slots:
     void _testGeoFenceUpload();
     void _testGeoFenceUploadChanges();
     void _testFenceWarningVehicle();
+    void _testFenceUploadRejected();
 
 private:
     /// The texts compared are in meters, whatever the locale

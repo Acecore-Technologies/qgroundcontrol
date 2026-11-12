@@ -14,6 +14,7 @@
 #include "GeoZone.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneFenceWarning.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneAlertLevel.h"
 #include "GeoZoneManager.h"
@@ -169,6 +170,9 @@ void GeoZonePreflightCheck::_connectMonitor()
                                    &GeoZoneVehicleMonitor::nearbyChanged }) {
             (void) connect(monitor, signal, _monitorConnections, [this]() { _scheduleUpdate(); });
         }
+        if (const GeoZoneFenceWarning *const fenceWarning = monitor->fenceWarning()) {
+            (void) connect(fenceWarning, &GeoZoneFenceWarning::fenceUnknownChanged, _monitorConnections, [this]() { _scheduleUpdate(); });
+        }
     }
     _scheduleUpdate();
 }
@@ -222,6 +226,9 @@ void GeoZonePreflightCheck::update()
                 fenceInput.vehicleFence = GeoZoneFenceUpload::snapshot(fenceManager->polygons(), fenceManager->circles(), fenceManager->breachReturnPoint());
             }
             fenceInput.verification = GeoZoneFenceUpload::verification(_vehicle);
+            const GeoZoneVehicleMonitor *const vehicleMonitor = _vehicleMonitor();
+            const GeoZoneFenceWarning *const fenceWarning = vehicleMonitor ? vehicleMonitor->fenceWarning() : nullptr;
+            fenceInput.vehicleFenceUnknown = fenceWarning && fenceWarning->fenceUnknown();
         }
         for (const GeoZoneSource *const source : _manager->repository()->sourceList()) {
             fenceInput.sources.append(GeoZoneSourceVersion::fromSource(source));
@@ -296,6 +303,12 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::fenceItem(const FenceInput &i
     QStringList problems;
     if (!input.unfenced.isEmpty()) {
         problems.append(tr("The vehicle's fence doesn't exclude the prohibited geozones the mission enters: %1.").arg(names(input.unfenced)));
+    }
+    if (input.vehicleFenceUnknown) {
+        // What the fence manager has isn't what the vehicle stores, so it is neither compared nor reported as no fence
+        problems.append(tr("The fence on the vehicle is unknown, since its last upload or download failed: the vehicle may still enforce the fence it had. "
+                           "Upload or download the plan again."));
+        return { Warning, problems.join(QLatin1Char(' ')) };
     }
     const bool vehicleFence = !input.vehicleFence.polygons.isEmpty() || !input.vehicleFence.circles.isEmpty();
     if (input.verification) {
