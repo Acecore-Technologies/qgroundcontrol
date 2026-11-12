@@ -24,9 +24,11 @@ import QGroundControl.ScreenTools
 /// data when the vehicle sends none. While the vehicle is in a zone, the strip is framed in the color of its alert
 /// level (GeoZoneMonitor.activeLevel), like the alert popup, while the bands keep the colors of their restrictions.
 Item {
-    id:         control
-    width:      ScreenTools.defaultFontPixelWidth * 18
-    visible:    _monitor.monitoring && _bands.length > 0 && !isNaN(_altitude)
+    id:             control
+    // The size of what is shown, which the Fly View may replace: the strip, or only the chip while it is collapsed
+    implicitWidth:  _collapsed ? chip.width : _stripWidth
+    implicitHeight: _collapsed ? chip.height : ScreenTools.defaultFontPixelHeight * 20
+    visible:        _monitor.monitoring && _bands.length > 0 && !isNaN(_altitude)
 
     /// Whose active vehicle is shown: the monitor of the application, unless a test gives its own
     property var monitor: GeoZoneMonitor
@@ -38,6 +40,7 @@ Item {
     readonly property real  _terrain:       _active?.terrainAMSL ?? NaN
     readonly property bool  _stale:         _active?.positionUnavailable === true
     readonly property bool  _degraded:      _active?.altitudeDegraded === true && !_stale
+    readonly property real  _stripWidth:    ScreenTools.defaultFontPixelWidth * 18
     readonly property real  _margin:        ScreenTools.defaultFontPixelWidth / 2
     readonly property real  _barX:          _margin
     readonly property real  _barWidth:      ScreenTools.defaultFontPixelWidth * 2.5
@@ -208,7 +211,7 @@ Item {
             x:                      chipDot.x + chipDot.width + control._margin
             anchors.verticalCenter: parent.verticalCenter
 
-            readonly property real _maxWidth: control.width - x - control._margin
+            readonly property real _maxWidth: control._stripWidth - x - control._margin
 
             QGCLabel {
                 width:          Math.min(implicitWidth, chipColumn._maxWidth)
