@@ -36,6 +36,11 @@ constexpr int kCircleSegments = 72;
 constexpr double kMaxZoomDrift = 1.41;      ///< Scale change from the vertices, half a zoom level, before they are rebuilt
 constexpr double kMaxOriginOffset = 1e5;    ///< Pixels from the item to the origin of the vertices before they are rebuilt
 constexpr int kCachedDetailLevels = 3;      ///< Triangulations kept per polygon, for zooming back and forth
+constexpr double kProbePixels = 100.0;      ///< Pixels between the points the transform from mercator to the item is found from
+constexpr double kHighlightedStrokeWidth = 3.0; ///< Item pixels, of the outlines of highlighted zones
+constexpr double kActiveStrokeWidth = 2.0;
+constexpr double kInactiveStrokeWidth = 1.0;    ///< Thinner, like the fainter fill of zones not active now
+constexpr double kMinEdgePixels = 1e-6;     ///< Edges shorter than this have no direction to stroke along
 
 /// Keeps a ring on the side of the antimeridian of its first vertex
 QList<QPointF> unwrapped(const QList<QPointF> &ring, double referenceX)
@@ -243,7 +248,7 @@ bool GeoZoneMapLayer::mercatorTransform(const QGeoCoordinate &center, double zoo
         return false;
     }
     const QPointF mercatorCenter = GeoZoneShape::toMercator(center);
-    const double step = 100.0 / GeoZoneShape::mercatorPixels(zoomLevel);
+    const double step = kProbePixels / GeoZoneShape::mercatorPixels(zoomLevel);
     // The probes stay within the projection, westwards near the antimeridian and northwards near its southern edge
     const double stepX = ((mercatorCenter.x() + step) < 1.0) ? step : -step;
     const double stepY = ((mercatorCenter.y() + step) < 1.0) ? step : -step;
@@ -355,7 +360,7 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
 
         // Outlines as quads with square caps, which cover the joins
         const auto stroke = premultiplied(highlighted ? _highlightColor : restrictionColor, 1);
-        const double halfWidth = (highlighted ? 3.0 : (active ? 2.0 : 1.0)) / 2;
+        const double halfWidth = (highlighted ? kHighlightedStrokeWidth : (active ? kActiveStrokeWidth : kInactiveStrokeWidth)) / 2;
         const auto appendStrokeVertex = [this, &stroke](const QPointF &point) {
             _strokeVertices.append(Vertex{ static_cast<float>(point.x()), static_cast<float>(point.y()), stroke[0], stroke[1], stroke[2], stroke[3] });
         };
@@ -365,7 +370,7 @@ void GeoZoneMapLayer::_rebuild(const QTransform &mercatorToItem)
                 const QPointF b = toVertex(ring[(i + 1) % ring.count()]);
                 const QPointF direction = b - a;
                 const double length = std::hypot(direction.x(), direction.y());
-                if (length < 1e-6) {
+                if (length < kMinEdgePixels) {
                     continue;
                 }
                 const QPointF along = direction * (halfWidth / length);

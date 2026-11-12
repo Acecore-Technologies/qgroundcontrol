@@ -60,6 +60,7 @@ public:
     static constexpr int missionAltitudeDelayMSecs = 500;       ///< Mission changes settle this long before its altitudes are read
     static constexpr double altitudeTolerance = 1;              ///< Meters the altitudes change by before the zones are filtered again
     static constexpr int missionLabelDelayMSecs = 500;          ///< Mission changes settle this long before the labels are placed again
+    static constexpr int scheduleIntervalMSecs = 60 * 1000;     ///< Between the times the zones active soon are filtered again
 
     explicit GeoZoneMapModel(QObject *parent = nullptr);
     explicit GeoZoneMapModel(GeoZoneManager *manager, QObject *parent = nullptr);

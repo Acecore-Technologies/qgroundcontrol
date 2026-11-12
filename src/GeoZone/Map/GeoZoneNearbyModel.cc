@@ -68,5 +68,6 @@ QVariant GeoZoneNearbyModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneNearbyModel::roleNames() const
 {
-    return { { ZoneRole, "zone" }, { InsideRole, "inside" }, { DistanceRole, "distance" }, { TimeToEntryRole, "timeToEntry" } };
+    static const QHash<int, QByteArray> roles{ { ZoneRole, "zone" }, { InsideRole, "inside" }, { DistanceRole, "distance" }, { TimeToEntryRole, "timeToEntry" } };
+    return roles;
 }

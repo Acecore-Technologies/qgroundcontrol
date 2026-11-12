@@ -51,7 +51,7 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager->planning(), &GeoZonePlanning::plannedEndChanged, this, &GeoZoneMapModel::_updateFilter);
 
     (void) connect(&_altitudeTimer, &QTimer::timeout, this, &GeoZoneMapModel::_updateAltitudes);
-    _scheduleTimer.setInterval(60 * 1000);
+    _scheduleTimer.setInterval(scheduleIntervalMSecs);
     (void) connect(&_scheduleTimer, &QTimer::timeout, this, [this]() {
         _invalidateFilter();
         _refresh();

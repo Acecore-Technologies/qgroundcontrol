@@ -127,7 +127,7 @@ QVariant GeoZoneSearchModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneSearchModel::roleNames() const
 {
-    return {
+    static const QHash<int, QByteArray> roles{
         { ZoneRole,             "zone" },
         { DisplayNameRole,      "displayName" },
         { IdentifierRole,       "identifier" },
@@ -135,4 +135,5 @@ QHash<int, QByteArray> GeoZoneSearchModel::roleNames() const
         { RestrictionTextRole,  "restrictionText" },
         { SourceCountRole,      "sourceCount" },
     };
+    return roles;
 }
