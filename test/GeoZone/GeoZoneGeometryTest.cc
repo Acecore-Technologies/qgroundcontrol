@@ -964,6 +964,14 @@ void GeoZoneGeometryTest::_testFenceSelection()
         return result;
     };
     const auto candidateZone = [](const Candidate &candidate) { return candidate.zone; };
+    // The candidates as selections go through them
+    const auto sortedByPriority = [](const QList<Candidate> &unsorted) {
+        QList<Candidate> sorted;
+        for (const Prepared::Entry &entry : prepare(unsorted).entries) {
+            sorted.append(entry.candidate);
+        }
+        return sorted;
+    };
     const QStringList priority = { QStringLiteral("Prohibited entered"), QStringLiteral("Overflown"), QStringLiteral("Prohibited near"),
                                    QStringLiteral("Prohibited far"), QStringLiteral("Prohibited far copy"), QStringLiteral("Prohibited farther"),
                                    QStringLiteral("Authorisation entered"), QStringLiteral("Conditional near"), QStringLiteral("Conditional small"),

@@ -500,17 +500,6 @@ Prepared prepare(const QList<Candidate> &candidates, const QList<double> &simpli
     return prepared;
 }
 
-QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances, bool circlesAsPolygons)
-{
-    const Prepared prepared = prepare(candidates, simplifyTolerances, circlesAsPolygons);
-    QList<Candidate> sorted;
-    sorted.reserve(prepared.entries.count());
-    for (const Prepared::Entry &entry : prepared.entries) {
-        sorted.append(entry.candidate);
-    }
-    return sorted;
-}
-
 QList<const GeoZone*> Selection::selectedZones() const
 {
     QList<const GeoZone*> zones;

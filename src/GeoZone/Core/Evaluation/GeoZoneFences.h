@@ -202,12 +202,6 @@ struct Selection {
     QList<Choice> notFenced() const;
 };
 
-/// @return The candidates in priority order: zones active during the whole planned flight before those active only part
-///         of it, then prohibited zones, other restricted ones (GeoZonePolicy::isRestricted), then the others; by
-///         proximity within those, by distance for far zones, then the most restrictive ones and those with fewer
-///         fence items at the largest simplification
-QList<Candidate> sortedByPriority(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances = { 0 }, bool circlesAsPolygons = false);
-
 /// Candidates in priority order with the fences of their zones measured: what selections need besides the capacity,
 /// the reserved fences and which candidates are excluded, so that selecting again is quick, like after the user
 /// includes or leaves out a zone
@@ -219,17 +213,21 @@ struct Prepared {
         bool hasShape = false;      ///< Importing the zone adds fences
     };
 
-    QList<Entry> entries;                       ///< In priority order, see sortedByPriority
+    QList<Entry> entries;                       ///< In priority order, see prepare
     QList<double> simplifyTolerances = { 0 };   ///< Ascending meters, 0 for unsimplified fences
     bool circlesAsPolygons = false;
 };
 
+/// @return The candidates in priority order: zones active during the whole planned flight before those active only part
+///         of it, then prohibited zones, other restricted ones (GeoZonePolicy::isRestricted), then the others; by
+///         proximity within those, by distance for far zones, then the most restrictive ones and those with fewer
+///         fence items at the largest simplification
 /// @param simplifyTolerances Ascending meters, 0 for unsimplified fences
 /// @param circlesAsPolygons For capacities without circles, see Capacity::circles
 Prepared prepare(const QList<Candidate> &candidates, const QList<double> &simplifyTolerances = { 0 }, bool circlesAsPolygons = false);
 
 /// Selects the zones whose fences fit into the capacity besides the reserved fences, in priority order, see
-/// sortedByPriority. Zones are added while they fit at the largest simplification tolerance, then the selected zones
+/// prepare. Zones are added while they fit at the largest simplification tolerance, then the selected zones
 /// take the smallest tolerance which fits, in priority order. Simplified fences only grow, see zoneFences.
 /// Zones with the same fences as a zone before them are duplicates, whether that zone is selected or not, so that
 /// leaving out a zone leaves out its area.
