@@ -81,7 +81,7 @@ ColumnLayout {
                 radius:     parent.radius
                 color:      qgcPal.buttonHighlight
 
-                property real _indeterminateX: 0
+                property real _indeterminateX
 
                 // Parsing and unknown download sizes have no measurable progress
                 SequentialAnimation on _indeterminateX {
@@ -307,7 +307,8 @@ ColumnLayout {
             if (!_dialogs[mode.title]) {
                 _dialogs[mode.title] = fileDialogComponent.createObject(fileDialog.parent, {
                     title: mode.title, nameFilters: mode.nameFilters, selectMultiple: !!mode.selectMultiple,
-                    defaultSuffix: mode.defaultSuffix || "", accept: mode.accept })
+                    defaultSuffix: mode.defaultSuffix || "" })
+                _dialogs[mode.title].picked.connect(mode.accept)
             }
             if (mode.save) {
                 _dialogs[mode.title].openForSave()
@@ -322,11 +323,12 @@ ColumnLayout {
             QGCFileDialog {
                 folder: QGroundControl.settingsManager.appSettings.missionSavePath
 
-                property var accept
+                /// The file, or the files with selectMultiple, picked to load or save
+                signal picked(var selection)
 
-                onAcceptedForLoad:      (file) => { accept(file); close() }
-                onAcceptedForLoadFiles: (files) => { accept(files); close() }
-                onAcceptedForSave:      (file) => { accept(file); close() }
+                onAcceptedForLoad:      (file) => { picked(file); close() }
+                onAcceptedForLoadFiles: (files) => { picked(files); close() }
+                onAcceptedForSave:      (file) => { picked(file); close() }
             }
         }
     }
