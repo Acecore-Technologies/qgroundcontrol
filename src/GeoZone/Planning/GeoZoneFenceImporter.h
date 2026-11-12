@@ -23,6 +23,7 @@
 #include <QtPositioning/QGeoRectangle>
 
 #include <optional>
+#include <utility>
 
 #include "GeoFenceController.h"
 #include "GeoZoneBox.h"
@@ -71,11 +72,14 @@ public:
 
     /// Special values of the activeWithinHours of updateSelection
     enum ActiveTime {
-        AnyTime = -1,       ///< Whatever the zone schedules
-        AtFlightTime = -2,  ///< Active from the planned start to the estimated end, see GeoZonePlanning, or any time without planned start.
-                            ///< Zones active only part of that time are left out.
+        Now = 0,            ///< Active from now for nowFlightSecs, or to the estimated end of the mission when that is later
+        AnyTime = -1,       ///< Whatever the zone schedules, also zones which are inactive: only when the user asks for it
+        AtFlightTime = -2,  ///< Active from the planned start to the estimated end, see GeoZonePlanning, or Now without planned start
     };
     Q_ENUM(ActiveTime)
+
+    static constexpr int nowFlightSecs = 3600;      ///< Shortest time from now the zones fenced with Now must be active for
+    static constexpr int maxActiveHours = 24 * 366; ///< Largest activeWithinHours, the others select like Now
 
     static constexpr int maxListedChoices = 500;    ///< Zones left out listed by choices
 
@@ -102,11 +106,11 @@ public:
     /// are prepared, unless another selection starts meanwhile
     ///     @param restrictions: GeoZone::Restriction values of the zones
     ///     @param area: Only zones intersecting this area. Invalid for zones anywhere.
-    ///     @param activeWithinHours: Only zones active now (0) or at some time in the next hours, see ActiveTime for the
-    ///                               others. Zones active only part of the next hours or of the flight are left out,
-    ///                               see GeoZoneFences::Candidate::partTime.
+    ///     @param activeWithinHours: Only zones active at some time in the next hours, or see ActiveTime. Except for
+    ///                               AnyTime, the zones active only part of that time aren't fenced, see
+    ///                               GeoZoneFences::Candidate::partTime, since the vehicle's fence has no schedule.
     ///     @param maxSimplifyTolerance: Meters fences may be simplified by to fit, see GeoZoneFences::zoneFences
-    Q_INVOKABLE void updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = -1, double maxSimplifyTolerance = 0);
+    Q_INVOKABLE void updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = Now, double maxSimplifyTolerance = 0);
 
     /// Selects which of the zones fit into the fence of the plan's vehicle besides the fences kept, the zones entered by or
     /// near the planned flight first, see GeoZoneFences::select. Simplification steps up to the tolerance when needed.
@@ -187,6 +191,9 @@ private:
         QDateTime activeFrom;   ///< Zones not active during the whole time from activeFrom to activeTo are left out,
         QDateTime activeTo;     ///< see GeoZoneFences::Candidate::partTime. Invalid for any time.
     };
+
+    /// @return When the zones fenced must be active from and to, both invalid for AnyTime
+    std::pair<QDateTime, QDateTime> _activeTimes(int activeWithinHours) const;
 
     /// What preparing a selection needs, gathered on the GUI thread
     struct PrepareInput {

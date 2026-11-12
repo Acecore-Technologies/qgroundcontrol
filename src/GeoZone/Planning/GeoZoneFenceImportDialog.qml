@@ -97,7 +97,7 @@ QGCPopupDialog {
 
     function _updateSelection() {
         const area = mapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
-        importer.updateSelection(_restrictions(), area, activeCombo.hours[activeCombo.currentIndex], simplifyCombo.tolerances[simplifyCombo.currentIndex])
+        importer.updateSelection(_restrictions(), area, activeCombo.selected, simplifyCombo.tolerances[simplifyCombo.currentIndex])
     }
 
     /// Starts the selection of the changes still settling, so that what is applied or uploaded is what the dialog shows
@@ -274,15 +274,17 @@ QGCPopupDialog {
             }
 
             QGCLabel { text: qsTr("Active") }
-            // At the planned flight time when there is one
+            // At the planned flight time when there is one, otherwise for a flight starting now. Any time, which also
+            // fences inactive zones, is last and never selected for the user.
             QGCComboBox {
                 id:                 activeCombo
                 Layout.fillWidth:   true
-                model:              (control._planned ? [ qsTr("At flight time") ] : []).concat([ qsTr("Any time"), qsTr("Now"), qsTr("Next 3 hours"), qsTr("Next 24 hours") ])
+                model:              (control._planned ? [ qsTr("At flight time") ] : []).concat([ qsTr("Now"), qsTr("Next 3 hours"), qsTr("Next 24 hours"), qsTr("Any time (also inactive zones)") ])
                 onActivated:        selectionTimer.restart()
                 onModelChanged:     selectionTimer.restart()
 
-                readonly property var hours: (control._planned ? [ GeoZoneFenceImporter.AtFlightTime ] : []).concat([ GeoZoneFenceImporter.AnyTime, 0, 3, 24 ])
+                readonly property var   hours:      (control._planned ? [ GeoZoneFenceImporter.AtFlightTime ] : []).concat([ GeoZoneFenceImporter.Now, 3, 24, GeoZoneFenceImporter.AnyTime ])
+                readonly property int   selected:   hours[currentIndex] ?? GeoZoneFenceImporter.Now
             }
 
             QGCLabel { text: qsTr("Simplify up to") }
@@ -297,15 +299,27 @@ QGCPopupDialog {
             }
         }
 
-        // The vehicle's fence has no schedule, so it only fences zones active the whole time
+        // The vehicle's fence has no schedule, so it only fences zones active the whole time. What any time does is
+        // always said.
         QGCLabel {
             Layout.preferredWidth:  _contentWidth
             wrapMode:               Text.WordWrap
             font.pointSize:         ScreenTools.smallFontPointSize
-            text:                   activeCombo.hours[activeCombo.currentIndex] === GeoZoneFenceImporter.AnyTime ?
-                                        qsTr("Any time fences zones whatever their schedule, also while they are inactive.") :
-                                        qsTr("The vehicle's fence has no schedule: zones active only part of the time are not fenced, so that a zone becoming active can't make the vehicle act. QGroundControl warns about them instead.")
-            visible:                helpButton.checked
+            color:                  activeCombo.selected === GeoZoneFenceImporter.AnyTime ? qgcPal.warningText : qgcPal.text
+            text: {
+                const partTime = qsTr("The vehicle's fence has no schedule: zones active only part of that time are not fenced, so that a zone becoming active can't make the vehicle act. QGroundControl warns about them instead.")
+                switch (activeCombo.selected) {
+                case GeoZoneFenceImporter.AnyTime:
+                    return qsTr("Any time fences zones whatever their schedule: the vehicle also stops at zones which are not active.")
+                case GeoZoneFenceImporter.AtFlightTime:
+                    return qsTr("Zones active from the planned start to the estimated end of the flight.") + " " + partTime
+                case GeoZoneFenceImporter.Now:
+                    return qsTr("Zones active from now for the next hour, or to the estimated end of the mission when that is later.") + " " + partTime
+                default:
+                    return qsTr("Zones active from now for the next %n hour(s).", "", activeCombo.selected) + " " + partTime
+                }
+            }
+            visible:                helpButton.checked || activeCombo.selected === GeoZoneFenceImporter.AnyTime
         }
 
         QGCLabel {

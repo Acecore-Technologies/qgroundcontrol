@@ -456,7 +456,7 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 
 1. Check the zone types to add (**Prohibited**, **Authorisation**, **Conditional**).
 1. Leave **Only zones in current map view** checked to only add the zones visible on the map (recommended for national files that contain many zones).
-1. Select when the zones must be **Active**: **At flight time** (offered and selected when the plan has a planned start: from the planned start to the estimated end of the mission, widened by 15 minutes), **Any time**, **Now**, or within the **Next 3 hours** or **Next 24 hours**. Except for **Any time**, only zones active during the whole of that time are fenced, see [Time-limited Zones](#time-limited-zones-and-fences).
+1. Select when the zones must be **Active**: **At flight time** (offered and selected when the plan has a planned start: from the planned start to the estimated end of the mission, widened by 15 minutes), **Now** (selected without a planned start: a flight starting now), within the **Next 3 hours** or **Next 24 hours**, or **Any time (also inactive zones)**. Except for **Any time**, only zones active during the whole of that time are fenced, see [Time-limited Zones](#time-limited-zones-and-fences).
 1. Select how far fences may be simplified to fit (**Simplify up to**). Fences are only simplified as far as needed, the most important zones the least. Simplified fences always enclose the whole zone and extend up to twice the tolerance beyond it. Select **Off** to keep the published vertices.
 1. Check the zones selected and, with **Show**, those left out, then press **Apply** to add the fences to the plan, or **Upload to Vehicle**.
 
@@ -480,7 +480,18 @@ Zones the flight only passes above or below are left out unless you check them, 
 
 #### Time-limited Zones and Fences {#time-limited-zones-and-fences}
 
-A vehicle fence has no schedule: once uploaded, the vehicle enforces it all the time. A fence of a zone active only part of the flight would make the vehicle act at a zone which isn't active yet, or when the zone becomes active while the vehicle is inside it, where EN 4709-003 §6.2.1 asks for a warning but no automatic manoeuvre. So the import only fences zones active during the whole planned time: with **At flight time** from the planned start to the estimated end widened by 15 minutes, with **Next 3 hours** and **Next 24 hours** from now to then, and with **Now** the zones active now. A zone active only part of that time, like one starting or ending during the flight, is left out with the reason _Active only part of the flight, QGroundControl warns instead_ and can't be checked: the [flight alerts](#flight-alerts) follow its schedule and warn when it becomes active. A zone with the same area which is active all the time is fenced in its place. **Any time** fences the zones whatever their schedule, also while they are inactive.
+A vehicle fence has no schedule: once uploaded, the vehicle enforces it all the time. A fence of a zone active only part of the flight would make the vehicle act at a zone which isn't active yet, or when the zone becomes active while the vehicle is inside it, where EN 4709-003 §6.2.1 asks for a warning but no automatic manoeuvre. So the import only fences zones active during the whole planned flight:
+
+| Active | Zones fenced |
+|---|---|
+| **At flight time** | Active from the planned start to the estimated end of the mission, widened by 15 minutes. Offered and selected when the plan has a [planned start](#flight-time). |
+| **Now** | Active from now for the next hour, or to the estimated end of the mission when it takes longer. Selected when the plan has no planned start. |
+| **Next 3 hours**, **Next 24 hours** | Active from now to then. |
+| **Any time (also inactive zones)** | All zones whatever their schedule: the vehicle also stops at zones which are not active. Never selected for you; the dialog says what it does, in the warning color, while it is selected. |
+
+A zone active only part of that time, like one starting or ending during the flight, is left out with the reason _Active only part of the flight, QGroundControl warns instead_ and can't be checked: the [flight alerts](#flight-alerts) follow its schedule and warn when it becomes active. It is [named among the zones not fenced](#zones-not-fenced). A zone with the same area which is active all the time is fenced in its place. A zone which isn't active at any moment of that time isn't listed.
+
+**Rebuild Geozone Fences** selects for the time the fences were made with. Fences made **At flight time** are rebuilt for **Now** once the plan's planned start is cleared, never for any time.
 
 #### Zones Not Fenced {#zones-not-fenced}
 

@@ -499,7 +499,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadConfirmation()
 
 void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
 {
-    // A permanent zone, one ending in an hour and one starting in half an hour
+    // A permanent zone, one ending in an hour, one starting in half an hour and one in an hour and a half
     ScopedEnvironment environment;
     const QDateTime now = _utc(QDate(2026, 6, 15), QTime(12, 0));
     environment.setNow(now);
@@ -521,8 +521,9 @@ void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
         _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 300),
         scheduled(QStringLiteral("ENDS"), 8.1, now.addDays(-1), now.addSecs(3600)),
         scheduled(QStringLiteral("STARTS"), 8.2, now.addSecs(1800), QDateTime()),
+        scheduled(QStringLiteral("LATER"), 8.3, now.addSecs(5400), QDateTime()),
     }), errorString), qPrintable(errorString));
-    QTRY_COMPARE(manager->zoneCount(), 3);
+    QTRY_COMPARE(manager->zoneCount(), 4);
 
     PlanMasterController masterController;
     masterController.setFlyView(false);
@@ -534,7 +535,9 @@ void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
     // The selected zones, then those left out with why, which can't be included
     const auto select = [&importer](int activeWithinHours) {
         importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), activeWithinHours, 25);
-        (void) QTest::qWaitFor([&importer]() { return !importer.busy(); }, 5000);
+        if (!QTest::qWaitFor([&importer]() { return !importer.busy(); }, 5000)) {
+            return QStringList{ QStringLiteral("still selecting") };
+        }
         QStringList selected;
         QStringList leftOut;
         for (const GeoZoneFenceChoiceModel::Row &row : importer.choices()->rows()) {
@@ -554,11 +557,32 @@ void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
     planning->setPlannedStart(now.addSecs(50 * 60));
     QCOMPARE(select(GeoZoneFenceImporter::AtFlightTime), QStringList({ QStringLiteral("A"), QStringLiteral("STARTS"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime }));
     QCOMPARE(importer.notFencedCount(), 1);
-    // In the next three hours both change, now only the zone starting later is inactive and not a candidate
-    QCOMPARE(select(3), QStringList({ QStringLiteral("A"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime, QStringLiteral("STARTS: ") + partTime }));
-    QCOMPARE(select(0), QStringList({ QStringLiteral("A"), QStringLiteral("ENDS"), QStringLiteral("|") }));
-    // Any time fences them all, whatever their schedule
-    QCOMPARE(select(GeoZoneFenceImporter::AnyTime), QStringList({ QStringLiteral("A"), QStringLiteral("ENDS"), QStringLiteral("STARTS"), QStringLiteral("|") }));
+    // In the next three hours all three change
+    const QStringList allPartTime = { QStringLiteral("A"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime, QStringLiteral("LATER: ") + partTime,
+                                      QStringLiteral("STARTS: ") + partTime };
+    QCOMPARE(select(3), allPartTime);
+
+    // Now is a flight starting now which takes an hour. At 12:05 the zone ending at 13:00 and the one starting at 12:30
+    // are active only part of it, so they aren't fenced. The zone starting at 13:30 isn't active during it.
+    environment.setNow(now.addSecs(300));
+    const QStringList nextHour = { QStringLiteral("A"), QStringLiteral("|"), QStringLiteral("ENDS: ") + partTime, QStringLiteral("STARTS: ") + partTime };
+    QCOMPARE(select(GeoZoneFenceImporter::Now), nextHour);
+    QCOMPARE(importer.notFencedCount(), 2);
+    // The flight time without a planned start is that flight, like for fences rebuilt after the start was cleared,
+    // rather than any time, as are hours out of range
+    planning->clearPlannedStart();
+    QCOMPARE(select(GeoZoneFenceImporter::AtFlightTime), nextHour);
+    QCOMPARE(select(-7), nextHour);
+    QCOMPARE(select(GeoZoneFenceImporter::maxActiveHours + 1), nextHour);
+    // A mission estimated to take longer is flown to its end, during which the zone starting at 13:30 becomes active
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(QGeoCoordinate(40, 8), 1);
+    (void) missionController->insertSimpleMissionItem(QGeoCoordinate(41, 8), 2);
+    QTRY_VERIFY(missionController->missionTime() > 2 * 3600);
+    QCOMPARE(select(GeoZoneFenceImporter::Now), allPartTime);
+
+    // Any time fences them all, whatever their schedule, when asked for
+    QCOMPARE(select(GeoZoneFenceImporter::AnyTime), QStringList({ QStringLiteral("A"), QStringLiteral("ENDS"), QStringLiteral("LATER"), QStringLiteral("STARTS"), QStringLiteral("|") }));
 }
 
 void GeoZoneFenceImportTest::_testGeoFenceStale()
@@ -643,6 +667,12 @@ void GeoZoneFenceImportTest::_testGeoFenceStale()
     QCOMPARE(importer.applySelection(), 1);
     planning->setPlannedStart(now.addSecs(1800));
     QCOMPARE(importer.rebuild(), 2);
+    // Once the planned start is cleared they are rebuilt for a flight starting now, not for any time: at 12:05 the
+    // zone ending at 13:00 is active only part of it
+    planning->clearPlannedStart();
+    environment.setNow(now.addSecs(300));
+    QCOMPARE(importer.rebuild(), 1);
+    QCOMPARE(importer.notFencedCount(), 1);
 }
 
 void GeoZoneFenceImportTest::_testGeoFenceUpload()

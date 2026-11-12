@@ -178,23 +178,9 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
         restrictionList.append(static_cast<GeoZone::Restriction>(restriction.toInt()));
     }
 
-    QDateTime activeFrom;
-    QDateTime activeTo;
-    const GeoZonePlanning *const planning = GeoZoneManager::instance()->planning();
-    if ((activeWithinHours == AtFlightTime) && planning->plannedStart().isValid()) {
-        // Widened like the mission check, since the flight may start early or late
-        constexpr int tolerance = GeoZonePathEvaluator::defaultScheduleToleranceSecs;
-        activeFrom = planning->plannedStart().addSecs(-tolerance);
-        activeTo = planning->plannedEnd().addSecs(tolerance);
-    } else if (activeWithinHours >= 0) {
-        activeFrom = GeoZoneEnvironment::currentDateTimeUtc();
-        if (activeWithinHours > 0) {
-            activeTo = activeFrom.addSecs(activeWithinHours * 3600);
-        }
-    }
-
     // Fences can't follow schedules: the zones fenced must be active from the start to the end
-    _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo), activeFrom, activeTo.isValid() ? activeTo : activeFrom };
+    const auto [activeFrom, activeTo] = _activeTimes(activeWithinHours);
+    _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo), activeFrom, activeTo };
     _settings = QJsonObject{
         { QStringLiteral("restrictions"), QJsonArray::fromVariantList(restrictions) },
         { QStringLiteral("activeWithinHours"), activeWithinHours },
@@ -206,6 +192,34 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
     _zones.clear();
     _setSimplifyTolerances(maxSimplifyTolerance);
     _prepareSelection(false);
+}
+
+std::pair<QDateTime, QDateTime> GeoZoneFenceImporter::_activeTimes(int activeWithinHours) const
+{
+    if (activeWithinHours == AnyTime) {
+        return {};
+    }
+    const GeoZonePlanning *const planning = GeoZoneManager::instance()->planning();
+    if ((activeWithinHours == AtFlightTime) && planning->plannedStart().isValid()) {
+        // Widened like the mission check, since the flight may start early or late
+        constexpr int tolerance = GeoZonePathEvaluator::defaultScheduleToleranceSecs;
+        return { planning->plannedStart().addSecs(-tolerance), planning->plannedEnd().addSecs(tolerance) };
+    }
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    if ((activeWithinHours > 0) && (activeWithinHours <= maxActiveHours)) {
+        return { now, now.addSecs(qint64{ activeWithinHours } * 3600) };
+    }
+    // Now, also for the flight time of a plan whose planned start was cleared and for hours out of range: a flight
+    // starting now, which takes the mission's estimated time when that is longer. Never any time, which would fence
+    // zones while they are inactive.
+    QDateTime end = now.addSecs(nowFlightSecs);
+    MissionController *const missionController = (_geoFenceController && _geoFenceController->masterController()) ? _geoFenceController->masterController()->missionController() : nullptr;
+    if (missionController && (missionController->missionTime() > 0)) {
+        const QDateTime missionEnd = now.addSecs(std::llround(missionController->missionTime()));
+        // With the repeats of DO_JUMP items
+        end = (std::max)(end, GeoZoneMissionReader::path(missionController).flightEnd(now, missionEnd));
+    }
+    return { now, end };
 }
 
 void GeoZoneFenceImporter::select(const QList<const GeoZone*> &zones, double maxSimplifyTolerance)
@@ -466,7 +480,7 @@ int GeoZoneFenceImporter::rebuild()
             _included.insert(it.key(), it.value().toBool());
         }
         updateSelection(settings.value(QStringLiteral("restrictions")).toArray().toVariantList(), area,
-                        settings.value(QStringLiteral("activeWithinHours")).toInt(-1), settings.value(QStringLiteral("maxSimplifyTolerance")).toDouble());
+                        settings.value(QStringLiteral("activeWithinHours")).toInt(Now), settings.value(QStringLiteral("maxSimplifyTolerance")).toDouble());
     }
     return applySelection();
 }
