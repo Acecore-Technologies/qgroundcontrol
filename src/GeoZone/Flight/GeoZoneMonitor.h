@@ -290,7 +290,8 @@ public:
     static GeoZone::Position vehiclePosition(Vehicle *vehicle, const QGeoCoordinate &coordinate) { return GeoZoneVehicleMonitor::vehiclePosition(vehicle, coordinate); }
     /// @return Description of a FENCE_STATUS breach like "Boundary fence breached (3 times)"
     static QString fenceBreachText(int breachType, int breachCount) { return GeoZoneVehicleMonitor::fenceBreachText(breachType, breachCount); }
-    /// @return Message of the alert about the zone, without the vehicle, like "Entered geozone P (Prohibited)"
+    /// @return Message of the alert about the zone, without the vehicle, like "Entered geozone P (Prohibited)", see
+    ///         GeoZoneAlertText::message
     static QString alertMessage(const AlertEvent &event, const QString &zoneName, const QString &restrictionText);
 
     /// Replaces the clock of the vehicles' messages and of the spoken alerts, like tests do

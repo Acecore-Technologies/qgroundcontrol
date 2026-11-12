@@ -13,6 +13,7 @@
 #include "AudioOutput.h"
 #include "GeoZone.h"
 #include "GeoZoneAlertHistory.h"
+#include "GeoZoneAlertText.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceWarning.h"
 #include "GeoZoneGuidedCheck.h"
@@ -1495,85 +1496,7 @@ GeoZoneMonitor::AlertEvent::Circumstance GeoZoneMonitor::AlertEvent::circumstanc
 
 QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zoneName, const QString &restrictionText)
 {
-    // Alerts about a zone the pilot acknowledged a permit for, see GeoZonePermits
-    const bool permitted = (event.circumstance == AlertEvent::Circumstance::Permit);
-    switch (event.kind) {
-    case AlertEvent::Entry:
-        return permitted ? tr("Entered geozone %1 (%2) \u2014 permit acknowledged").arg(zoneName, restrictionText) : tr("Entered geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::OnGround: {
-        if (permitted) {
-            return tr("On the ground inside geozone %1 (%2) \u2014 permit acknowledged").arg(zoneName, restrictionText);
-        }
-        const bool arming = (event.circumstance == AlertEvent::Circumstance::Arming);
-        switch (event.restriction) {
-        case GeoZone::Prohibited:
-            return arming ? tr("Arming inside prohibited geozone %1 — take-off not allowed here").arg(zoneName) :
-                            tr("On the ground inside prohibited geozone %1 — take-off not allowed here").arg(zoneName);
-        case GeoZone::ReqAuthorisation:
-            return arming ? tr("Arming inside geozone %1 (%2) — take-off only with an authorisation").arg(zoneName, restrictionText) :
-                            tr("On the ground inside geozone %1 (%2) — take-off only with an authorisation").arg(zoneName, restrictionText);
-        case GeoZone::Conditional:
-        case GeoZone::Unknown:
-            return arming ? tr("Arming inside geozone %1 (%2) — check its conditions before take-off").arg(zoneName, restrictionText) :
-                            tr("On the ground inside geozone %1 (%2) — check its conditions before take-off").arg(zoneName, restrictionText);
-        case GeoZone::NoRestriction:
-        case GeoZone::USpace:
-            break;
-        }
-        return arming ? tr("Arming inside geozone %1 (%2)").arg(zoneName, restrictionText) : tr("On the ground inside geozone %1 (%2)").arg(zoneName, restrictionText);
-    }
-    case AlertEvent::PositionLost:
-        return event.inside ? tr("Position lost inside geozone %1 (%2)").arg(zoneName, restrictionText) :
-                              tr("Position lost near geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::Traffic:
-        return tr("Traffic %1 entered geozone %2 (%3)").arg(event.traffic, zoneName, restrictionText);
-    case AlertEvent::NonConformance:
-        return zoneName.isEmpty() ? tr("Outside planned volume") : tr("Outside planned volume: %1").arg(zoneName);
-    case AlertEvent::Awareness:
-        return GeoZoneAwareness::alertMessage(GeoZoneAwareness::stateFromCode(event.zoneIdentifier), event.zoneName);
-    case AlertEvent::FenceWarning:
-        return tr("Geofence ahead: %1").arg(zoneName);
-    case AlertEvent::FenceBreach:
-        return zoneName;
-    case AlertEvent::Activated:
-        return tr("Geozone %1 (%2) is now active \u2014 you are inside it. Leave or land as soon as possible.").arg(zoneName, restrictionText);
-    case AlertEvent::ActivationSoon: {
-        // Minutes rounded up, so the zone never applies before the time said
-        const qint64 secs = std::isnan(event.timeToEntry) ? 0 : static_cast<qint64>(std::ceil(event.timeToEntry));
-        const QString left = (secs >= 60) ? tr("%n min", nullptr, static_cast<int>((secs + 59) / 60)) : tr("%n s", nullptr, static_cast<int>(secs));
-        return event.inside ? tr("Geozone %1 (%2) becomes active in %3, you are inside it").arg(zoneName, restrictionText, left) :
-                              tr("Geozone %1 (%2) nearby becomes active in %3").arg(zoneName, restrictionText, left);
-    }
-    case AlertEvent::Notified:
-        return tr("Pilot notified about geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::Approved:
-        return tr("Pilot confirmed the permission to fly in geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::Dismissed:
-        return tr("Pilot dismissed the alert about geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::Muted:
-        return tr("Pilot muted the alerts about geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::Permit:
-        return tr("Pilot acknowledged the permit to enter geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::PermitEnded:
-        return tr("Permit to enter geozone %1 (%2) ended").arg(zoneName, restrictionText);
-    case AlertEvent::SourceOff:
-        return tr("Geozone source %1 turned off, its zones are no longer checked").arg(zoneName);
-    case AlertEvent::SourceOn:
-        return tr("Geozone source %1 turned on").arg(zoneName);
-    case AlertEvent::Authorised:
-        return tr("Authorisation recorded for geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::AuthorisationRemoved:
-        return tr("Authorisation removed for geozone %1 (%2)").arg(zoneName, restrictionText);
-    case AlertEvent::Approach:
-        break;
-    }
-    if (permitted) {
-        return tr("Approaching geozone %1 (%2) \u2014 permit acknowledged").arg(zoneName, restrictionText);
-    }
-    if (!std::isnan(event.timeToEntry)) {
-        return tr("Approaching geozone %1 (%2), entry in about %3 s").arg(zoneName, restrictionText).arg(std::lround(event.timeToEntry));
-    }
-    return tr("Approaching geozone %1 (%2)").arg(zoneName, restrictionText);
+    return GeoZoneAlertText::message(event, zoneName, restrictionText);
 }
 
 GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance,
