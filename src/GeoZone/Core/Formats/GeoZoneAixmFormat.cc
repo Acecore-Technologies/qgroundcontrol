@@ -380,7 +380,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     zone.issues.append(GeoZoneParser::tr("Boundary with an invalid circle ignored"));
                 } else if (circleOnly && volume.center.isValid()) {
                     volume.isCircle = true;
-                    _appendVolume(volume, zone.volumes);
+                    _appendVolume(volume, zone.volumes, zone.issues);
                 } else if (ring.count() > kMaxRingVertices) {
                     zone.issues.append(GeoZoneParser::tr("Boundary with more than %1 points ignored").arg(kMaxRingVertices));
                 } else {
@@ -394,7 +394,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                         volume.isCircle = false;
                         const GeoZone::Ring published = GeoZone::toRing(ring);
                         volume.rings = { (ring.count() >= 3) ? GeoZoneGeometry::densifyGreatCircles(published, kMaxRingVertices, geodesicEdges) : published };
-                        _appendVolume(volume, zone.volumes);
+                        _appendVolume(volume, zone.volumes, zone.issues);
                     }
                 }
             } else if (name == QLatin1String("Airspace")) {

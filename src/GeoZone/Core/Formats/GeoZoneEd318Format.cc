@@ -46,7 +46,7 @@ void _ed318Geometry(const QJsonObject &geometry, const GeoZone::Volume &parentLa
     }
 
     // ED-318 circle radius is always expressed in meters, the layer uom only applies to vertical limits
-    _appendHorizontalGeometry(geometry, layer, 1.0, volumes);
+    _appendHorizontalGeometry(geometry, layer, 1.0, volumes, issues);
 }
 
 

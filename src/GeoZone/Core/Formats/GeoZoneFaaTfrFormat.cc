@@ -312,7 +312,7 @@ GeoZoneFormat::FeatureResult _faaTfrFeature(const QJsonObject &feature, const Ge
         zone.message = GeoZoneParser::tr("Temporary flight restriction, FAA NOTAM %1. The NOTAM defines the times, altitudes and exceptions.").arg(notam);
     }
 
-    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     // Circular TFRs are published as polygons whose sides cut inside the circle, the NOTAM gives the circle itself
     for (GeoZone::Volume &volume : zone.volumes) {
         if (volume.isCircle || (volume.rings.count() != 1)) {

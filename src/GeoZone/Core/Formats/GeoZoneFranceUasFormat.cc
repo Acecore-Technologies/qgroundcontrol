@@ -43,7 +43,7 @@ GeoZoneFormat::FeatureResult _franceFeature(const QJsonObject &feature, GeoZone:
         layer.setReferences(QStringLiteral("AGL"), QString());
     }
 
-    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }
 

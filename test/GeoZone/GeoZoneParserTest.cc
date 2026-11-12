@@ -315,8 +315,8 @@ void GeoZoneParserTest::_testParseFixtures_data()
     // The airspaces the FAA and OpenAIP formats leave out on purpose aren't skipped features.
     row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0, "9229fa5a8ab6ffc6");
     row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "e2d4b0d264592f37");
-    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "3c0d3f716763a061");
-    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "bb11ebfc2907b643");
+    row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "f56191e626dd0b9d");
+    row("ed318_test.json", Format::Unknown, Format::ED318, 3, 1, 0, "f92894dd6e031e61");
     row("es_enaire_ed318_test.json", Format::ED318, Format::ED318, 3, 0, 0, "1ba7cfe75dd69cce");
     row("es_servais_ed318_test.json", Format::ED318, Format::ED318, 2, 0, 0, "4ca8ded0a0427a73");
     row("at_ed269_test.json", Format::ED269, Format::ED269, 3, 0, 0, "5a0999bafe784557");
@@ -1598,6 +1598,100 @@ void GeoZoneParserTest::_testRingValidation()
     QCOMPARE(readBack.issues, result.issues);
     QCOMPARE(readBack.skippedFeatures, result.skippedFeatures);
     QCOMPARE(readBack.zones.first().volumes.first().rings, volume.rings);
+}
+
+void GeoZoneParserTest::_testDroppedGeometry_data()
+{
+    QTest::addColumn<QJsonValue>("geometry");
+    QTest::addColumn<QString>("issue");
+    QTest::addColumn<int>("volumes");           ///< Of the zone, 0 when it is rejected
+    QTest::addColumn<QGeoCoordinate>("inside"); ///< A position in what the zone keeps or covers
+
+    const auto ring = [](double west, double south, double size, const QJsonValue &invalid = QJsonValue()) {
+        QJsonArray positions{ QJsonArray{ west, south }, QJsonArray{ west + size, south }, QJsonArray{ west + size, south + size }, QJsonArray{ west, south + size },
+                              QJsonArray{ west, south } };
+        if (!invalid.isNull()) {
+            positions[2] = invalid;
+        }
+        return positions;
+    };
+    const auto geometry = [](const char *type, const QJsonArray &coordinates) { return QJsonObject{ { "type", type }, { "coordinates", coordinates } }; };
+    const QJsonArray square{ ring(8, 47, 0.01) };
+    const QJsonArray notANumber{ 8.2, "north" };
+    const QJsonArray outOfRange{ 8.2, 95 };
+    const QString invalidPosition = QStringLiteral("Polygon with an invalid position ignored");
+    const QString invalidHole = QStringLiteral("Invalid polygon hole ignored, the zone covers it");
+    const QGeoCoordinate inSquare(47.005, 8.005);
+    const QGeoCoordinate none;
+    const auto row = [](const char *name, const QJsonValue &tested, const QString &issue, int volumes, const QGeoCoordinate &inside) {
+        QTest::newRow(name) << tested << issue << volumes << inside;
+    };
+
+    // A polygon which can't be read is told. The zone keeps its other polygons, and is rejected without any.
+    row("multipolygon, position not a number", geometry("MultiPolygon", { square, QJsonArray{ ring(8.2, 47, 0.01, notANumber) } }), invalidPosition, 1, inSquare);
+    row("multipolygon, position out of range", geometry("MultiPolygon", { square, QJsonArray{ ring(8.2, 47, 0.01, outOfRange) } }), invalidPosition, 1, inSquare);
+    row("multipolygon, polygon without rings", geometry("MultiPolygon", { square, QJsonArray() }),
+        QStringLiteral("Polygon with fewer than 3 distinct points ignored"), 1, inSquare);
+    row("polygon, position not a number", geometry("Polygon", { ring(8, 47, 0.01, notANumber) }), invalidPosition, 0, none);
+    QJsonArray manyPositions;
+    for (qsizetype i = 0; i <= GeoZoneParserUtils::kMaxRingVertices; i++) {
+        manyPositions.append(QJsonArray{ 8.2 + (i * 1e-7), 47 });
+    }
+    row("multipolygon, ring over the limit", geometry("MultiPolygon", { square, QJsonArray{ manyPositions } }),
+        QStringLiteral("Polygon with more than 200000 points ignored"), 1, inSquare);
+    // The zone covers a hole which can't be read
+    row("hole, position not a number", geometry("Polygon", { ring(8, 47, 0.01), ring(8.004, 47.004, 0.002, notANumber) }), invalidHole, 1, inSquare);
+    row("hole without positions", geometry("Polygon", { ring(8, 47, 0.01), QJsonArray() }), invalidHole, 1, inSquare);
+    // Geometries which aren't areas
+    row("line string", geometry("LineString", ring(8, 47, 0.01)), QStringLiteral("Unsupported geometry LineString ignored"), 0, none);
+    row("point without extent", geometry("Point", { 8, 47 }), QStringLiteral("Unsupported geometry Point ignored"), 0, none);
+    row("collection with a line", QJsonObject{ { "type", "GeometryCollection" }, { "geometries", QJsonArray{ geometry("Polygon", square), geometry("LineString", ring(8, 47, 0.01)) } } },
+        QStringLiteral("Unsupported geometry LineString ignored"), 1, inSquare);
+    row("circle without center", QJsonObject{ { "type", "Point" }, { "coordinates", notANumber }, { "extent", QJsonObject{ { "subType", "Circle" }, { "radius", 100 } } } },
+        QStringLiteral("Circle without a valid center ignored"), 0, none);
+    row("without geometry", QJsonValue(), QStringLiteral("Zone without geometry ignored"), 0, none);
+    // More polygons than a zone may have
+    QJsonArray manyPolygons;
+    for (qsizetype i = 0; i <= GeoZoneParserUtils::kMaxVolumesPerZone; i++) {
+        manyPolygons.append(QJsonArray{ ring(8 + ((i % 100) * 0.02), 47 + ((i / 100) * 0.02), 0.01) });
+    }
+    row("too many polygons", geometry("MultiPolygon", manyPolygons), QStringLiteral("More than 10000 shapes, the others are ignored"),
+        static_cast<int>(GeoZoneParserUtils::kMaxVolumesPerZone), inSquare);
+}
+
+void GeoZoneParserTest::_testDroppedGeometry()
+{
+    QFETCH(QJsonValue, geometry);
+    QFETCH(QString, issue);
+    QFETCH(int, volumes);
+    QFETCH(QGeoCoordinate, inside);
+
+    // With a valid zone, so that the file loads when the tested one is rejected
+    const auto feature = [](const char *identifier, const QJsonValue &featureGeometry) {
+        return QJsonObject{ { "type", "Feature" }, { "properties", QJsonObject{ { "identifier", identifier }, { "type", "PROHIBITED" } } }, { "geometry", featureGeometry } };
+    };
+    const QJsonObject valid{ { "type", "Point" }, { "coordinates", QJsonArray{ 8, 40 } }, { "extent", QJsonObject{ { "subType", "Circle" }, { "radius", 100 } } } };
+    const QJsonObject document{ { "type", "FeatureCollection" }, { "features", QJsonArray{ feature("TESTED", geometry), feature("VALID", valid) } } };
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(QJsonDocument(document).toJson(QJsonDocument::Compact), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::ED318);
+
+    // The source tells what was left out, whether the zone is kept or not
+    QCOMPARE(result.issues, (QMap<QString, int>{ { issue, 1 } }));
+    const bool rejected = volumes == 0;
+    QCOMPARE(result.skippedFeatures, rejected ? 1 : 0);
+    QCOMPARE(result.zones.count(), rejected ? 1 : 2);
+    if (rejected) {
+        QCOMPARE(result.zones.first().identifier, QStringLiteral("VALID"));
+        return;
+    }
+    const GeoZone::Data &data = result.zones.first();
+    QCOMPARE(data.identifier, QStringLiteral("TESTED"));
+    QCOMPARE(data.issues, QStringList{ issue });
+    QCOMPARE(data.volumes.count(), volumes);
+    QCOMPARE(data.volumes.first().rings.count(), 1);
+    QVERIFY(GeoZone(data).contains(inside));
 }
 
 void GeoZoneParserTest::_testEdgeInterpolation_data()

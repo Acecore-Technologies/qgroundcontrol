@@ -116,6 +116,10 @@ bool GeoZoneParser::_parseXml(const QByteArray &xml, Result &result, QString &er
 bool GeoZoneParser::_addZone(GeoZone::Data &zone, Result &result)
 {
     const bool usable = _normalizeVolumes(zone);
+    if (!usable && zone.issues.isEmpty()) {
+        // Every zone left out tells why
+        zone.issues.append(tr("Zone without geometry ignored"));
+    }
     zone.issues.removeDuplicates();
     for (const QString &issue : std::as_const(zone.issues)) {
         result.issues[issue]++;
@@ -243,7 +247,11 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
             // Left out on purpose, which isn't a problem to report
             continue;
         }
-        if ((featureResult == GeoZoneFormat::FeatureResult::Unusable) || !_addZone(zone, result)) {
+        // The issues of a feature the format couldn't use are counted too
+        if (featureResult == GeoZoneFormat::FeatureResult::Unusable) {
+            zone.volumes.clear();
+        }
+        if (!_addZone(zone, result)) {
             qCDebug(GeoZoneParserLog) << "Skipping feature without usable geometry" << zone.identifier;
             result.skippedFeatures++;
         }

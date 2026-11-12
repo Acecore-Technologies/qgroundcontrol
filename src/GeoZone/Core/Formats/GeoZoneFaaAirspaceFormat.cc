@@ -195,7 +195,7 @@ GeoZoneFormat::FeatureResult _facilityMapFeature(const QJsonObject &feature, con
     layer.lowerLimit = 0;
     layer.upperLimit = kUnlimitedSentinel;
     layer.setReferences(QStringLiteral("SFC"), QStringLiteral("MSL"));
-    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }
 
@@ -234,7 +234,7 @@ GeoZoneFormat::FeatureResult _nationalSecurityFeature(const QJsonObject &feature
     layer.lowerLimit = floor.feet;
     layer.upperLimit = ceiling.feet;
     layer.setReferences(floor.reference, ceiling.reference);
-    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }
 
@@ -309,7 +309,7 @@ GeoZoneFormat::FeatureResult _airspaceFeature(const QJsonObject &feature, const 
     layer.feet = true;
     _setFaaLimit(layer, false, properties.value(QStringLiteral("LOWER_VAL")), _trimmed(properties, "LOWER_UOM"), _trimmed(properties, "LOWER_CODE"));
     _setFaaLimit(layer, true, properties.value(QStringLiteral("UPPER_VAL")), _trimmed(properties, "UPPER_UOM"), _trimmed(properties, "UPPER_CODE"));
-    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }
 

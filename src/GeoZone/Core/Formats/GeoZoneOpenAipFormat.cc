@@ -215,7 +215,7 @@ GeoZoneFormat::FeatureResult _openAipFeature(const QJsonObject &feature, GeoZone
     _openAipLimit(item.value(QStringLiteral("upperLimit")).toObject(), true, layer, zone.issues);
     // The exports keep the geometry in the feature, the API in the item
     const QJsonObject geometry = feature.contains(QStringLiteral("properties")) ? feature.value(QStringLiteral("geometry")).toObject() : item.value(QStringLiteral("geometry")).toObject();
-    _appendHorizontalGeometry(geometry, layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(geometry, layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }
 

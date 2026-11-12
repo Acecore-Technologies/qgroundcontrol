@@ -96,7 +96,8 @@ private:
     /// @return true if the options accept documents in the format
     static bool _acceptsFormat(const GeoZoneFormat *format, const Options &options, QString &errorString);
     /// Checks the geometry of a parsed zone, see GeoZoneParserUtils::_normalizeVolumes, and adds it to the result with
-    /// its issues. The issues of a zone left without volumes are counted too.
+    /// its issues. The issues of a zone left without volumes are counted too, it has one telling so when it has no
+    /// other.
     /// @return false if the zone has no usable volume
     static bool _addZone(GeoZone::Data &zone, Result &result);
 };

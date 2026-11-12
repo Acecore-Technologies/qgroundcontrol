@@ -42,6 +42,8 @@ private slots:
     void _testParseCacheValidation();
     void _testRingValidation_data();
     void _testRingValidation();
+    void _testDroppedGeometry_data();
+    void _testDroppedGeometry();
     void _testEdgeInterpolation_data();
     void _testEdgeInterpolation();
     void _testTfrCircles();

@@ -53,6 +53,14 @@ double _width(const QList<QPointF> &points)
     return width;
 }
 
+/// Adds the issue once: a geometry may leave out any number of polygons
+void _addIssue(QStringList &issues, const QString &issue)
+{
+    if (!issues.contains(issue)) {
+        issues.append(issue);
+    }
+}
+
 enum class RingProblem {
     None,
     TooFewPoints,
@@ -523,36 +531,48 @@ bool _position(const QJsonValue &value, QGeoCoordinate &coordinate)
     return coordinate.isValid();
 }
 
-bool _ring(const QJsonValue &value, GeoZone::Ring &ring)
+bool _ring(const QJsonValue &value, GeoZone::Ring &ring, bool hole, QStringList &issues)
 {
     ring.clear();
+    // The zone covers a hole which is left out, whatever is wrong with it
+    const auto fail = [hole, &issues](const QString &issue) {
+        _addIssue(issues, hole ? GeoZoneParser::tr("Invalid polygon hole ignored, the zone covers it") : issue);
+        return false;
+    };
     const QJsonArray positions = value.toArray();
     if (positions.count() > kMaxRingVertices) {
         qCWarning(GeoZoneParserLog) << "Ignoring ring with" << positions.count() << "vertices";
-        return false;
+        return fail(GeoZoneParser::tr("Polygon with more than %1 points ignored").arg(kMaxRingVertices));
     }
     ring.reserve(positions.count());
     for (const QJsonValue &positionValue : positions) {
         QGeoCoordinate coordinate;
         if (!_position(positionValue, coordinate)) {
-            return false;
+            return fail(GeoZoneParser::tr("Polygon with an invalid position ignored"));
         }
         ring.append(QPointF(coordinate.longitude(), coordinate.latitude()));
     }
     if ((ring.count() > 1) && (ring.first() == ring.last())) {
         ring.removeLast();
     }
-    return !ring.isEmpty();
+    if (ring.isEmpty()) {
+        return fail(GeoZoneParser::tr("Polygon with fewer than 3 distinct points ignored"));
+    }
+    return true;
 }
 
-bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume)
+bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume, QStringList &issues)
 {
     volume.isCircle = false;
     volume.rings.clear();
     const QJsonArray rings = value.toArray();
+    if (rings.isEmpty()) {
+        _addIssue(issues, GeoZoneParser::tr("Polygon with fewer than 3 distinct points ignored"));
+        return false;
+    }
     for (qsizetype i = 0; i < rings.count(); i++) {
         GeoZone::Ring ring;
-        if (!_ring(rings[i], ring)) {
+        if (!_ring(rings[i], ring, i > 0, issues)) {
             if (i == 0) {
                 return false;
             }
@@ -560,13 +580,13 @@ bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume)
         }
         volume.rings.append(ring);
     }
-    return !volume.rings.isEmpty();
+    return true;
 }
 
-void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volumes)
+void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volumes, QStringList &issues)
 {
     if (volumes.count() >= kMaxVolumesPerZone) {
-        qCDebug(GeoZoneParserLog) << "Ignoring volumes over" << kMaxVolumesPerZone;
+        _addIssue(issues, GeoZoneParser::tr("More than %1 shapes, the others are ignored").arg(kMaxVolumesPerZone));
         return;
     }
     volumes.append(volume);
@@ -646,45 +666,52 @@ bool _normalizeVolumes(GeoZone::Data &zone)
     return !zone.volumes.isEmpty();
 }
 
-/// Adds the volumes described by a GeoJSON-like horizontal geometry. Vertical limits are copied from volumeTemplate.
-void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes)
+void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes,
+                               QStringList &issues)
 {
     const QString type = geometry.value(QStringLiteral("type")).toString();
+    const auto unsupported = [&type, &issues]() {
+        constexpr qsizetype maxShown = 40;
+        qCDebug(GeoZoneParserLog) << "Ignoring unsupported geometry type" << type;
+        _addIssue(issues, GeoZoneParser::tr("Unsupported geometry %1 ignored").arg(type.left(maxShown)));
+    };
+    const auto circle = [&](const QJsonValue &center, const QJsonValue &radius) {
+        GeoZone::Volume volume = volumeTemplate;
+        volume.isCircle = true;
+        volume.radius = _number(radius) * radiusScale;
+        if (_position(center, volume.center)) {
+            _appendVolume(volume, volumes, issues);
+        } else {
+            _addIssue(issues, GeoZoneParser::tr("Circle without a valid center ignored"));
+        }
+    };
 
     if (type == QStringLiteral("Polygon")) {
         GeoZone::Volume volume = volumeTemplate;
-        if (_polygonRings(geometry.value(QStringLiteral("coordinates")), volume)) {
-            _appendVolume(volume, volumes);
+        if (_polygonRings(geometry.value(QStringLiteral("coordinates")), volume, issues)) {
+            _appendVolume(volume, volumes, issues);
         }
     } else if (type == QStringLiteral("MultiPolygon")) {
+        // The zone keeps the polygons which can be read: fewer than published, which the issue of the others tells
         for (const QJsonValue &polygon : geometry.value(QStringLiteral("coordinates")).toArray()) {
             GeoZone::Volume volume = volumeTemplate;
-            if (_polygonRings(polygon, volume)) {
-                _appendVolume(volume, volumes);
+            if (_polygonRings(polygon, volume, issues)) {
+                _appendVolume(volume, volumes, issues);
             }
         }
     } else if (type == QStringLiteral("Circle")) {
         // ED-269: { "type": "Circle", "center": [lon, lat], "radius": r }
-        GeoZone::Volume volume = volumeTemplate;
-        volume.isCircle = true;
-        volume.radius = _number(geometry.value(QStringLiteral("radius"))) * radiusScale;
-        if (_position(geometry.value(QStringLiteral("center")), volume.center)) {
-            _appendVolume(volume, volumes);
-        }
+        circle(geometry.value(QStringLiteral("center")), geometry.value(QStringLiteral("radius")));
     } else if (type == QStringLiteral("Point")) {
         // ED-318: GeoJSON Point with { "extent": { "subType": "Circle", "radius": r } }
         const QJsonObject extent = geometry.value(QStringLiteral("extent")).toObject();
-        if (extent.value(QStringLiteral("subType")).toString().compare(QStringLiteral("Circle"), Qt::CaseInsensitive) != 0) {
-            return;
+        if (extent.value(QStringLiteral("subType")).toString().compare(QStringLiteral("Circle"), Qt::CaseInsensitive) == 0) {
+            circle(geometry.value(QStringLiteral("coordinates")), extent.value(QStringLiteral("radius")));
+        } else {
+            unsupported();
         }
-        GeoZone::Volume volume = volumeTemplate;
-        volume.isCircle = true;
-        volume.radius = _number(extent.value(QStringLiteral("radius"))) * radiusScale;
-        if (_position(geometry.value(QStringLiteral("coordinates")), volume.center)) {
-            _appendVolume(volume, volumes);
-        }
-    } else {
-        qCDebug(GeoZoneParserLog) << "Ignoring unsupported geometry type" << type;
+    } else if (!type.isEmpty()) {
+        unsupported();
     }
 }
 

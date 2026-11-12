@@ -32,7 +32,7 @@ GeoZoneFormat::FeatureResult _ed269Feature(const QJsonObject &feature, GeoZone::
         layer.setReferences(geometry.value(QStringLiteral("lowerVerticalReference")).toString(), geometry.value(QStringLiteral("upperVerticalReference")).toString());
 
         // ED-269 expresses all dimensions, including the circle radius, in uomDimensions
-        _appendHorizontalGeometry(geometry.value(QStringLiteral("horizontalProjection")).toObject(), layer, layer.feet ? kMetersPerFoot : 1.0, zone.volumes);
+        _appendHorizontalGeometry(geometry.value(QStringLiteral("horizontalProjection")).toObject(), layer, layer.feet ? kMetersPerFoot : 1.0, zone.volumes, zone.issues);
     }
     zone.applicability = _applicability(feature.value(QStringLiteral("applicability")), zone.country, zone.volumes, zone.issues);
 

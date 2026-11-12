@@ -151,7 +151,7 @@ GeoZoneFormat::FeatureResult _dipulFeature(const QJsonObject &feature, GeoZone::
         zone.applicability.append(period);
     }
 
-    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
+    _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }
 

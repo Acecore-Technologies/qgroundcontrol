@@ -96,12 +96,18 @@ qint64 _durationSecs(const QString &duration);
 bool _position(const QJsonValue &value, QGeoCoordinate &coordinate);
 
 /// Reads the positions of a ring, without the closing one. Their number is checked by _normalizeVolumes.
-/// @return false for invalid positions and rings over kMaxRingVertices
-bool _ring(const QJsonValue &value, GeoZone::Ring &ring);
+/// @param hole   A hole of a polygon, which the zone covers when it can't be read
+/// @param issues Why the ring can't be read is added to it
+/// @return false for rings without positions, with an invalid position or with more than kMaxRingVertices
+bool _ring(const QJsonValue &value, GeoZone::Ring &ring, bool hole, QStringList &issues);
 
-bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume);
+/// Reads the rings of a polygon. A hole which can't be read is left out, so that the zone covers it.
+/// @param issues The rings which can't be read are added to it
+/// @return false when the outer ring can't be read
+bool _polygonRings(const QJsonValue &value, GeoZone::Volume &volume, QStringList &issues);
 
-void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volumes);
+/// Adds the volume, unless the zone has kMaxVolumesPerZone already, which is added to the issues
+void _appendVolume(const GeoZone::Volume &volume, QList<GeoZone::Volume> &volumes, QStringList &issues);
 
 bool _validRadius(double radius);
 
@@ -119,7 +125,11 @@ void _densifyGreatCircles(QList<GeoZone::Volume> &volumes);
 bool _normalizeVolumes(GeoZone::Data &zone);
 
 /// Adds the volumes described by a GeoJSON-like horizontal geometry. Vertical limits are copied from volumeTemplate.
-void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes);
+/// What is left out is added to the issues, so that a zone isn't smaller than published without telling: polygons
+/// and holes which can't be read, circles without center and geometries of other types. A zone keeps its other
+/// polygons, GeoZoneParser reports the one left without any. A geometry without type adds nothing.
+void _appendHorizontalGeometry(const QJsonObject &geometry, const GeoZone::Volume &volumeTemplate, double radiusScale, QList<GeoZone::Volume> &volumes,
+                               QStringList &issues);
 
 /// Reads the zone properties ED-269 and ED-318 share. The reasons may also be given as "reasons", and the extended
 /// properties as text. A message in localizedMessages of the extended properties (Austro Control) in the preferred
