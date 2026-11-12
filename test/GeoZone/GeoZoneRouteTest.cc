@@ -12,6 +12,8 @@
 #include "GeoZoneTestHelpers.h"
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QHashFunctions>
+#include <QtCore/QScopeGuard>
 
 using namespace GeoZoneTestHelpers;
 
@@ -432,6 +434,53 @@ void GeoZoneRouteTest::_testSettings()
     settings.margin = 0;
     search.setSettings(settings);
     QCOMPARE(search.settings().margin, GeoZoneRouteSearch::Settings::minMargin);
+}
+
+void GeoZoneRouteTest::_testDeterministicOrder()
+{
+    // The start enclosed by walls which overlap at their ends, and scattered zones in the way of a longer leg
+    const QGeoCoordinate center(47, 8);
+    ZoneOwner owner;
+    const GeoZoneGeometry::LocalProjection projection(center);
+    QList<const GeoZone*> walls;
+    const QList<QRectF> rectangles = { QRectF(-1100, 900, 2200, 200), QRectF(-1100, -1100, 2200, 200), QRectF(-1100, -1100, 200, 2200), QRectF(900, -1100, 200, 2200) };
+    for (qsizetype i = 0; i < rectangles.count(); i++) {
+        const QRectF &rectangle = rectangles[i];
+        walls.append(_localPolygonZone(owner, projection, QStringLiteral("Wall %1").arg(i + 1),
+                                       { rectangle.topLeft(), rectangle.topRight(), rectangle.bottomRight(), rectangle.bottomLeft() }));
+    }
+    QList<const GeoZone*> scattered;
+    for (int i = 0; i < 12; i++) {
+        const QPointF offset(3000 + (i * 700), ((i % 3) - 1) * 350);
+        QList<QPointF> ring;
+        for (const QPointF &corner : _square(250)) {
+            ring.append(corner + offset);
+        }
+        scattered.append(_localPolygonZone(owner, projection, QStringLiteral("Zone %1").arg(i + 1), ring));
+    }
+    const QGeoCoordinate outside = projection.toGeo(QPointF(12000, 0));
+    const GeoZoneRouteSearch::Settings settings;
+
+    // The order of sets, which the searches collect obstacles in, depends on the seed of the hashes, which differs from
+    // one run of the application to the next: the zones named and the route must not
+    const auto restoreSeed = qScopeGuard([]() { QHashSeed::resetRandomGlobalSeed(); });
+    QStringList enclosing;
+    QList<QGeoCoordinate> waypoints;
+    for (int run = 0; run < 24; run++) {
+        QHashSeed::resetRandomGlobalSeed();
+        const GeoZoneRouteSearch::Route enclosed = GeoZoneRouteSearch::detourAround(center, outside, walls, settings);
+        QCOMPARE(enclosed.failure, GeoZoneRouteSearch::Failure::Enclosed);
+        QVERIFY(enclosed.zones.count() > 1);
+        const GeoZoneRouteSearch::Route around = GeoZoneRouteSearch::detourAround(projection.toGeo(QPointF(2000, 0)), outside, scattered, settings);
+        QVERIFY(around.isValid());
+        QVERIFY(!around.waypoints.isEmpty());
+        if (run == 0) {
+            enclosing = enclosed.zones;
+            waypoints = around.waypoints;
+        }
+        QCOMPARE(enclosed.zones, enclosing);
+        QCOMPARE(around.waypoints, waypoints);
+    }
 }
 
 void GeoZoneRouteTest::_testMaze()

@@ -24,5 +24,6 @@ private slots:
     void _testFailures();
     void _testUnknownAltitude();
     void _testSettings();
+    void _testDeterministicOrder();
     void _testMaze();
 };

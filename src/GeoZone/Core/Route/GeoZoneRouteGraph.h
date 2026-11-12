@@ -63,7 +63,7 @@ public:
 
     /// @return Obstacles outside the graph the segment between the nodes comes closer to than the margin
     QList<int> hits(int from, int to);
-    /// @return Obstacles outside the graph which left out nodes since the last call
+    /// @return Obstacles outside the graph which left out nodes since the last call, in the order they were added
     QList<int> takeNodeBlockers();
     /// @return true if nodes were left out since the graph had too many, or a search stopped when the work of the
     ///         graph reached its limit

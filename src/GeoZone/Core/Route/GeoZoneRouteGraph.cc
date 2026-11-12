@@ -82,6 +82,9 @@ QList<int> GeoZoneRouteGraph::takeNodeBlockers()
         }
     }
     _nodeBlockers.clear();
+    // The order they are added to the graph in decides the routes between equally long ones, that of a set differs
+    // from one run of the application to the next
+    std::sort(pending.begin(), pending.end());
     return pending;
 }
 

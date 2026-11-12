@@ -181,8 +181,11 @@ void GeoZoneRouteObstacles::prepare()
 
 QList<const GeoZone*> GeoZoneRouteObstacles::zones(const QSet<int> &indexes) const
 {
+    // In the order the obstacles were added: the order of a set differs from one run of the application to the next
+    QList<int> sorted(indexes.cbegin(), indexes.cend());
+    std::sort(sorted.begin(), sorted.end());
     QList<const GeoZone*> zones;
-    for (const int index : indexes) {
+    for (const int index : std::as_const(sorted)) {
         if (!zones.contains(_obstacles[index].zone)) {
             zones.append(_obstacles[index].zone);
         }

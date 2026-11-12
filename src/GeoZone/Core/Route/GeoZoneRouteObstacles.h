@@ -206,7 +206,7 @@ public:
     /// @return Order in which the obstacle was added to the graph, -1 while it isn't
     int rank(int index) const { return _obstacles[index].rank; }
     void setRank(int index, int rank) { _obstacles[index].rank = rank; }
-    /// @return Distinct zones of the obstacles
+    /// @return Distinct zones of the obstacles, in the order the obstacles were added
     QList<const GeoZone*> zones(const QSet<int> &indexes) const;
 
     /// Zones the start or the end is inside of, among the obstacles built
