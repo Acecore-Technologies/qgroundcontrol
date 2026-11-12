@@ -226,7 +226,7 @@ QByteArray _aixmMessage(const QString &segments, const QString &limits = QString
         </aixm:geometryComponent></aixm:AirspaceTimeSlice></aixm:timeSlice></aixm:Airspace></message:hasMember>)");
     const QString circle = QStringLiteral(R"(<gml:CircleByCenterPoint numArc="1"><gml:pos>57 -5</gml:pos><gml:radius uom="[nmi_i]">2</gml:radius></gml:CircleByCenterPoint>)");
     return (QStringLiteral(R"(<message:AIXMBasicMessage xmlns:message="http://www.aixm.aero/schema/5.1/message" xmlns:aixm="http://www.aixm.aero/schema/5.1"
-        xmlns:gml="http://www.opengis.net/gml/3.2">)") + airspace.arg(QStringLiteral("TESTED"), limits, surfaceAttributes, segments) +
+        xmlns:gml="http://www.opengis.net/gml/3.2" xmlns:xlink="http://www.w3.org/1999/xlink">)") + airspace.arg(QStringLiteral("TESTED"), limits, surfaceAttributes, segments) +
             airspace.arg(QStringLiteral("VALID"), QString(), QString(), circle) + QStringLiteral("</message:AIXMBasicMessage>")).toUtf8();
 }
 
@@ -367,7 +367,7 @@ void GeoZoneParserTest::_testParseFixtures_data()
     row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
     row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
     row("openaip_test.json", Format::Unknown, Format::OpenAip, 6, 0, 0, "4e6d00a175de6fd3");
-    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "1cc47a3d61d437ed");
+    row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "634a327978b9a106");
 }
 
 void GeoZoneParserTest::_testParseFixtures()
@@ -2052,7 +2052,10 @@ void GeoZoneParserTest::_testRejectedAixmGeometry()
     QVERIFY2(GeoZoneParser::parse(bytes, result, errorString), qPrintable(errorString));
     QCOMPARE(result.zones.count(), 2);
     QCOMPARE(result.skippedFeatures, 1);
-    QCOMPARE(result.issues, (QMap<QString, int>{ { QStringLiteral("Circle without a valid radius ignored"), 1 } }));
+    // The danger area of the file follows a coast, which is published as another feature
+    QCOMPARE(result.issues, (QMap<QString, int>{
+        { QStringLiteral("Circle without a valid radius ignored"), 1 },
+        { QStringLiteral("Boundary following another feature, like a border or a coast, replaced by a straight line: the zone is approximate"), 1 } }));
 }
 
 void GeoZoneParserTest::_testAixmTitle()
@@ -2117,6 +2120,20 @@ void GeoZoneParserTest::_testAixmInvalidBoundary_data()
     row("position without longitude", sector(validArc, QStringLiteral("52 0 52.33287")), invalidPosition);
     row("circle with a line", north.arg(QStringLiteral("52 0 52.33287 0")) + QStringLiteral(R"(<gml:CircleByCenterPoint numArc="1"><gml:pos>52 0</gml:pos>
         <gml:radius uom="[nmi_i]">20</gml:radius></gml:CircleByCenterPoint>)"), QStringLiteral("Boundary with an invalid circle ignored"));
+    // A part of a boundary which isn't read, a segment of another kind or a point or curve defined by another feature,
+    // is replaced by a straight line, which the airspace tells. A curve run backwards rejects the volume.
+    const QString unsupportedSegment = QStringLiteral("Boundary segment of an unsupported kind replaced by a straight line: the zone is approximate");
+    const QString reference = QStringLiteral("Boundary following another feature, like a border or a coast, replaced by a straight line: the zone is approximate");
+    const QString nextCurve = QStringLiteral("</gml:segments></gml:Curve></gml:curveMember>%1<gml:curveMember><gml:Curve gml:id=\"C2\"><gml:segments>");
+    row("segment of another kind", north.arg(QStringLiteral("52 0 52.33287 0")) + validArc + QStringLiteral("<gml:Arc><gml:posList>52 0.54 51.9 0.3 52 0</gml:posList></gml:Arc>"),
+        unsupportedSegment, false);
+    row("point by reference", sector(validArc) + QStringLiteral("<gml:GeodesicString><gml:pos>52 0</gml:pos><gml:pointProperty xlink:href=\"#north\"/></gml:GeodesicString>"),
+        reference, false);
+    row("curve by reference", north.arg(QStringLiteral("52 0 52.33287 0")) + validArc + nextCurve.arg(QStringLiteral("<gml:curveMember xlink:href=\"#border\"/>")), reference, false);
+    row("curve run backwards", north.arg(QStringLiteral("52 0 52.33287 0")) + validArc +
+        nextCurve.arg(QStringLiteral(R"(<gml:curveMember><gml:OrientableCurve gml:id="O" orientation="-"><gml:baseCurve><gml:Curve gml:id="B"><gml:segments>
+            <gml:GeodesicString><gml:posList>52 0 52 0.54</gml:posList></gml:GeodesicString></gml:segments></gml:Curve></gml:baseCurve></gml:OrientableCurve></gml:curveMember>)")),
+        QStringLiteral("Boundary with a curve run backwards ignored"));
     // A limit in an unknown unit is unknown: the airspace has no ceiling, rather than one taken as meters
     row("ceiling in an unknown unit", sector(validArc), QStringLiteral("Unknown unit SM, the altitude limits are ignored"), false,
         QStringLiteral(R"(<aixm:upperLimit uom="SM">100</aixm:upperLimit><aixm:upperLimitReference>MSL</aixm:upperLimitReference>)"));

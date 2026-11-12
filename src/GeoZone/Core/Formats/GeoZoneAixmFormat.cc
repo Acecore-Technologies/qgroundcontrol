@@ -124,6 +124,26 @@ AixmCrs _aixmCrs(const AixmCrs &enclosing, const QXmlStreamAttributes &attribute
     return crs;
 }
 
+/// Parts of a boundary which aren't read as published
+enum class AixmUnreadPart {
+    None,
+    Reference,  ///< A point or curve defined by another feature, like a border (xlink:href)
+    Reversed,   ///< A curve which runs backwards (orientation="-")
+};
+
+AixmUnreadPart _aixmUnreadPart(const QXmlStreamAttributes &attributes)
+{
+    for (const QXmlStreamAttribute &attribute : attributes) {
+        if (attribute.name() == QLatin1String("href")) {
+            return AixmUnreadPart::Reference;
+        }
+        if ((attribute.name() == QLatin1String("orientation")) && (attribute.value().trimmed() == QLatin1String("-"))) {
+            return AixmUnreadPart::Reversed;
+        }
+    }
+    return AixmUnreadPart::None;
+}
+
 /// Sets the limits of the volume, in feet when both are published in feet or as flight levels, in meters otherwise
 void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmLimit &upper)
 {
@@ -149,9 +169,12 @@ void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmL
 /// line strings, arcs and circles by center point are supported. As in the AIXM coding guidelines, geodesic strings are
 /// great circles, line strings in EPSG:4326 are straight in latitude and longitude, like parallels, and arcs are circles
 /// around their center whose angles are bearings. Positions are read in the reference system of their element or of
-/// those enclosing it, see _aixmCrs. A volume whose boundary has a position, arc or unit which can't be read, or is in
-/// another reference system, is left out with an issue of its airspace, rather than given another shape. Airspaces
-/// left without volume are returned too, GeoZoneParser counts them as skipped with their issues.
+/// those enclosing it, see _aixmCrs. A volume whose boundary has a position, arc or unit which can't be read, is in
+/// another reference system or has a curve run backwards is left out with an issue of its airspace, rather than given
+/// another shape. A part of a boundary which isn't read, a segment of another kind or a point or curve defined by
+/// another feature like a border, is replaced by a straight line between the parts around it, as published datasets
+/// like the UK one have them along coasts: the airspace is kept, with an issue telling that it is approximate.
+/// Airspaces left without volume are returned too, GeoZoneParser counts them as skipped with their issues.
 bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString)
 {
     result.format = GeoZoneParser::Format::Aixm;
@@ -260,6 +283,20 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 // Reading the text moved the reader on, the name is no longer that of this element
                 continue;
             }
+            if (inExterior && !reader.attributes().isEmpty()) {
+                switch (_aixmUnreadPart(reader.attributes())) {
+                case AixmUnreadPart::Reference:
+                    // The parts around it are joined by a straight line, which the airspace tells
+                    zone.issues.append(GeoZoneParser::tr("Boundary following another feature, like a border or a coast, replaced by a straight line: the zone is approximate"));
+                    break;
+                case AixmUnreadPart::Reversed:
+                    // Its points can't be joined in the order they are read
+                    rejectVolume(GeoZoneParser::tr("Boundary with a curve run backwards ignored"));
+                    break;
+                case AixmUnreadPart::None:
+                    break;
+                }
+            }
             if (name == QLatin1String("Airspace")) {
                 if (cancelled()) {
                     return false;
@@ -326,6 +363,10 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 if (segmentIssue.isEmpty()) {
                     segmentIssue = issue;
                 }
+            } else if (inExterior && ((name == QLatin1String("pos")) || (name == QLatin1String("posList")))) {
+                // Positions of a segment or ring of another kind, which aren't read: the parts around it are joined by
+                // a straight line
+                zone.issues.append(GeoZoneParser::tr("Boundary segment of an unsupported kind replaced by a straight line: the zone is approximate"));
             } else if (!segment.isEmpty() && (name == QLatin1String("radius"))) {
                 const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
                 radius = _aixmDistance(_numberFromText(elementText()), uom);
