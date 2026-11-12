@@ -24,6 +24,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QFileInfo>
+#include <QtCore/QSaveFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtGui/QFont>
@@ -741,21 +742,31 @@ QString GeoZoneBriefingExport::toHtml(const GeoZoneBriefing &briefing, bool forP
 
 bool GeoZoneBriefingExport::writePdf(const GeoZoneBriefing &briefing, const QString &fileName, QString &errorString)
 {
-    QPdfWriter writer(fileName);
-    writer.setTitle(tr("Geozone briefing: %1").arg(briefing.mission.name));
-    writer.setCreator(QStringLiteral("QGroundControl"));
-    writer.setResolution(300);
-    // Without page margins QTextDocument::print() adds its own, with the page numbers in the bottom one
-    writer.setPageLayout(QPageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF()));
-    QTextDocument document;
-    QFont font = withoutLigatures(document.defaultFont());
-    font.setPointSizeF(9);
-    document.setDefaultFont(font);
-    document.setHtml(toHtml(briefing, true));
-    // Prints the text in black where the style sets no color, whatever the palette of the application
-    document.print(&writer);
-    if (QFileInfo(fileName).size() <= 0) {
-        errorString = tr("Can't write %1").arg(fileName);
+    // Like the other formats, into a file which only replaces the one of the name once the document is complete, so
+    // that a previous or a partial document is never taken for the new one
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly)) {
+        errorString = tr("Can't write %1: %2").arg(fileName, file.errorString());
+        return false;
+    }
+    {
+        QPdfWriter writer(&file);
+        writer.setTitle(tr("Geozone briefing: %1").arg(briefing.mission.name));
+        writer.setCreator(QStringLiteral("QGroundControl"));
+        writer.setResolution(300);
+        // Without page margins QTextDocument::print() adds its own, with the page numbers in the bottom one
+        writer.setPageLayout(QPageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF()));
+        QTextDocument document;
+        QFont font = withoutLigatures(document.defaultFont());
+        font.setPointSizeF(9);
+        document.setDefaultFont(font);
+        document.setHtml(toHtml(briefing, true));
+        // Prints the text in black where the style sets no color, whatever the palette of the application
+        document.print(&writer);
+    }
+    // A failed write makes the commit fail and leaves the file of the name as it was
+    if ((file.size() <= 0) || !file.commit()) {
+        errorString = (file.error() == QFileDevice::NoError) ? tr("Can't write %1").arg(fileName) : tr("Can't write %1: %2").arg(fileName, file.errorString());
         return false;
     }
     return true;

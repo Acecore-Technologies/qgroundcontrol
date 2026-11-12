@@ -871,6 +871,38 @@ void GeoZonePlanningTest::_testBriefingExport()
     QVERIFY2(exporter.exportBriefing(dir.filePath(QStringLiteral("briefing.html"))), qPrintable(exporter.errorString()));
     QVERIFY(!exporter.exportBriefing(dir.filePath(QStringLiteral("missing/briefing.json"))));
     QVERIFY(!exporter.errorString().isEmpty());
+
+    // A PDF document which can't be written is an error, whatever is at its name
+    QVERIFY(!exporter.exportBriefing(dir.filePath(QStringLiteral("missing/briefing.pdf"))));
+    QVERIFY(exporter.errorString().contains(QStringLiteral("briefing.pdf")));
+    QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("folder.pdf")));
+    QVERIFY(!exporter.exportBriefing(dir.filePath(QStringLiteral("folder.pdf"))));
+    QVERIFY2(exporter.errorString().contains(QStringLiteral("folder.pdf")), qPrintable(exporter.errorString()));
+    // Nor is a document which can't be replaced taken for the new one
+    const QString stalePdf = dir.filePath(QStringLiteral("stale.pdf"));
+    const auto contents = [](const QString &fileName) {
+        QFile source(fileName);
+        return source.open(QIODevice::ReadOnly) ? source.readAll() : QByteArray();
+    };
+    {
+        QFile stale(stalePdf);
+        QVERIFY(stale.open(QIODevice::WriteOnly));
+        QCOMPARE(stale.write("previous"), qint64(8));
+    }
+    QVERIFY(QFile::setPermissions(stalePdf, QFileDevice::ReadOwner));
+    const bool replaced = exporter.exportBriefing(stalePdf);
+    QVERIFY(QFile::setPermissions(stalePdf, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    if (replaced) {
+        QVERIFY(contents(stalePdf).startsWith("%PDF"));
+    } else {
+        QCOMPARE(contents(stalePdf), QByteArray("previous"));
+        QVERIFY(exporter.errorString().contains(QStringLiteral("stale.pdf")));
+    }
+    // The document of a successful export is complete
+    QVERIFY2(exporter.exportBriefing(stalePdf), qPrintable(exporter.errorString()));
+    QVERIFY(contents(stalePdf).startsWith("%PDF"));
+    QVERIFY(contents(stalePdf).trimmed().endsWith("%%EOF"));
+    QVERIFY(QDir(dir.path()).entryList({ QStringLiteral("stale.pdf.*") }, QDir::Files).isEmpty());
 }
 
 void GeoZonePlanningTest::_testPlanAudit()
