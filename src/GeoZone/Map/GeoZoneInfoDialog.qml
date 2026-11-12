@@ -45,6 +45,8 @@ QGCPopupDialog {
     readonly property bool _notified: _notification.zoneKey !== undefined
     readonly property string _notificationRequirement: geoZone ? _authorisations.notificationRequirement(geoZone) : ""
     property bool _notificationForm: false  ///< The form records a notification of the zone's authority rather than an authorisation
+    /// An authorisation for a prohibited zone needs the permit and the last day, see GeoZoneAuthorisations::authorise
+    readonly property bool _permitRequired: !_notificationForm && !!geoZone && geoZone.restriction === GeoZone.Prohibited
     readonly property var  _permits:        GeoZoneMonitor.permits
     readonly property bool _permitApplies:  geoZone ? _permits.applies(geoZone) : false
     readonly property bool _permitted:      (_permits.count, geoZone ? _permits.permitted(geoZone) : false)
@@ -283,11 +285,11 @@ QGCPopupDialog {
                 columnSpacing:  ScreenTools.defaultFontPixelWidth
                 visible:        false
 
-                QGCLabel { text: root._notificationForm ? qsTr("Reference") : qsTr("Permit") }
+                QGCLabel { text: root._notificationForm ? qsTr("Reference") : (root._permitRequired ? qsTr("Permit *") : qsTr("Permit")) }
                 QGCTextField {
                     id:                     permitField
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
-                    placeholderText:        root._notificationForm ? qsTr("Optional") : qsTr("Number or reference")
+                    placeholderText:        root._notificationForm ? qsTr("Optional") : (root._permitRequired ? qsTr("Required") : qsTr("Number or reference"))
                 }
 
                 QGCLabel { text: qsTr("First day") }
@@ -297,11 +299,11 @@ QGCPopupDialog {
                     placeholderText:        qsTr("yyyy-MM-dd, optional")
                 }
 
-                QGCLabel { text: qsTr("Last day") }
+                QGCLabel { text: root._permitRequired ? qsTr("Last day *") : qsTr("Last day") }
                 QGCTextField {
                     id:                     validToField
                     Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 30
-                    placeholderText:        qsTr("yyyy-MM-dd, optional")
+                    placeholderText:        root._permitRequired ? qsTr("yyyy-MM-dd, required") : qsTr("yyyy-MM-dd, optional")
                 }
 
                 // The scope, unlimited when empty
@@ -358,10 +360,21 @@ QGCPopupDialog {
                 }
 
                 QGCLabel {
+                    Layout.columnSpan:      2
+                    Layout.preferredWidth:  root._contentWidth
+                    wrapMode:               Text.WordWrap
+                    font.pointSize:         ScreenTools.smallFontPointSize
+                    text:                   qsTr("* An authorisation for a prohibited zone needs the permit number or reference and the last day it is valid.")
+                    visible:                root._permitRequired
+                }
+
+                // Why the authorisation or notification wasn't saved, the form stays open
+                QGCLabel {
                     id:                     authorisationError
                     Layout.columnSpan:      2
                     Layout.preferredWidth:  root._contentWidth
                     wrapMode:               Text.WordWrap
+                    textFormat:             Text.PlainText
                     color:                  qgcPal.warningText
                     visible:                text !== ""
                 }

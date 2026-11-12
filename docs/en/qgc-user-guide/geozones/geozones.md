@@ -341,6 +341,8 @@ A permit is often limited. The optional scope fields of the form limit the autho
 - **Aircraft**: the registration or description of the aircraft, for information.
 - **Only within the mission area**: limits the authorisation to the area of the mission planned in the Plan View, its bounds widened by 250 m. The mission check warns when the flight leaves it inside the zone.
 
+For a prohibited zone the form marks **Permit** and **Last day** with \*: an authorisation for it needs both. When something is missing or can't be read, **Save** says what below the fields and the form stays open.
+
 Flight alerts leave the zone out while the vehicle is within the area and below the ceiling; guided command checks leave it out when the path stays within them. **Route Around Zones...** goes around zones whose authorisation has a ceiling or an area. Authorisations saved before scopes existed, and those of plans without them, cover the whole zone.
 An authorisation kept in the file or offered by a plan is left out when one of its dates, its ceiling, its area, its daily hours or its kind is there but can't be read, rather than applied without that limit: the zone is then checked and alerted as without authorisation.
 The file of the authorisations (`authorisations.json` in the `GeoZones` folder of the application data location) is never replaced by less than it held: when it can't be read, no zone is authorised, a message says so and the file is moved to a backup next to it (`authorisations.json.<date>.bak`); when some of its authorisations are left out, it is copied to such a backup before the others are saved again; and a file saved by a newer version of _QGroundControl_ is neither read nor changed, so authorisations added then last until the application closes.
