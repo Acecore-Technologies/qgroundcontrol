@@ -125,11 +125,14 @@ GeoZoneRouteSearch::Route GeoZoneRouteVertical::route(GeoZoneRouteSearch::Kind k
         const double newFrom = climb ? (std::max)(fromAltitude, target) : (std::min)(fromAltitude, target);
         const double newTo = climb ? (std::max)(toAltitude, target) : (std::min)(toAltitude, target);
         QList<GeoZone::Position> moved = samples;
+        // The height above the terrain is only compared with the clearance of descents and, when there is one, the
+        // maximum height of climbs
+        const bool heightLimited = !climb || !qIsNaN(_settings.maxAltitudeAGL);
         double extreme = climb ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
         for (qsizetype i = 0; i <= last; i++) {
             const double fraction = static_cast<double>(i) / last;
             moved[i].altitudeAMSL = newFrom + ((newTo - newFrom) * fraction);
-            if (std::abs(moved[i].altitudeAMSL - samples[i].altitudeAMSL) < kTolerance) {
+            if (!heightLimited || (std::abs(moved[i].altitudeAMSL - samples[i].altitudeAMSL) < kTolerance)) {
                 continue;
             }
             if (qIsNaN(samples[i].terrainAMSL)) {

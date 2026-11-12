@@ -351,6 +351,27 @@ void GeoZoneRouteTest::_testUnknownAltitude()
     // Known at both ends, the leg passes above the zone
     const GeoZoneRouteSearch::Result above = search.plan(GeoZoneRouteSearch::Leg{ GeoZone::Position{ west, 500 }, GeoZone::Position{ east, 500 } });
     QVERIFY(above.crossedZones.isEmpty());
+
+    // A climb over the zone needs the terrain, which isn't known here, only for its maximum height above it
+    const GeoZoneRouteSearch::Leg low{ GeoZone::Position{ west, 50 }, GeoZone::Position{ east, 50 } };
+    const auto climbOf = [](const GeoZoneRouteSearch::Result &result) {
+        for (const GeoZoneRouteSearch::Route &route : result.routes) {
+            if (route.kind == GeoZoneRouteSearch::Kind::Climb) {
+                return route;
+            }
+        }
+        return GeoZoneRouteSearch::Route();
+    };
+    GeoZoneRouteSearch unlimited(zones.catalog(), GeoZonePolicy::routing(QDateTime(), QDateTime()));
+    QCOMPARE(climbOf(unlimited.plan(low)).failure, GeoZoneRouteSearch::Failure::TerrainUnknown);
+    GeoZoneRouteSearch::Settings settings;
+    settings.maxAltitudeAGL = qQNaN();
+    unlimited.setSettings(settings);
+    const GeoZoneRouteSearch::Route climb = climbOf(unlimited.plan(low));
+    QVERIFY2(climb.isValid(), qPrintable(QString::number(int(climb.failure))));
+    QCOMPARE(climb.kind, GeoZoneRouteSearch::Kind::Climb);
+    QVERIFY(_near(climb.altitude, 100 + settings.verticalMargin, 0.01));
+    QVERIFY(_near(climb.fromAltitude, climb.altitude, 0.01));
 }
 
 void GeoZoneRouteTest::_testSettings()
