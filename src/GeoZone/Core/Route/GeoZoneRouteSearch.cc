@@ -79,6 +79,27 @@ void _setOutcome(GeoZoneRouteSearch::Route &route, const GeoZoneRouteDetour &sea
 
 } // namespace
 
+GeoZoneRouteSearch::Settings GeoZoneRouteSearch::Settings::validated() const
+{
+    const Settings defaults;
+    // The value when it is a number of at least the minimum, the default otherwise
+    const auto atLeast = [](double value, double minimum, double fallback) { return (std::isfinite(value) && (value >= minimum)) ? value : fallback; };
+    Settings settings = *this;
+    settings.margin = (std::max)(atLeast(margin, 0, defaults.margin), minMargin);
+    settings.verticalMargin = atLeast(verticalMargin, 0, defaults.verticalMargin);
+    settings.minGroundClearance = atLeast(minGroundClearance, 0, defaults.minGroundClearance);
+    if (!qIsNaN(maxAltitudeAGL)) {
+        settings.maxAltitudeAGL = atLeast(maxAltitudeAGL, 0, defaults.maxAltitudeAGL);
+    }
+    settings.maxDetourFactor = atLeast(maxDetourFactor, 1, defaults.maxDetourFactor);
+    settings.minDetourAllowance = atLeast(minDetourAllowance, 0, defaults.minDetourAllowance);
+    settings.climbWeight = atLeast(climbWeight, 0, defaults.climbWeight);
+    settings.descentWeight = atLeast(descentWeight, 0, defaults.descentWeight);
+    settings.sampleSpacing = atLeast(sampleSpacing, 1, defaults.sampleSpacing);
+    settings.maxSearchWork = (maxSearchWork > 0) ? maxSearchWork : defaults.maxSearchWork;
+    return settings;
+}
+
 GeoZoneRouteSearch::GeoZoneRouteSearch(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const QDateTime &time)
     : _catalog(catalog)
     , _policy(policy)
@@ -177,8 +198,10 @@ GeoZoneRouteSearch::Route GeoZoneRouteSearch::_detour(const Leg &leg, const QLis
     if (lowTerrain > highTerrain) {
         lowTerrain = highTerrain = qQNaN();
     }
-    const GeoZone::Position low{ from.coordinate, (std::min)(from.altitudeAMSL, to.altitudeAMSL), highTerrain };
-    const GeoZone::Position high{ to.coordinate, (std::max)(from.altitudeAMSL, to.altitudeAMSL), lowTerrain };
+    // An unknown altitude at either end makes both bounds unknown, so that the volumes at all altitudes are obstacles
+    const bool altitudesKnown = !qIsNaN(from.altitudeAMSL) && !qIsNaN(to.altitudeAMSL);
+    const GeoZone::Position low{ from.coordinate, altitudesKnown ? (std::min)(from.altitudeAMSL, to.altitudeAMSL) : qQNaN(), highTerrain };
+    const GeoZone::Position high{ to.coordinate, altitudesKnown ? (std::max)(from.altitudeAMSL, to.altitudeAMSL) : qQNaN(), lowTerrain };
     GeoZonePolicy policy = _policy;
     if ((policy.schedule() == GeoZonePolicy::Schedule::Planned) && leg.start.isValid()) {
         const int tolerance = GeoZonePathEvaluator::defaultScheduleToleranceSecs;
@@ -227,8 +250,9 @@ GeoZoneRouteSearch::Route GeoZoneRouteSearch::_detour(const Leg &leg, const QLis
 }
 
 GeoZoneRouteSearch::Route GeoZoneRouteSearch::detourAround(const QGeoCoordinate &from, const QGeoCoordinate &to, const QList<const GeoZone*> &zones,
-                                                           const Settings &settings, const GeoZoneCancelToken &cancel)
+                                                           const Settings &requested, const GeoZoneCancelToken &cancel)
 {
+    const Settings settings = requested.validated();
     Route route;
     route.kind = Kind::Detour;
     Cache cache;

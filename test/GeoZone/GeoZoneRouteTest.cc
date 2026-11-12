@@ -320,6 +320,99 @@ void GeoZoneRouteTest::_testFailures()
              GeoZoneRouteSearch::Failure::Cancelled);
 }
 
+void GeoZoneRouteTest::_testUnknownAltitude()
+{
+    // A zone up to 100 m AMSL across a leg, far below the altitude known at one end of it
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("Low"), QStringLiteral("PROHIBITED"), center, 300), 0, QStringLiteral("AMSL"), 100, QStringLiteral("AMSL")) }), errorString),
+             qPrintable(errorString));
+    const GeoZoneRouteSearch search(zones.catalog(), GeoZonePolicy::routing(QDateTime(), QDateTime()));
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(2000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(2000, 90);
+
+    // The altitude of the leg is unknown whichever end it is unknown at: the zone is an obstacle from the first search of
+    // the detour, not only once a path through it was found to enter it
+    const GeoZoneRouteSearch::Route unknownStart = search.detour(GeoZoneRouteSearch::Leg{ GeoZone::Position{ west }, GeoZone::Position{ east, 500 } });
+    const GeoZoneRouteSearch::Route unknownEnd = search.detour(GeoZoneRouteSearch::Leg{ GeoZone::Position{ west, 500 }, GeoZone::Position{ east } });
+    for (const GeoZoneRouteSearch::Route &route : { unknownStart, unknownEnd }) {
+        QVERIFY2(route.isValid(), qPrintable(QString::number(int(route.failure))));
+        QVERIFY(!route.waypoints.isEmpty());
+        QCOMPARE(route.zones, QStringList{ QStringLiteral("Low") });
+        QCOMPARE(route.statistics.obstacles, 1);
+        QCOMPARE(route.statistics.rounds, 1);
+    }
+    QCOMPARE(unknownEnd.waypoints, unknownStart.waypoints);
+
+    // Known at both ends, the leg passes above the zone
+    const GeoZoneRouteSearch::Result above = search.plan(GeoZoneRouteSearch::Leg{ GeoZone::Position{ west, 500 }, GeoZone::Position{ east, 500 } });
+    QVERIFY(above.crossedZones.isEmpty());
+}
+
+void GeoZoneRouteTest::_testSettings()
+{
+    const QGeoCoordinate center(47, 8);
+    ZoneOwner owner;
+    const GeoZoneGeometry::LocalProjection projection(center);
+    const GeoZone *const zone = _localPolygonZone(owner, projection, QStringLiteral("Z"), _square(300));
+    const QGeoCoordinate west = center.atDistanceAndAzimuth(2000, 270);
+    const QGeoCoordinate east = center.atDistanceAndAzimuth(2000, 90);
+
+    // Without a margin, with a negative one or one which isn't a number, the route must not go straight through the zone
+    const GeoZoneRouteSearch::Settings defaults;
+    for (const double margin : { 0.0, GeoZoneRouteSearch::Settings::minMargin / 1000, -50.0, qQNaN(), qInf() }) {
+        GeoZoneRouteSearch::Settings settings;
+        settings.margin = margin;
+        const double expected = (margin >= 0) && std::isfinite(margin) ? GeoZoneRouteSearch::Settings::minMargin : defaults.margin;
+        QCOMPARE(settings.validated().margin, expected);
+        const GeoZoneRouteSearch::Route route = GeoZoneRouteSearch::detourAround(west, east, { zone }, settings);
+        QVERIFY2(route.isValid(), qPrintable(QString::number(margin)));
+        QVERIFY2(!route.waypoints.isEmpty(), qPrintable(QString::number(margin)));
+        const double clearance = _pathClearance(_routePath(west, route, east), { zone }, 2);
+        QVERIFY2(clearance > (expected - 0.1), qPrintable(QStringLiteral("%1: %2").arg(margin).arg(clearance)));
+    }
+
+    // The other settings which a search can't work with are replaced by the defaults, the valid ones kept
+    GeoZoneRouteSearch::Settings settings;
+    settings.margin = 40;
+    settings.verticalMargin = -1;
+    settings.minGroundClearance = qQNaN();
+    settings.maxAltitudeAGL = -5;
+    settings.maxDetourFactor = 0;
+    settings.minDetourAllowance = -1;
+    settings.climbWeight = qQNaN();
+    settings.descentWeight = -3;
+    settings.sampleSpacing = 0;
+    settings.maxSearchWork = 0;
+    const GeoZoneRouteSearch::Settings valid = settings.validated();
+    QCOMPARE(valid.margin, 40.0);
+    QCOMPARE(valid.verticalMargin, defaults.verticalMargin);
+    QCOMPARE(valid.minGroundClearance, defaults.minGroundClearance);
+    QCOMPARE(valid.maxAltitudeAGL, defaults.maxAltitudeAGL);
+    QCOMPARE(valid.maxDetourFactor, defaults.maxDetourFactor);
+    QCOMPARE(valid.minDetourAllowance, defaults.minDetourAllowance);
+    QCOMPARE(valid.climbWeight, defaults.climbWeight);
+    QCOMPARE(valid.descentWeight, defaults.descentWeight);
+    QCOMPARE(valid.sampleSpacing, defaults.sampleSpacing);
+    QCOMPARE(valid.maxSearchWork, defaults.maxSearchWork);
+    // Climbs without a limit above the terrain stay without one
+    settings.maxAltitudeAGL = qQNaN();
+    QVERIFY(qIsNaN(settings.validated().maxAltitudeAGL));
+
+    // A search validates its settings
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    GeoZoneRouteSearch search(zones.catalog(), GeoZonePolicy::routing(QDateTime(), QDateTime()));
+    settings.margin = 0;
+    search.setSettings(settings);
+    QCOMPARE(search.settings().margin, GeoZoneRouteSearch::Settings::minMargin);
+}
+
 void GeoZoneRouteTest::_testMaze()
 {
     // A leg of 20 km through a row of a maze of 1200 zones, whose detour took a minute of a debug build when A* tested the

@@ -22,5 +22,7 @@ private slots:
     void _testVertical_data();
     void _testVertical();
     void _testFailures();
+    void _testUnknownAltitude();
+    void _testSettings();
     void _testMaze();
 };

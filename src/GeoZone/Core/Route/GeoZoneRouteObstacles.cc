@@ -23,6 +23,9 @@ constexpr int kMaxCircleNodes = 32;
 constexpr double kEndpointRelaxation = 0.9;     ///< Of the distance to a zone that segments from an end within the margin keep
 constexpr qsizetype kMinSimplifiedVertices = 16;
 
+// Segments keeping a margin within the tolerance aren't blocked, see _blocks
+static_assert(GeoZoneRouteSearch::Settings::minMargin > (2 * GeoZoneRouteObstacles::kTolerance));
+
 using GeoZoneVector::cross;
 using GeoZoneVector::dot;
 using GeoZoneVector::length;

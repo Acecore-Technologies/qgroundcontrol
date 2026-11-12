@@ -61,6 +61,15 @@ public:
         /// Units of work after which a detour search stops with SearchLimit, about 20 seconds of a debug build and a few
         /// of a release build, see Statistics::work
         qint64 maxSearchWork = 100000000;
+
+        /// Meters, the smallest margin of detours: zones closer than the rounding tolerance of the margin aren't
+        /// obstacles, so that without a margin routes would go straight through them
+        static constexpr double minMargin = 1;
+
+        /// @return The settings a search can work with: the margin at least minMargin, and the defaults instead of
+        ///         values which aren't numbers or are out of range, like a negative margin, which keeps more from the
+        ///         zones than a margin of zero. maxAltitudeAGL stays NaN without limit.
+        Settings validated() const;
     };
 
     /// Way of avoiding the zones
@@ -144,7 +153,8 @@ public:
     /// @param time   Evaluation time, see GeoZonePathEvaluator
     GeoZoneRouteSearch(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const QDateTime &time = QDateTime());
 
-    void setSettings(const Settings &settings) { _settings = settings; }
+    /// Sets the settings validated, see Settings::validated
+    void setSettings(const Settings &settings) { _settings = settings.validated(); }
     const Settings &settings() const { return _settings; }
     /// Ground elevations for limits above ground and the clearance of descents, see GeoZonePathEvaluator::setTerrainLookup
     void setTerrainLookup(const GeoZonePathEvaluator::TerrainLookup &lookup);
@@ -161,7 +171,7 @@ public:
 
     /// @return The shortest detour from one coordinate to another keeping the margin from all volumes of the zones,
     ///         whatever their vertical limits, without the length limit. Without waypoints when the straight line
-    ///         keeps the margin.
+    ///         keeps the margin. With the settings validated, see Settings::validated.
     static Route detourAround(const QGeoCoordinate &from, const QGeoCoordinate &to, const QList<const GeoZone*> &zones, const Settings &settings,
                               const GeoZoneCancelToken &cancel = GeoZoneCancelToken());
 
