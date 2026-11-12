@@ -275,7 +275,7 @@ private:
     int _selectedCount = 0;
     bool _busy = false;
     bool _rejectionHandled = false;                     ///< The capacity was lowered for the fence the vehicle rejected last
-    QObject *_vehicleConnections = nullptr;
+    GeoZoneFenceConnections _vehicleConnections;        ///< Of the plan's vehicle, also made again from one of them
     QObject *_fenceConnections = nullptr;
     QObject *_fenceEditConnections = nullptr;           ///< Receiver of the edits of the fences from geozones, replaced to disconnect them
     QTimer _fenceNoteTimer;                             ///< Updates the fence note once after edits

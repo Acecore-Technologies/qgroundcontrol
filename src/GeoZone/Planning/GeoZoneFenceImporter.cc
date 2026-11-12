@@ -113,31 +113,27 @@ Vehicle *GeoZoneFenceImporter::_vehicle() const
 
 void GeoZoneFenceImporter::_connectVehicle()
 {
-    if (_vehicleConnections) {
-        // Possibly from one of its connections
-        (void) QObject::disconnect(nullptr, nullptr, _vehicleConnections, nullptr);
-        _vehicleConnections->deleteLater();
-    }
-    _vehicleConnections = new QObject(this);
+    // Possibly from one of its connections
+    _vehicleConnections.disconnect();
     if (!_geoFenceController || !_geoFenceController->masterController()) {
         return;
     }
     PlanMasterController *const masterController = _geoFenceController->masterController();
-    (void) connect(masterController, &PlanMasterController::managerVehicleChanged, _vehicleConnections, [this]() {
+    _vehicleConnections << connect(masterController, &PlanMasterController::managerVehicleChanged, this, [this]() {
         _connectVehicle();
         _updateCapacity();
     }, Qt::QueuedConnection);
     if (Vehicle *const vehicle = _vehicle()) {
         // The capacity and warnings depend on the parameters
-        (void) connect(vehicle->parameterManager(), &ParameterManager::parametersReadyChanged, _vehicleConnections, [this]() { _updateCapacity(); });
+        _vehicleConnections << connect(vehicle->parameterManager(), &ParameterManager::parametersReadyChanged, this, [this]() { _updateCapacity(); });
         // ... and for PX4 on the firmware version
-        (void) connect(vehicle, &Vehicle::firmwareVersionChanged, _vehicleConnections, [this]() { _updateCapacity(); });
+        _vehicleConnections << connect(vehicle, &Vehicle::firmwareVersionChanged, this, [this]() { _updateCapacity(); });
         // The fence the vehicle stores and its record change with its transfers, once those following them are done
         GeoFenceManager *const manager = vehicle->geoFenceManager();
         const auto transferred = [this]() { _fenceNoteTimer.start(); };
-        (void) connect(manager, &GeoFenceManager::sendComplete, _vehicleConnections, transferred);
-        (void) connect(manager, &GeoFenceManager::loadComplete, _vehicleConnections, transferred);
-        (void) connect(manager, &GeoFenceManager::removeAllComplete, _vehicleConnections, transferred);
+        _vehicleConnections << connect(manager, &GeoFenceManager::sendComplete, this, transferred);
+        _vehicleConnections << connect(manager, &GeoFenceManager::loadComplete, this, transferred);
+        _vehicleConnections << connect(manager, &GeoFenceManager::removeAllComplete, this, transferred);
     }
     _fenceNoteTimer.start();
 }

@@ -30,6 +30,35 @@ class QGCFenceCircle;
 class QGCFencePolygon;
 class Vehicle;
 
+/// Connections which are made and disconnected together, each by its handle, so that they can be disconnected from one
+/// of their own slots and are gone at once: a receiver object can't be deleted from its own slot, and
+/// QObject::disconnect() without a sender disconnects nothing
+class GeoZoneFenceConnections
+{
+public:
+    GeoZoneFenceConnections() = default;
+    ~GeoZoneFenceConnections() { disconnect(); }
+
+    Q_DISABLE_COPY_MOVE(GeoZoneFenceConnections)
+
+    GeoZoneFenceConnections &operator<<(const QMetaObject::Connection &connection)
+    {
+        _connections.append(connection);
+        return *this;
+    }
+    void disconnect()
+    {
+        for (const QMetaObject::Connection &connection : std::as_const(_connections)) {
+            (void) QObject::disconnect(connection);
+        }
+        _connections.clear();
+    }
+    bool isEmpty() const { return _connections.isEmpty(); }
+
+private:
+    QList<QMetaObject::Connection> _connections;
+};
+
 /// Sends the fence of a plan to its vehicle like a plan upload does, then reads it back and compares it with the fence
 /// sent. The upload goes through the states
 ///
@@ -183,7 +212,8 @@ private:
     QString _message;
 
     // Of the upload in progress
-    QObject *_uploadConnections = nullptr;              ///< Receiver of the signals of the upload, deleted to disconnect them
+    GeoZoneFenceConnections _uploadConnections;         ///< Of the signals of the upload, disconnected when it ends
+    quint64 _uploadNumber = 0;                          ///< Counts the uploads started, for what an upload posted to itself
     QPointer<Vehicle> _vehicle;
     QPointer<GeoFenceManager> _manager;
     QString _planFile;                                  ///< Of the plan when the upload started

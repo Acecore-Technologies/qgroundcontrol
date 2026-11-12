@@ -279,12 +279,8 @@ bool GeoZoneFenceUpload::_transition(State state, const QString &message)
         return false;
     }
     if ((state != Sending) && (state != Verifying)) {
-        if (_uploadConnections) {
-            // Possibly from one of its connections
-            (void) QObject::disconnect(nullptr, nullptr, _uploadConnections, nullptr);
-            _uploadConnections->deleteLater();
-            _uploadConnections = nullptr;
-        }
+        // Possibly from one of its connections
+        _uploadConnections.disconnect();
         _vehicle = nullptr;
         _manager = nullptr;
     }
@@ -431,11 +427,12 @@ void GeoZoneFenceUpload::start()
     _error.clear();
     _ackResult = MAV_MISSION_ACCEPTED;
     _rejectedForRoom = false;
+    _uploadNumber++;
     (void) _transition(Sending, tr("Uploading the fence…"));
 
-    _uploadConnections = new QObject(this);
+    _uploadConnections.disconnect();
     // The fence manager reports a rejected upload without the reason the vehicle gave
-    (void) connect(vehicle, &Vehicle::mavlinkMessageReceived, _uploadConnections, [this](const mavlink_message_t &message) {
+    _uploadConnections << connect(vehicle, &Vehicle::mavlinkMessageReceived, this, [this](const mavlink_message_t &message) {
         if (message.msgid != MAVLINK_MSG_ID_MISSION_ACK) {
             return;
         }
@@ -445,24 +442,24 @@ void GeoZoneFenceUpload::start()
             _ackResult = ack.type;
         }
     });
-    (void) connect(_manager, &GeoFenceManager::error, _uploadConnections, [this](int, const QString &message) { _error = message; });
-    (void) connect(_manager, &GeoFenceManager::sendComplete, _uploadConnections, [this](bool error) { _sent(error); });
-    (void) connect(_manager, &GeoFenceManager::loadComplete, _uploadConnections, [this]() { _readBack(); });
-    (void) connect(vehicle, &QObject::destroyed, _uploadConnections, [this]() { _vehicleLost(); });
-    (void) connect(masterController, &PlanMasterController::managerVehicleChanged, _uploadConnections, [this]() { _vehicleLost(); });
-    (void) connect(masterController, &PlanMasterController::currentPlanFileChanged, _uploadConnections, [this, masterController]() {
+    _uploadConnections << connect(_manager, &GeoFenceManager::error, this, [this](int, const QString &message) { _error = message; });
+    _uploadConnections << connect(_manager, &GeoFenceManager::sendComplete, this, [this](bool error) { _sent(error); });
+    _uploadConnections << connect(_manager, &GeoFenceManager::loadComplete, this, [this]() { _readBack(); });
+    _uploadConnections << connect(vehicle, &QObject::destroyed, this, [this]() { _vehicleLost(); });
+    _uploadConnections << connect(masterController, &PlanMasterController::managerVehicleChanged, this, [this]() { _vehicleLost(); });
+    _uploadConnections << connect(masterController, &PlanMasterController::currentPlanFileChanged, this, [this, masterController]() {
         if (masterController->currentPlanFile() != _planFile) {
             abort(tr("The plan file changed during the upload, upload the fence again."));
         }
     });
     // Edits of the fence. Sending clears the dirty state of the fences, so that the first edit of each sets it again.
     const auto edited = [this]() { _checkFence(); };
-    (void) connect(_geoFenceController, &QObject::destroyed, _uploadConnections, [this]() { abort(tr("The plan was closed during the upload.")); });
-    (void) connect(_geoFenceController, &GeoFenceController::dirtyChanged, _uploadConnections, edited);
-    (void) connect(_geoFenceController, &GeoFenceController::breachReturnPointChanged, _uploadConnections, edited);
+    _uploadConnections << connect(_geoFenceController, &QObject::destroyed, this, [this]() { abort(tr("The plan was closed during the upload.")); });
+    _uploadConnections << connect(_geoFenceController, &GeoFenceController::dirtyChanged, this, edited);
+    _uploadConnections << connect(_geoFenceController, &GeoFenceController::breachReturnPointChanged, this, edited);
     for (QmlObjectListModel *const fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
-        (void) connect(fences, &QmlObjectListModel::countChanged, _uploadConnections, edited);
-        (void) connect(fences, &QmlObjectListModel::dirtyChanged, _uploadConnections, edited);
+        _uploadConnections << connect(fences, &QmlObjectListModel::countChanged, this, edited);
+        _uploadConnections << connect(fences, &QmlObjectListModel::dirtyChanged, this, edited);
     }
 
     _geoFenceController->sendToVehicle();
@@ -529,8 +526,8 @@ void GeoZoneFenceUpload::_sent(bool error)
     (void) _transition(Verifying, tr("Reading the fence back from the vehicle…"));
     _error.clear();
     // After the fence manager has finished the upload transaction
-    QTimer::singleShot(0, _uploadConnections, [this]() {
-        if (_state != Verifying) {
+    QTimer::singleShot(0, this, [this, upload = _uploadNumber]() {
+        if ((upload != _uploadNumber) || (_state != Verifying)) {
             return;
         }
         if (!_manager) {

@@ -22,6 +22,7 @@
 #include "ParameterManager.h"
 #include "Vehicle.h"
 
+#include <QtCore/QRegularExpression>
 #include <QtCore/QScopeGuard>
 
 #include <algorithm>
@@ -1292,6 +1293,22 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     importer.setGeoFenceController(geoFenceController);
     GeoZoneFenceUpload *const upload = importer.upload();
     importer.select(zones, 25);
+    QCOMPARE(importer.selectedCount(), 1);
+
+    // The connections of an upload which ended and those to the vehicle of the plan before are disconnected at once,
+    // not left to a deferred delete after a disconnect without sender, which Qt refuses with this warning
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("QObject::disconnect: Unexpected")));
+    {
+        PlanMasterController otherController;
+        otherController.setFlyView(false);
+        otherController.start();
+        importer.setGeoFenceController(otherController.geoFenceController());
+        // So a signal of the vehicle reaches the importer once, for the plan it has now
+        QSignalSpy selectionSpy(&importer, &GeoZoneFenceImporter::selectionChanged);
+        emit vehicle->parameterManager()->parametersReadyChanged(true);
+        QCOMPARE(selectionSpy.count(), 1);
+        importer.setGeoFenceController(geoFenceController);
+    }
     QCOMPARE(importer.selectedCount(), 1);
     const auto moveVertex = [geoFenceController]() {
         QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(0);
