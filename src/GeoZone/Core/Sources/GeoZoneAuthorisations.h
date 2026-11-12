@@ -11,6 +11,7 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QDateTime>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QLoggingCategory>
@@ -115,10 +116,50 @@ struct GeoZoneAuthorisation
     friend bool operator==(const GeoZoneAuthorisation &, const GeoZoneAuthorisation &) = default;
 };
 
+/// The authorisations and notifications of the operator as a plain value: looked up by zone, replaced and merged by
+/// zone and kind, and read from what was saved. GeoZoneAuthorisations is the list model keeping one in a file; code
+/// which only looks zones up or checks entries, like a worker with a copy, needs no model.
+class GeoZoneAuthorisationList
+{
+public:
+    GeoZoneAuthorisationList() = default;
+    explicit GeoZoneAuthorisationList(const QList<GeoZoneAuthorisation> &entries) : _entries(entries) {}
+
+    const QList<GeoZoneAuthorisation> &entries() const { return _entries; }
+    int count() const { return static_cast<int>(_entries.count()); }
+    bool isEmpty() const { return _entries.isEmpty(); }
+
+    /// @return Authorisation of the zone, null without or when it can't stand for the zone, see
+    ///         GeoZoneAuthorisation::validFor
+    const GeoZoneAuthorisation *find(const GeoZone *zone) const;
+    /// @return Notification recorded for the zone, null without
+    const GeoZoneAuthorisation *findNotification(const GeoZone *zone) const { return entry(zone, true); }
+    /// @return The entry of the zone, whether it can stand for it or not
+    const GeoZoneAuthorisation *entry(const GeoZone *zone, bool notification) const;
+
+    /// Adds the authorisation, replacing the one of the same zone and kind
+    /// @return true if the list changed
+    bool set(const GeoZoneAuthorisation &authorisation);
+    /// @return The list with the authorisations added, keeping of those of the same zone and kind the longer one
+    GeoZoneAuthorisationList merged(const QList<GeoZoneAuthorisation> &authorisations) const;
+    /// @return true if the list had the entry of the zone and kind, which was removed
+    bool remove(const QString &zoneKey, bool notification);
+
+    QJsonArray toJson() const;
+    /// @return The entries of a saved list which GeoZoneAuthorisation::fromJson accepts
+    /// @param unread Set to the number of entries left out
+    static GeoZoneAuthorisationList fromJson(const QJsonArray &values, int *unread = nullptr);
+
+    friend bool operator==(const GeoZoneAuthorisationList &, const GeoZoneAuthorisationList &) = default;
+
+private:
+    QList<GeoZoneAuthorisation> _entries;
+};
+
 /// Zones the operator is authorised to fly in, which the checks and alerts leave out while the authorisation is
 /// valid and the flight stays within its scope, see GeoZonePolicy::excludingAuthorised, and the notifications given to the
-/// authorities of zones requiring them. Kept in a file, with roles zoneKey, zoneName, permit, statusText and
-/// notification.
+/// authorities of zones requiring them. The model of a GeoZoneAuthorisationList kept in a file, with roles zoneKey,
+/// zoneName, permit, statusText and notification.
 ///
 /// The file has a version and the entries of GeoZoneAuthorisation::toJson. A file which can't be read, or only in
 /// part, isn't lost to the next change: it is moved or copied to a backup next to it ("<file>.<time>.bak") before
@@ -149,17 +190,19 @@ public:
     /// @return Key matching the zone in any source: its country and identifier, or GeoZone::key without identifier
     static QString zoneKey(const GeoZone *zone);
 
-    int count() const { return static_cast<int>(_authorisations.count()); }
-    const QList<GeoZoneAuthorisation> &authorisations() const { return _authorisations; }
+    int count() const { return _list.count(); }
+    const QList<GeoZoneAuthorisation> &authorisations() const { return _list.entries(); }
+    /// @return The authorisations as a value, to look zones up without the model
+    const GeoZoneAuthorisationList &list() const { return _list; }
     /// @return Why the file wasn't read, or only in part, with what became of it, empty when it was. Also emitted as
     ///         loadFailed.
     QString loadError() const { return _loadError; }
 
     /// @return Authorisation of the zone, null without or when it can't stand for the zone, see
     ///         GeoZoneAuthorisation::validFor
-    const GeoZoneAuthorisation *find(const GeoZone *zone) const;
+    const GeoZoneAuthorisation *find(const GeoZone *zone) const { return _list.find(zone); }
     /// @return Notification recorded for the zone, null without
-    const GeoZoneAuthorisation *findNotification(const GeoZone *zone) const { return _find(zone, true); }
+    const GeoZoneAuthorisation *findNotification(const GeoZone *zone) const { return _list.findNotification(zone); }
 
     /// Adds the authorisation, replacing the one of the same zone and kind
     void set(const GeoZoneAuthorisation &authorisation);
@@ -236,8 +279,6 @@ signals:
 private:
     /// @return Validity of the authorisation at the time without its scope
     static QString validityText(const GeoZoneAuthorisation &authorisation, const QDateTime &now);
-    /// @return The entry of the zone, whether it can stand for it or not
-    const GeoZoneAuthorisation *_find(const GeoZone *zone, bool notification) const;
     /// Reads the authorisation, or the notification, of the zone from what the user entered, see authorise
     /// @return Error message, empty on success
     QString _readInput(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo, const QVariantMap &scope,
@@ -248,20 +289,18 @@ private:
     /// @param unread Set to the number of entries left out, see GeoZoneAuthorisation::fromJson
     /// @param newer Set to whether the file is of a newer version, which is neither read nor written
     /// @return Why it can't be read, empty when it was
-    QString _readFile(QList<GeoZoneAuthorisation> &authorisations, int &unread, bool &newer) const;
+    QString _readFile(GeoZoneAuthorisationList &list, int &unread, bool &newer) const;
     /// Keeps the file as it is in a backup next to it
     /// @param move The file is moved rather than copied
     /// @return Path of the backup, empty when it couldn't be made
     QString _backUp(bool move) const;
     void _save();
-    void _reset(const QList<GeoZoneAuthorisation> &authorisations);
-    /// @return The known authorisations with those of the list added, keeping the longer of the same zone
-    QList<GeoZoneAuthorisation> _merged(const QList<GeoZoneAuthorisation> &authorisations) const;
+    void _reset(const GeoZoneAuthorisationList &list);
 
     QString _filePath;
     QString _loadError;
     bool _keepFile = false;         ///< The file wasn't read and couldn't be backed up, or is of a newer version: it isn't written
     bool _keepFileReported = false;
-    QList<GeoZoneAuthorisation> _authorisations;
+    GeoZoneAuthorisationList _list;
     QList<GeoZoneAuthorisation> _pending;
 };

@@ -350,20 +350,20 @@ QString GeoZoneAuthorisations::zoneKey(const GeoZone *zone)
     return zone->identifier().isEmpty() ? zone->key() : QStringLiteral("%1/%2").arg(zone->country(), zone->identifier());
 }
 
-const GeoZoneAuthorisation *GeoZoneAuthorisations::find(const GeoZone *zone) const
+const GeoZoneAuthorisation *GeoZoneAuthorisationList::find(const GeoZone *zone) const
 {
     // Checked against the zone as it is now: it may have become prohibited, or the entry may not say that it was
-    const GeoZoneAuthorisation *const authorisation = _find(zone, false);
+    const GeoZoneAuthorisation *const authorisation = entry(zone, false);
     return (authorisation && authorisation->validFor(zone)) ? authorisation : nullptr;
 }
 
-const GeoZoneAuthorisation *GeoZoneAuthorisations::_find(const GeoZone *zone, bool notification) const
+const GeoZoneAuthorisation *GeoZoneAuthorisationList::entry(const GeoZone *zone, bool notification) const
 {
-    if (_authorisations.isEmpty() || !zone) {
+    if (_entries.isEmpty() || !zone) {
         return nullptr;
     }
-    const QString key = zoneKey(zone);
-    for (const GeoZoneAuthorisation &authorisation : _authorisations) {
+    const QString key = GeoZoneAuthorisations::zoneKey(zone);
+    for (const GeoZoneAuthorisation &authorisation : _entries) {
         if ((authorisation.zoneKey == key) && (authorisation.notification == notification)) {
             return &authorisation;
         }
@@ -371,32 +371,31 @@ const GeoZoneAuthorisation *GeoZoneAuthorisations::_find(const GeoZone *zone, bo
     return nullptr;
 }
 
-void GeoZoneAuthorisations::set(const GeoZoneAuthorisation &authorisation)
+bool GeoZoneAuthorisationList::set(const GeoZoneAuthorisation &authorisation)
 {
-    QList<GeoZoneAuthorisation> updated = _authorisations;
-    const auto it = std::find_if(updated.begin(), updated.end(), [&authorisation](const GeoZoneAuthorisation &existing) {
+    const auto it = std::find_if(_entries.begin(), _entries.end(), [&authorisation](const GeoZoneAuthorisation &existing) {
         return (existing.zoneKey == authorisation.zoneKey) && (existing.notification == authorisation.notification);
     });
-    if (it == updated.end()) {
-        updated.append(authorisation);
-    } else {
-        *it = authorisation;
+    if (it == _entries.end()) {
+        _entries.append(authorisation);
+        return true;
     }
-    if (updated != _authorisations) {
-        _reset(updated);
-        _save();
+    if (*it == authorisation) {
+        return false;
     }
+    *it = authorisation;
+    return true;
 }
 
-QList<GeoZoneAuthorisation> GeoZoneAuthorisations::_merged(const QList<GeoZoneAuthorisation> &authorisations) const
+GeoZoneAuthorisationList GeoZoneAuthorisationList::merged(const QList<GeoZoneAuthorisation> &authorisations) const
 {
-    QList<GeoZoneAuthorisation> merged = _authorisations;
+    GeoZoneAuthorisationList merged = *this;
     for (const GeoZoneAuthorisation &authorisation : authorisations) {
-        const auto it = std::find_if(merged.begin(), merged.end(), [&authorisation](const GeoZoneAuthorisation &existing) {
+        const auto it = std::find_if(merged._entries.begin(), merged._entries.end(), [&authorisation](const GeoZoneAuthorisation &existing) {
             return (existing.zoneKey == authorisation.zoneKey) && (existing.notification == authorisation.notification);
         });
-        if (it == merged.end()) {
-            merged.append(authorisation);
+        if (it == merged._entries.end()) {
+            merged._entries.append(authorisation);
         } else if (it->validTo.isValid() && (!authorisation.validTo.isValid() || (authorisation.validTo > it->validTo))) {
             *it = authorisation;
         }
@@ -404,10 +403,52 @@ QList<GeoZoneAuthorisation> GeoZoneAuthorisations::_merged(const QList<GeoZoneAu
     return merged;
 }
 
+bool GeoZoneAuthorisationList::remove(const QString &zoneKey, bool notification)
+{
+    return _entries.removeIf([&zoneKey, notification](const GeoZoneAuthorisation &authorisation) {
+        return (authorisation.zoneKey == zoneKey) && (authorisation.notification == notification);
+    }) > 0;
+}
+
+QJsonArray GeoZoneAuthorisationList::toJson() const
+{
+    QJsonArray values;
+    for (const GeoZoneAuthorisation &authorisation : _entries) {
+        values.append(authorisation.toJson());
+    }
+    return values;
+}
+
+GeoZoneAuthorisationList GeoZoneAuthorisationList::fromJson(const QJsonArray &values, int *unread)
+{
+    GeoZoneAuthorisationList list;
+    int leftOut = 0;
+    for (const QJsonValue &value : values) {
+        if (const auto authorisation = GeoZoneAuthorisation::fromJson(value.toObject())) {
+            list._entries.append(*authorisation);
+        } else {
+            leftOut++;
+        }
+    }
+    if (unread) {
+        *unread = leftOut;
+    }
+    return list;
+}
+
+void GeoZoneAuthorisations::set(const GeoZoneAuthorisation &authorisation)
+{
+    GeoZoneAuthorisationList updated = _list;
+    if (updated.set(authorisation)) {
+        _reset(updated);
+        _save();
+    }
+}
+
 void GeoZoneAuthorisations::merge(const QList<GeoZoneAuthorisation> &authorisations)
 {
-    const QList<GeoZoneAuthorisation> merged = _merged(authorisations);
-    if (merged != _authorisations) {
+    const GeoZoneAuthorisationList merged = _list.merged(authorisations);
+    if (merged != _list) {
         _reset(merged);
         _save();
     }
@@ -418,7 +459,7 @@ void GeoZoneAuthorisations::offer(const QList<GeoZoneAuthorisation> &authorisati
     // Only those which would add a zone or extend an authorisation are worth asking about
     QList<GeoZoneAuthorisation> pending;
     for (const GeoZoneAuthorisation &authorisation : authorisations) {
-        if (_merged({ authorisation }) != _authorisations) {
+        if (_list.merged({ authorisation }) != _list) {
             pending.append(authorisation);
         }
     }
@@ -540,7 +581,7 @@ QString GeoZoneAuthorisations::_readInput(const QVariant &zone, const QString &p
     }
     authorisation.aircraft = scope.value(QStringLiteral("aircraft")).toString().trimmed();
     if (scope.value(QStringLiteral("limitToMission")).toBool()) {
-        const GeoZoneAuthorisation *const existing = _find(info.zone(), false);
+        const GeoZoneAuthorisation *const existing = _list.entry(info.zone(), false);
         const QGeoRectangle missionBounds = scope.value(QStringLiteral("missionArea")).value<QGeoRectangle>();
         if (missionBounds.isValid()) {
             authorisation.area = GeoZoneAuthorisation::missionArea(missionBounds);
@@ -571,10 +612,8 @@ QString GeoZoneAuthorisations::recordNotification(const QVariant &zone, const QS
 
 void GeoZoneAuthorisations::revoke(const QString &zoneKey, bool notification)
 {
-    QList<GeoZoneAuthorisation> remaining = _authorisations;
-    if (remaining.removeIf([&zoneKey, notification](const GeoZoneAuthorisation &authorisation) {
-            return (authorisation.zoneKey == zoneKey) && (authorisation.notification == notification);
-        }) > 0) {
+    GeoZoneAuthorisationList remaining = _list;
+    if (remaining.remove(zoneKey, notification)) {
         _reset(remaining);
         _save();
     }
@@ -583,7 +622,7 @@ void GeoZoneAuthorisations::revoke(const QString &zoneKey, bool notification)
 QVariantMap GeoZoneAuthorisations::authorisationOf(const QVariant &zone) const
 {
     const GeoZone *const geoZone = zone.value<GeoZoneInfo>().zone();
-    const GeoZoneAuthorisation *const authorisation = _find(geoZone, false);
+    const GeoZoneAuthorisation *const authorisation = _list.entry(geoZone, false);
     if (!authorisation) {
         return QVariantMap();
     }
@@ -743,7 +782,7 @@ QVariant GeoZoneAuthorisations::data(const QModelIndex &index, int role) const
     if (!checkIndex(index, CheckIndexOption::IndexIsValid | CheckIndexOption::ParentIsInvalid)) {
         return QVariant();
     }
-    const GeoZoneAuthorisation &authorisation = _authorisations[index.row()];
+    const GeoZoneAuthorisation &authorisation = _list.entries()[index.row()];
     switch (role) {
     case ZoneKeyRole:
         return authorisation.zoneKey;
@@ -768,15 +807,15 @@ QHash<int, QByteArray> GeoZoneAuthorisations::roleNames() const
     return names;
 }
 
-void GeoZoneAuthorisations::_reset(const QList<GeoZoneAuthorisation> &authorisations)
+void GeoZoneAuthorisations::_reset(const GeoZoneAuthorisationList &list)
 {
     beginResetModel();
-    _authorisations = authorisations;
+    _list = list;
     endResetModel();
     emit changed();
 }
 
-QString GeoZoneAuthorisations::_readFile(QList<GeoZoneAuthorisation> &authorisations, int &unread, bool &newer) const
+QString GeoZoneAuthorisations::_readFile(GeoZoneAuthorisationList &list, int &unread, bool &newer) const
 {
     QFile file(_filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -797,13 +836,7 @@ QString GeoZoneAuthorisations::_readFile(QList<GeoZoneAuthorisation> &authorisat
         newer = true;
         return QString();
     }
-    for (const QJsonValue &value : root.value(authorisationsKey).toArray()) {
-        if (const auto authorisation = GeoZoneAuthorisation::fromJson(value.toObject())) {
-            authorisations.append(*authorisation);
-        } else {
-            unread++;
-        }
-    }
+    list = GeoZoneAuthorisationList::fromJson(root.value(authorisationsKey).toArray(), &unread);
     return QString();
 }
 
@@ -825,10 +858,10 @@ void GeoZoneAuthorisations::_load()
     if (_filePath.isEmpty() || !QFile::exists(_filePath)) {
         return;
     }
-    QList<GeoZoneAuthorisation> authorisations;
+    GeoZoneAuthorisationList list;
     int unread = 0;
     bool newer = false;
-    const QString error = _readFile(authorisations, unread, newer);
+    const QString error = _readFile(list, unread, newer);
     if (newer) {
         _keepFile = true;
         _loadError = tr("The geozone authorisations were saved by a newer version of QGroundControl and are not loaded: no zone is authorised. "
@@ -850,7 +883,7 @@ void GeoZoneAuthorisations::_load()
             tr("%n geozone authorisation(s) could not be read and are left out, their zones are checked and alerted. "
                "The file as it was is kept in %1.", nullptr, unread).arg(backup);
     }
-    _authorisations = authorisations;
+    _list = list;
     if (!_loadError.isEmpty()) {
         qCWarning(GeoZoneAuthorisationsLog) << _loadError;
         // Nothing is connected yet
@@ -872,10 +905,7 @@ void GeoZoneAuthorisations::_save()
         return;
     }
     (void) QDir().mkpath(QFileInfo(_filePath).absolutePath());
-    QJsonArray values;
-    for (const GeoZoneAuthorisation &authorisation : std::as_const(_authorisations)) {
-        values.append(authorisation.toJson());
-    }
+    const QJsonArray values = _list.toJson();
     QSaveFile file(_filePath);
     if (!file.open(QIODevice::WriteOnly) ||
         (file.write(QJsonDocument(QJsonObject{ { versionKey, fileVersion }, { authorisationsKey, values } }).toJson()) < 0) ||

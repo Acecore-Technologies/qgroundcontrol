@@ -749,6 +749,92 @@ void GeoZoneEvaluatorTest::_testAuthorisationFile()
     }
 }
 
+void GeoZoneEvaluatorTest::_testAuthorisationList()
+{
+    // The list of the authorisations as a value, without the model which keeps it in a file
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 90), 300),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 2);
+    const GeoZone *const restricted = zones.zoneList().constFirst();
+    const GeoZone *const prohibited = zones.zoneList().constLast();
+    const QDateTime june = _utc(QDate(2026, 6, 30), QTime(0, 0));
+    const QDateTime december = _utc(QDate(2026, 12, 31), QTime(0, 0));
+    const GeoZoneAuthorisation permit{ GeoZoneAuthorisations::zoneKey(restricted), QStringLiteral("A"), QStringLiteral("P-1"), QDateTime(), june };
+    GeoZoneAuthorisation notification = permit;
+    notification.notification = true;
+    const GeoZoneAuthorisation incomplete{ GeoZoneAuthorisations::zoneKey(prohibited), QStringLiteral("P"), QString(), QDateTime(), QDateTime() };
+
+    // Entries are set by zone and kind
+    GeoZoneAuthorisationList list;
+    QVERIFY(list.isEmpty());
+    QVERIFY(!list.find(restricted));
+    QVERIFY(list.set(permit));
+    QVERIFY(!list.set(permit));
+    QVERIFY(list.set(notification));
+    QVERIFY(list.set(incomplete));
+    QCOMPARE(list.count(), 3);
+    const GeoZoneAuthorisation *const found = list.find(restricted);
+    QVERIFY(found);
+    QCOMPARE(*found, permit);
+    const GeoZoneAuthorisation *const notified = list.findNotification(restricted);
+    QVERIFY(notified);
+    QCOMPARE(*notified, notification);
+    QVERIFY(!list.find(nullptr));
+    // The entry of a prohibited zone is there, and doesn't stand for it without permit and end
+    QVERIFY(list.entry(prohibited, false));
+    QVERIFY(!list.find(prohibited));
+    QVERIFY(!list.findNotification(prohibited));
+
+    // Merging keeps, of the same zone and kind, the one which ends later
+    GeoZoneAuthorisation longer = permit;
+    longer.permit = QStringLiteral("P-2");
+    longer.validTo = december;
+    GeoZoneAuthorisation shorter = permit;
+    shorter.permit = QStringLiteral("P-0");
+    shorter.validTo = june.addDays(-1);
+    QCOMPARE(list.merged({ shorter, permit }), list);
+    const GeoZoneAuthorisationList merged = list.merged({ shorter, longer });
+    QVERIFY(merged != list);
+    QCOMPARE(merged.count(), 3);
+    const GeoZoneAuthorisation *const extended = merged.find(restricted);
+    QVERIFY(extended);
+    QCOMPARE(extended->permit, QStringLiteral("P-2"));
+    QCOMPARE(list.entries().constFirst(), permit);
+
+    // Saved and read, without the entries which can't be
+    QCOMPARE(GeoZoneAuthorisationList::fromJson(list.toJson()), list);
+    QJsonArray values = list.toJson();
+    QJsonObject damaged = values[0].toObject();
+    damaged.insert(QStringLiteral("validTo"), QStringLiteral("soon"));
+    values[0] = damaged;
+    int unread = 0;
+    const GeoZoneAuthorisationList read = GeoZoneAuthorisationList::fromJson(values, &unread);
+    QCOMPARE(unread, 1);
+    QCOMPARE(read.entries(), (QList<GeoZoneAuthorisation>{ notification, incomplete }));
+
+    // Removed by zone and kind
+    QVERIFY(list.remove(permit.zoneKey, true));
+    QVERIFY(!list.remove(permit.zoneKey, true));
+    QVERIFY(!list.findNotification(restricted));
+    QVERIFY(list.find(restricted));
+    QVERIFY(list.remove(permit.zoneKey, false));
+    QCOMPARE(list.entries(), QList<GeoZoneAuthorisation>{ incomplete });
+
+    // The model keeps one
+    GeoZoneAuthorisations model{ QString() };
+    model.merge(merged.entries());
+    QCOMPARE(model.list(), merged);
+    QCOMPARE(model.authorisations(), merged.entries());
+    QCOMPARE(model.find(restricted), model.list().find(restricted));
+}
+
 void GeoZoneEvaluatorTest::_testUnknownTerrain()
 {
     // From 50 to 150 m above the ground, which is at 400 m except in a gap without terrain data around the zone center
