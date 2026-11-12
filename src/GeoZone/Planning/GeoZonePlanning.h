@@ -52,17 +52,27 @@ public:
     /// Geozone data the open plan was saved with, nothing for plans without it, like new or older plans
     const std::optional<GeoZonePlanAudit::Record> &planAudit() const { return _planAudit; }
     void setPlanAudit(const std::optional<GeoZonePlanAudit::Record> &planAudit);
+    /// @return true while the open plan has an audit record which a newer version of QGroundControl wrote and this one
+    ///         can't read: the geozone data isn't compared with it
+    bool planAuditUnread() const { return _planAuditUnread; }
+    /// Sets whether the plan loaded has such a record, telling the pilot with planNotice when it has
+    void setPlanAuditUnread(bool unread);
+    /// Tells the pilot with planNotice, once, that saving the plan replaced the record this version couldn't read
+    void notePlanAuditReplaced();
 
 signals:
     void plannedStartChanged();
     void planAuditChanged();
     void missionAreaChanged();
     void plannedEndChanged();
+    /// What the pilot is to know about the geozone data of the open plan, like a record this version can't read
+    void planNotice(const QString &message);
 
 private:
     QDateTime _plannedStart;
     QGeoRectangle _missionArea;
     QDateTime _plannedEnd;
     std::optional<GeoZonePlanAudit::Record> _planAudit;
+    bool _planAuditUnread = false;
     GeoZoneAuthorisations *_authorisations = nullptr;
 };

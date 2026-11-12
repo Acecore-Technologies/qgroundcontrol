@@ -62,6 +62,8 @@ public:
         ///         version than this one, whose fields may mean something else. Records of version 1, which kept the
         ///         restrictions as the numbers of their enumerators, are still read.
         static std::optional<Record> fromJson(const QJsonObject &json);
+        /// @return true for the JSON of a record of a newer version than this one, which fromJson doesn't read
+        static bool isNewer(const QJsonObject &json);
 
         friend bool operator==(const Record &, const Record &) = default;
     };

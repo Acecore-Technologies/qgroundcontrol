@@ -103,6 +103,11 @@ QJsonObject GeoZonePlanAudit::Record::toJson() const
     return json;
 }
 
+bool GeoZonePlanAudit::Record::isNewer(const QJsonObject &json)
+{
+    return json.value(versionKey).toInt() > version;
+}
+
 std::optional<GeoZonePlanAudit::Record> GeoZonePlanAudit::Record::fromJson(const QJsonObject &json)
 {
     // Without a whole number as version the JSON isn't a record, a newer one can't be understood

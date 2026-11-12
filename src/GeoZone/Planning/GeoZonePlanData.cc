@@ -89,6 +89,8 @@ void save(PlanMasterController *planController, QJsonObject &planJson, GeoZoneMa
     if (!json.isEmpty()) {
         planJson.insert(jsonKey, json);
     }
+    // The record of a newer version, which couldn't be read, isn't in the plan any more
+    manager->planning()->notePlanAuditReplaced();
 }
 
 void load(PlanMasterController *planController, const QJsonObject &planJson, GeoZoneManager *manager)
@@ -111,8 +113,10 @@ void load(PlanMasterController *planController, const QJsonObject &planJson, Geo
     // Permits are the operator's, so those of a plan from elsewhere are only added when accepted
     manager->planning()->authorisations()->offer(authorisations);
 
-    // Older plans don't have the data they were saved with
-    manager->planning()->setPlanAudit(GeoZonePlanAudit::Record::fromJson(json.value(auditKey).toObject()));
+    // Older plans don't have the data they were saved with, and the record of a newer version can't be read
+    const QJsonObject audit = json.value(auditKey).toObject();
+    manager->planning()->setPlanAudit(GeoZonePlanAudit::Record::fromJson(audit));
+    manager->planning()->setPlanAuditUnread(GeoZonePlanAudit::Record::isNewer(audit));
 }
 
 void reset(GeoZoneManager *manager)
@@ -120,6 +124,7 @@ void reset(GeoZoneManager *manager)
     manager = manager ? manager : GeoZoneManager::instance();
     manager->planning()->clearPlannedStart();
     manager->planning()->setPlanAudit(std::nullopt);
+    manager->planning()->setPlanAuditUnread(false);
 }
 
 void follow(PlanMasterController *planController, GeoZoneManager *manager)

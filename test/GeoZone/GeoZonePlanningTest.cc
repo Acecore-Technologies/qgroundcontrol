@@ -1092,6 +1092,68 @@ void GeoZonePlanningTest::_testPlanSave()
     manager.repository()->clear();
 }
 
+void GeoZonePlanningTest::_testPlanAuditNewerVersion()
+{
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center, 300) }), errorString), qPrintable(errorString));
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    (void) masterController.missionController()->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 270), 1);
+    (void) masterController.missionController()->insertSimpleMissionItem(center.atDistanceAndAzimuth(1000, 90), 2);
+
+    // A plan whose record of the geozone data was written by a newer version, in a format this one doesn't know
+    const QString jsonKey = QString::fromLatin1(GeoZonePlanData::jsonKey);
+    QJsonObject newerPlan;
+    GeoZonePlanData::save(&masterController, newerPlan, &manager);
+    QJsonObject geoZones = newerPlan[jsonKey].toObject();
+    QJsonObject audit = geoZones[QStringLiteral("audit")].toObject();
+    QCOMPARE(audit[QStringLiteral("version")].toInt(), GeoZonePlanAudit::version);
+    audit[QStringLiteral("version")] = GeoZonePlanAudit::version + 1;
+    geoZones[QStringLiteral("audit")] = audit;
+    newerPlan[jsonKey] = geoZones;
+
+    // It isn't read, which the pilot is told when the plan is loaded
+    GeoZonePlanning *const planning = manager.planning();
+    QSignalSpy noticeSpy(planning, &GeoZonePlanning::planNotice);
+    GeoZonePlanData::load(&masterController, newerPlan, &manager);
+    QVERIFY(!planning->planAudit().has_value());
+    QVERIFY(planning->planAuditUnread());
+    QCOMPARE(noticeSpy.count(), 1);
+    QVERIFY2(noticeSpy[0][0].toString().startsWith(QStringLiteral("This plan was saved by a newer version of QGroundControl")), qPrintable(noticeSpy[0][0].toString()));
+
+    // Saving the plan replaces the record with one of this version, which the pilot is told once
+    QJsonObject saved;
+    GeoZonePlanData::save(&masterController, saved, &manager);
+    QCOMPARE(saved[jsonKey].toObject()[QStringLiteral("audit")].toObject()[QStringLiteral("version")].toInt(), GeoZonePlanAudit::version);
+    QCOMPARE(noticeSpy.count(), 2);
+    QVERIFY2(noticeSpy[1][0].toString().contains(QStringLiteral("replaced the one of the newer version")), qPrintable(noticeSpy[1][0].toString()));
+    QVERIFY(!planning->planAuditUnread());
+    QVERIFY(planning->planAudit().has_value());
+    GeoZonePlanData::save(&masterController, saved, &manager);
+    QCOMPARE(noticeSpy.count(), 2);
+
+    // Plans with a record of this version or without one tell nothing, nor does a new plan after such a plan
+    GeoZonePlanData::load(&masterController, saved, &manager);
+    QVERIFY(planning->planAudit().has_value());
+    GeoZonePlanData::load(&masterController, QJsonObject(), &manager);
+    QVERIFY(!planning->planAudit().has_value());
+    QVERIFY(!planning->planAuditUnread());
+    QCOMPARE(noticeSpy.count(), 2);
+    GeoZonePlanData::load(&masterController, newerPlan, &manager);
+    QCOMPARE(noticeSpy.count(), 3);
+    GeoZonePlanData::reset(&manager);
+    QVERIFY(!planning->planAuditUnread());
+    GeoZonePlanData::save(&masterController, saved, &manager);
+    QCOMPARE(noticeSpy.count(), 3);
+    manager.repository()->clear();
+}
+
 void GeoZonePlanningTest::_testUploadReasons()
 {
     ScopedEnvironment environment;

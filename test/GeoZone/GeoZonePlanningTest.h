@@ -41,6 +41,7 @@ private slots:
     void _testBriefingExport();
     void _testPlanAudit();
     void _testPlanSave();
+    void _testPlanAuditNewerVersion();
     void _testUploadReasons();
     void _testUploadReasonDetails();
     void _testPlannedStartPerPlan();

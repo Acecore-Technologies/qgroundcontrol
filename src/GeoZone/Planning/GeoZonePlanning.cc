@@ -49,6 +49,24 @@ void GeoZonePlanning::setPlanAudit(const std::optional<GeoZonePlanAudit::Record>
     }
 }
 
+void GeoZonePlanning::setPlanAuditUnread(bool unread)
+{
+    _planAuditUnread = unread;
+    if (unread) {
+        emit planNotice(tr("This plan was saved by a newer version of QGroundControl: its record of the geozone data it was checked against "
+                           "can't be read by this version, so changes of the geozone data since then aren't reported. "
+                           "Saving the plan replaces the record with one of this version."));
+    }
+}
+
+void GeoZonePlanning::notePlanAuditReplaced()
+{
+    if (_planAuditUnread) {
+        _planAuditUnread = false;
+        emit planNotice(tr("The plan was saved with a record of the geozone data of this version of QGroundControl, which replaced the one of the newer version."));
+    }
+}
+
 void GeoZonePlanning::setMissionArea(const QGeoRectangle &missionArea)
 {
     if (missionArea != _missionArea) {
