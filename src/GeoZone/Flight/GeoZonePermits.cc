@@ -95,14 +95,39 @@ QString GeoZonePermits::originText(Origin origin)
     return QStringLiteral("zone details");
 }
 
-bool GeoZonePermits::contains(const QString &key) const
+int GeoZonePermits::_find(const QString &key, int vehicleId) const
 {
-    return !key.isEmpty() && std::any_of(_permits.cbegin(), _permits.cend(), [&key](const Permit &permit) { return permit.key == key; });
+    if (key.isEmpty()) {
+        return -1;
+    }
+    // A permit acknowledged without a vehicle is for the flight of the next one
+    const auto it = std::find_if(_permits.cbegin(), _permits.cend(), [&key, vehicleId](const Permit &permit) {
+        return (permit.key == key) && ((permit.vehicleId == vehicleId) || (permit.vehicleId < 0));
+    });
+    return (it != _permits.cend()) ? static_cast<int>(std::distance(_permits.cbegin(), it)) : -1;
+}
+
+void GeoZonePermits::setVehicleId(int vehicleId)
+{
+    if (vehicleId == _vehicleId) {
+        return;
+    }
+    _vehicleId = vehicleId;
+    if (vehicleId >= 0) {
+        for (int row = 0; row < count(); row++) {
+            if (_permits[row].vehicleId < 0) {
+                _permits[row].vehicleId = vehicleId;
+                emit dataChanged(index(row), index(row), { VehicleIdRole });
+            }
+        }
+    }
+    // What permitted() answers changed
+    emit countChanged();
 }
 
 bool GeoZonePermits::acknowledge(const GeoZone *zone, Origin origin, int vehicleId)
 {
-    if (!applies(zone) || covers(zone)) {
+    if (!applies(zone) || covers(zone, vehicleId)) {
         return false;
     }
     Permit permit;
@@ -138,11 +163,11 @@ bool GeoZonePermits::permitted(const QVariant &zone) const
     return covers(zone.value<GeoZoneInfo>().zone());
 }
 
-void GeoZonePermits::withdraw(const QString &key)
+void GeoZonePermits::withdraw(const QString &key, int vehicleId)
 {
-    const auto it = std::find_if(_permits.cbegin(), _permits.cend(), [&key](const Permit &permit) { return permit.key == key; });
-    if (it != _permits.cend()) {
-        _remove(static_cast<int>(std::distance(_permits.cbegin(), it)), QStringLiteral("withdrawn"));
+    const int row = _find(key, vehicleId);
+    if (row >= 0) {
+        _remove(row, QStringLiteral("withdrawn"));
     }
 }
 

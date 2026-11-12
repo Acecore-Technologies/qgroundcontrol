@@ -22,12 +22,15 @@
 /// one flight: from the zone details or the pre-flight checklist before the flight, or by answering "I do" to an alert
 /// in flight. A permit stops the alerts about the zone, apart from an advisory on entry, and ends after the flight:
 /// when the vehicle disarms after having been armed, or disconnects, see endFlight(). Unlike the authorisations of
-/// GeoZoneAuthorisations, permits aren't kept. They apply to the zone in every source, see key(). GeoZoneMonitor logs
-/// them in the alert log. Roles key, zoneName, restrictionText, time (local), originText and vehicleId.
+/// GeoZoneAuthorisations, permits aren't kept. They apply to the zone in every source, see key(), and to the vehicle
+/// they were acknowledged for: the active vehicle, or the one answering the alert. One acknowledged without a vehicle
+/// is for the flight of the next active vehicle, see setVehicleId(). GeoZoneMonitor logs them in the alert log. Roles
+/// key, zoneName, restrictionText, time (local), originText and vehicleId.
 class GeoZonePermits : public QAbstractListModel
 {
     Q_OBJECT
 
+    /// Also notified when the vehicle permitted() answers for changes
     Q_PROPERTY(int count READ count NOTIFY countChanged FINAL)
 
 public:
@@ -56,7 +59,7 @@ public:
         GeoZone::Restriction restriction = GeoZone::Unknown;
         QString sourceText;
         QDateTime time;             ///< UTC
-        int vehicleId = -1;         ///< Active vehicle when acknowledged, GeoZoneMonitor::noVehicle without
+        int vehicleId = -1;         ///< Vehicle the permit is for, GeoZoneMonitor::noVehicle until a vehicle is active
         Origin origin = ZoneDetails;
     };
 
@@ -76,27 +79,37 @@ public:
     /// @return Where the permit was acknowledged, like "zone details", as logged
     static QString originText(Origin origin);
 
-    bool covers(const GeoZone *zone) const { return zone && contains(key(zone)); }
-    bool contains(const QString &key) const;
+    /// @return true when the vehicle has a permit for the zone: one acknowledged for it, or without a vehicle. The
+    ///         permit of another vehicle doesn't count.
+    bool covers(const GeoZone *zone, int vehicleId) const { return zone && contains(key(zone), vehicleId); }
+    /// @return true when the active vehicle has a permit for the zone, see setVehicleId()
+    bool covers(const GeoZone *zone) const { return covers(zone, _vehicleId); }
+    /// @return true when the vehicle has a permit with the key, see covers()
+    bool contains(const QString &key, int vehicleId) const { return _find(key, vehicleId) >= 0; }
 
     /// Acknowledges the permit of the zone for the flight of the vehicle
-    /// @return false when it doesn't apply to the zone or is acknowledged already
+    /// @return false when it doesn't apply to the zone or the vehicle has it already
     bool acknowledge(const GeoZone *zone, Origin origin, int vehicleId);
     /// Acknowledges the permit of a GeoZoneInfo for the flight of the active vehicle, see setVehicleId()
     Q_INVOKABLE bool acknowledge(const QVariant &zone, int origin);
     Q_INVOKABLE bool applies(const QVariant &zone) const;
+    /// @return true when the active vehicle has a permit for the GeoZoneInfo
     Q_INVOKABLE bool permitted(const QVariant &zone) const;
-    /// Withdraws a permit by key
-    Q_INVOKABLE void withdraw(const QString &key);
-    /// Withdraws the permit of a GeoZoneInfo
+    /// Withdraws the permit of the active vehicle by key
+    Q_INVOKABLE void withdraw(const QString &key) { withdraw(key, _vehicleId); }
+    /// Withdraws the permit of a vehicle by key, like that of a row
+    Q_INVOKABLE void withdraw(const QString &key, int vehicleId);
+    /// Withdraws the permit of the active vehicle for a GeoZoneInfo
     Q_INVOKABLE void withdrawZone(const QVariant &zone) { withdraw(key(zone.value<GeoZoneInfo>().zone())); }
     /// Ends the permits of the flight of the vehicle: those acknowledged for it or without vehicle, which are logged as
     /// the vehicle's
     /// @param reason Logged, like "flight ended"
     void endFlight(int vehicleId, const QString &reason);
 
-    /// Vehicle the permits acknowledged from QML are for
-    void setVehicleId(int vehicleId) { _vehicleId = vehicleId; }
+    /// The active vehicle, which the permits acknowledged, asked for and withdrawn from QML are for. Permits
+    /// acknowledged without a vehicle become its permits.
+    void setVehicleId(int vehicleId);
+    int vehicleId() const { return _vehicleId; }
 
 signals:
     void countChanged();
@@ -106,6 +119,8 @@ signals:
 
 private:
     void _remove(int row, const QString &reason);
+    /// @return Row of the permit with the key which covers the vehicle, -1 without
+    int _find(const QString &key, int vehicleId) const;
 
     QList<Permit> _permits;     ///< In the order acknowledged
     int _vehicleId = -1;

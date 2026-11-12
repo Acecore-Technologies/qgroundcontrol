@@ -2654,6 +2654,64 @@ void GeoZoneMonitorTest::_testPermits()
     // The entry with the permit is logged as such
     QCOMPARE(GeoZoneAlertHistory::parseLogLine(QStringLiteral("2026-06-15T10:00:00.000Z,1,47,8,450,400,entered,0,A,,ReqAuthorisation,,,,5,permit"))->message,
              QStringLiteral("Entered geozone A (Authorisation required) \u2014 permit acknowledged"));
+
+    // A permit is for its vehicle: that of the first vehicle doesn't silence a second one in the same zone, which is
+    // asked itself
+    constexpr int otherId = 2;
+    const GeoZone *const authorisation = zone(QStringLiteral("A"));
+    QVERIFY(authorisation);
+    QVERIFY(permits->covers(authorisation, vehicleId));
+    QVERIFY(!permits->covers(authorisation, otherId));
+    monitor.evaluate({ center.atDistanceAndAzimuth(10000, 0), 450, 400 }, otherId);
+    monitor.evaluate({ center, 450, 400 }, otherId);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 2: Entered geozone A (Authorisation required)"));
+    const int otherAlert = alertSpy.last()[2].toInt();
+    const std::optional<GeoZoneAlertModel::Alert> otherShown = shownAlert(monitor, otherAlert);
+    QVERIFY(otherShown);
+    QVERIFY(otherShown->question);
+    const GeoZoneVehicleMonitor *const other = monitor.positionMonitor(otherId);
+    QVERIFY(other);
+    QVERIFY(vehicle->groundWarning().isEmpty());
+    // Its answer is its own permit, listed with its vehicle
+    monitor.approveAlert(otherAlert);
+    QCOMPARE(permits->count(), 2);
+    QVERIFY(permits->covers(authorisation, otherId));
+    QCOMPARE(permits->data(permits->index(1), GeoZonePermits::VehicleIdRole).toInt(), otherId);
+    // The pilot asks and withdraws for the active vehicle, the first
+    QCOMPARE(permits->vehicleId(), vehicleId);
+    QVERIFY(permits->permitted(QVariant::fromValue(GeoZoneInfo(authorisation))));
+    // Each permit ends with the flight of its vehicle
+    vehicle->setArmed(false);
+    QCOMPARE(permits->count(), 1);
+    QVERIFY(!permits->covers(authorisation, vehicleId));
+    QVERIFY(!permits->permitted(QVariant::fromValue(GeoZoneInfo(authorisation))));
+    QVERIFY(permits->covers(authorisation, otherId));
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Caution));
+    // Withdrawing the permit of the active vehicle leaves that of the other, whose row withdraws its own, and only it
+    // is alerted again
+    permits->withdraw(GeoZonePermits::key(authorisation));
+    QCOMPARE(permits->count(), 1);
+    const qsizetype alertCount = alertSpy.count();
+    permits->withdraw(GeoZonePermits::key(authorisation), otherId);
+    QCOMPARE(permits->count(), 0);
+    monitor.evaluate({ center, 400, 400 }, vehicleId);
+    QCOMPARE(alertSpy.count(), alertCount);
+    monitor.evaluate({ center, 450, 400 }, otherId);
+    QCOMPARE(alertSpy.count(), alertCount + 1);
+    QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 2: Entered geozone A (Authorisation required)"));
+
+    // A permit acknowledged without a vehicle becomes that of the next active vehicle
+    GeoZonePermits loose;
+    QSignalSpy looseSpy(&loose, &GeoZonePermits::countChanged);
+    QVERIFY(loose.acknowledge(authorisation, GeoZonePermits::ZoneDetails, loose.vehicleId()));
+    QVERIFY(loose.covers(authorisation, 5) && loose.covers(authorisation, 6));
+    loose.setVehicleId(5);
+    QCOMPARE(looseSpy.count(), 2);
+    QCOMPARE(loose.permits().first().vehicleId, 5);
+    QVERIFY(loose.covers(authorisation, 5));
+    QVERIFY(!loose.covers(authorisation, 6));
+    loose.setVehicleId(6);
+    QVERIFY(!loose.permitted(QVariant::fromValue(GeoZoneInfo(authorisation))));
 }
 
 GEOZONE_TEST(GeoZoneMonitorTest)

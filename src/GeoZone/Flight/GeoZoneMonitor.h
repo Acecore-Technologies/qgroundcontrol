@@ -70,7 +70,8 @@ class Vehicle;
 /// Whether geo-awareness is available for the active vehicle is published as awareness(), and the changes of state of
 /// flying vehicles are alerted, see AlertEvent::Awareness.
 /// Zones requiring an authorisation or a notification take a permit for the flight instead of an approval, see
-/// permits(): acknowledged before the flight or by answering the question, it stops their alerts until the flight ends.
+/// permits(): acknowledged before the flight or by answering the question, it stops their alerts for its vehicle until
+/// the flight ends.
 class GeoZoneMonitor : public QObject
 {
     Q_OBJECT
@@ -387,8 +388,9 @@ private:
     void _raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change);
     /// Logs a permit acknowledged or ended
     void _logPermit(const GeoZonePermits::Permit &permit, AlertEvent::Kind kind, const QString &detail);
-    /// Updates the questions and ground warnings after the permits changed, and alerts a withdrawn permit's zones again
-    void _permitsChanged(const QString &withdrawnKey);
+    /// Updates the questions and ground warnings after a permit was acknowledged or ended, and alerts its vehicle
+    /// about the zones of a withdrawn permit again
+    void _permitsChanged(const GeoZonePermits::Permit &permit, bool withdrawn);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();
     /// Adds an alert to the shown alerts, logging that the pilot was notified

@@ -136,11 +136,11 @@ ToolIndicatorPage {
                 }
             }
 
-            // Permits acknowledged for this flight, which end when the vehicle disarms or disconnects
+            // Permits acknowledged for this flight, which end when their vehicle disarms or disconnects
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth
                 heading:                qsTr("Permits This Flight")
-                headingDescription:     qsTr("Zones you confirmed the permission to enter. Their alerts stop until the vehicle disarms after the flight or disconnects.")
+                headingDescription:     qsTr("Zones you confirmed the permission to enter. Their alerts stop for that vehicle until it disarms after the flight or disconnects.")
                 visible:                control._monitor.permits.count > 0
 
                 Repeater {
@@ -156,12 +156,17 @@ ToolIndicatorPage {
                         required property string    restrictionText
                         required property date      time
                         required property string    originText
+                        required property int       vehicleId
+
+                        // The permit of another vehicle than the active one names it
+                        readonly property bool _otherVehicle: (vehicleId >= 0) && ((control._active?.vehicleId ?? vehicleId) !== vehicleId)
 
                         QGCLabel {
                             Layout.fillWidth:   true
                             wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                             textFormat:         Text.PlainText
-                            text:               qsTr("%1 (%2)").arg(permitRow.zoneName).arg(permitRow.restrictionText)
+                            text:               permitRow._otherVehicle ? qsTr("Vehicle %1: %2 (%3)").arg(permitRow.vehicleId).arg(permitRow.zoneName).arg(permitRow.restrictionText)
+                                                                        : qsTr("%1 (%2)").arg(permitRow.zoneName).arg(permitRow.restrictionText)
                         }
 
                         QGCLabel {
@@ -171,7 +176,7 @@ ToolIndicatorPage {
 
                         QGCButton {
                             text:       qsTr("Withdraw")
-                            onClicked:  control._monitor.permits.withdraw(permitRow.key)
+                            onClicked:  control._monitor.permits.withdraw(permitRow.key, permitRow.vehicleId)
                         }
                     }
                 }
