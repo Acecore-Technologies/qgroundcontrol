@@ -18,6 +18,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QLocale>
 #include <QtCore/QXmlStreamReader>
 
 #include <algorithm>
@@ -37,9 +38,15 @@ using namespace GeoZoneParserUtils;
 
 bool GeoZoneParser::parseFile(const QString &fileName, Result &result, QString &errorString)
 {
+    result = Result();
     QFile file(fileName);
     if (!file.open(QIODevice::ReadOnly)) {
         errorString = tr("Unable to open file %1: %2").arg(fileName, file.errorString());
+        return false;
+    }
+    // Not read into memory whatever its size
+    if (file.size() > maxFileBytes) {
+        errorString = tr("The file %1 is larger than %2.").arg(fileName, QLocale::c().formattedDataSize(maxFileBytes));
         return false;
     }
     return parse(file.readAll(), result, errorString);

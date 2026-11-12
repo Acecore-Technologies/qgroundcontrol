@@ -82,6 +82,13 @@ public:
     /// @return A document with its companion documents, which parse() reads like the document with the companions
     static QByteArray composite(const QJsonObject &document, const Companions &companions);
 
+    /// Limit of the files parseFile() reads, the one of the files and downloads the application loads
+    /// (GeoZoneDownloader::defaultMaxBytes)
+    static constexpr qint64 maxFileBytes = 100 * 1024 * 1024;
+
+    /// Parses a file read whole, for tests and tools. The application loads files with GeoZoneLoader, which also reads
+    /// zip packages and keeps the stored copy with its parse cache.
+    /// @return false with the reason when the file can't be read, is larger than maxFileBytes or isn't parsed
     static bool parseFile(const QString &fileName, Result &result, QString &errorString);
     static bool parse(const QByteArray &bytes, Result &result, QString &errorString, const Options &options);
     /// See Options

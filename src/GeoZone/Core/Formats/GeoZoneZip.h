@@ -32,6 +32,8 @@ struct File {
     QString name;
     QByteArray data;
 };
+/// All the files at once, for tests and tools: the application reads packages with forEachFile(), which keeps one
+/// file in memory at a time. Bounded like it, by maxBytes for the files together and maxEntries for their number.
 /// @return The files of the archive with one of the suffixes, inflated, the largest first, none on errors
 /// @param maxBytes Limit of the total size of the files
 QList<File> files(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString);

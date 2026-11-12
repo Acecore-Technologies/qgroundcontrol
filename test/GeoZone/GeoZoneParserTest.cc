@@ -1476,6 +1476,16 @@ void GeoZoneParserTest::_testParseErrors()
     QVERIFY(!GeoZoneParser::parseFile(QStringLiteral("/nonexistent/geozones.json"), result, errorString));
     QVERIFY(!errorString.isEmpty());
 
+    // A file over the limit of the application isn't read into memory
+    static_assert(GeoZoneParser::maxFileBytes == GeoZoneDownloader::defaultMaxBytes);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QFile large(dir.filePath(QStringLiteral("large.json")));
+    QVERIFY(large.open(QIODevice::WriteOnly) && large.resize(GeoZoneParser::maxFileBytes + 1));
+    large.close();
+    QVERIFY(!GeoZoneParser::parseFile(large.fileName(), result, errorString));
+    QCOMPARE(errorString, QStringLiteral("The file %1 is larger than 100.00 MiB.").arg(large.fileName()));
+
     QVERIFY(!GeoZoneParser::parse("{ \"features\": [", result, errorString));
     QVERIFY(!errorString.isEmpty());
 
