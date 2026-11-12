@@ -86,7 +86,7 @@ public:
     /// Downloads a feed from a service taking credentials, an ED-318 query or the area of interest, see
     /// GeoZoneSourceRepository::addService
     /// @param service Fields of GeoZoneService::toVariantMap
-    /// @param secret API key, token, password or client secret, kept in the settings, the one kept when empty
+    /// @param secret API key, token, password or client secret, kept by GeoZoneCredentials, the one kept when empty
     /// @param allowOtherOrigins The user confirmed the other servers of serviceOtherOrigins
     Q_INVOKABLE void addService(const QString &url, const QVariantMap &service, const QString &secret, bool allowOtherOrigins = false)
     {

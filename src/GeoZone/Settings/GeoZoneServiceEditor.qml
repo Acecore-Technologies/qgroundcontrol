@@ -153,7 +153,7 @@ ColumnLayout {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
         font.pointSize:     ScreenTools.smallFontPointSize
-        text:               qsTr("Secrets are kept in the application settings, unencrypted, never in the list of sources, logs or exported packs.")
+        text:               qsTr("Secrets are kept unencrypted in a file only your user account can read, never in the settings, the list of sources, logs or exported packs.")
         visible:            serviceEntry._auth > 0
     }
 

@@ -13,7 +13,7 @@ void GeoZoneServiceRegistry::setService(const QString &key, const GeoZoneService
 {
     // A secret only goes where it was entered for
     if (const auto previous = _services.constFind(key); (previous == _services.cend()) || !previous->sameAuthTarget(service)) {
-        _credentials.remove(key);
+        (void) _credentials.remove(key);
         forgetToken(key);
     }
     if (service.isEmpty()) {
@@ -33,7 +33,7 @@ void GeoZoneServiceRegistry::restoreService(const QString &key, const GeoZoneSer
 void GeoZoneServiceRegistry::forget(const QString &key)
 {
     if (_services.remove(key) > 0) {
-        _credentials.remove(key);
+        (void) _credentials.remove(key);
     }
     forgetToken(key);
 }
@@ -43,7 +43,8 @@ bool GeoZoneServiceRegistry::setSecret(const QString &key, const QString &secret
     if (const auto it = _services.constFind(key); (it == _services.cend()) || !it->needsSecret()) {
         return false;
     }
-    _credentials.setSecret(key, secret);
+    // When it can't be kept, the source shows that it is missing
+    (void) _credentials.setSecret(key, secret);
     forgetToken(key);
     return true;
 }

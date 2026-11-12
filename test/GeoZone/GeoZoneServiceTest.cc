@@ -138,10 +138,14 @@ void GeoZoneServiceTest::_testServiceApiKeys()
         QVERIFY2(!failedSpy.last()[1].toString().contains(QStringLiteral("missing-s3cret")), qPrintable(failedSpy.last()[1].toString()));
         QVERIFY(manager.repository()->credentials().secret(missingUrl).isEmpty());
 
-        // The service is kept with the source, its secret in the settings rather than the store, and neither is logged
+        // The service is kept with the source, its secret in the file of the credentials rather than the store or the
+        // settings, and neither is logged
         QVERIFY(manager.repository()->credentials().secret(headerUrl) == QStringLiteral("header-s3cret"));
         const QByteArray stored = _directoryContent(storageDir.path());
         QVERIFY(stored.contains("X-Api-Key"));
+        QVERIFY(!QSettings().childGroups().contains(QStringLiteral("GeoZoneCredentials")));
+        QVERIFY(QFile::exists(manager.repository()->credentials().filePath()));
+        QVERIFY(!(QFile::permissions(manager.repository()->credentials().filePath()) & (QFile::ReadGroup | QFile::ReadOther | QFile::WriteGroup | QFile::WriteOther)));
         for (const char *secret : { "header-s3cret", "query-s3cret", "bearer-s3cret", "missing-s3cret" }) {
             QVERIFY2(!stored.contains(secret), secret);
             QVERIFY2(!log.text().contains(QLatin1String(secret)), secret);
@@ -149,7 +153,7 @@ void GeoZoneServiceTest::_testServiceApiKeys()
         QVERIFY(log.text().contains(QStringLiteral("Downloading")));
     }
 
-    // The services are restored with the sources, their secrets from the settings
+    // The services are restored with the sources, their secrets from the file of the credentials
     GeoZoneManager restarted(storageDir.path());
     restarted.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
     GeoZoneSource *const queryFeed = restarted.repository()->source(queryUrl);
@@ -700,31 +704,95 @@ void GeoZoneServiceTest::_testMapViewAreaOfInterest()
 
 void GeoZoneServiceTest::_testCredentials()
 {
-    // The secrets are in a group of the settings, by the hash of the source key
-    const QString group = QStringLiteral("GeoZoneCredentialsTest");
-    const auto restore = qScopeGuard([&group]() { QSettings().remove(group); });
+    // The secrets are in a file of their own, by the hash of the source key, apart from the settings and the store
+    const QString name = QStringLiteral("GeoZoneCredentialsTest");
+    GeoZoneCredentials credentials(name);
+    const QString filePath = credentials.filePath();
+    const auto restore = qScopeGuard([&name, &filePath]() {
+        QSettings().remove(name);
+        (void) QFile::remove(filePath);
+    });
+    QVERIFY(QFileInfo(filePath).isAbsolute());
+    QVERIFY2(!QDir::fromNativeSeparators(filePath).contains(QStringLiteral("/GeoZones/")), qPrintable(filePath));
+    QVERIFY(!QFile::exists(filePath));
     const QString key = QStringLiteral("https://example.org/zones");
-    const QString id = QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex());
-    const auto stored = [&group]() {
-        QSettings settings;
-        settings.beginGroup(group);
-        QVariantMap secrets;
-        for (const QString &settingKey : settings.childKeys()) {
-            secrets.insert(settingKey, settings.value(settingKey));
-        }
-        return secrets;
+    const QString otherKey = QStringLiteral("https://example.org/other");
+    const auto idOf = [](const QString &sourceKey) { return QString::fromLatin1(QCryptographicHash::hash(sourceKey.toUtf8(), QCryptographicHash::Sha256).toHex()); };
+    const auto fileBytes = [&filePath]() {
+        QFile file(filePath);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     };
-    GeoZoneCredentials credentials(group);
-    credentials.setSecret(key, QStringLiteral("s3cret"));
-    QCOMPARE(stored(), (QVariantMap{ { id, QStringLiteral("s3cret") } }));
-    QCOMPARE(GeoZoneCredentials(group).secret(key), QStringLiteral("s3cret"));
-    credentials.setSecret(key, QStringLiteral("new-s3cret"));
-    QCOMPARE(credentials.secret(key), QStringLiteral("new-s3cret"));
+    const auto stored = [&fileBytes]() { return QJsonDocument::fromJson(fileBytes()).object().value(QStringLiteral("secrets")).toObject().toVariantMap(); };
+    // Which only its owner can read and write
+    const auto ownerOnly = [&filePath]() {
+        const QFile::Permissions permissions = QFile::permissions(filePath);
+        return permissions.testFlags(QFile::ReadOwner | QFile::WriteOwner) &&
+               !(permissions & (QFile::ReadGroup | QFile::WriteGroup | QFile::ExeGroup | QFile::ReadOther | QFile::WriteOther | QFile::ExeOther));
+    };
+    const auto inSettings = [&name]() {
+        QSettings settings;
+        settings.beginGroup(name);
+        return settings.childKeys();
+    };
 
-    // Removing a secret removes it from the settings
-    credentials.remove(key);
-    QVERIFY(stored().isEmpty());
+    QVERIFY(credentials.setSecret(key, QStringLiteral("s3cret")));
+    QCOMPARE(stored(), (QVariantMap{ { idOf(key), QStringLiteral("s3cret") } }));
+    QVERIFY(ownerOnly());
+    QVERIFY(inSettings().isEmpty());
+    QCOMPARE(GeoZoneCredentials(name).secret(key), QStringLiteral("s3cret"));
+    QVERIFY(credentials.setSecret(key, QStringLiteral("new-s3cret")));
+    QCOMPARE(credentials.secret(key), QStringLiteral("new-s3cret"));
+    QVERIFY(ownerOnly());
+
+    // A file someone opened to others is closed again when it is written
+    QVERIFY(QFile::setPermissions(filePath, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup | QFile::ReadOther));
+    QVERIFY(credentials.setSecret(otherKey, QStringLiteral("other-s3cret")));
+    QVERIFY(ownerOnly());
+    QCOMPARE(stored().count(), 2);
+
+    // Removing the secrets removes them from the file, and the file with the last one
+    QVERIFY(credentials.remove(key));
+    QCOMPARE(stored(), (QVariantMap{ { idOf(otherKey), QStringLiteral("other-s3cret") } }));
     QVERIFY(credentials.secret(key).isEmpty());
+    QVERIFY(credentials.remove(otherKey));
+    QVERIFY(!QFile::exists(filePath));
+
+    // The secrets earlier versions kept in the settings are moved to the file, where those entered since stay
+    {
+        QSettings settings;
+        settings.beginGroup(name);
+        settings.setValue(idOf(key), QStringLiteral("settings-s3cret"));
+        settings.setValue(idOf(otherKey), QStringLiteral("old-s3cret"));
+    }
+    QVERIFY(credentials.setSecret(otherKey, QStringLiteral("entered-s3cret")));
+    QCOMPARE(inSettings().count(), 2);
+    const GeoZoneCredentials migrated(name);
+    QCOMPARE(migrated.secret(key), QStringLiteral("settings-s3cret"));
+    QCOMPARE(migrated.secret(otherKey), QStringLiteral("entered-s3cret"));
+    QVERIFY(inSettings().isEmpty());
+    QVERIFY(ownerOnly());
+
+    // A file of a newer version is neither used nor replaced
+    const QByteArray newer = QJsonDocument(QJsonObject{ { QStringLiteral("version"), GeoZoneCredentials::fileVersion + 1 },
+                                                        { QStringLiteral("secrets"), QJsonObject{ { idOf(key), QStringLiteral("newer-s3cret") } } } }).toJson();
+    {
+        QFile file(filePath);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate) && (file.write(newer) == newer.size()));
+    }
+    QVERIFY(credentials.secret(key).isEmpty());
+    QVERIFY(!credentials.setSecret(key, QStringLiteral("s3cret")));
+    QVERIFY(!credentials.remove(key));
+    QCOMPARE(fileBytes(), newer);
+
+    // One which can't be read is replaced by the secrets entered again
+    {
+        QFile file(filePath);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate) && (file.write("{ \"secrets\": ") > 0));
+    }
+    QVERIFY(credentials.secret(key).isEmpty());
+    QVERIFY(credentials.setSecret(key, QStringLiteral("s3cret")));
+    QCOMPARE(stored(), (QVariantMap{ { idOf(key), QStringLiteral("s3cret") } }));
+    QVERIFY(ownerOnly());
 }
 
 void GeoZoneServiceTest::_testOpenAipService()
