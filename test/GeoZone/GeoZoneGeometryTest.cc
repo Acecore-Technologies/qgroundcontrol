@@ -1758,6 +1758,60 @@ void GeoZoneGeometryTest::_testAreaIntersection()
     QVERIFY(GeoZone(elevated).intersectsArea(area(survey, 400, 450)));
 }
 
+void GeoZoneGeometryTest::_testSharedGeometryHelpers()
+{
+    using namespace GeoZoneGeometry;
+
+    // The distance to a segment and its square, beside it, beyond its ends and for a segment without length
+    const QPointF a(0, 0);
+    const QPointF b(10, 0);
+    for (const QPointF &point : { QPointF(5, 3), QPointF(-4, 3), QPointF(13, -4), QPointF(2, 0), QPointF(0, 0) }) {
+        const double distance = distanceToSegment(point, a, b);
+        QCOMPARE(distanceToSegmentSquared(point, a, b), distance * distance);
+    }
+    QCOMPARE(distanceToSegment(QPointF(5, 3), a, b), 3.0);
+    QCOMPARE(distanceToSegment(QPointF(-4, 3), a, b), 5.0);
+    QCOMPARE(distanceToSegment(QPointF(13, -4), a, b), 5.0);
+    QCOMPARE(distanceToSegmentSquared(QPointF(3, 4), a, a), 25.0);
+
+    // An edge folding back over the previous one, unlike one going on straight or turning
+    QVERIFY(foldsBack(QPointF(0, 0), QPointF(2, 0), QPointF(1, 0)));
+    QVERIFY(foldsBack(QPointF(0, 0), QPointF(2, 0), QPointF(-1, 0)));
+    QVERIFY(!foldsBack(QPointF(0, 0), QPointF(1, 0), QPointF(2, 0)));
+    QVERIFY(!foldsBack(QPointF(0, 0), QPointF(2, 0), QPointF(1, 1)));
+    QVERIFY(!isSimple({ QPointF(0, 0), QPointF(2, 0), QPointF(1, 0), QPointF(1, 2) }));
+
+    // The chain simplifier keeps the vertices farther than the tolerance from the chords, the same with distances
+    // and with squared ones, also for a chain wrapping around the end of the ring
+    const QList<QPointF> ring = { { 0, 0 }, { 2, 0.4 }, { 4, 3 }, { 6, 0.4 }, { 8, 0 }, { 8, 8 }, { 4, 8.3 }, { 0, 8 } };
+    const auto kept = [&ring](qsizetype first, qsizetype last, double tolerance, bool keepFarthest, bool squared) {
+        QList<bool> keep(ring.count(), false);
+        if (squared) {
+            simplifyChain(ring, first, last, tolerance * tolerance, keep, keepFarthest, distanceToSegmentSquared);
+        } else {
+            simplifyChain(ring, first, last, tolerance, keep, keepFarthest);
+        }
+        QList<int> indexes;
+        for (int i = 0; i < keep.count(); i++) {
+            if (keep[i]) {
+                indexes.append(i);
+            }
+        }
+        return indexes;
+    };
+    for (const bool squared : { false, true }) {
+        // Vertex 2 is 3 off the chord from 0 to 4, vertices 1 and 3 are 0.88 off the chords to it
+        QCOMPARE(kept(0, 4, 1, false, squared), QList<int>({ 2 }));
+        QCOMPARE(kept(0, 4, 0.3, false, squared), QList<int>({ 1, 2, 3 }));
+        QCOMPARE(kept(0, 4, 5, false, squared), QList<int>());
+        QCOMPARE(kept(0, 4, 5, true, squared), QList<int>({ 2 }));
+        // From vertex 5 around to vertex 0, where vertex 6 is 0.3 off the chord from 5 to 7
+        QCOMPARE(kept(5, 8, 0.2, false, squared), QList<int>({ 6, 7 }));
+        QCOMPARE(kept(5, 8, 1, false, squared), QList<int>({ 7 }));
+        QCOMPARE(kept(4, 8, 5, false, squared), QList<int>({ 6 }));
+    }
+}
+
 void GeoZoneGeometryTest::_testShapeSimplification()
 {
     // Dense 5 km circle with a 40 m hole

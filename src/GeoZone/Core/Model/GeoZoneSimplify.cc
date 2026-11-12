@@ -33,33 +33,6 @@ QPointF _lineIntersection(const QPointF &p, const QPointF &d, const QPointF &q, 
     return p + (d * (GeoZoneVector::cross(q - p, e) / denominator));
 }
 
-/// Douglas-Peucker on the part of the closed ring from first to last, which may exceed the vertex count to wrap
-/// around. Marks the vertices to keep, excluding first and last.
-/// @param keepFarthest Keep the vertex farthest from the chord even when within the tolerance
-void _simplifyChain(const QList<QPointF> &ring, qsizetype first, qsizetype last, double tolerance, QList<bool> &keep, bool keepFarthest = false)
-{
-    const qsizetype count = ring.count();
-    QList<std::pair<qsizetype, qsizetype>> stack = { { first, last } };
-    while (!stack.isEmpty()) {
-        const auto [chainFirst, chainLast] = stack.takeLast();
-        double maxDistance = 0;
-        qsizetype maxIndex = -1;
-        for (qsizetype i = chainFirst + 1; i < chainLast; i++) {
-            const double distance = distanceToSegment(ring[i % count], ring[chainFirst % count], ring[chainLast % count]);
-            if (distance > maxDistance) {
-                maxDistance = distance;
-                maxIndex = i;
-            }
-        }
-        if ((maxIndex >= 0) && ((maxDistance > tolerance) || keepFarthest)) {
-            keepFarthest = false;
-            keep[maxIndex % count] = true;
-            stack.append({ chainFirst, maxIndex });
-            stack.append({ maxIndex, chainLast });
-        }
-    }
-}
-
 QPointF _outwardNormal(const QPointF &direction, bool counterClockwise)
 {
     return counterClockwise ? QPointF(direction.y(), -direction.x()) : QPointF(-direction.y(), direction.x());
@@ -299,7 +272,7 @@ void _findCrossings(const QList<QPointF> &expanded, const QList<QPointF> &origin
         const QPointF &a2 = expanded[(i + 1) % count];
         const QPointF &a3 = expanded[(i + 2) % count];
         // Adjacent edges may only share their vertex, not fold back over each other
-        if ((GeoZoneVector::orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
+        if (foldsBack(a1, a2, a3)) {
             badExpandedEdges.append(i);
             badExpandedEdges.append((i + 1) % count);
         }
@@ -327,6 +300,32 @@ void _findCrossings(const QList<QPointF> &expanded, const QList<QPointF> &origin
 }
 
 } // namespace
+
+void simplifyChain(const QList<QPointF> &ring, qsizetype first, qsizetype last, double tolerance, QList<bool> &keep, bool keepFarthest, ChainMeasure measure)
+{
+    const qsizetype count = ring.count();
+    QList<std::pair<qsizetype, qsizetype>> stack = { { first, last } };
+    while (!stack.isEmpty()) {
+        const auto [chainFirst, chainLast] = stack.takeLast();
+        const QPointF &chordStart = ring[chainFirst % count];
+        const QPointF &chordEnd = ring[chainLast % count];
+        double maxDistance = 0;
+        qsizetype maxIndex = -1;
+        for (qsizetype i = chainFirst + 1; i < chainLast; i++) {
+            const double distance = measure(ring[(i < count) ? i : (i % count)], chordStart, chordEnd);
+            if (distance > maxDistance) {
+                maxDistance = distance;
+                maxIndex = i;
+            }
+        }
+        if ((maxIndex >= 0) && ((maxDistance > tolerance) || keepFarthest)) {
+            keepFarthest = false;
+            keep[maxIndex % count] = true;
+            stack.append({ chainFirst, maxIndex });
+            stack.append({ maxIndex, chainLast });
+        }
+    }
+}
 
 QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double toleranceMeters)
 {
@@ -359,8 +358,8 @@ QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double 
     QList<bool> keep(count, false);
     keep[0] = keep[farthest] = true;
     // Keeping a vertex on each side makes polygons smaller than the tolerance at least a triangle
-    _simplifyChain(original, 0, farthest, toleranceMeters, keep, true);
-    _simplifyChain(original, farthest, count, toleranceMeters, keep, true);
+    simplifyChain(original, 0, farthest, toleranceMeters, keep, true);
+    simplifyChain(original, farthest, count, toleranceMeters, keep, true);
     QList<double> chainTolerances(count, toleranceMeters);  ///< Tolerance used for the chain starting at a kept vertex
 
     // The orientation of the simplified ring may flip when it degenerates, so the original defines outward
@@ -446,7 +445,7 @@ QList<QGeoCoordinate> simplifyOutward(const QList<QGeoCoordinate> &ring, double 
                     keep[i % count] = true;
                 }
             } else {
-                _simplifyChain(original, first, last, tolerance, keep);
+                simplifyChain(original, first, last, tolerance, keep);
             }
             for (qsizetype i = first; i < last; i++) {
                 if (keep[i % count]) {

@@ -13,28 +13,12 @@
 
 #include <algorithm>
 #include <cmath>
-#include <utility>
-#include <vector>
 
 namespace {
 
 constexpr double kMaxMercatorLatitude = 85.05112878;
 constexpr double kEarthCircumferenceMeters = 40075016.686;
 constexpr double kTilePixels = 256.0;
-
-double _segmentDistanceSquared(const QPointF &point, const QPointF &a, const QPointF &b)
-{
-    const double dx = b.x() - a.x();
-    const double dy = b.y() - a.y();
-    const double lengthSquared = (dx * dx) + (dy * dy);
-    double t = 0;
-    if (lengthSquared > 0) {
-        t = std::clamp((((point.x() - a.x()) * dx) + ((point.y() - a.y()) * dy)) / lengthSquared, 0.0, 1.0);
-    }
-    const double px = a.x() + (t * dx) - point.x();
-    const double py = a.y() + (t * dy) - point.y();
-    return (px * px) + (py * py);
-}
 
 } // namespace
 
@@ -153,30 +137,10 @@ QList<QPointF> GeoZoneShape::simplifyRing(const QList<QPointF> &ring, double mer
     keep[0] = true;
     keep[farthest] = true;
 
-    // Index count stands for vertex 0 closing the ring
-    std::vector<std::pair<qsizetype, qsizetype>> segments = { { 0, farthest }, { farthest, count } };
+    // Index count stands for vertex 0 closing the ring. Squared distances are compared, for the many vertices of maps.
     const double toleranceSquared = mercatorTolerance * mercatorTolerance;
-    while (!segments.empty()) {
-        const auto [first, last] = segments.back();
-        segments.pop_back();
-
-        const QPointF &a = points[first];
-        const QPointF &b = points[last % count];
-        qsizetype index = -1;
-        double maxDistance = toleranceSquared;
-        for (qsizetype i = first + 1; i < last; i++) {
-            const double distance = _segmentDistanceSquared(points[i], a, b);
-            if (distance > maxDistance) {
-                maxDistance = distance;
-                index = i;
-            }
-        }
-        if (index >= 0) {
-            keep[index] = true;
-            segments.emplace_back(first, index);
-            segments.emplace_back(index, last);
-        }
-    }
+    GeoZoneGeometry::simplifyChain(points, 0, farthest, toleranceSquared, keep, false, GeoZoneGeometry::distanceToSegmentSquared);
+    GeoZoneGeometry::simplifyChain(points, farthest, count, toleranceSquared, keep, false, GeoZoneGeometry::distanceToSegmentSquared);
 
     QList<QPointF> simplified;
     for (qsizetype i = 0; i < count; i++) {
@@ -212,7 +176,7 @@ QList<QPointF> GeoZoneShape::spanningTriangle(const QList<QPointF> &ring)
         if (i == second) {
             continue;
         }
-        const double distance = _segmentDistanceSquared(points[i], points[0], points[second]);
+        const double distance = GeoZoneGeometry::distanceToSegmentSquared(points[i], points[0], points[second]);
         if (distance > maxDistance) {
             maxDistance = distance;
             third = i;

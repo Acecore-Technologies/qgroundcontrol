@@ -10,10 +10,25 @@
 #pragma once
 
 #include <QtCore/QList>
+#include <QtCore/QPointF>
 #include <QtPositioning/QGeoCoordinate>
 
-/// Simplification of geozone polygons which keeps them inside, see GeoZoneGeometry.h
+#include "GeoZonePredicates.h"
+
+/// Simplification of geozone polygons, see GeoZoneGeometry.h
 namespace GeoZoneGeometry {
+
+/// How far a vertex is from the chord replacing it: distanceToSegment, or distanceToSegmentSquared which is cheaper
+using ChainMeasure = double (*)(const QPointF &point, const QPointF &a, const QPointF &b);
+
+/// The Douglas-Peucker step of the simplifications, on the part of the closed ring from the vertex first to the vertex
+/// last, which may exceed the vertex count to wrap around. Marks the vertices to keep between them, those farther
+/// than the tolerance from the chord between the kept vertices around them.
+/// @param tolerance    In the measure: squared for distanceToSegmentSquared
+/// @param keep         A flag for each vertex of the ring
+/// @param keepFarthest Keep the vertex farthest from the chord from first to last even when within the tolerance
+void simplifyChain(const QList<QPointF> &ring, qsizetype first, qsizetype last, double tolerance, QList<bool> &keep, bool keepFarthest = false,
+                   ChainMeasure measure = distanceToSegment);
 
 /// Reduces the vertex count of a polygon ring while keeping the whole original polygon inside the result.
 /// The ring is simplified with the tolerance, then each edge is moved outward past the vertices it replaced,

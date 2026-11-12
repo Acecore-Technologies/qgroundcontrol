@@ -42,7 +42,14 @@ double signedArea(const QList<QGeoCoordinate> &ring);
 
 bool segmentsIntersect(const QPointF &a1, const QPointF &a2, const QPointF &b1, const QPointF &b2);
 
+/// @return true if the edge from b to c folds back over the edge from a to b. Adjacent edges of a ring intersect at
+///         the vertex they share, which segmentsIntersect can't tell from folding back.
+bool foldsBack(const QPointF &a, const QPointF &b, const QPointF &c);
+
+/// @return Distance from the point to the closest point of the segment from a to b
 double distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &b);
+/// @return The square of distanceToSegment, cheaper where distances are only compared
+double distanceToSegmentSquared(const QPointF &point, const QPointF &a, const QPointF &b);
 
 /// @return Distance to the closest edge of the unclosed ring
 /// @param xScale Applied to x offsets from the point, like LocalProjection::eastScaleAt

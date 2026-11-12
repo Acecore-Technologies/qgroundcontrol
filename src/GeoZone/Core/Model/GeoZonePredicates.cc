@@ -60,6 +60,16 @@ bool _filled(int winding, Qt::FillRule fillRule)
     return (fillRule == Qt::WindingFill) ? (winding != 0) : ((winding % 2) != 0);
 }
 
+/// @return Offset from the point to the closest point of the segment from a to b
+QPointF _offsetToSegment(const QPointF &point, const QPointF &a, const QPointF &b)
+{
+    const double dx = b.x() - a.x();
+    const double dy = b.y() - a.y();
+    const double lengthSquared = (dx * dx) + (dy * dy);
+    const double t = (lengthSquared > 0) ? std::clamp((((point.x() - a.x()) * dx) + ((point.y() - a.y()) * dy)) / lengthSquared, 0.0, 1.0) : 0.0;
+    return QPointF(a.x() + (t * dx) - point.x(), a.y() + (t * dy) - point.y());
+}
+
 } // namespace
 
 bool ringContains(const QList<QPointF> &ring, const QPointF &point, Qt::FillRule fillRule)
@@ -127,12 +137,20 @@ bool segmentsIntersect(const QPointF &a1, const QPointF &a2, const QPointF &b1, 
            ((o3 == 0) && _onSegment(b1, b2, a1)) || ((o4 == 0) && _onSegment(b1, b2, a2));
 }
 
+bool foldsBack(const QPointF &a, const QPointF &b, const QPointF &c)
+{
+    return (GeoZoneVector::orientation(a, b, c) == 0) && (QPointF::dotProduct(b - a, c - b) < 0);
+}
+
 double distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &b)
 {
-    const QPointF ab = b - a;
-    const double lengthSquared = QPointF::dotProduct(ab, ab);
-    const double t = (lengthSquared > 0) ? std::clamp(QPointF::dotProduct(point - a, ab) / lengthSquared, 0.0, 1.0) : 0.0;
-    return GeoZoneVector::length(a + (ab * t) - point);
+    return GeoZoneVector::length(_offsetToSegment(point, a, b));
+}
+
+double distanceToSegmentSquared(const QPointF &point, const QPointF &a, const QPointF &b)
+{
+    const QPointF offset = _offsetToSegment(point, a, b);
+    return (offset.x() * offset.x()) + (offset.y() * offset.y());
 }
 
 double distanceToRing(const QPointF &point, const QList<QPointF> &ring, double xScale)
@@ -252,7 +270,7 @@ bool isSimple(const QList<QPointF> &ring)
         const QPointF &a2 = ring[(i + 1) % count];
         const QPointF &a3 = ring[(i + 2) % count];
         // Adjacent edges may only share their vertex, not fold back over each other
-        if ((GeoZoneVector::orientation(a1, a2, a3) == 0) && (QPointF::dotProduct(a2 - a1, a3 - a2) < 0)) {
+        if (foldsBack(a1, a2, a3)) {
             return false;
         }
     }

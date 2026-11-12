@@ -43,6 +43,7 @@ private slots:
     void _testFlightLevels();
     void _testAreaIntersection();
     void _testShapeSimplification();
+    void _testSharedGeometryHelpers();
 #ifndef GEOZONE_CORE_TEST
     void _testMapLayerTriangulation();
 #endif
