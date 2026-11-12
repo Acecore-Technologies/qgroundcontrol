@@ -60,6 +60,7 @@ ColumnLayout {
         QGCLabel {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
+            textFormat:         Text.PlainText
             font.pointSize:     ScreenTools.smallFontPointSize
             text:               _repository.progressText
         }

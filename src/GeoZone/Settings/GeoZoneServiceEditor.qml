@@ -59,7 +59,8 @@ ColumnLayout {
 
     Component.onCompleted: applyTemplate()
 
-    QGCComboBox {
+    // The names and notes of the templates may come from a feed catalogue
+    GeoZoneChoiceComboBox {
         id:                 serviceTemplateCombo
         Layout.fillWidth:   true
         model:              serviceEntry._templates.map(serviceTemplate => serviceTemplate.name)
@@ -69,6 +70,7 @@ ColumnLayout {
     QGCLabel {
         Layout.fillWidth:   true
         wrapMode:           Text.WordWrap
+        textFormat:         Text.PlainText
         font.pointSize:     ScreenTools.smallFontPointSize
         text:               serviceEntry._template.note
     }

@@ -48,7 +48,11 @@ QGCComboBox {
 
     alternateText: currentIndex >= 0 && !currentEnabled ? _text(currentIndex, currentText) : ""
 
-    Component.onCompleted: contentItem.elide = Text.ElideRight
+    // The texts may come from feed catalogues: no markup, in the box and in the list
+    Component.onCompleted: {
+        contentItem.elide = Text.ElideRight
+        contentItem.textFormat = Text.PlainText
+    }
 
     QGCPalette { id: choicePalette; colorGroupEnabled: true }
 
@@ -65,6 +69,7 @@ QGCComboBox {
 
         contentItem: Text {
             text:               control._text(choice.index, choice.modelData)
+            textFormat:         Text.PlainText
             font:               control.font
             wrapMode:           Text.WordWrap
             verticalAlignment:  Text.AlignVCenter
