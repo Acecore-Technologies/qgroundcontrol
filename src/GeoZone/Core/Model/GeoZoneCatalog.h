@@ -70,8 +70,9 @@ public:
     QList<const GeoZone*> zonesAt(const QGeoCoordinate &coordinate) const;
 
     /// @return Zones whose name or identifier contains the text ignoring case and diacritics (see searchKey), those
-    ///         starting with it first, then the most restrictive, limited to maxResults. Zones with the same identifier,
-    ///         name and restriction, like the same zone from overlapping sources, are found once.
+    ///         starting with it first, then the most restrictive, limited to maxResults. A zone which overlapping
+    ///         sources publish alike is found once, see rebuild. Zones of a source sharing their identifier, name and
+    ///         restriction are zones of their own, each with its GeoZone::key, and are all found.
     QList<const GeoZone*> search(const QString &text, int maxResults) const;
     /// @return The text case folded without diacritics, like "zurich" for "Zürich", so that names match however
     ///         their accents are typed

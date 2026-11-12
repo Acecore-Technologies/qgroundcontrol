@@ -353,6 +353,7 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
             _shapes.append(volume.isCircle ? new GeoZoneShape(zone, volume.center, volume.radius) : new GeoZoneShape(zone, volume.rings));
         }
     }
+    GeoZone::disambiguateKeys(_zones);
 
     _changedZoneKeys.clear();
     if (reload) {

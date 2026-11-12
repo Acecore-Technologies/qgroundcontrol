@@ -118,6 +118,25 @@ void GeoZone::setSourceKey(const QString &sourceKey)
     _key = QStringLiteral("%1\x1f%2\x1f%3\x1f%4").arg(sourceKey, _data.identifier, _data.name, QString::number(static_cast<int>(_data.restriction)));
 }
 
+void GeoZone::disambiguateKeys(const QList<GeoZone*> &zones)
+{
+    QHash<QString, QList<GeoZone*>> twins;
+    for (GeoZone *zone : zones) {
+        // Without the ordinal of an earlier call
+        zone->setSourceKey(zone->_sourceKey);
+        twins[zone->_key].append(zone);
+    }
+    for (QList<GeoZone*> &sameKey : twins) {
+        if (sameKey.count() < 2) {
+            continue;
+        }
+        std::stable_sort(sameKey.begin(), sameKey.end(), [](const GeoZone *a, const GeoZone *b) { return a->_data.contentHash < b->_data.contentHash; });
+        for (qsizetype i = 1; i < sameKey.count(); i++) {
+            sameKey[i]->_key += QChar(0x1f) + QString::number(i + 1);
+        }
+    }
+}
+
 void GeoZone::setSourceText(const QString &sourceText)
 {
     _sourceText = sourceText;

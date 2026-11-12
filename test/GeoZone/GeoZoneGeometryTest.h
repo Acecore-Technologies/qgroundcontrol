@@ -33,6 +33,7 @@ private slots:
     void _testFencePrediction();
     void _testContainsAndPaths();
     void _testInvalidCoordinates();
+    void _testZoneKeys();
     void _testRingContainment();
     void _testAltitudeLimits();
     void _testVerticalOverlap_data();

@@ -9,10 +9,14 @@
 
 #include "GeoZoneGeometryTest.h"
 #include "GeoZoneTestHelpers.h"
+#include "GeoZoneAlertTracker.h"
 #include "GeoZoneFencePrediction.h"
 #include "GeoZoneFences.h"
 #include "GeoZoneText.h"
 #include "GeoZoneVertical.h"
+#ifndef GEOZONE_CORE_TEST
+#include "GeoZoneAlertArbiter.h"
+#endif
 
 using namespace GeoZoneTestHelpers;
 
@@ -1187,6 +1191,128 @@ void GeoZoneGeometryTest::_testInvalidCoordinates()
         QCOMPARE(zone->distanceTo(center), 0.0);
         QVERIFY(_near(zone->distanceTo(center.atDistanceAndAzimuth(600, 0)), 100, 1));
     }
+}
+
+void GeoZoneGeometryTest::_testZoneKeys()
+{
+    // Three zones of a source with the same identifier, name and restriction, like the areas of a restriction
+    // published as features of their own, 1 km apart, and a zone of its own
+    const QGeoCoordinate center(47, 8);
+    const QJsonArray features = { _circleFeature(QStringLiteral("TWIN"), QStringLiteral("PROHIBITED"), center, 300),
+                                  _circleFeature(QStringLiteral("TWIN"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1000, 90), 300),
+                                  _circleFeature(QStringLiteral("TWIN"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1000, 0), 300),
+                                  _circleFeature(QStringLiteral("OTHER"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(5000, 180), 300) };
+    QJsonArray reversedFeatures;
+    for (qsizetype i = features.count() - 1; i >= 0; i--) {
+        reversedFeatures.append(features[i]);
+    }
+    const auto load = [](GeoZoneSource &source, const QJsonArray &sourceFeatures) {
+        GeoZoneParser::Result result;
+        QString errorString;
+        if (!GeoZoneParser::parse(QJsonDocument(QJsonObject{ { "features", sourceFeatures } }).toJson(), result, errorString)) {
+            return false;
+        }
+        const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+        source.setResult(result, now, now);
+        return true;
+    };
+    // The keys of the zones by their content
+    const auto keysByContent = [](const GeoZoneSource &source) {
+        QHash<QByteArray, QString> keys;
+        for (const GeoZone *zone : source.zones()) {
+            keys.insert(zone->data().contentHash, zone->key());
+        }
+        return keys;
+    };
+
+    GeoZoneSource source(QStringLiteral("twins.json"), QString());
+    QVERIFY(load(source, features));
+    QCOMPARE(source.zoneCount(), 4);
+    const QHash<QByteArray, QString> keys = keysByContent(source);
+    QCOMPARE(keys.count(), 4);
+    QCOMPARE(QSet<QString>(keys.cbegin(), keys.cend()).count(), 4);
+
+    // Keys without twins are as they were, and so is that of the first twin by content hash; the others follow it
+    // with their ordinal
+    const QString twinKey = QStringLiteral("twins.json\x1fTWIN\x1f\x1f") + QString::number(static_cast<int>(GeoZone::Prohibited));
+    QList<QByteArray> twinHashes;
+    for (const GeoZone *zone : source.zones()) {
+        if (zone->identifier() == QStringLiteral("TWIN")) {
+            twinHashes.append(zone->data().contentHash);
+        } else {
+            QCOMPARE(zone->key(), QStringLiteral("twins.json\x1fOTHER\x1f\x1f") + QString::number(static_cast<int>(GeoZone::Prohibited)));
+        }
+    }
+    QCOMPARE(twinHashes.count(), 3);
+    std::sort(twinHashes.begin(), twinHashes.end());
+    QCOMPARE(keys.value(twinHashes[0]), twinKey);
+    QCOMPARE(keys.value(twinHashes[1]), twinKey + QStringLiteral("\x1f") + QStringLiteral("2"));
+    QCOMPARE(keys.value(twinHashes[2]), twinKey + QStringLiteral("\x1f") + QStringLiteral("3"));
+
+    // Whatever the order the source lists them in, and over a reload
+    GeoZoneSource reversed(QStringLiteral("twins.json"), QString());
+    QVERIFY(load(reversed, reversedFeatures));
+    QCOMPARE(keysByContent(reversed), keys);
+    QVERIFY(load(source, reversedFeatures));
+    QCOMPARE(keysByContent(source), keys);
+    QVERIFY(source.changedZoneKeys().isEmpty());
+    GeoZone::disambiguateKeys(source.zones());
+    QCOMPARE(keysByContent(source), keys);
+
+    // Lookups by key, like those of the fences made from zones and of the zones a plan was saved with, find each twin
+    QHash<QString, const GeoZone*> zonesByKey;
+    for (const GeoZone *zone : source.zones()) {
+        zonesByKey.insert(zone->key(), zone);
+    }
+    QCOMPARE(zonesByKey.count(), 4);
+    for (const GeoZone *zone : source.zones()) {
+        QCOMPARE(zonesByKey.value(zone->key()), zone);
+    }
+    const GeoZoneFences::Prepared prepared = GeoZoneFences::prepare(GeoZoneFences::candidates(QList<const GeoZone*>(source.zones().cbegin(), source.zones().cend()),
+                                                                                           GeoZonePathEvaluator::Result(), {}));
+    QHash<QString, qsizetype> fenceIndexes;
+    for (qsizetype i = 0; i < prepared.entries.count(); i++) {
+        fenceIndexes.insert(prepared.entries[i].candidate.zone->key(), i);
+    }
+    QCOMPARE(fenceIndexes.count(), 4);
+
+    // The alert states of the twins stay apart: a vehicle in the first twin and near the two others is alerted of
+    // each once, not again at the next position
+    GeoZoneCatalog catalog;
+    catalog.rebuild({ &source });
+    const GeoZonePolicy policy({ GeoZone::Prohibited });
+    const GeoZoneAlertTracker::Limits limits{ 1000, 100, 0, 0 };
+    GeoZoneAlertTracker tracker;
+    GeoZoneAlertTracker::Update update = tracker.update(catalog, policy, GeoZone::Position{ center, 50 }, GeoZoneAlertTracker::Velocity(), limits);
+    QCOMPARE(update.nearby.count(), 3);
+    QCOMPARE(update.alerts.count(), 3);
+    QCOMPARE(std::count_if(update.alerts.cbegin(), update.alerts.cend(), [](const GeoZoneAlertTracker::Alert &alert) { return alert.inside; }), 1);
+    QSet<QString> alerted;
+    for (const GeoZoneAlertTracker::Alert &alert : std::as_const(update.alerts)) {
+        QVERIFY(alert.zone);
+        alerted.insert(alert.zone->key());
+    }
+    QCOMPARE(alerted.count(), 3);
+    update = tracker.update(catalog, policy, GeoZone::Position{ center.atDistanceAndAzimuth(1, 0), 50 }, GeoZoneAlertTracker::Velocity(), limits);
+    QCOMPARE(update.nearby.count(), 3);
+    QVERIFY(update.alerts.isEmpty());
+    // Forgetting one twin alerts of it again, not of the others
+    const GeoZone *const inside = catalog.zonesAt(center).value(0);
+    QVERIFY(inside);
+    tracker.forget({ inside->key() });
+    update = tracker.update(catalog, policy, GeoZone::Position{ center, 50 }, GeoZoneAlertTracker::Velocity(), limits);
+    QCOMPARE(update.alerts.count(), 1);
+    QCOMPARE(update.alerts.constFirst().zone, inside);
+
+#ifndef GEOZONE_CORE_TEST
+    // Approving a twin for a vehicle doesn't approve the others
+    GeoZoneAlertArbiter arbiter;
+    arbiter.approveZone(1, inside->key());
+    for (const GeoZone *zone : source.zones()) {
+        QCOMPARE(arbiter.zoneApproved(1, zone->key()), zone == inside);
+    }
+    QCOMPARE(arbiter.approvalCount(), 1);
+#endif
 }
 
 void GeoZoneGeometryTest::_testRingContainment()

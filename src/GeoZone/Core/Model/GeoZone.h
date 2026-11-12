@@ -178,8 +178,16 @@ public:
     /// @return true if the zone is from the source, or one of otherSources
     bool fromSource(const QString &sourceKey) const;
 
-    /// @return Identifies the zone across reloads of its source, from the source key, identifier, name and restriction
+    /// @return Identifies the zone among all zones and across reloads of its source: the source key, identifier, name
+    ///         and restriction. Zones of a source with the same ones, like the parts of a restriction published as
+    ///         features of their own, are told apart by an ordinal the second and later ones get appended, see
+    ///         disambiguateKeys. Keys are kept in plans, authorisations and the alert log.
     const QString &key() const { return _key; }
+    /// Makes the keys of the zones of one source unique, once the source set its key on them and before it publishes
+    /// them. Of zones with the same key, the first keeps it and the others get their ordinal appended, from 2. They
+    /// are ordered by their content hashes, then as listed, so that the keys don't depend on the order the source
+    /// lists its zones in and stay with their zones over reloads while these zones don't change.
+    static void disambiguateKeys(const QList<GeoZone*> &zones);
 
     /// Re-evaluates the active state against the specified UTC time
     /// @return true if the state changed
