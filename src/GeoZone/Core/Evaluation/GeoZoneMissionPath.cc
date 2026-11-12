@@ -63,7 +63,13 @@ QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &pa
         case Destination::BreachReturnPoint:
             description = definite ? tr("the flight to the breach return point after a fence breach") : tr("a flight to the breach return point after a fence breach");
             break;
-        default:
+        // Home, and the destinations no flight after a breach leads to, see GeoZoneReturnModel::breachPath
+        case Destination::Home:
+        case Destination::MissionLanding:
+        case Destination::ReturnPath:
+        case Destination::ReverseMission:
+        case Destination::MissionForward:
+        case Destination::None:
             description = definite ? tr("the flight home after a fence breach") : tr("a flight home after a fence breach");
             break;
         }
@@ -81,7 +87,11 @@ QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &pa
         case Destination::ReverseMission:
             description = definite ? tr("the return home after the mission in reverse") : tr("a return home after the mission in reverse");
             break;
-        default:
+        // Home, and the destinations without a return path to describe, see GeoZoneReturnModel::returnPath
+        case Destination::Home:
+        case Destination::BreachReturnPoint:
+        case Destination::MissionForward:
+        case Destination::None:
             description = definite ? tr("the return to launch") : tr("a return to launch");
             break;
         }
