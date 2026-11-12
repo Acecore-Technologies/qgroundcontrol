@@ -212,12 +212,14 @@ public:
     /// Circle volumes without duplicates
     QList<QGeoCircle> exclusionCircles() const;
 
-    /// @return true if the position is inside a volume. Unknown altitudes are inside all vertical limits.
+    /// @return true if the position is inside a volume. Unknown altitudes are inside all vertical limits. An invalid
+    ///         coordinate is in no zone: contains, volumeContains and distanceTo agree on it.
     bool contains(const Position &position) const;
     bool contains(const QGeoCoordinate &coordinate) const { return contains(Position{ coordinate }); }
 
     /// @return Horizontal distance in meters from the position to the closest volume whose vertical limits are
-    ///         within verticalMargin meters of the position's altitude. 0 when inside, infinity without such a volume.
+    ///         within verticalMargin meters of the position's altitude. 0 when inside, infinity without such a volume
+    ///         or for an invalid coordinate.
     /// @param maxDistance Polygons farther than this may be skipped, the result is then larger than maxDistance
     double distanceTo(const Position &position, double verticalMargin = 0, double maxDistance = qInf()) const;
     double distanceTo(const QGeoCoordinate &coordinate) const { return distanceTo(Position{ coordinate }); }
@@ -249,7 +251,8 @@ public:
     /// @return true if the area overlaps a volume horizontally and vertically
     bool intersectsArea(const Area &area) const;
 
-    /// @return true if the coordinate is inside the horizontal projection of the volume at the index
+    /// @return true if the coordinate is inside the horizontal projection of the volume at the index, false for an
+    ///         invalid coordinate
     bool volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordinate) const;
 
     /// @return Fractions of the great circle between the coordinates, which vehicles fly along, inside the horizontal

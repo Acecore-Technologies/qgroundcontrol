@@ -1148,6 +1148,47 @@ void GeoZoneGeometryTest::_testContainsAndPaths()
 #endif
 }
 
+void GeoZoneGeometryTest::_testInvalidCoordinates()
+{
+    // An unknown position is in no zone and near none, for circles like for polygons: the three queries agree
+    const QGeoCoordinate center(47, 8);
+    GeoZone::Volume circleVolume;
+    circleVolume.isCircle = true;
+    circleVolume.center = center;
+    circleVolume.radius = 500;
+    GeoZone::Data circleData;
+    circleData.volumes.append(circleVolume);
+    const GeoZone circle(circleData);
+    GeoZone::Data polygonData;
+    polygonData.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(_circleRing(center, 500, 8)) } });
+    const GeoZone polygon(polygonData);
+    GeoZone::Data bothData;
+    bothData.volumes = { polygonData.volumes.constFirst(), circleVolume };
+    const GeoZone both(bothData);
+
+    for (const QGeoCoordinate &invalid : { QGeoCoordinate(), QGeoCoordinate(qQNaN(), 8), QGeoCoordinate(91, 8), QGeoCoordinate(47, 181) }) {
+        QVERIFY(!invalid.isValid());
+        for (const GeoZone *zone : { &circle, &polygon, &both }) {
+            QVERIFY(!zone->contains(invalid));
+            QVERIFY(!zone->contains(GeoZone::Position{ invalid, 100, 0 }));
+            for (qsizetype i = 0; i < zone->data().volumes.count(); i++) {
+                QVERIFY(!zone->volumeContains(i, invalid));
+            }
+            QCOMPARE(zone->distanceTo(invalid), qInf());
+            QCOMPARE(zone->distanceTo(GeoZone::Position{ invalid, 100, 0 }, 50, 1000), qInf());
+            QVERIFY(!zone->pathEntry({ GeoZone::Position{ invalid } }));
+            QVERIFY(zone->horizontalIntervals(0, invalid, center).isEmpty());
+        }
+    }
+    // Valid positions as before
+    for (const GeoZone *zone : { &circle, &polygon, &both }) {
+        QVERIFY(zone->contains(center));
+        QVERIFY(zone->volumeContains(0, center));
+        QCOMPARE(zone->distanceTo(center), 0.0);
+        QVERIFY(_near(zone->distanceTo(center.atDistanceAndAzimuth(600, 0)), 100, 1));
+    }
+}
+
 void GeoZoneGeometryTest::_testRingContainment()
 {
     // A figure-8 whose edges cross at its center, and a pentagram whose boundary winds twice around its center

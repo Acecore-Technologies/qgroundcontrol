@@ -278,6 +278,10 @@ const GeoZone::Projected &GeoZone::_projected() const
 
 bool GeoZone::volumeContains(qsizetype volumeIndex, const QGeoCoordinate &coordinate) const
 {
+    // QGeoCoordinate measures 0 m to an invalid coordinate, which is in no volume
+    if (!coordinate.isValid()) {
+        return false;
+    }
     const Volume &volume = _data.volumes[volumeIndex];
     if (volume.isCircle) {
         return volume.center.isValid() && (volume.center.distanceTo(coordinate) <= volume.radius);
@@ -376,6 +380,9 @@ bool GeoZone::contains(const Position &position) const
 double GeoZone::distanceTo(const Position &position, double verticalMargin, double maxDistance) const
 {
     double minDistance = std::numeric_limits<double>::infinity();
+    if (!position.coordinate.isValid()) {
+        return minDistance;
+    }
     for (qsizetype i = 0; i < _data.volumes.count(); i++) {
         const Volume &volume = _data.volumes[i];
         if (!GeoZoneVertical::overlap(volume, position, position, verticalMargin)) {
