@@ -368,7 +368,7 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     const GeoZoneParseCache::Key cacheKey{ job.language, job.formatHint };
     if (job.fromStore && GeoZoneParseCache::read(job.sourcePath, cacheKey, loadResult.result)) {
         loadResult.fromCache = true;
-        qCDebug(GeoZoneSourceLog) << "Read" << loadResult.result.zones.count() << "zones of" << job.key << "from the parse cache in" << timer.elapsed() << "ms";
+        qCDebug(GeoZoneSourceLog) << "Read" << loadResult.result.zones.count() << "zones of" << GeoZoneDownloader::redactedUrl(job.key) << "from the parse cache in" << timer.elapsed() << "ms";
         return loadResult;
     }
     if (job.downloaded && !job.responseMember.isEmpty() && !extractMember(job.sourcePath, job.responseMember, loadResult.errorString)) {
@@ -425,7 +425,7 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
         loadResult.errorString = parseError;
         return loadResult;
     }
-    qCDebug(GeoZoneSourceLog) << "Parsed" << loadResult.result.zones.count() << "zones of" << job.key << "in" << timer.elapsed() << "ms";
+    qCDebug(GeoZoneSourceLog) << "Parsed" << loadResult.result.zones.count() << "zones of" << GeoZoneDownloader::redactedUrl(job.key) << "in" << timer.elapsed() << "ms";
     if (!job.storedFileName.isEmpty()) {
         loadResult.stored = job.downloaded ? store.adoptFile(job.sourcePath, job.storedFileName, loadResult.storeError)
                                            : store.copyFile(job.sourcePath, job.storedFileName, loadResult.storeError);

@@ -297,7 +297,7 @@ void GeoZoneSourceRepository::_checkAreas()
         if (const QDateTime retryAt = _scheduler->retryAt(source->key()); retryAt.isValid() && (retryAt > now)) {
             continue;
         }
-        qCDebug(GeoZoneSourceLog) << "The area of interest left the area of" << source->key();
+        qCDebug(GeoZoneSourceLog) << "The area of interest left the area of" << GeoZoneDownloader::redactedUrl(source->key());
         _download(source->key(), GeoZoneLoader::Request::Automatic);
     }
 }
@@ -432,7 +432,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
 
     _endOperation(url, fetch->cancelToken());
     if ((result.status == GeoZoneFeedFetch::Result::Status::NotModified) && existing) {
-        qCDebug(GeoZoneSourceLog) << "Feed not modified" << url;
+        qCDebug(GeoZoneSourceLog) << "Feed not modified" << GeoZoneDownloader::redactedUrl(url);
         const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
         existing->setCheckedAt(now);
         existing->setBusy(false);
@@ -447,7 +447,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
     }
 
     const QString error = result.errorString.isEmpty() ? tr("The server responded with status %1.").arg(304) : result.errorString;
-    qCWarning(GeoZoneSourceLog) << "Download failed" << url << error;
+    qCWarning(GeoZoneSourceLog) << "Download failed" << GeoZoneDownloader::redactedUrl(url) << error;
     if (existing) {
         existing->setBusy(false);
         existing->setErrorString(error);
@@ -464,7 +464,7 @@ void GeoZoneSourceRepository::_fetchFinished(GeoZoneFeedFetch *fetch, const GeoZ
         _services.forget(url);
     }
     if (request != GeoZoneLoader::Request::Automatic) {
-        emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(url, error));
+        emit loadFailed(url, tr("Geozone download from %1 failed. %2").arg(GeoZoneDownloader::redactedUrl(url), error));
     }
 }
 
@@ -549,7 +549,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     }
 
     if (!loadResult.errorString.isEmpty()) {
-        qCWarning(GeoZoneSourceLog) << "Load failed" << job.key << loadResult.errorString;
+        qCWarning(GeoZoneSourceLog) << "Load failed" << GeoZoneDownloader::redactedUrl(job.key) << loadResult.errorString;
         if (source) {
             source->setErrorString(loadResult.errorString);
             _scheduler->refreshFailed(*source);
@@ -568,7 +568,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
                            (source->contentHash() == loadResult.result.contentHash) && (source->format() == loadResult.result.format);
     if (unchanged) {
         source->markCurrent(loadResult.result, job.loadedAt, job.fileDate);
-        qCDebug(GeoZoneSourceLog) << "Zones unchanged" << job.key;
+        qCDebug(GeoZoneSourceLog) << "Zones unchanged" << GeoZoneDownloader::redactedUrl(job.key);
     } else {
         if (!source) {
             source = _newSource(job.key, job.url);
@@ -581,7 +581,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         emit sourceAboutToChange(source);
         source->setResult(loadResult.result, job.loadedAt, job.fileDate);
         emit sourceChanged(source);
-        qCDebug(GeoZoneSourceLog) << "Loaded" << source->zoneCount() << source->formatName() << "zones from" << job.key;
+        qCDebug(GeoZoneSourceLog) << "Loaded" << source->zoneCount() << source->formatName() << "zones from" << GeoZoneDownloader::redactedUrl(job.key);
     }
     if (job.checkedAt > job.loadedAt) {
         source->setCheckedAt(job.checkedAt);
@@ -601,7 +601,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     // A download missing zones, like a WFS response which lost pages, counts as a failed refresh and is retried as one
     const bool incomplete = job.downloaded && source->isFeed() && (source->missingCount() > 0);
     if (incomplete) {
-        qCWarning(GeoZoneSourceLog) << "Incomplete download" << job.key << source->incompleteText();
+        qCWarning(GeoZoneSourceLog) << "Incomplete download" << GeoZoneDownloader::redactedUrl(job.key) << source->incompleteText();
         _scheduler->refreshFailed(*source);
     } else {
         _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
@@ -630,7 +630,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     }
 
     if (incomplete && (job.request != GeoZoneLoader::Request::Automatic)) {
-        emit loadFailed(job.key, tr("Geozone download from %1. %2").arg(job.key, source->incompleteText()));
+        emit loadFailed(job.key, tr("Geozone download from %1. %2").arg(GeoZoneDownloader::redactedUrl(job.key), source->incompleteText()));
     }
     if (unchanged) {
         return;
@@ -797,7 +797,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         }
         GeoZoneLoader::Job job = GeoZoneLoader::storedJob(entry, _store.path(entry.fileName));
         if (!QFile::exists(job.sourcePath) || source(job.key)) {
-            qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source" << job.key << entry.fileName;
+            qCWarning(GeoZoneSourceLog) << "Skipping stored geozone source" << GeoZoneDownloader::redactedUrl(job.key) << entry.fileName;
             continue;
         }
         job.cancelToken = _beginOperation(job.key);

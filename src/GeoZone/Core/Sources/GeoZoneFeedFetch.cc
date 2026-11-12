@@ -45,7 +45,8 @@ GeoZoneFeedFetch::~GeoZoneFeedFetch()
 
 void GeoZoneFeedFetch::start()
 {
-    qCDebug(GeoZoneSourceLog) << "Downloading" << _request.url;
+    // A key typed into the address of a feed stays out of the log, see GeoZoneDownloader::redactedUrl
+    qCDebug(GeoZoneSourceLog) << "Downloading" << _logUrl();
     const GeoZoneService &service = _request.service;
     _requestUrl = service.isEmpty() ? _request.url : service.requestUrl(_request.url, _request.area, _request.time);
     _result.requestUrl = _requestUrl;
@@ -72,7 +73,7 @@ void GeoZoneFeedFetch::start()
 
 void GeoZoneFeedFetch::_requestToken()
 {
-    qCDebug(GeoZoneSourceLog) << "Requesting an access token from" << _request.service.tokenUrl;
+    qCDebug(GeoZoneSourceLog) << "Requesting an access token from" << GeoZoneDownloader::redactedUrl(_request.service.tokenUrl);
     _stage = Stage::Token;
     _tokenRequested = true;
     _get(_request.service.tokenUrl, QString(), QString(), [this](const GeoZoneDownloader::Result &download) { _tokenReceived(download); },
@@ -213,7 +214,7 @@ void GeoZoneFeedFetch::_feedReceived(const GeoZoneDownloader::Result &download)
     }
     // The lifetime of a download page, often a minute for the pages of a web site, isn't that of the dataset it links
 
-    qCDebug(GeoZoneSourceLog) << "Downloading dataset" << linkedUrl << "linked from" << _request.url;
+    qCDebug(GeoZoneSourceLog) << "Downloading dataset" << GeoZoneDownloader::redactedUrl(linkedUrl) << "linked from" << _logUrl();
     (void) QFile::remove(download.filePath);
     _stage = Stage::Dataset;
     _result.datasetUrl = linkedUrl;
@@ -290,7 +291,7 @@ void GeoZoneFeedFetch::_sha256Received(const QString &url, const GeoZoneDownload
         _finish(Result::Status::Failed, tr("The integrity check failed: the SHA-256 of the data doesn't match %1.").arg(download.finalUrl));
         return;
     }
-    qCDebug(GeoZoneSourceLog) << "SHA-256 verified" << url;
+    qCDebug(GeoZoneSourceLog) << "SHA-256 verified" << GeoZoneDownloader::redactedUrl(url);
     _result.integrity = GeoZoneProvenance::Integrity::Verified;
     _result.integrityText = download.finalUrl;
     _fetchRest();
@@ -337,7 +338,7 @@ bool GeoZoneFeedFetch::_startPages()
         _finishTruncated();
         return true;
     }
-    qCDebug(GeoZoneSourceLog) << "Downloading up to" << _paging.pageCount << "more pages from" << _request.url;
+    qCDebug(GeoZoneSourceLog) << "Downloading up to" << _paging.pageCount << "more pages from" << _logUrl();
     _fetchNextPage();
     return true;
 }
@@ -392,7 +393,7 @@ void GeoZoneFeedFetch::_fetchNextPage()
             return;
         }
         const QString error = (page.status == GeoZoneDownloader::Result::Status::Ok) ? QString::fromUtf8(head.left(300)) : page.errorString;
-        qCWarning(GeoZoneSourceLog) << "Page download failed" << _request.url << error;
+        qCWarning(GeoZoneSourceLog) << "Page download failed" << _logUrl() << error;
         if (page.status == GeoZoneDownloader::Result::Status::Ok) {
             (void) QFile::remove(page.filePath);
         }
@@ -433,7 +434,7 @@ void GeoZoneFeedFetch::_fetchCompanions()
         return;
     }
 
-    qCDebug(GeoZoneSourceLog) << "Downloading" << missing.count() << "companion documents of" << _request.url;
+    qCDebug(GeoZoneSourceLog) << "Downloading" << missing.count() << "companion documents of" << _logUrl();
     _remainingCompanions = static_cast<int>(missing.count());
     for (const GeoZoneFormat::CompanionRequest &companion : std::as_const(missing)) {
         _get(companion.url, QString(), QString(), [this, companion](const GeoZoneDownloader::Result &download) {
@@ -444,7 +445,7 @@ void GeoZoneFeedFetch::_fetchCompanions()
                     _companions.insert(companion.key, GeoZoneParser::Companion{ companion.version, data });
                 }
             } else {
-                qCWarning(GeoZoneSourceLog) << "Companion download failed" << companion.url << download.errorString;
+                qCWarning(GeoZoneSourceLog) << "Companion download failed" << GeoZoneDownloader::redactedUrl(companion.url) << download.errorString;
             }
             if (!download.filePath.isEmpty()) {
                 (void) QFile::remove(download.filePath);
@@ -484,7 +485,7 @@ void GeoZoneFeedFetch::_addMaxAge(qint64 maxAgeSecs)
 void GeoZoneFeedFetch::_finish(Result::Status status, const QString &errorString)
 {
     if (status != Result::Status::Ready) {
-        qCDebug(GeoZoneSourceLog) << "Feed" << ((status == Result::Status::NotModified) ? "not modified" : "failed") << _request.url << errorString;
+        qCDebug(GeoZoneSourceLog) << "Feed" << ((status == Result::Status::NotModified) ? "not modified" : "failed") << _logUrl() << errorString;
         for (const QString &path : std::as_const(_result.pagePaths) + QStringList{ _result.filePath }) {
             if (!path.isEmpty()) {
                 (void) QFile::remove(path);

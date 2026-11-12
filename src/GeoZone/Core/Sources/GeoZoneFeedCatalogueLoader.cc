@@ -172,7 +172,7 @@ void GeoZoneFeedCatalogueLoader::_refuseUrl(const QString &problem)
     _downloadError.clear();
     _unreachable = false;
     if (differs) {
-        qCWarning(GeoZoneSourceLog) << "Feed catalogue not downloaded" << _url << problem;
+        qCWarning(GeoZoneSourceLog) << "Feed catalogue not downloaded" << GeoZoneDownloader::redactedUrl(_url) << problem;
     }
     if (hadCatalogue) {
         _apply();
@@ -242,7 +242,7 @@ void GeoZoneFeedCatalogueLoader::_download()
     }
     _downloading = true;
     const bool sameUrl = (_cache.url == _url) && !_cache.data.isEmpty();
-    qCDebug(GeoZoneSourceLog) << "Downloading the feed catalogue" << _url;
+    qCDebug(GeoZoneSourceLog) << "Downloading the feed catalogue" << GeoZoneDownloader::redactedUrl(_url);
     _downloader->get(_url, sameUrl ? _cache.etag : QString(), sameUrl ? _cache.lastModified : QString(),
                      [this](const GeoZoneDownloader::Result &result) { _downloaded(result); }, _tag);
 }
@@ -261,7 +261,7 @@ void GeoZoneFeedCatalogueLoader::_downloaded(const GeoZoneDownloader::Result &re
         const qint64 delay = (std::min)(qint64{ GeoZoneRefreshScheduler::maxRetrySecs }, qint64{ GeoZoneRefreshScheduler::minRetrySecs } << (std::min)(_failures - 1, 16));
         _retryAt = now.addSecs(delay);
         _downloadError = result.errorString;
-        qCWarning(GeoZoneSourceLog) << "Feed catalogue download failed" << _url << result.errorString;
+        qCWarning(GeoZoneSourceLog) << "Feed catalogue download failed" << GeoZoneDownloader::redactedUrl(_url) << result.errorString;
         emit changed();
         return;
     }
@@ -283,7 +283,7 @@ void GeoZoneFeedCatalogueLoader::_downloaded(const GeoZoneDownloader::Result &re
     if (data.isEmpty()) {
         errorString = tr("It is empty or larger than %1 KB.").arg(maxBytes / 1024);
     } else if (!GeoZoneFeedCatalogue::parse(data, _url, catalogue, errorString)) {
-        qCWarning(GeoZoneSourceLog) << "Feed catalogue ignored" << _url << errorString;
+        qCWarning(GeoZoneSourceLog) << "Feed catalogue ignored" << GeoZoneDownloader::redactedUrl(_url) << errorString;
     }
     if (!errorString.isEmpty()) {
         // The last valid copy stays in use, the invalid one isn't asked for again before the next refresh

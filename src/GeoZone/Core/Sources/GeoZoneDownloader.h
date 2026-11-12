@@ -88,6 +88,14 @@ public:
 
     /// @return The text with the secrets, also percent-encoded, replaced by ***
     static QString redacted(const QString &text, const QStringList &secrets);
+    /// @return Secrets someone typed into the address of a feed: the values of the query items whose names tell a key,
+    ///         like api_key, access_token or sig, of at least minUrlSecretLength characters, and the password of its user.
+    ///         They are kept out of the URLs and errors of the results like the secrets of the options.
+    static QStringList urlSecrets(const QString &url);
+    /// @return The URL for the log, with the password of its user and the values of its query items whose names tell
+    ///         a key replaced by ***
+    static QString redactedUrl(const QString &url);
+    static constexpr qsizetype minUrlSecretLength = 4;
 
     /// Cancels the downloads started with the tag. Their callbacks report a failure.
     void abort(const QString &tag);

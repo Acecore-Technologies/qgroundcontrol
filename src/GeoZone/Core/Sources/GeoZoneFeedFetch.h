@@ -136,6 +136,8 @@ private:
     void _fetchCompanions();
     void _companionsReceived();
     void _finish(Result::Status status, const QString &errorString = QString());
+    /// @return The URL of the feed for the log
+    QString _logUrl() const { return GeoZoneDownloader::redactedUrl(_request.url); }
     void _addMaxAge(qint64 maxAgeSecs);
 
     QPointer<GeoZoneDownloader> _downloader;

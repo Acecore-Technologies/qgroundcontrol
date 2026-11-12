@@ -15,6 +15,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QLocale>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QUuid>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -77,18 +78,20 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
 void GeoZoneDownloader::get(const QString &url, const QString &etag, const QString &lastModified, Callback callback, const QString &tag,
                             const Options &options)
 {
+    // A key typed into the address is kept out of the errors and the URLs of the result like the secrets of a service
+    const QStringList secrets = options.secrets + urlSecrets(url);
     // Failures before the request are reported like the others, once the caller is done
-    const auto failLater = [this, &url, &options](Callback failed, const QString &errorString) {
+    const auto failLater = [this, &url, &secrets](Callback failed, const QString &errorString) {
         Result result;
         result.errorString = errorString;
-        result.finalUrl = redacted(url, options.secrets);
+        result.finalUrl = redacted(url, secrets);
         (void) QMetaObject::invokeMethod(this, [failed = std::move(failed), result]() { failed(result); }, Qt::QueuedConnection);
     };
     // Only web servers are asked: a link or an address from a document must not read a local file
     const QUrl requested(url);
     const QString scheme = requested.scheme().toLower();
     if (!requested.isValid() || ((scheme != QStringLiteral("https")) && (scheme != QStringLiteral("http"))) || requested.host().isEmpty()) {
-        failLater(std::move(callback), tr("%1 is not an http or https address.").arg(redacted(url, options.secrets)));
+        failLater(std::move(callback), tr("%1 is not an http or https address.").arg(redacted(url, secrets)));
         return;
     }
 
@@ -98,6 +101,7 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
     download.etag = etag;
     download.lastModified = lastModified;
     download.options = options;
+    download.options.secrets = secrets;
     download.callback = std::move(callback);
     (void) QDir().mkpath(_directory);
     download.file = QSharedPointer<QFile>::create(QDir(_directory).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".part")));
@@ -121,6 +125,58 @@ QString GeoZoneDownloader::redacted(const QString &text, const QStringList &secr
         (void) result.replace(QString::fromLatin1(QUrl::toPercentEncoding(secret)), QStringLiteral("***"));
     }
     return result;
+}
+
+namespace {
+
+/// @return true for the names of query items which hold keys, like api_key, access_token, sig or code
+bool keyLikeName(const QString &name)
+{
+    static const QRegularExpression pattern(QStringLiteral("key|token|secret|passw|pwd|auth|signature|credential|session|^sig$|^code$"),
+                                            QRegularExpression::CaseInsensitiveOption);
+    return pattern.match(name).hasMatch();
+}
+
+} // namespace
+
+QStringList GeoZoneDownloader::urlSecrets(const QString &url)
+{
+    QStringList secrets;
+    const QUrl parsed(url);
+    if (!parsed.password().isEmpty()) {
+        secrets.append(parsed.password());
+    }
+    for (const auto &[name, value] : QUrlQuery(parsed).queryItems(QUrl::FullyDecoded)) {
+        // Shorter values are no keys, and replacing them would garble the rest of a text
+        if ((value.size() >= minUrlSecretLength) && keyLikeName(name)) {
+            secrets.append(value);
+        }
+    }
+    return secrets;
+}
+
+QString GeoZoneDownloader::redactedUrl(const QString &url)
+{
+    QUrl parsed(url);
+    bool changed = false;
+    if (!parsed.password().isEmpty()) {
+        parsed.setPassword(QStringLiteral("***"));
+        changed = true;
+    }
+    QUrlQuery query(parsed);
+    QList<std::pair<QString, QString>> items = query.queryItems(QUrl::FullyEncoded);
+    for (auto &[name, value] : items) {
+        if (!value.isEmpty() && keyLikeName(QUrl::fromPercentEncoding(name.toUtf8()))) {
+            value = QStringLiteral("***");
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return url;
+    }
+    query.setQueryItems(items);
+    parsed.setQuery(query);
+    return parsed.toString();
 }
 
 void GeoZoneDownloader::_send(Download download, const QUrl &url)

@@ -1058,4 +1058,82 @@ void GeoZoneServiceTest::_testOpenAipService()
     QCOMPARE(source->provider(), QStringLiteral("OpenAIP (unofficial, CC BY-NC 4.0)"));
 }
 
+void GeoZoneServiceTest::_testUrlKeysNotLogged()
+{
+    // The password of the user and the values of the query items whose names tell a key are left out
+    QCOMPARE(GeoZoneDownloader::redactedUrl(QStringLiteral("https://pilot:pa55word@zones.example.com/z?bbox=1,2,3,4&apikey=abc123&Access_Token=x.y-z&sig=Zm9v%2Bg%3D%3D&page=2")),
+             QStringLiteral("https://pilot:***@zones.example.com/z?bbox=1,2,3,4&apikey=***&Access_Token=***&sig=***&page=2"));
+    QCOMPARE(GeoZoneDownloader::urlSecrets(QStringLiteral("https://pilot:pa55word@zones.example.com/z?bbox=1,2,3,4&apikey=abc123&sig=Zm9v%2Bg%3D%3D&key=1")),
+             QStringList({ QStringLiteral("pa55word"), QStringLiteral("abc123"), QStringLiteral("Zm9v+g==") }));
+    // An address without them stays as it is
+    const QString plain = QStringLiteral("https://zones.example.com/wfs?REQUEST=GetFeature&BBOX={bbox},EPSG:4326&monkey=");
+    QCOMPARE(GeoZoneDownloader::redactedUrl(plain), plain);
+    QVERIFY(GeoZoneDownloader::urlSecrets(plain).isEmpty());
+
+    // A key typed into the address of a feed, of a service or of a catalogue stays out of the log, whether the download
+    // works, fails or is confirmed
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    server.etags.insert("/zones", "\"v1\"");
+    server.files.insert("/catalogue", R"({ "feeds": [ { "id": "maker", "name": "Maker zones", "url": "https://maker.example.com/zones.json" } ] })");
+    const QString url = server.url(QStringLiteral("/zones?api_key=k3y-in-feed-url&bbox=1,2,3,4"));
+    const QString failingUrl = server.url(QStringLiteral("/missing?token=t0ken-in-failing-url"));
+    const QString areaUrl = server.url(QStringLiteral("/zones?subscription-key=k3y-in-area-url&bbox={bbox}"));
+    const QString catalogueUrl = server.url(QStringLiteral("/catalogue?access_token=t0ken-in-catalogue-url"));
+    const QStringList secrets = { QStringLiteral("k3y-in-feed-url"), QStringLiteral("t0ken-in-failing-url"), QStringLiteral("k3y-in-area-url"), QStringLiteral("t0ken-in-catalogue-url") };
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    ScopedLogCapture log;
+    QStringList messages;
+    {
+        GeoZoneManager manager(storageDir.path());
+        GeoZoneSourceRepository *const repository = manager.repository();
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+        repository->addUrl(url);
+        QVERIFY(addedSpy.wait(10000));
+        repository->addUrl(failingUrl);
+        QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 1, 10000);
+        repository->setVehiclePosition(QGeoCoordinate(47.0, 8.0));
+        manager.addService(areaUrl, GeoZoneService().toVariantMap(), QString());
+        QVERIFY(addedSpy.wait(10000));
+        QTRY_VERIFY(!repository->busy());
+        // Confirmed by its validator, then failing
+        repository->refreshSource(url);
+        QTRY_VERIFY(!repository->busy());
+        server.files.remove("/zones");
+        server.handler = [](const QByteArray &request, QByteArray &status, QByteArray &, QByteArray &) {
+            if (!request.startsWith("GET /zones")) {
+                return false;
+            }
+            status = "503 Service Unavailable";
+            return true;
+        };
+        repository->refreshFeeds();
+        QTRY_VERIFY(!repository->busy());
+        repository->setVehiclePosition(QGeoCoordinate(48.0, 9.0));
+        QTRY_VERIFY(!repository->busy());
+        QCOMPARE(failedSpy.count(), 3);
+        for (const QList<QVariant> &failure : failedSpy) {
+            messages.append(failure[1].toString());
+        }
+        repository->feedCatalogue()->setUrl(catalogueUrl);
+        repository->feedCatalogue()->init();
+        QTRY_VERIFY_WITH_TIMEOUT(repository->feedCatalogue()->checkedAt().isValid(), 10000);
+        QVERIFY(repository->source(url));
+        QVERIFY(!repository->source(url)->errorString().isEmpty());
+        messages.append(repository->source(url)->errorString());
+    }
+    const QString logged = log.text();
+    QVERIFY(logged.contains(QStringLiteral("Downloading")));
+    QVERIFY(logged.contains(QStringLiteral("Download failed")));
+    QVERIFY(logged.contains(QStringLiteral("api_key=***")));
+    for (const QString &secret : secrets) {
+        QVERIFY2(!logged.contains(secret), qPrintable(secret));
+        // nor in the messages about the failures
+        QVERIFY2(!messages.join(QLatin1Char('\n')).contains(secret), qPrintable(secret));
+    }
+}
+
 GEOZONE_TEST(GeoZoneServiceTest)
