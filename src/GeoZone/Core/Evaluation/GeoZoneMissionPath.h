@@ -57,6 +57,13 @@ public:
         /// @return Position at the distance along the great circle from the start, with the altitude and terrain
         ///         interpolated
         GeoZone::Position positionAt(double along) const;
+
+        /// @return Meters from the start of the terrain sample at the index, the last one at the end of the segment
+        /// @param length Meters from the start to the end
+        double terrainSampleDistance(qsizetype index, double length) const;
+        /// @return Position at the fraction of the segment, along meters from the start towards the azimuth of the
+        ///         end, with the altitude interpolated and the terrain given
+        GeoZone::Position interpolated(double fraction, double along, double azimuth, double terrain = qQNaN()) const;
     };
 
     /// Connected positions for zone checks, see pathsFromSegments

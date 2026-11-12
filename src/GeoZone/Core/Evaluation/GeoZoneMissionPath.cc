@@ -23,31 +23,38 @@ double GeoZoneMissionPath::Segment::terrainAt(double along) const
     }
     const double length = from.distanceTo(to);
     const qsizetype last = count - 1;
-    const auto sampleDistance = [this, last, length](qsizetype index) {
-        return (index == last) ? length : std::min(index * terrainSpacing, length);
-    };
     const qsizetype index = std::clamp<qsizetype>(static_cast<qsizetype>(along / terrainSpacing), 0, last - 1);
-    const double start = sampleDistance(index);
-    const double end = sampleDistance(index + 1);
+    const double start = terrainSampleDistance(index, length);
+    const double end = terrainSampleDistance(index + 1, length);
     const double fraction = (end > start) ? std::clamp((along - start) / (end - start), 0.0, 1.0) : 0.0;
     return terrainAMSL[index] + ((terrainAMSL[index + 1] - terrainAMSL[index]) * fraction);
 }
 
-GeoZone::Position GeoZoneMissionPath::Segment::positionAt(double along) const
+double GeoZoneMissionPath::Segment::terrainSampleDistance(qsizetype index, double length) const
 {
-    const double length = from.distanceTo(to);
-    const double fraction = (length > 0) ? std::clamp(along / length, 0.0, 1.0) : 0.0;
+    return (index == (terrainAMSL.count() - 1)) ? length : (std::min)(index * terrainSpacing, length);
+}
+
+GeoZone::Position GeoZoneMissionPath::Segment::interpolated(double fraction, double along, double azimuth, double terrain) const
+{
     GeoZone::Position position;
     if (fraction <= 0) {
         position.coordinate = from;
     } else if (fraction >= 1) {
         position.coordinate = to;
     } else {
-        position.coordinate = from.atDistanceAndAzimuth(along, from.azimuthTo(to));
+        position.coordinate = from.atDistanceAndAzimuth(along, azimuth);
     }
     position.altitudeAMSL = fromAltitudeAMSL + ((toAltitudeAMSL - fromAltitudeAMSL) * fraction);
-    position.terrainAMSL = terrainAt(along);
+    position.terrainAMSL = terrain;
     return position;
+}
+
+GeoZone::Position GeoZoneMissionPath::Segment::positionAt(double along) const
+{
+    const double length = from.distanceTo(to);
+    const double fraction = (length > 0) ? std::clamp(along / length, 0.0, 1.0) : 0.0;
+    return interpolated(fraction, along, ((fraction > 0) && (fraction < 1)) ? from.azimuthTo(to) : 0, terrainAt(along));
 }
 
 QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, bool definite, bool breach)
@@ -280,7 +287,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
         if (terrainKnown) {
             const qsizetype lastIndex = segment.terrainAMSL.count() - 1;
             for (qsizetype i = 0; i <= lastIndex; i++) {
-                const double along = (i == lastIndex) ? distance : std::min(i * segment.terrainSpacing, distance);
+                const double along = segment.terrainSampleDistance(i, distance);
                 samples.append({ along, (distance > 0) ? (along / distance) : (static_cast<double>(i) / lastIndex), segment.terrainAMSL[i] });
             }
         } else {
@@ -297,17 +304,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPath::pathsFromSegments(const QLis
         distances.reserve(samples.count());
         for (const auto &[along, fraction, terrain] : std::as_const(samples)) {
             distances.append(segmentOffset + (segment.distance * fraction));
-            GeoZone::Position position;
-            if (fraction <= 0) {
-                position.coordinate = segment.from;
-            } else if (fraction >= 1) {
-                position.coordinate = segment.to;
-            } else {
-                position.coordinate = segment.from.atDistanceAndAzimuth(along, azimuth);
-            }
-            position.altitudeAMSL = segment.fromAltitudeAMSL + ((segment.toAltitudeAMSL - segment.fromAltitudeAMSL) * fraction);
-            position.terrainAMSL = terrain;
-            positions.append(position);
+            positions.append(segment.interpolated(fraction, along, azimuth, terrain));
         }
 
         // Continue the previous path, keeping both ends when the altitude changes at the shared waypoint
