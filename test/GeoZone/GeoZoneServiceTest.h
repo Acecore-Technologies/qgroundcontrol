@@ -21,6 +21,7 @@ private slots:
     void _testOpenAipService();
     void _testServiceApiKeys();
     void _testClearForgetsPendingServices();
+    void _testSecretsOnlyOfServices();
     void _testServiceOAuth2();
     void _testEd318Service();
     void _testServiceAreaOfInterest();

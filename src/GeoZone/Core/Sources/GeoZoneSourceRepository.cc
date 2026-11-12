@@ -197,12 +197,13 @@ void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneServic
 
 void GeoZoneSourceRepository::setSecret(const QString &key, const QString &secret)
 {
-    _services.setSecret(key, secret);
-    if (GeoZoneSource *const existing = source(key)) {
-        existing->setCredentialsMissing(secret.isEmpty());
-        if (existing->isFeed() && !secret.isEmpty()) {
-            _download(key, GeoZoneLoader::Request::User);
-        }
+    // Nothing is kept for a key without a service sending a secret, whose source then misses none
+    if (!_services.setSecret(key, secret)) {
+        return;
+    }
+    _updateCredentialsMissing(key);
+    if (const GeoZoneSource *const existing = source(key); existing && existing->isFeed() && !secret.isEmpty()) {
+        _download(key, GeoZoneLoader::Request::User);
     }
 }
 

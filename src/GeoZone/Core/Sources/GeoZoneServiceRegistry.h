@@ -34,8 +34,9 @@ public:
     void forget(const QString &key);
 
     QString secret(const QString &key) const { return _credentials.secret(key); }
-    /// Replaces the secret of a source, forgetting its token
-    void setSecret(const QString &key, const QString &secret);
+    /// Replaces the secret of a source, forgetting its token. A secret is only kept for a service which sends one.
+    /// @return false, without keeping it, when the source has no service or its service needs no secret
+    bool setSecret(const QString &key, const QString &secret);
     /// @return true when the service of the source needs a secret which isn't known
     bool credentialsMissing(const QString &key) const;
     GeoZoneCredentials &credentials() { return _credentials; }

@@ -38,10 +38,14 @@ void GeoZoneServiceRegistry::forget(const QString &key)
     forgetToken(key);
 }
 
-void GeoZoneServiceRegistry::setSecret(const QString &key, const QString &secret)
+bool GeoZoneServiceRegistry::setSecret(const QString &key, const QString &secret)
 {
+    if (const auto it = _services.constFind(key); (it == _services.cend()) || !it->needsSecret()) {
+        return false;
+    }
     _credentials.setSecret(key, secret);
     forgetToken(key);
+    return true;
 }
 
 bool GeoZoneServiceRegistry::credentialsMissing(const QString &key) const

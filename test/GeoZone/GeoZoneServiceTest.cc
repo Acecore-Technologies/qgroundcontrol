@@ -221,6 +221,60 @@ void GeoZoneServiceTest::_testClearForgetsPendingServices()
     manager.repository()->clear();
 }
 
+void GeoZoneServiceTest::_testSecretsOnlyOfServices()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/plain", server.body);
+    server.files.insert("/keyed", server.body);
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString plainUrl = server.url(QStringLiteral("/plain"));
+    const QString keyedUrl = server.url(QStringLiteral("/keyed"));
+    const QString unknownUrl = server.url(QStringLiteral("/unknown"));
+    GeoZoneManager manager(storageDir.path());
+    GeoZoneSourceRepository *const repository = manager.repository();
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    repository->addUrl(plainUrl);
+    QVERIFY(addedSpy.wait(10000));
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::ApiKeyHeader;
+    service.authParameter = QStringLiteral("X-Api-Key");
+    manager.addService(keyedUrl, service.toVariantMap(), QStringLiteral("keyed-s3cret"));
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!repository->busy());
+    const GeoZoneSource *const plain = repository->source(plainUrl);
+    const GeoZoneSource *const keyed = repository->source(keyedUrl);
+    QVERIFY(plain && keyed);
+
+    // A secret is only kept for a service which sends one: not for a plain feed, nor for a source which isn't there
+    const qsizetype requests = server.requests.count();
+    repository->setSecret(plainUrl, QStringLiteral("stray-s3cret"));
+    repository->setSecret(unknownUrl, QStringLiteral("stray-s3cret"));
+    QVERIFY(repository->credentials().secret(plainUrl).isEmpty());
+    QVERIFY(repository->credentials().secret(unknownUrl).isEmpty());
+    QVERIFY(!repository->busy());
+    QCOMPARE(server.requests.count(), requests);
+
+    // and a feed without service doesn't miss the secret it never had
+    repository->setSecret(plainUrl, QString());
+    QVERIFY(!plain->credentialsMissing());
+    repository->refreshSource(plainUrl);
+    QTRY_VERIFY(!repository->busy());
+    QVERIFY2(plain->errorString().isEmpty(), qPrintable(plain->errorString()));
+
+    // The source of a service follows what is kept for it
+    repository->setSecret(keyedUrl, QString());
+    QVERIFY(keyed->credentialsMissing());
+    repository->setSecret(keyedUrl, QStringLiteral("new-s3cret"));
+    QVERIFY(!keyed->credentialsMissing());
+    QCOMPARE(repository->credentials().secret(keyedUrl), QStringLiteral("new-s3cret"));
+    QTRY_VERIFY(!repository->busy());
+    QCOMPARE(TestFeedServer::header(server.requests.last(), "X-Api-Key"), QByteArray("new-s3cret"));
+    repository->clear();
+}
+
 void GeoZoneServiceTest::_testServiceOAuth2()
 {
     ScopedEnvironment environment;
