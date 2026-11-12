@@ -60,6 +60,7 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(bool             fenceUnknown    READ fenceUnknown       NOTIFY fenceUnknownChanged FINAL)   ///< The fence the vehicle stores couldn't be read
     Q_PROPERTY(QString          actionText      READ actionText         NOTIFY configChanged FINAL)     ///< Manoeuvre of the vehicle at a breach, like "RTL or land"
     Q_PROPERTY(QString          overrideText    READ overrideText       NOTIFY configChanged FINAL)     ///< How the pilot overrides it
+    Q_PROPERTY(QString          timingText      READ timingText         NOTIFY configChanged FINAL)     ///< When the vehicle acts if not at the fence, empty otherwise
     Q_PROPERTY(QString          takeControlMode READ takeControlMode    NOTIFY configChanged FINAL)     ///< Flight mode takeControl() switches to, empty when there is none
     Q_PROPERTY(bool             canTakeControl  READ canTakeControl     NOTIFY canTakeControlChanged FINAL) ///< The vehicle would switch to takeControlMode now
     Q_PROPERTY(bool             canDisableFence READ canDisableFence    NOTIFY configChanged FINAL)     ///< The autopilot accepts disableFence()
@@ -116,6 +117,8 @@ public:
         bool modeChangeBlocked = false; ///< ArduPilot FENCE_OPTIONS bit 0: no mode change until the breach clears
         /// A VTOL hovering. ArduPilot's has the fence actions of planes, and the pilot takes control in its hover modes.
         bool vtolHover = false;
+        /// PX4 GF_PREDICT: the vehicle acts when its trajectory would breach the fence, before it reaches it
+        bool predictive = false;
         QString takeControlMode;    ///< See takeControlMode
     };
 
@@ -126,7 +129,8 @@ public:
     /// @return The fence of the vehicle: its polygons and circles, the circle around home and the altitude limits
     ///         its parameters enable (ArduPilot FENCE_TYPE, FENCE_RADIUS, FENCE_ALT_MAX, FENCE_ALT_MIN, FENCE_MARGIN,
     ///         FENCE_OPTIONS; PX4 GF_MAX_HOR_DIST, GF_MAX_VER_DIST) and whether its parameters enable it (ArduPilot
-    ///         FENCE_ENABLE, or FENCE_AUTOENABLE while armed; PX4 unless GF_ACTION is None)
+    ///         FENCE_ENABLE, or FENCE_AUTOENABLE while armed; PX4 unless GF_ACTION is None), and whether PX4 acts
+    ///         before the fence (GF_PREDICT, where the firmware has it)
     static Config vehicleConfig(Vehicle *vehicle);
     /// @param stored Instead of the polygons and circles of the vehicle's GeoFenceManager
     static Config vehicleConfig(Vehicle *vehicle, const StoredFence &stored);
@@ -170,6 +174,7 @@ public:
     bool fenceUnknown() const { return _fenceUnknown; }
     QString actionText() const { return actionText(_config.firmware, actionClass(_config), _config.action); }
     QString overrideText() const { return overrideText(_config); }
+    QString timingText() const { return timingText(_config); }
     QString takeControlMode() const { return _config.takeControlMode; }
     /// There is a mode to take control in, and the vehicle accepts it: during a breach ArduPilot refuses mode changes
     /// with FENCE_OPTIONS bit 0, and PX4's flight termination can't be overridden
@@ -203,7 +208,10 @@ public:
     static QString takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes, bool vtolHover = false);
     /// @return Like "Geofence: RTL or land in 6 s, 42 m ahead", or "Geofence in 6 s, 42 m ahead: report only, no manoeuvre"
     ///         for actions which aren't manoeuvres
-    static QString warningText(const QString &action, bool manoeuvre, double time, double distance);
+    /// @param early The vehicle acts before the fence, see Config::predictive: "within 6 s"
+    static QString warningText(const QString &action, bool manoeuvre, double time, double distance, bool early = false);
+    /// @return That the vehicle acts before it reaches the fence, empty when it acts at the fence
+    static QString timingText(const Config &config);
 
 signals:
     void warningChanged();

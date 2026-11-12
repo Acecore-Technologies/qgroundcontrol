@@ -43,7 +43,7 @@ QVariant _parameter(Vehicle *vehicle, const QString &name)
 const QStringList &_fenceParameters()
 {
     static const QStringList names = {
-        QStringLiteral("GF_ACTION"), QStringLiteral("GF_MAX_HOR_DIST"), QStringLiteral("GF_MAX_VER_DIST"),
+        QStringLiteral("GF_ACTION"), QStringLiteral("GF_MAX_HOR_DIST"), QStringLiteral("GF_MAX_VER_DIST"), QStringLiteral("GF_PREDICT"),
         QStringLiteral("FENCE_ENABLE"), QStringLiteral("FENCE_AUTOENABLE"), QStringLiteral("FENCE_TYPE"), QStringLiteral("FENCE_ACTION"),
         QStringLiteral("FENCE_RADIUS"), QStringLiteral("FENCE_ALT_MAX"), QStringLiteral("FENCE_ALT_MIN"), QStringLiteral("FENCE_MARGIN"),
         QStringLiteral("FENCE_MARGIN_XY"), QStringLiteral("FENCE_OPTIONS"), QStringLiteral("FENCE_ALT_MAX_TP"), QStringLiteral("FENCE_ALT_MIN_TP"),
@@ -230,6 +230,8 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
         fence.inclusionUnion = true;
         fence.maxDistance = positive(QStringLiteral("GF_MAX_HOR_DIST"));
         fence.maxAltitude = positive(QStringLiteral("GF_MAX_VER_DIST"));
+        // Not a parameter of all versions
+        config.predictive = _parameter(vehicle, QStringLiteral("GF_PREDICT")).toInt() != 0;
     } else if (vehicle->apmFirmware()) {
         config.firmware = Firmware::ArduPilot;
         const QVariant action = _parameter(vehicle, QStringLiteral("FENCE_ACTION"));
@@ -431,19 +433,31 @@ void GeoZoneFenceWarning::_setBreach(const std::optional<GeoZoneFencePrediction:
     }
 }
 
-QString GeoZoneFenceWarning::warningText(const QString &action, bool manoeuvre, double time, double distance)
+QString GeoZoneFenceWarning::warningText(const QString &action, bool manoeuvre, double time, double distance, bool early)
 {
     const QString units = FactMetaData::appSettingsHorizontalDistanceUnitsString();
     const QString distanceText = QStringLiteral("%1 %2").arg(qRound(FactMetaData::metersToAppSettingsHorizontalDistanceUnits(distance).toDouble())).arg(units);
     if (!manoeuvre) {
         return tr("Geofence in %1 s, %2 ahead: %3").arg(std::lround(time)).arg(distanceText, action.toLower());
     }
-    return tr("Geofence: %1 in %2 s, %3 ahead").arg(action).arg(std::lround(time)).arg(distanceText);
+    return (early ? tr("Geofence: %1 within %2 s, %3 ahead") : tr("Geofence: %1 in %2 s, %3 ahead")).arg(action).arg(std::lround(time)).arg(distanceText);
+}
+
+QString GeoZoneFenceWarning::timingText(const Config &config)
+{
+    if ((config.firmware == Firmware::PX4) && config.predictive && isManoeuvre(config.firmware, config.action)) {
+        return tr("The vehicle predicts the breach (GF_PREDICT): it acts before it reaches the fence, earlier than the time shown.");
+    }
+    return QString();
 }
 
 QString GeoZoneFenceWarning::text() const
 {
-    return _breach ? warningText(actionText(), isManoeuvre(_config.firmware, _config.action), _breach->time, _breach->distance) : QString();
+    if (!_breach) {
+        return QString();
+    }
+    const bool manoeuvre = isManoeuvre(_config.firmware, _config.action);
+    return warningText(actionText(), manoeuvre, _breach->time, _breach->distance, !timingText().isEmpty());
 }
 
 int GeoZoneFenceWarning::timeToFence() const

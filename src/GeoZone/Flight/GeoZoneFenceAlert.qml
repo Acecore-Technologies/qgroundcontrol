@@ -63,6 +63,16 @@ ColumnLayout {
         textFormat:         Text.PlainText
         color:              control.textColor
         font.pointSize:     ScreenTools.smallFontPointSize
+        text:               control._warning ? control._warning.timingText : ""
+        visible:            text !== "" && !!control._warning && control._warning.active
+    }
+
+    QGCLabel {
+        Layout.fillWidth:   true
+        wrapMode:           Text.WordWrap
+        textFormat:         Text.PlainText
+        color:              control.textColor
+        font.pointSize:     ScreenTools.smallFontPointSize
         text:               control._warning ? qsTr("To override: %1").arg(control._warning.overrideText) : ""
     }
 

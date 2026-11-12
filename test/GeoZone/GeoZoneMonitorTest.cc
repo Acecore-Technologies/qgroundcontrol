@@ -1242,6 +1242,25 @@ void GeoZoneMonitorTest::_testFenceTakeControl()
     warning.setConfig(config);
     QVERIFY(!warning.canTakeControl());
 
+    // With GF_PREDICT PX4 acts before the fence, which the warning tells
+    config.predictive = true;
+    config.takeControlMode = QStringLiteral("Position");
+    warning.setConfig(config);
+    QVERIFY(warning.timingText().contains(QStringLiteral("GF_PREDICT")));
+    warning.evaluate(center.atDistanceAndAzimuth(160, 270), 30, Warning::Velocity{ 0, 10, 0, true });
+    QVERIFY(warning.active());
+    QVERIFY2(warning.text().startsWith(QStringLiteral("Geofence: Return within 6 s, ")), qPrintable(warning.text()));
+    config.predictive = false;
+    warning.setConfig(config);
+    QVERIFY(warning.timingText().isEmpty());
+    QVERIFY2(warning.text().startsWith(QStringLiteral("Geofence: Return in 6 s, ")), qPrintable(warning.text()));
+    // ... but not for an action which only warns
+    config.predictive = true;
+    config.action = 1;
+    warning.setConfig(config);
+    QVERIFY(warning.timingText().isEmpty());
+    config.action = 3;
+
     // A warning time which isn't positive, like the one of a profile with both of its times at 0, isn't taken
     warning.setWarningTime(12);
     QCOMPARE(warning.warningTime(), 12.0);
