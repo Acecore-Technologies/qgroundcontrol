@@ -172,10 +172,13 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
         _positionReceived(msecs);
         break;
     case MAVLINK_MSG_ID_COMMAND_ACK: {
-        // The vehicle answers an arm command also when its pre-arm checks refuse it
+        // The vehicle answers an arm command also when its pre-arm checks refuse it. The acknowledgement doesn't tell
+        // whether the command armed or disarmed: an accepted one is that of a disarm command reaching a vehicle
+        // already on the ground, or of an arm command, whose attempt is alerted when the vehicle reports being armed.
         mavlink_command_ack_t ack{};
         mavlink_msg_command_ack_decode(&message, &ack);
-        if ((ack.command == MAV_CMD_COMPONENT_ARM_DISARM) && onGround()) {
+        const bool refused = (ack.result != MAV_RESULT_ACCEPTED) && (ack.result != MAV_RESULT_IN_PROGRESS);
+        if ((ack.command == MAV_CMD_COMPONENT_ARM_DISARM) && refused && onGround()) {
             emit armingAttempted();
         }
         break;

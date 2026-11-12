@@ -2871,6 +2871,30 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     QVERIFY(vehicle->groundWarning().isEmpty());
     monitor.evaluate({ authorisationCenter, 400, 400 }, vehicleId + 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 3: Entered geozone A (Authorisation required)"));
+
+    // The acknowledgement of a disarm command which reaches a vehicle on the ground is no attempt to arm. A refused
+    // arm command is one, and an accepted one once the vehicle is armed.
+    constexpr int landedId = 5;
+    monitor.evaluate(inside, landedId);
+    GeoZoneVehicleMonitor *const landed = monitor.positionMonitor(landedId);
+    QVERIFY(landed);
+    landed->setArmed(false);
+    const QString landedArming = QStringLiteral("Vehicle 5: ") + arming;
+    mavlink_message_t accepted{};
+    (void) mavlink_msg_command_ack_pack(landedId, MAV_COMP_ID_AUTOPILOT1, &accepted, MAV_CMD_COMPONENT_ARM_DISARM, MAV_RESULT_ACCEPTED, 0, 0, 0, 0);
+    qsizetype count = alertSpy.count();
+    now += GeoZoneMonitor::armingAlertIntervalMSecs;
+    landed->handleMessage(accepted, now);
+    QCOMPARE(alertSpy.count(), count);
+    landed->handleMessage(ack, now);
+    QCOMPARE(alertSpy.count(), count + 1);
+    QCOMPARE(alertSpy.last()[0].toString(), landedArming);
+    now += GeoZoneMonitor::armingAlertIntervalMSecs;
+    landed->handleMessage(accepted, now);
+    QCOMPARE(alertSpy.count(), count + 1);
+    landed->setArmed(true);
+    QCOMPARE(alertSpy.count(), count + 2);
+    QCOMPARE(alertSpy.last()[0].toString(), landedArming);
 }
 
 

@@ -396,7 +396,7 @@ private:
     static void _setThresholds(AlertEvent &event, const GeoZoneAlertThresholds::Result &thresholds);
     /// Suspends the breaches of a vehicle whose position is lost and alerts it once, or resumes them
     void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
-    /// A vehicle on the ground tried to arm, or armed: alerts the restricted zones it is in again, once per attempt
+    /// A vehicle on the ground was refused to arm, or armed: alerts the restricted zones it is in again, once per attempt
     void _armingAttempted(GeoZoneVehicleMonitor *monitor);
     /// Sets the ground warning of the vehicle from the restricted zones it is in while on the ground
     void _updateGroundStatus(GeoZoneVehicleMonitor *monitor);

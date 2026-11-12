@@ -262,7 +262,8 @@ signals:
     /// The vehicle started breaching its fence
     void fenceBreachStarted(const QString &text);
     void armedChanged();
-    /// The vehicle on the ground acknowledged an arm command, whether or not it armed
+    /// The vehicle on the ground refused an arm command. One it accepts shows as armedChanged, like arming with the
+    /// remote control.
     void armingAttempted();
     void groundStatusChanged();
 
