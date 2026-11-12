@@ -331,21 +331,30 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::fenceItem(const FenceInput &i
         return { Warning, problems.join(QLatin1Char(' ')) };
     }
     const bool vehicleFence = !input.vehicleFence.polygons.isEmpty() || !input.vehicleFence.circles.isEmpty();
-    if (input.verification) {
-        const GeoZoneFenceUpload::Verification &verification = *input.verification;
-        const bool changedSince = !GeoZoneFenceUpload::compareFences(verification.fence, input.vehicleFence).isEmpty();
-        if (changedSince) {
-            problems.append(tr("The vehicle's fence changed since it was verified at %1.").arg(timeText(verification.time)));
-        } else {
-            // The zones the import of the fence left out, which the vehicle doesn't stop at
-            const QString notFenced = GeoZoneFenceTags::notFencedText(verification.notFenced, verification.notFencedCount);
-            if (!notFenced.isEmpty()) {
-                problems.append(notFenced);
+    // The fence recorded for the vehicle is the one it stores while they compare equal. The record is kept across
+    // restarts and reconnects, of uploads which read the fence back (verified) and of plan uploads, which don't.
+    const bool recorded = input.verification && GeoZoneFenceUpload::compareFences(input.verification->fence, input.vehicleFence).isEmpty();
+    const bool verified = input.verification && input.verification->verified;
+    if (verified && !recorded) {
+        problems.append(tr("The vehicle's fence changed since it was verified at %1.").arg(timeText(input.verification->time)));
+    } else if (vehicleFence && !(recorded && verified)) {
+        problems.append(tr("The vehicle's fence wasn't verified. Upload it from the fence import of the Plan View, which reads it back."));
+    }
+    if (recorded) {
+        const GeoZoneFenceUpload::Verification &record = *input.verification;
+        // The zones the import of the fence left out, which the vehicle doesn't stop at: the first of them in priority
+        // order by name, all of them in the Plan View
+        constexpr int maxNamed = 20;
+        const QString notFenced = GeoZoneFenceTags::notFencedText(record.notFenced, record.notFencedCount, maxNamed);
+        if (!notFenced.isEmpty()) {
+            problems.append(notFenced);
+            if (record.notFencedCount > maxNamed) {
+                problems.append(tr("The GeoFence panel of the Plan View lists all of them."));
             }
         }
-        if (!changedSince && (verification.geoZoneFences > 0)) {
+        if (record.geoZoneFences > 0) {
             QStringList changed;
-            for (const GeoZoneSourceVersion &used : verification.sources) {
+            for (const GeoZoneSourceVersion &used : record.sources) {
                 const auto current = std::find_if(input.sources.cbegin(), input.sources.cend(), [&used](const GeoZoneSourceVersion &source) { return source.key == used.key; });
                 if ((current == input.sources.cend()) || !current->sameData(used)) {
                     changed.append(used.name.isEmpty() ? used.key : used.name);
@@ -356,13 +365,11 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::fenceItem(const FenceInput &i
                                     .arg(changed.join(QStringLiteral(", "))));
             }
         }
-    } else if (vehicleFence) {
-        problems.append(tr("The vehicle's fence wasn't verified. Upload it from the fence import of the Plan View, which reads it back."));
     }
     if (!problems.isEmpty()) {
         return { Warning, problems.join(QLatin1Char(' ')) };
     }
-    if (input.verification) {
+    if (recorded && verified) {
         return { Passed, (input.verification->geoZoneFences > 0) ? tr("Verified at %1, made from the current geozone data.").arg(timeText(input.verification->time)) :
                                                                    tr("Verified at %1.").arg(timeText(input.verification->time)) };
     }

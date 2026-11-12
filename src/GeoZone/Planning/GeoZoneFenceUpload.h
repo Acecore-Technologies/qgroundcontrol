@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QtCore/QDateTime>
+#include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -37,6 +38,8 @@ class Vehicle;
 /// when the plan's fence is edited or the plan file changes meanwhile, since the vehicle wouldn't store the plan's
 /// fence. The plan's fence stays dirty unless the vehicle received it as it is. Each of the final states can
 /// start again.
+/// It also records the fence each vehicle stores, see Verification: the one an upload verified, or the one a plan upload
+/// sent, with the zones its import left out, kept across restarts for the pre-flight checklist.
 class GeoZoneFenceUpload : public QObject
 {
     Q_OBJECT
@@ -110,19 +113,35 @@ public:
     /// @return What differs between the fences beyond verifyTolerance, empty when they match. Fences may be in any order.
     static QString compareFences(const FenceSnapshot &sent, const FenceSnapshot &received);
 
-    /// Fence an upload verified on a vehicle, kept until the next verification or the vehicle is gone
+    /// Fence uploaded to a vehicle, kept until the next upload to it or until its fence is removed, also when the
+    /// vehicle reconnects and across restarts, see setRecordsFile
     struct Verification {
         FenceSnapshot fence;
         QDateTime time;                         ///< UTC
         int geoZoneFences = 0;                  ///< Polygons and circles added from geozones, see GeoZoneFenceTag
-        QList<GeoZoneSourceVersion> sources;    ///< Of the geozone data when it was verified
+        QList<GeoZoneSourceVersion> sources;    ///< Of the geozone data when it was uploaded
         QList<GeoZoneFenceTags::NotFenced> notFenced;   ///< Zones the import of the fences left out, see GeoZoneFenceTags::notFenced
         int notFencedCount = 0;                         ///< Also those not kept
+        /// Read back from the vehicle and found to be the fence sent. False for the fence of a plan upload, which isn't
+        /// read back.
+        bool verified = true;
+
+        QJsonObject toJson() const;
+        static std::optional<Verification> fromJson(const QJsonObject &json);
     };
-    /// @return The last fence verified on the vehicle, nothing without
+    /// @return The last fence uploaded to the vehicle, nothing without. Vehicles are told apart by the unique id they
+    ///         report, or by their system id without one. The fence is the vehicle's while it compares equal to the one
+    ///         the vehicle stores, see compareFences.
     static std::optional<Verification> verification(const Vehicle *vehicle);
-    /// Records the fence verified on the vehicle, as uploads do
+    /// Records the fence uploaded to the vehicle, as uploads do
     static void setVerification(Vehicle *vehicle, const Verification &verification);
+    /// Forgets the fence recorded for the vehicle, like when its fence is removed
+    static void clearVerification(Vehicle *vehicle);
+
+    static constexpr int maxRecordedVehicles = 16;  ///< Vehicles whose fences are kept, the most recent ones
+    /// Keeps the recorded fences in the file instead of fences/vehicle-fences.json of the geozone storage, forgetting
+    /// those in memory, so that they are read from the file again like after a restart. Empty for the default.
+    static void setRecordsFile(const QString &fileName);
 
 signals:
     void geoFenceControllerChanged();
@@ -138,6 +157,12 @@ private:
     bool _transition(State state, const QString &message);
     void _sent(bool error);
     void _readBack();
+    /// Follows the fence transfers of the plan's vehicle, see _planFenceSent
+    void _connectPlanVehicle();
+    /// Records the fence a plan upload sent to the vehicle when it is the fence of the controller, not verified
+    void _planFenceSent(Vehicle *vehicle, bool error);
+    /// @return Record of the fence uploaded from the plan of the controller, with its zones not fenced
+    Verification _record(const FenceSnapshot &fence) const;
     /// Aborts the upload in progress when the plan's fence no longer is the one sent
     void _checkFence();
     void _vehicleLost();
@@ -145,6 +170,7 @@ private:
 
     QPointer<GeoFenceController> _geoFenceController;
     QObject *_controllerConnections = nullptr;          ///< Receiver of the signals of the controller, deleted to disconnect them
+    QObject *_planVehicleConnections = nullptr;         ///< Receiver of the signals of the plan's vehicle, deleted to disconnect them
     State _state = Idle;
     QString _message;
 
@@ -154,6 +180,7 @@ private:
     QPointer<GeoFenceManager> _manager;
     QString _planFile;                                  ///< Of the plan when the upload started
     FenceSnapshot _sentFence;
+    Verification _sentRecord;                           ///< Of the fence sent, with the zones the plan didn't fence then
     QString _error;                                     ///< Reported by the fence manager
     int _ackResult = 0;                                 ///< MAV_MISSION_RESULT of the last fence MISSION_ACK, 0 when accepted
 };

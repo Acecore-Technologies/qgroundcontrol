@@ -11,6 +11,8 @@
 
 #include "UnitTest.h"
 
+#include <QtCore/QTemporaryDir>
+
 #include <memory>
 
 namespace GeoZoneTestHelpers {
@@ -36,6 +38,7 @@ private slots:
     void _testGeoFenceSelection();
     void _testGeoFenceNotFenced();
     void _testGeoFenceUploadConfirmation();
+    void _testGeoFenceRecords();
     void _testGeoFenceActiveTime();
     void _testGeoFenceStale();
     void _testGeoFenceUpload();
@@ -47,4 +50,6 @@ private slots:
 private:
     /// The texts compared are in meters, whatever the locale
     std::unique_ptr<GeoZoneTestHelpers::ScopedMetricUnits> _metricUnits;
+    /// Keeps the fences recorded for the vehicles of the tests, see GeoZoneFenceUpload::setRecordsFile
+    std::unique_ptr<QTemporaryDir> _recordsDir;
 };

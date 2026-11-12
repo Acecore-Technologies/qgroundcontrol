@@ -20,16 +20,221 @@
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
 
-#include <QtCore/QHash>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QSaveFile>
 #include <QtCore/QTimer>
+
+#include <algorithm>
+#include <cmath>
 
 namespace {
 
-/// Of the vehicles, removed when they are destroyed
-QHash<const Vehicle*, GeoZoneFenceUpload::Verification> &verifications()
+// Keys of the file of recorded fences and of its records
+constexpr int recordsVersion = 1;
+constexpr const char *versionKey = "version";
+constexpr const char *vehiclesKey = "vehicles";
+constexpr const char *uidKey = "uid";
+constexpr const char *systemIdKey = "systemId";
+constexpr const char *timeKey = "time";
+constexpr const char *verifiedKey = "verified";
+constexpr const char *geoZoneFencesKey = "geoZoneFences";
+constexpr const char *sourcesKey = "sources";
+constexpr const char *notFencedKey = "notFenced";
+constexpr const char *countKey = "count";
+constexpr const char *zonesKey = "zones";
+constexpr const char *nameKey = "name";
+constexpr const char *reasonKey = "reason";
+constexpr const char *fenceKey = "fence";
+constexpr const char *polygonsKey = "polygons";
+constexpr const char *circlesKey = "circles";
+constexpr const char *inclusionKey = "inclusion";
+constexpr const char *verticesKey = "vertices";
+constexpr const char *centerKey = "center";
+constexpr const char *radiusKey = "radius";
+constexpr const char *returnPointKey = "returnPoint";
+
+QJsonArray _coordinateJson(const QGeoCoordinate &coordinate)
 {
-    static QHash<const Vehicle*, GeoZoneFenceUpload::Verification> map;
-    return map;
+    return QJsonArray{ coordinate.latitude(), coordinate.longitude() };
+}
+
+/// @return The coordinate of a [latitude, longitude] array, invalid for anything else
+QGeoCoordinate _coordinateFromJson(const QJsonValue &json)
+{
+    const QJsonArray values = json.toArray();
+    if ((values.count() < 2) || !values[0].isDouble() || !values[1].isDouble()) {
+        return QGeoCoordinate();
+    }
+    return QGeoCoordinate(values[0].toDouble(), values[1].toDouble());
+}
+
+QJsonObject _fenceJson(const GeoZoneFenceUpload::FenceSnapshot &fence)
+{
+    QJsonArray polygons;
+    for (const GeoZoneFenceUpload::FenceSnapshot::Polygon &polygon : fence.polygons) {
+        QJsonArray vertices;
+        for (const QGeoCoordinate &vertex : polygon.vertices) {
+            vertices.append(_coordinateJson(vertex));
+        }
+        polygons.append(QJsonObject{ { inclusionKey, polygon.inclusion }, { verticesKey, vertices } });
+    }
+    QJsonArray circles;
+    for (const GeoZoneFenceUpload::FenceSnapshot::Circle &circle : fence.circles) {
+        circles.append(QJsonObject{ { inclusionKey, circle.inclusion }, { centerKey, _coordinateJson(circle.circle.center()) }, { radiusKey, circle.circle.radius() } });
+    }
+    QJsonObject json{ { polygonsKey, polygons }, { circlesKey, circles } };
+    if (fence.returnPoint.isValid()) {
+        json.insert(returnPointKey, _coordinateJson(fence.returnPoint));
+    }
+    return json;
+}
+
+/// @return The fence, nothing when a vertex, center or radius can't be read: a fence read in part would compare with
+///         the vehicle's as another fence
+std::optional<GeoZoneFenceUpload::FenceSnapshot> _fenceFromJson(const QJsonObject &json)
+{
+    GeoZoneFenceUpload::FenceSnapshot fence;
+    for (const QJsonValue &value : json.value(polygonsKey).toArray()) {
+        GeoZoneFenceUpload::FenceSnapshot::Polygon polygon;
+        polygon.inclusion = value[inclusionKey].toBool();
+        for (const QJsonValue &vertex : value[verticesKey].toArray()) {
+            polygon.vertices.append(_coordinateFromJson(vertex));
+            if (!polygon.vertices.constLast().isValid()) {
+                return std::nullopt;
+            }
+        }
+        fence.polygons.append(polygon);
+    }
+    for (const QJsonValue &value : json.value(circlesKey).toArray()) {
+        const QGeoCoordinate center = _coordinateFromJson(value[centerKey]);
+        const double radius = value[radiusKey].toDouble(qQNaN());
+        if (!center.isValid() || !std::isfinite(radius)) {
+            return std::nullopt;
+        }
+        fence.circles.append({ value[inclusionKey].toBool(), QGeoCircle(center, radius) });
+    }
+    if (json.contains(returnPointKey)) {
+        fence.returnPoint = _coordinateFromJson(json.value(returnPointKey));
+        if (!fence.returnPoint.isValid()) {
+            return std::nullopt;
+        }
+    }
+    return fence;
+}
+
+/// Fence recorded for a vehicle, which is told from the others by the unique id it reports, or by its system id
+/// while one of them has none. Vehicles taken for each other only share a record while they store the same fence.
+struct Record {
+    quint64 uid = 0;
+    int systemId = 0;
+    GeoZoneFenceUpload::Verification verification;
+
+    bool isOf(quint64 otherUid, int otherSystemId) const
+    {
+        return ((uid != 0) && (otherUid != 0)) ? (uid == otherUid) : (systemId == otherSystemId);
+    }
+};
+
+/// The recorded fences, the most recent first, read from their file when first used and written when they change
+class Records
+{
+public:
+    void setFileName(const QString &fileName)
+    {
+        _fileName = fileName;
+        _records.clear();
+        _loaded = false;
+    }
+
+    const Record *find(quint64 uid, int systemId)
+    {
+        _load();
+        const auto it = std::find_if(_records.cbegin(), _records.cend(), [uid, systemId](const Record &record) { return record.isOf(uid, systemId); });
+        return (it != _records.cend()) ? &*it : nullptr;
+    }
+
+    void set(const Record &record)
+    {
+        _load();
+        (void) _records.removeIf([&record](const Record &other) { return other.isOf(record.uid, record.systemId); });
+        _records.prepend(record);
+        if (_records.count() > GeoZoneFenceUpload::maxRecordedVehicles) {
+            _records.resize(GeoZoneFenceUpload::maxRecordedVehicles);
+        }
+        _save();
+    }
+
+    void remove(quint64 uid, int systemId)
+    {
+        _load();
+        if (_records.removeIf([uid, systemId](const Record &record) { return record.isOf(uid, systemId); }) > 0) {
+            _save();
+        }
+    }
+
+private:
+    QString _path() const
+    {
+        return _fileName.isEmpty() ? QDir(GeoZoneManager::instance()->repository()->storageDir()).filePath(QStringLiteral("fences/vehicle-fences.json")) : _fileName;
+    }
+
+    void _load()
+    {
+        if (_loaded) {
+            return;
+        }
+        _loaded = true;
+        QFile file(_path());
+        if (!file.open(QIODevice::ReadOnly)) {
+            return;
+        }
+        const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+        // A file of a later version, or one which isn't of recorded fences, has no record this version can rely on:
+        // the fences then read as not verified
+        if (json.value(versionKey).toInt() != recordsVersion) {
+            qCWarning(GeoZoneManagerLog) << "recorded vehicle fences not read, version" << json.value(versionKey) << file.fileName();
+            return;
+        }
+        for (const QJsonValue &value : json.value(vehiclesKey).toArray()) {
+            const QJsonObject entry = value.toObject();
+            const std::optional<GeoZoneFenceUpload::Verification> verification = GeoZoneFenceUpload::Verification::fromJson(entry);
+            if (verification) {
+                _records.append(Record{ entry.value(uidKey).toString().toULongLong(nullptr, 16), entry.value(systemIdKey).toInt(), *verification });
+            }
+        }
+    }
+
+    void _save() const
+    {
+        QJsonArray vehicles;
+        for (const Record &record : _records) {
+            QJsonObject entry = record.verification.toJson();
+            entry.insert(uidKey, QString::number(record.uid, 16));
+            entry.insert(systemIdKey, record.systemId);
+            vehicles.append(entry);
+        }
+        const QString path = _path();
+        QSaveFile file(path);
+        if (!QDir().mkpath(QFileInfo(path).absolutePath()) || !file.open(QIODevice::WriteOnly) ||
+            (file.write(QJsonDocument(QJsonObject{ { versionKey, recordsVersion }, { vehiclesKey, vehicles } }).toJson(QJsonDocument::Compact)) < 0) || !file.commit()) {
+            // Kept in memory for this session
+            qCWarning(GeoZoneManagerLog) << "recorded vehicle fences not saved" << path << file.errorString();
+        }
+    }
+
+    QString _fileName;
+    QList<Record> _records;
+    bool _loaded = false;
+};
+
+Records &records()
+{
+    static Records instance;
+    return instance;
 }
 
 QString _countText(const GeoZoneFenceUpload::FenceSnapshot &fence)
@@ -108,6 +313,7 @@ void GeoZoneFenceUpload::setGeoFenceController(GeoFenceController *geoFenceContr
     }
     _geoFenceController = geoFenceController;
     _connectController();
+    _connectPlanVehicle();
     if (_state != Idle) {
         (void) _transition(Idle, QString());
     }
@@ -125,8 +331,69 @@ void GeoZoneFenceUpload::_connectController()
     PlanMasterController *const masterController = _geoFenceController->masterController();
     const auto changed = [this]() { emit canUploadChanged(); };
     (void) connect(masterController, &PlanMasterController::managerVehicleChanged, _controllerConnections, changed);
+    (void) connect(masterController, &PlanMasterController::managerVehicleChanged, _controllerConnections, [this]() { _connectPlanVehicle(); });
     (void) connect(masterController, &PlanMasterController::offlineChanged, _controllerConnections, changed);
     (void) connect(_geoFenceController, &GeoFenceController::supportedChanged, _controllerConnections, changed);
+}
+
+void GeoZoneFenceUpload::_connectPlanVehicle()
+{
+    delete _planVehicleConnections;
+    _planVehicleConnections = new QObject(this);
+    Vehicle *const vehicle = _planVehicle();
+    if (!vehicle || vehicle->isOfflineEditingVehicle()) {
+        return;
+    }
+    // Plan uploads send the fence without this object. What they sent is recorded, so that the pre-flight checklist
+    // names the zones not fenced after them too.
+    const QPointer<Vehicle> sentTo = vehicle;
+    (void) connect(vehicle->geoFenceManager(), &GeoFenceManager::sendComplete, _planVehicleConnections, [this, sentTo](bool error) { _planFenceSent(sentTo, error); });
+    (void) connect(vehicle->geoFenceManager(), &GeoFenceManager::removeAllComplete, _planVehicleConnections, [sentTo](bool error) {
+        if (!error) {
+            clearVerification(sentTo);
+        }
+    });
+}
+
+GeoZoneFenceUpload::Verification GeoZoneFenceUpload::_record(const FenceSnapshot &fence) const
+{
+    Verification record;
+    record.fence = fence;
+    record.time = GeoZoneEnvironment::currentDateTimeUtc();
+    for (QmlObjectListModel *const fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
+        for (int i = 0; i < fences->count(); i++) {
+            record.geoZoneFences += GeoZoneFenceTag::isGeoZone(fences->get(i)) ? 1 : 0;
+        }
+    }
+    // The data the fences from geozones were made of
+    for (const GeoZoneSource *const source : GeoZoneManager::instance()->repository()->sourceList()) {
+        record.sources.append(GeoZoneSourceVersion::fromSource(source));
+    }
+    record.notFenced = GeoZoneFenceTags::notFenced(_geoFenceController, &record.notFencedCount);
+    return record;
+}
+
+void GeoZoneFenceUpload::_planFenceSent(Vehicle *vehicle, bool error)
+{
+    // An upload of this object records its fence once it is read back
+    if (error || !vehicle || !_geoFenceController || busy()) {
+        return;
+    }
+    GeoFenceManager *const manager = vehicle->geoFenceManager();
+    const FenceSnapshot sent = snapshot(manager->polygons(), manager->circles(), manager->breachReturnPoint());
+    // Of another plan, or edited since: the zones this plan doesn't fence aren't those of the fence sent
+    if (!compareFences(snapshot(_geoFenceController), sent).isEmpty()) {
+        return;
+    }
+    Verification record = _record(sent);
+    record.verified = false;
+    // Each importer of the plan follows the upload
+    const std::optional<Verification> previous = verification(vehicle);
+    if (previous && !previous->verified && (previous->fence == record.fence) && (previous->notFenced == record.notFenced) &&
+        (previous->notFencedCount == record.notFencedCount) && (previous->geoZoneFences == record.geoZoneFences) && (previous->sources == record.sources)) {
+        return;
+    }
+    setVerification(vehicle, record);
 }
 
 bool GeoZoneFenceUpload::canUpload() const
@@ -159,6 +426,8 @@ void GeoZoneFenceUpload::start()
     _manager = vehicle->geoFenceManager();
     _planFile = masterController->currentPlanFile();
     _sentFence = snapshot(_geoFenceController);
+    // With the zones the plan doesn't fence now: reading back may replace the fences of an empty plan
+    _sentRecord = _record(_sentFence);
     _error.clear();
     _ackResult = MAV_MISSION_ACCEPTED;
     (void) _transition(Sending, tr("Uploading the fence…"));
@@ -290,19 +559,8 @@ void GeoZoneFenceUpload::_readBack()
     }
     const QString differences = compareFences(_sentFence, snapshot(_manager->polygons(), _manager->circles(), _manager->breachReturnPoint()));
     if (differences.isEmpty()) {
-        Verification verification;
-        verification.fence = _sentFence;
+        Verification verification = _sentRecord;
         verification.time = GeoZoneEnvironment::currentDateTimeUtc();
-        for (QmlObjectListModel *const fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
-            for (int i = 0; i < fences->count(); i++) {
-                verification.geoZoneFences += GeoZoneFenceTag::isGeoZone(fences->get(i)) ? 1 : 0;
-            }
-        }
-        // The data the fences from geozones were made of
-        for (const GeoZoneSource *const source : GeoZoneManager::instance()->repository()->sourceList()) {
-            verification.sources.append(GeoZoneSourceVersion::fromSource(source));
-        }
-        verification.notFenced = GeoZoneFenceTags::notFenced(_geoFenceController, &verification.notFencedCount);
         setVerification(_vehicle, verification);
         QString message = tr("Verified: the vehicle stores the fence of %1.").arg(_countText(_sentFence));
         const QString notFenced = GeoZoneFenceTags::notFencedText(verification.notFenced, verification.notFencedCount);
@@ -315,10 +573,58 @@ void GeoZoneFenceUpload::_readBack()
     }
 }
 
+QJsonObject GeoZoneFenceUpload::Verification::toJson() const
+{
+    QJsonArray sourceList;
+    for (GeoZoneSourceVersion source : sources) {
+        // Only what tells whether the data changed since
+        source.provenance = QJsonObject();
+        sourceList.append(source.toJson());
+    }
+    QJsonArray zones;
+    for (const GeoZoneFenceTags::NotFenced &zone : notFenced) {
+        zones.append(QJsonObject{ { nameKey, zone.name }, { reasonKey, zone.reason } });
+    }
+    return QJsonObject{
+        { timeKey, time.toUTC().toString(Qt::ISODateWithMs) },
+        { verifiedKey, verified },
+        { geoZoneFencesKey, geoZoneFences },
+        { fenceKey, _fenceJson(fence) },
+        { sourcesKey, sourceList },
+        { notFencedKey, QJsonObject{ { countKey, (std::max)(notFencedCount, static_cast<int>(notFenced.count())) }, { zonesKey, zones } } },
+    };
+}
+
+std::optional<GeoZoneFenceUpload::Verification> GeoZoneFenceUpload::Verification::fromJson(const QJsonObject &json)
+{
+    const std::optional<FenceSnapshot> fence = _fenceFromJson(json.value(fenceKey).toObject());
+    if (!fence || !json.value(fenceKey).isObject()) {
+        return std::nullopt;
+    }
+    Verification verification;
+    verification.fence = *fence;
+    verification.time = QDateTime::fromString(json.value(timeKey).toString(), Qt::ISODateWithMs).toUTC();
+    // Only a record which says so was read back
+    verification.verified = json.value(verifiedKey).toBool(false);
+    verification.geoZoneFences = (std::max)(json.value(geoZoneFencesKey).toInt(), 0);
+    for (const QJsonValue &source : json.value(sourcesKey).toArray()) {
+        verification.sources.append(GeoZoneSourceVersion::fromJson(source.toObject()));
+    }
+    const QJsonObject notFencedJson = json.value(notFencedKey).toObject();
+    for (const QJsonValue &zone : notFencedJson.value(zonesKey).toArray()) {
+        verification.notFenced.append(GeoZoneFenceTags::NotFenced{ zone[nameKey].toString(), zone[reasonKey].toString() });
+    }
+    verification.notFencedCount = (std::max)(notFencedJson.value(countKey).toInt(), static_cast<int>(verification.notFenced.count()));
+    return verification;
+}
+
 std::optional<GeoZoneFenceUpload::Verification> GeoZoneFenceUpload::verification(const Vehicle *vehicle)
 {
-    const auto it = verifications().constFind(vehicle);
-    return (it != verifications().cend()) ? std::make_optional(*it) : std::nullopt;
+    if (!vehicle) {
+        return std::nullopt;
+    }
+    const Record *const record = records().find(vehicle->vehicleUID(), vehicle->id());
+    return record ? std::make_optional(record->verification) : std::nullopt;
 }
 
 void GeoZoneFenceUpload::setVerification(Vehicle *vehicle, const Verification &verification)
@@ -326,11 +632,19 @@ void GeoZoneFenceUpload::setVerification(Vehicle *vehicle, const Verification &v
     if (!vehicle) {
         return;
     }
-    if (!verifications().contains(vehicle)) {
-        // The address of a destroyed vehicle may be reused by the next one
-        (void) connect(vehicle, &QObject::destroyed, vehicle, [vehicle]() { (void) verifications().remove(vehicle); });
+    records().set(Record{ vehicle->vehicleUID(), vehicle->id(), verification });
+}
+
+void GeoZoneFenceUpload::clearVerification(Vehicle *vehicle)
+{
+    if (vehicle) {
+        records().remove(vehicle->vehicleUID(), vehicle->id());
     }
-    verifications().insert(vehicle, verification);
+}
+
+void GeoZoneFenceUpload::setRecordsFile(const QString &fileName)
+{
+    records().setFileName(fileName);
 }
 
 int GeoZoneFenceUpload::FenceSnapshot::pointCount() const

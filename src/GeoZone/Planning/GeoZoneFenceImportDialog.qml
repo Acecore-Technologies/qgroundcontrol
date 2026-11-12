@@ -66,18 +66,83 @@ QGCPopupDialog {
         function onZonesChanged()   { selectionTimer.restart() }
     }
 
-    // The zones the vehicle won't stop at are confirmed: those of the settled selection, which the importer names
+    // The zones the vehicle won't stop at are confirmed: those of the settled selection, which the importer names,
+    // each of them
     Connections {
         target: importer
         function onUploadConfirmationRequired(confirmation, text, zones) {
-            mainWindow.showMessageDialog(qsTr("Upload Fence"),
-                                         qsTr("%1\n\nThe vehicle doesn't stop at zones which are not fenced, QGroundControl only alerts about them. Click 'Ok' to upload the fence anyway.")
-                                            .arg(text.replace(/</g, "\u2039").replace(/>/g, "\u203A")),
-                                         Dialog.Ok | Dialog.Cancel,
-                                         function() {
-                                             control._flushSelection()
-                                             importer.confirmUpload(confirmation)
-                                         })
+            zoneListDialogComponent.createObject(mainWindow, {
+                title:          qsTr("Upload Fence"),
+                buttons:        Dialog.Ok | Dialog.Cancel,
+                intro:          qsTr("%n geozone(s) are not fenced:", "", zones.length),
+                zones:          zones,
+                note:           qsTr("The vehicle doesn't stop at zones which are not fenced, QGroundControl only alerts about them. Click 'Ok' to upload the fence anyway."),
+                acceptFunction: function() {
+                    control._flushSelection()
+                    importer.confirmUpload(confirmation)
+                }
+            }).open()
+        }
+    }
+
+    Component {
+        id: zoneListDialogComponent
+
+        ZoneListDialog { }
+    }
+
+    /// Lists zones with why, like those not fenced: each of them, in a list which scrolls. Asks with Ok and Cancel
+    /// buttons and an accept function.
+    component ZoneListDialog: QGCPopupDialog {
+        id: zoneListDialog
+
+        property string intro
+        property var    zones:          []      ///< Texts, shown as plain text
+        property string note
+        property var    acceptFunction: null
+
+        readonly property real _listWidth: Math.min(ScreenTools.defaultFontPixelWidth * 56, mainWindow.width - ScreenTools.defaultFontPixelWidth * 8)
+
+        onAccepted: {
+            if (acceptFunction) {
+                acceptFunction()
+            }
+        }
+
+        ColumnLayout {
+            spacing: ScreenTools.defaultFontPixelHeight / 2
+
+            QGCLabel {
+                Layout.preferredWidth:  zoneListDialog._listWidth
+                wrapMode:               Text.WordWrap
+                text:                   zoneListDialog.intro
+                textFormat:             Text.PlainText
+                visible:                text !== ""
+            }
+
+            QGCListView {
+                Layout.preferredWidth:  zoneListDialog._listWidth
+                Layout.preferredHeight: Math.min(contentHeight, ScreenTools.defaultFontPixelHeight * 12)
+                clip:                   true
+                model:                  zoneListDialog.zones
+
+                delegate: QGCLabel {
+                    required property string modelData
+
+                    width:      ListView.view ? ListView.view.width : implicitWidth
+                    wrapMode:   Text.WordWrap
+                    textFormat: Text.PlainText
+                    text:       "\u2022 " + modelData
+                }
+            }
+
+            QGCLabel {
+                Layout.preferredWidth:  zoneListDialog._listWidth
+                wrapMode:               Text.WordWrap
+                text:                   zoneListDialog.note
+                textFormat:             Text.PlainText
+                visible:                text !== ""
+            }
         }
     }
 
@@ -91,6 +156,10 @@ QGCPopupDialog {
         }
         if (conditionalCheck.checked) {
             restrictions.push(GeoZone.Conditional)
+        }
+        // Alerted like restricted zones
+        if (unknownCheck.checked) {
+            restrictions.push(GeoZone.Unknown)
         }
         return restrictions
     }
@@ -262,6 +331,13 @@ QGCPopupDialog {
                     checked:            false
                     onClicked:          selectionTimer.restart()
                 }
+                // Zones whose restriction isn't known are alerted about like restricted ones
+                QGCCheckBox {
+                    id:                 unknownCheck
+                    text:               qsTr("Unknown")
+                    checked:            true
+                    onClicked:          selectionTimer.restart()
+                }
             }
 
             QGCLabel { text: qsTr("Area") }
@@ -402,7 +478,8 @@ QGCPopupDialog {
             delegate:               choiceDelegate
         }
 
-        // The zones the vehicle won't stop at stand out, those covered by the fence of a zone with the same area don't
+        // The zones the vehicle won't stop at stand out, those covered by the fence of a zone with the same area don't.
+        // All zones left out are listed.
         RowLayout {
             Layout.preferredWidth:  _contentWidth
             spacing:                _margin
@@ -417,9 +494,6 @@ QGCPopupDialog {
                     }
                     if (importer.leftOutCount > importer.notFencedCount) {
                         parts.push(qsTr("%n covered by other fences", "", importer.leftOutCount - importer.notFencedCount))
-                    }
-                    if (importer.leftOutCount > leftOutList.count) {
-                        parts.push(qsTr("the first %1 listed").arg(leftOutList.count))
                     }
                     return parts.join(", ")
                 }

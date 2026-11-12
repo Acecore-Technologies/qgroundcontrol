@@ -129,17 +129,17 @@ public:
 
         friend bool operator==(const NotFenced &, const NotFenced &) = default;
     };
-    static constexpr int maxStoredNotFenced = 100;  ///< Zones kept, the others are counted
     static constexpr int maxListedNotFenced = 5;    ///< Zones named by notFencedText, the others are counted
 
-    /// Records the zones the last selection left out, count of them in all, with the fences from geozones it added
+    /// Records the zones the last selection left out, all of them, with the fences from geozones it added
+    /// @param count Number of zones left out when the zones are only some of them
     static void setNotFenced(GeoFenceController *geoFenceController, const QList<NotFenced> &zones, int count);
     /// @return The zones the last selection left out, while the fences from geozones are the ones it added. Nothing once
     ///         those changed, or without such a selection.
-    /// @param count Set to the number of zones left out, also those not kept
+    /// @param count Set to the number of zones left out, also those which plans saved by earlier versions didn't keep
     static QList<NotFenced> notFenced(GeoFenceController *geoFenceController, int *count = nullptr);
     /// @return Like "3 geozones are not fenced: A (No room left in the vehicle fence), B (Left out by you) and 1 more.",
-    ///         empty without zones
+    ///         empty without zones. A summary: what shows it also gives the way to see all of them.
     static QString notFencedText(const QList<NotFenced> &zones, int count, int maxListed = maxListedNotFenced);
     /// @return Identifies the polygons and circles from geozones of the controller, in their order
     static QString geoZoneFencesFingerprint(GeoFenceController *geoFenceController);

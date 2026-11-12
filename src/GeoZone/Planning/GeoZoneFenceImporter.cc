@@ -10,6 +10,7 @@
 #include "GeoZoneFenceImporter.h"
 #include "GeoZoneInfo.h"
 #include "GeoFenceController.h"
+#include "GeoFenceManager.h"
 #include "GeoZone.h"
 #include "GeoZoneEnvironment.h"
 #include "GeoZoneFenceTags.h"
@@ -124,7 +125,14 @@ void GeoZoneFenceImporter::_connectVehicle()
     if (Vehicle *const vehicle = _vehicle()) {
         // The capacity and warnings depend on the parameters
         (void) connect(vehicle->parameterManager(), &ParameterManager::parametersReadyChanged, _vehicleConnections, [this]() { _updateCapacity(); });
+        // The fence the vehicle stores and its record change with its transfers, once those following them are done
+        GeoFenceManager *const manager = vehicle->geoFenceManager();
+        const auto transferred = [this]() { _fenceNoteTimer.start(); };
+        (void) connect(manager, &GeoFenceManager::sendComplete, _vehicleConnections, transferred);
+        (void) connect(manager, &GeoFenceManager::loadComplete, _vehicleConnections, transferred);
+        (void) connect(manager, &GeoFenceManager::removeAllComplete, _vehicleConnections, transferred);
     }
+    _fenceNoteTimer.start();
 }
 
 GeoZoneFences::Capacity GeoZoneFenceImporter::vehicleCapacity(Vehicle *vehicle)
@@ -367,21 +375,33 @@ void GeoZoneFenceImporter::_select()
         _notFenced.append(GeoZoneFenceTags::NotFenced{ choice.candidate.zone->displayName(), GeoZoneFences::statusText(choice) });
     }
 
-    QList<GeoZoneFenceChoiceModel::Row> rows;
+    // All of them, so that each zone left out can be seen, in priority order rather than selected first, so that the
+    // row of a zone changing lists is updated in place
+    QList<GeoZoneFenceChoiceModel::Row> rows(_selection.choices.count());
+    QList<bool> placed(rows.count(), false);
+    QList<GeoZoneFenceChoiceModel::Row> sameKey;
     _selectedCount = 0;
-    int leftOutListed = 0;
     for (const GeoZoneFences::Choice &choice : std::as_const(_selection.choices)) {
-        if (choice.status == GeoZoneFences::Status::Selected) {
-            _selectedCount++;
-        } else if (leftOutListed++ >= maxListedChoices) {
-            break;
+        _selectedCount += (choice.status == GeoZoneFences::Status::Selected) ? 1 : 0;
+        const GeoZoneFenceChoiceModel::Row row = _row(choice);
+        const qsizetype index = _prepared.indexes.value(row.key, -1);
+        if ((index >= 0) && (index < rows.count()) && !placed[index]) {
+            rows[index] = row;
+            placed[index] = true;
+        } else {
+            sameKey.append(row);
         }
-        rows.append(_row(choice));
     }
-    // In priority order rather than selected first, so that the row of a zone changing lists is updated in place
-    std::sort(rows.begin(), rows.end(), [this](const GeoZoneFenceChoiceModel::Row &a, const GeoZoneFenceChoiceModel::Row &b) {
-        return _prepared.indexes.value(a.key) < _prepared.indexes.value(b.key);
-    });
+    // Zones sharing a key have one place in the priority order: the others follow the list
+    if (!sameKey.isEmpty()) {
+        QList<GeoZoneFenceChoiceModel::Row> listed;
+        for (qsizetype i = 0; i < rows.count(); i++) {
+            if (placed[i]) {
+                listed.append(rows[i]);
+            }
+        }
+        rows = listed + sameKey;
+    }
     _choices->setRows(rows);
     emit selectionChanged();
 }
@@ -531,7 +551,8 @@ void GeoZoneFenceImporter::_updateFenceNote()
     const QList<GeoZoneFenceTags::NotFenced> zones = GeoZoneFenceTags::notFenced(_geoFenceController, &count);
     QStringList zoneTexts = _zoneTexts(zones);
     if (count > zoneTexts.count()) {
-        zoneTexts.append(tr("%n more", nullptr, count - static_cast<int>(zoneTexts.count())));
+        // Plans saved before all zones were kept
+        zoneTexts.append(tr("%n more which this plan doesn't name: add the fences from geozones again to list them", nullptr, count - static_cast<int>(zoneTexts.count())));
     }
     const QString note = GeoZoneFenceTags::notFencedText(zones, count);
     if ((note != _fenceNote) || (count != _fenceNoteCount) || (zoneTexts != _fenceNoteZones)) {
@@ -539,6 +560,32 @@ void GeoZoneFenceImporter::_updateFenceNote()
         _fenceNoteCount = count;
         _fenceNoteZones = zoneTexts;
         emit fenceNoteChanged();
+    }
+    _updateVehicleFenceNote();
+}
+
+void GeoZoneFenceImporter::_updateVehicleFenceNote()
+{
+    QString note;
+    QStringList zoneTexts;
+    Vehicle *const vehicle = _vehicle();
+    if (vehicle && !vehicle->isOfflineEditingVehicle()) {
+        const std::optional<GeoZoneFenceUpload::Verification> record = GeoZoneFenceUpload::verification(vehicle);
+        GeoFenceManager *const manager = vehicle->geoFenceManager();
+        // Of the fence the vehicle stores now
+        if (record && (record->notFencedCount > 0) &&
+            GeoZoneFenceUpload::compareFences(record->fence, GeoZoneFenceUpload::snapshot(manager->polygons(), manager->circles(), manager->breachReturnPoint())).isEmpty()) {
+            note = tr("On the vehicle: %1").arg(GeoZoneFenceTags::notFencedText(record->notFenced, record->notFencedCount));
+            zoneTexts = _zoneTexts(record->notFenced);
+            if (record->notFencedCount > zoneTexts.count()) {
+                zoneTexts.append(tr("%n more which weren't recorded by name", nullptr, record->notFencedCount - static_cast<int>(zoneTexts.count())));
+            }
+        }
+    }
+    if ((note != _vehicleFenceNote) || (zoneTexts != _vehicleFenceNoteZones)) {
+        _vehicleFenceNote = note;
+        _vehicleFenceNoteZones = zoneTexts;
+        emit vehicleFenceNoteChanged();
     }
 }
 

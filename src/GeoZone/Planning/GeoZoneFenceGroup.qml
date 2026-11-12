@@ -51,7 +51,15 @@ Column {
         return count
     }
 
+    // The zones the vehicle's fence leaves out are shown unless the plan's note names the same ones
+    readonly property bool _vehicleNoteShown: staleImporter.vehicleFenceNote !== "" && staleImporter.vehicleFenceNoteZones.join("\n") !== staleImporter.fenceNoteZones.join("\n")
+
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
+
+    /// Lists each of the zones in a dialog which scrolls
+    function _showZones(title, intro, zones) {
+        zoneListDialogComponent.createObject(mainWindow, { title: title, intro: intro, zones: zones }).open()
+    }
 
     /// Selects the fence for editing, moving the map to it when it is out of view
     function _select(fence) {
@@ -114,9 +122,27 @@ Column {
     QGCButton {
         text:       qsTr("Not Fenced...")
         visible:    staleImporter.fenceNoteCount > 0
-        onClicked:  mainWindow.showMessageDialog(qsTr("Geozones Not Fenced"),
-                                                 qsTr("The vehicle doesn't stop at these geozones, QGroundControl only alerts about them:\n\n%1")
-                                                    .arg(staleImporter.fenceNoteZones.map(zone => "\u2022 " + zone.replace(/</g, "\u2039").replace(/>/g, "\u203A")).join("\n")))
+        onClicked:  control._showZones(qsTr("Geozones Not Fenced"), qsTr("The vehicle doesn't stop at these geozones, QGroundControl only alerts about them:"),
+                                       staleImporter.fenceNoteZones)
+    }
+
+    // Those of the fence the vehicle stores, as recorded when it was uploaded, when they aren't those of the plan: like
+    // after a restart, with the fence loaded from the vehicle
+    QGCLabel {
+        width:      parent.width
+        wrapMode:   Text.WordWrap
+        color:      qgcPal.warningText
+        text:       staleImporter.vehicleFenceNote
+        textFormat: Text.PlainText
+        visible:    control._vehicleNoteShown
+    }
+
+    QGCButton {
+        text:       qsTr("Not Fenced on Vehicle...")
+        visible:    control._vehicleNoteShown
+        onClicked:  control._showZones(qsTr("Geozones Not Fenced on Vehicle"),
+                                       qsTr("The fence on the vehicle was uploaded without these geozones. The vehicle doesn't stop at them, QGroundControl only alerts about them:"),
+                                       staleImporter.vehicleFenceNoteZones)
     }
 
     SectionHeader {
@@ -170,5 +196,11 @@ Column {
         id: fenceImportDialogComponent
 
         GeoZoneFenceImportDialog { }
+    }
+
+    Component {
+        id: zoneListDialogComponent
+
+        GeoZoneFenceImportDialog.ZoneListDialog { }
     }
 }

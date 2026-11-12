@@ -361,7 +361,8 @@ void GeoZoneFenceTags::setNotFenced(GeoFenceController *geoFenceController, cons
     }
     QJsonObject settings = importSettings(geoFenceController);
     QJsonArray entries;
-    for (const NotFenced &zone : zones.first((std::min)(zones.count(), qsizetype{ maxStoredNotFenced }))) {
+    // All of them, so that the plan can always name each zone its fence leaves out
+    for (const NotFenced &zone : zones) {
         entries.append(QJsonObject{ { nameKey, zone.name }, { notFencedReasonKey, zone.reason } });
     }
     settings.insert(notFencedKey, QJsonObject{
