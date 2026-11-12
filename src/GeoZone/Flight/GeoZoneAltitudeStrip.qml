@@ -301,23 +301,25 @@ Item {
             visible:    !isNaN(control._terrain) && y < control._plotTop + control._plotHeight
         }
 
+        // One item per band, kept while the bands move with the altitude of the vehicle: the model is their number,
+        // since a new list of bands would make new items with each altitude step
         Repeater {
-            model: control._merged
+            model: control._merged.length
 
             Item {
                 id:             bandItem
                 anchors.fill:   parent
                 opacity:        control._stale ? 0.5 : 1
-                visible:        control._inRange(band)
+                visible:        !!band && control._inRange(band)
 
-                required property var   modelData
                 required property int   index
 
-                readonly property var   band:       modelData
-                readonly property real _floorY:     control._floorY(band)
-                readonly property real _ceilingY:   control._ceilingY(band)
+                /// Of _merged, null for the moment between a shorter list and the removal of the item
+                readonly property var   band:       control._merged[index] ?? null
+                readonly property real _floorY:     band ? control._floorY(band) : NaN
+                readonly property real _ceilingY:   band ? control._ceilingY(band) : NaN
                 readonly property real _labelY:     control._labelYs[index] ?? NaN
-                readonly property int  _restriction: band.restriction
+                readonly property int  _restriction: band ? band.restriction : -1
                 readonly property color _color:     GeoZoneStyle.restrictionColor(_restriction)
 
                 // Overlapping bands share the bar, the most severe on top
@@ -348,7 +350,7 @@ Item {
 
                     QGCLabel {
                         width:          parent.width
-                        text:           control._names(bandItem.band)
+                        text:           bandItem.band ? control._names(bandItem.band) : ""
                         textFormat:     Text.PlainText
                         elide:          Text.ElideRight
                         font.pointSize: ScreenTools.smallFontPointSize
@@ -356,7 +358,7 @@ Item {
 
                     QGCLabel {
                         width:          parent.width
-                        text:           bandItem.band.limitsText
+                        text:           bandItem.band ? bandItem.band.limitsText : ""
                         textFormat:     Text.PlainText
                         elide:          Text.ElideRight
                         font.pointSize: ScreenTools.smallFontPointSize

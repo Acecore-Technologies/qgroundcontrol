@@ -1393,13 +1393,26 @@ void GeoZoneFlightTest::_testAltitudeStrip()
     };
 
     // The vehicle is in a zone without restriction and in U-space airspace, which is the more severe: on top and named
-    const QVariantList bands = { band(GeoZone::NoRestriction, QStringLiteral("N"), qQNaN(), 450), band(GeoZone::USpace, QStringLiteral("U"), 350, 900) };
+    const auto makeBands = [&band]() {
+        return QVariantList{ band(GeoZone::NoRestriction, QStringLiteral("N"), qQNaN(), 450), band(GeoZone::USpace, QStringLiteral("U"), 350, 900) };
+    };
+    const QVariantList bands = makeBands();
     QVERIFY(vehicle->setProperty("verticalBands", bands));
     QVERIFY(strip->isVisible());
     const QVariantMap inside = strip->property("_insideBand").toMap();
     QCOMPARE(inside.value(QStringLiteral("names")).toStringList(), QStringList{ QStringLiteral("U") });
     QList<QPointer<QQuickItem>> items = bandItems();
     QCOMPARE(items.count(), 2);
+
+    // The items are kept while the vehicle climbs, which gives the strip a new list of the same bands with each step
+    QSignalSpy mergedSpy(strip, SIGNAL(_mergedChanged()));
+    QVERIFY(vehicle->setProperty("altitudeAMSL", 400.5));
+    QVERIFY(vehicle->setProperty("verticalBands", makeBands()));
+    QCOMPARE(mergedSpy.count(), 1);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+    QVERIFY(std::all_of(items.cbegin(), items.cend(), [](const QPointer<QQuickItem> &item) { return !item.isNull(); }));
+    QCOMPARE(bandItems().count(), 2);
 
     // A band wholly above the shown range isn't drawn, and its edges stay within the plot
     const double plotTop = strip->property("_plotTop").toDouble();
