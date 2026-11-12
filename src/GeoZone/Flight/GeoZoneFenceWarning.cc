@@ -51,6 +51,9 @@ const QStringList &_fenceParameters()
     return names;
 }
 
+// PX4's GF_ACTION which ends the flight
+constexpr int kPx4ActionTerminate = 4;
+
 // Fences of ArduPilot's FENCE_TYPE
 constexpr int kArduPilotPolygonsBit = 4;
 constexpr int kArduPilotCircleBit = 2;
@@ -75,6 +78,8 @@ GeoZoneFenceWarning::GeoZoneFenceWarning(Vehicle *vehicle, const Clock &clock, Q
     _fenceCommandTimer.setSingleShot(true);
     _fenceCommandTimer.setInterval(fenceCommandTimeoutMSecs);
     (void) connect(&_fenceCommandTimer, &QTimer::timeout, this, &GeoZoneFenceWarning::_fenceCommandTimedOut);
+    (void) connect(this, &GeoZoneFenceWarning::configChanged, this, &GeoZoneFenceWarning::canTakeControlChanged);
+    (void) connect(this, &GeoZoneFenceWarning::outsideChanged, this, &GeoZoneFenceWarning::canTakeControlChanged);
     _connectVehicle();
     _updateConfig();
 }
@@ -195,6 +200,7 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
     if (!vehicle || vehicle->isOfflineEditingVehicle()) {
         return config;
     }
+    config.vtolHover = vehicle->vtol() && !vehicle->vtolInFwdFlight();
     if (vehicle->fixedWing() || (vehicle->vtol() && vehicle->vtolInFwdFlight())) {
         config.vehicleClass = VehicleClass::Plane;
     } else if (vehicle->rover()) {
@@ -271,7 +277,7 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
     if (!fence.home.isValid()) {
         fence.maxDistance = qQNaN();
     }
-    config.takeControlMode = takeControlMode(config.firmware, config.vehicleClass, vehicle->flightModes());
+    config.takeControlMode = takeControlMode(config.firmware, config.vehicleClass, vehicle->flightModes(), config.vtolHover);
     return config;
 }
 
@@ -470,6 +476,12 @@ bool GeoZoneFenceWarning::isManoeuvre(Firmware firmware, int action)
     return false;
 }
 
+GeoZoneFenceWarning::VehicleClass GeoZoneFenceWarning::actionClass(const Config &config)
+{
+    // ArduPilot's VTOLs run its plane firmware, also while they hover
+    return ((config.firmware == Firmware::ArduPilot) && config.vtolHover) ? VehicleClass::Plane : config.vehicleClass;
+}
+
 QString GeoZoneFenceWarning::actionText(Firmware firmware, VehicleClass vehicleClass, int action)
 {
     if (action < 0) {
@@ -585,12 +597,18 @@ QString GeoZoneFenceWarning::overrideText(const Config &config)
     return tr("Switch the flight mode to override it.");
 }
 
-QString GeoZoneFenceWarning::takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes)
+QString GeoZoneFenceWarning::takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes, bool vtolHover)
 {
     // The names of QGroundControl's firmware plugins, then those of autopilots reporting their modes (AVAILABLE_MODES),
     // like ArduPilot's "LOITER", compared without case
     QStringList candidates;
-    if (firmware == Firmware::PX4) {
+    // Generic standard modes, like those of simulators
+    QStringList generic = { QStringLiteral("Position"), QStringLiteral("Manual") };
+    if ((firmware == Firmware::ArduPilot) && vtolHover) {
+        // Only the hover modes of the plane firmware: its Loiter circles and its Manual flies as a fixed wing
+        candidates = { QStringLiteral("QuadPlane Loiter"), QStringLiteral("QLoiter"), QStringLiteral("QuadPlane Hover"), QStringLiteral("QHover") };
+        generic.clear();
+    } else if (firmware == Firmware::PX4) {
         switch (vehicleClass) {
         case VehicleClass::Copter:
         case VehicleClass::Plane:
@@ -619,8 +637,7 @@ QString GeoZoneFenceWarning::takeControlMode(Firmware firmware, VehicleClass veh
             break;
         }
     }
-    // Generic standard modes, like those of simulators
-    candidates.append({ QStringLiteral("Position"), QStringLiteral("Manual") });
+    candidates.append(generic);
     for (const QString &candidate : std::as_const(candidates)) {
         for (const QString &mode : flightModes) {
             if (mode.compare(candidate, Qt::CaseInsensitive) == 0) {
@@ -639,6 +656,34 @@ void GeoZoneFenceWarning::_setCommandText(const QString &text)
     }
 }
 
+bool GeoZoneFenceWarning::canTakeControl() const
+{
+    if (_config.takeControlMode.isEmpty()) {
+        return false;
+    }
+    // A fence the pilot disabled no longer keeps the vehicle from switching
+    if (!breached() || _fenceDisabled) {
+        return true;
+    }
+    switch (_config.firmware) {
+    case Firmware::PX4:
+        return _config.action != kPx4ActionTerminate;
+    case Firmware::ArduPilot:
+        return !_config.modeChangeBlocked || !isManoeuvre(_config.firmware, _config.action);
+    case Firmware::Other:
+        break;
+    }
+    return true;
+}
+
+void GeoZoneFenceWarning::setBreachReported(bool breached)
+{
+    if (breached != _breachReported) {
+        _breachReported = breached;
+        emit canTakeControlChanged();
+    }
+}
+
 void GeoZoneFenceWarning::takeControl()
 {
     Vehicle *const vehicle = _vehicle;
@@ -647,8 +692,13 @@ void GeoZoneFenceWarning::takeControl()
         _setCommandText(tr("No flight mode to take control in."));
         return;
     }
-    qCInfo(GeoZoneMonitorLog) << "Pilot takes control from the fence action:" << mode;
+    if (!canTakeControl()) {
+        _setCommandText(overrideText());
+        return;
+    }
+    qCInfo(GeoZoneMonitorLog) << "Pilot takes control:" << mode << (breached() ? "during a fence breach" : "");
     _pendingMode = mode;
+    _pendingModeOverrides = breached() && !_fenceDisabled && isManoeuvre(_config.firmware, _config.action);
     _setCommandText(tr("Switching to %1\u2026").arg(mode));
     // The vehicle reports the mode with its next heartbeat, or refuses it, like ArduPilot in fence recovery
     _modeTimer.start();
@@ -669,7 +719,16 @@ void GeoZoneFenceWarning::_modeSwitched(bool timedOut)
     const QString mode = _pendingMode;
     _pendingMode.clear();
     _modeTimer.stop();
-    _setCommandText(switched ? tr("%1: you have control, the fence action is overridden.").arg(mode) : tr("The vehicle didn't switch to %1.").arg(mode));
+    if (!switched) {
+        _setCommandText(tr("The vehicle didn't switch to %1.").arg(mode));
+    } else if (_pendingModeOverrides) {
+        _setCommandText(tr("%1: you have control, the fence action is overridden.").arg(mode));
+    } else if (enabled() && isManoeuvre(_config.firmware, _config.action)) {
+        // Nothing was overridden: the fence wasn't breached
+        _setCommandText(tr("%1: you have control. The vehicle still takes its fence action at the fence.").arg(mode));
+    } else {
+        _setCommandText(tr("%1: you have control.").arg(mode));
+    }
 }
 
 void GeoZoneFenceWarning::disableFence()

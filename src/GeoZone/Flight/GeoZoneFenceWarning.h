@@ -61,6 +61,7 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(QString          actionText      READ actionText         NOTIFY configChanged FINAL)     ///< Manoeuvre of the vehicle at a breach, like "RTL or land"
     Q_PROPERTY(QString          overrideText    READ overrideText       NOTIFY configChanged FINAL)     ///< How the pilot overrides it
     Q_PROPERTY(QString          takeControlMode READ takeControlMode    NOTIFY configChanged FINAL)     ///< Flight mode takeControl() switches to, empty when there is none
+    Q_PROPERTY(bool             canTakeControl  READ canTakeControl     NOTIFY canTakeControlChanged FINAL) ///< The vehicle would switch to takeControlMode now
     Q_PROPERTY(bool             canDisableFence READ canDisableFence    NOTIFY configChanged FINAL)     ///< The autopilot accepts disableFence()
     Q_PROPERTY(QString          commandText     READ commandText        NOTIFY commandTextChanged FINAL)    ///< Result of the last override
     /// The vehicle accepted disableFence(): until it accepts enableFence(), reports its fence enabled again or is
@@ -113,6 +114,8 @@ public:
         VehicleClass vehicleClass = VehicleClass::Copter;
         int action = -1;            ///< GF_ACTION or FENCE_ACTION, -1 when unknown
         bool modeChangeBlocked = false; ///< ArduPilot FENCE_OPTIONS bit 0: no mode change until the breach clears
+        /// A VTOL hovering. ArduPilot's has the fence actions of planes, and the pilot takes control in its hover modes.
+        bool vtolHover = false;
         QString takeControlMode;    ///< See takeControlMode
     };
 
@@ -164,9 +167,16 @@ public:
     /// The last transfer of the fence failed, so the vehicle may store another fence than its GeoFenceManager has: the
     /// one it had before a rejected upload, or one which couldn't be read. Until a transfer succeeds.
     bool fenceUnknown() const { return _fenceUnknown; }
-    QString actionText() const { return actionText(_config.firmware, _config.vehicleClass, _config.action); }
+    QString actionText() const { return actionText(_config.firmware, actionClass(_config), _config.action); }
     QString overrideText() const { return overrideText(_config); }
     QString takeControlMode() const { return _config.takeControlMode; }
+    /// There is a mode to take control in, and the vehicle accepts it: during a breach ArduPilot refuses mode changes
+    /// with FENCE_OPTIONS bit 0, and PX4's flight termination can't be overridden
+    bool canTakeControl() const;
+    /// The vehicle breaches its fence: it reports so, see setBreachReported, or its position is outside()
+    bool breached() const { return _breachReported || outside(); }
+    /// Set by GeoZoneVehicleMonitor for a vehicle which reports the breaches of its fence (FENCE_STATUS)
+    void setBreachReported(bool breached);
     bool canDisableFence() const { return _config.firmware == Firmware::ArduPilot; }
     QString commandText() const { return _commandText; }
     bool fenceDisabled() const { return _fenceDisabled; }
@@ -181,12 +191,15 @@ public:
 
     /// @return The manoeuvre of the action, like "RTL or land", "Report only (no manoeuvre)"
     static QString actionText(Firmware firmware, VehicleClass vehicleClass, int action);
+    /// @return The vehicle class whose fence actions the autopilot has
+    static VehicleClass actionClass(const Config &config);
     /// @return true if the action makes the vehicle act, rather than only report the breach
     static bool isManoeuvre(Firmware firmware, int action);
     /// @return How the pilot overrides the fence action
     static QString overrideText(const Config &config);
     /// @return The first of the flight modes the pilot flies the vehicle class in which the vehicle has
-    static QString takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes);
+    /// @param vtolHover See Config::vtolHover
+    static QString takeControlMode(Firmware firmware, VehicleClass vehicleClass, const QStringList &flightModes, bool vtolHover = false);
     /// @return Like "Geofence: RTL or land in 6 s, 42 m ahead", or "Geofence in 6 s, 42 m ahead: report only, no manoeuvre"
     ///         for actions which aren't manoeuvres
     static QString warningText(const QString &action, bool manoeuvre, double time, double distance);
@@ -198,6 +211,7 @@ signals:
     void warningEnded();
     void outsideChanged();
     void configChanged();
+    void canTakeControlChanged();
     void fenceUnknownChanged();
     void commandTextChanged();
     void fenceDisabledChanged();
@@ -245,7 +259,9 @@ private:
     bool _fenceDisabled = false;
     bool _reportedEnabled = false;              ///< The ArduPilot vehicle reports its fence enabled (SYS_STATUS)
     bool _disableReported = false;              ///< The vehicle reported its fence disabled since it accepted to disable it
+    bool _breachReported = false;
     QString _pendingMode;                       ///< Flight mode takeControl() asked for which the vehicle hasn't reported yet
+    bool _pendingModeOverrides = false;         ///< The vehicle was taking its fence action when takeControl() asked for it
     QTimer _modeTimer;
     std::optional<bool> _pendingFenceEnable;    ///< Fence enable or disable command the vehicle hasn't answered yet
     std::optional<bool> _unansweredFenceEnable; ///< The last one, once its answer is overdue: it may still come

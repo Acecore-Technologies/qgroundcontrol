@@ -37,7 +37,8 @@ class Vehicle;
 /// - fence: the vehicle's fence is the one an upload from geozones verified, built from geozone data which hasn't
 ///   changed since, and it excludes the prohibited zones the mission enters, see GeoZoneFenceUpload::verification. The
 ///   zones its import left out are listed as a warning. While the fence on the vehicle is unknown, after a transfer of
-///   it failed, the item warns rather than telling there is none, see GeoZoneFenceWarning::fenceUnknown.
+///   it failed, the item warns rather than telling there is none, see GeoZoneFenceWarning::fenceUnknown. It also
+///   warns while the fence is disabled by the pilot, see GeoZoneFenceWarning::fenceDisabled.
 /// - QNH: set when limits published as flight levels are near the mission altitudes
 /// - Remote ID: ready, with the operator ID set, when the mission enters U-space airspace, see GeoZoneRemoteId
 /// - take-off position: the vehicle on the ground isn't inside a prohibited zone, or a restricted zone the pilot hasn't
@@ -131,6 +132,7 @@ public:
     struct FenceInput {
         GeoZoneFenceUpload::FenceSnapshot vehicleFence;     ///< Stored by the vehicle
         bool vehicleFenceUnknown = false;                   ///< The last transfer of the fence failed, so vehicleFence may not be it
+        bool fenceDisabled = false;                         ///< The pilot disabled the fence, see GeoZoneFenceWarning::fenceDisabled
         std::optional<GeoZoneFenceUpload::Verification> verification;
         QList<GeoZoneSourceVersion> sources;                ///< Current versions of the sources
         QList<const GeoZone*> unfenced;                     ///< Prohibited zones the mission enters which the fence doesn't exclude

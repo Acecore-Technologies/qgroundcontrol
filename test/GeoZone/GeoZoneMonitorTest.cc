@@ -14,6 +14,7 @@
 #include "GeoZoneFences.h"
 #include "GeoZoneNearbyModel.h"
 #include "GeoZonePermits.h"
+#include "GeoZonePreflightCheck.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "Vehicle.h"
@@ -1170,6 +1171,84 @@ void GeoZoneMonitorTest::_testFenceBreachWithoutStatus()
 
     monitor.closeAlerts();
     monitor.removeVehicle(&vehicle);
+}
+
+void GeoZoneMonitorTest::_testFenceTakeControl()
+{
+    using Warning = GeoZoneFenceWarning;
+    const QGeoCoordinate center(47, 8);
+
+    // An ArduPilot VTOL runs the plane firmware: hovering it has the fence actions of planes, and the pilot takes
+    // control in its hover modes only, since its Loiter circles and FBW A and Manual fly as a fixed wing
+    const QStringList planeModes = { QStringLiteral("Manual"), QStringLiteral("FBW A"), QStringLiteral("Loiter"), QStringLiteral("QuadPlane Hover"),
+                                     QStringLiteral("QuadPlane Loiter") };
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, planeModes, true), QStringLiteral("QuadPlane Loiter"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("QHOVER"), QStringLiteral("MANUAL") }, true), QStringLiteral("QHOVER"));
+    QVERIFY(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("Manual"), QStringLiteral("Loiter") }, true).isEmpty());
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Plane, planeModes, false), QStringLiteral("FBW A"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Copter, { QStringLiteral("Hold"), QStringLiteral("Position") }, true), QStringLiteral("Position"));
+    Vehicle vtol(MAV_AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_VTOL_TILTROTOR);
+    Warning warning(&vtol);
+    Warning::Config config;
+    config.enabled = true;
+    config.firmware = Warning::Firmware::ArduPilot;
+    config.vehicleClass = Warning::VehicleClass::Copter;
+    config.vtolHover = true;
+    config.action = 6;
+    config.fence.circles.append({ QGeoCircle(center, 100), false });
+    config.takeControlMode = QStringLiteral("QuadPlane Loiter");
+    warning.setConfig(config);
+    QCOMPARE(warning.actionText(), QStringLiteral("Guided to the return point"));
+    config.vtolHover = false;
+    warning.setConfig(config);
+    QCOMPARE(warning.actionText(), QStringLiteral("Fence action 6"));
+
+    // Taking control is offered while the vehicle would switch: not during a breach with FENCE_OPTIONS bit 0 ...
+    QSignalSpy canSpy(&warning, &Warning::canTakeControlChanged);
+    QVERIFY(warning.canTakeControl());
+    config.modeChangeBlocked = true;
+    warning.setConfig(config);
+    QVERIFY(warning.canTakeControl());
+    canSpy.clear();
+    warning.setBreachReported(true);
+    QCOMPARE(canSpy.count(), 1);
+    QVERIFY(warning.breached());
+    QVERIFY(!warning.canTakeControl());
+    warning.takeControl();
+    QVERIFY2(warning.commandText().contains(QStringLiteral("refuses flight mode changes")), qPrintable(warning.commandText()));
+    // ... unless the fence only reports
+    config.action = 0;
+    warning.setConfig(config);
+    QVERIFY(warning.canTakeControl());
+    warning.setBreachReported(false);
+    QVERIFY(!warning.breached());
+
+    // ... and not once PX4 terminates the flight, which the position outside the fence tells
+    config = Warning::Config();
+    config.enabled = true;
+    config.firmware = Warning::Firmware::PX4;
+    config.action = 4;
+    config.fence.circles.append({ QGeoCircle(center, 100), false });
+    config.takeControlMode = QStringLiteral("Position");
+    warning.setConfig(config);
+    QVERIFY(warning.canTakeControl());
+    warning.evaluate(center, 30, Warning::Velocity());
+    QVERIFY(warning.breached());
+    QVERIFY(!warning.canTakeControl());
+    config.action = 3;
+    warning.setConfig(config);
+    QVERIFY(warning.canTakeControl());
+    config.takeControlMode.clear();
+    warning.setConfig(config);
+    QVERIFY(!warning.canTakeControl());
+
+    // The pilot disabling the fence shows in the checklist until it is enabled again
+    GeoZonePreflightCheck::FenceInput input;
+    QCOMPARE(GeoZonePreflightCheck::fenceItem(input).state, GeoZonePreflightCheck::NotApplicable);
+    input.fenceDisabled = true;
+    const GeoZonePreflightCheck::Item item = GeoZonePreflightCheck::fenceItem(input);
+    QCOMPARE(item.state, GeoZonePreflightCheck::Warning);
+    QVERIFY2(item.text.contains(QStringLiteral("Disable Fence")), qPrintable(item.text));
 }
 
 void GeoZoneMonitorTest::_testFenceAlertSequence()

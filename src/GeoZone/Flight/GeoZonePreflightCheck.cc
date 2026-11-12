@@ -172,6 +172,7 @@ void GeoZonePreflightCheck::_connectMonitor()
         }
         if (const GeoZoneFenceWarning *const fenceWarning = monitor->fenceWarning()) {
             (void) connect(fenceWarning, &GeoZoneFenceWarning::fenceUnknownChanged, _monitorConnections, [this]() { _scheduleUpdate(); });
+            (void) connect(fenceWarning, &GeoZoneFenceWarning::fenceDisabledChanged, _monitorConnections, [this]() { _scheduleUpdate(); });
         }
     }
     _scheduleUpdate();
@@ -229,6 +230,7 @@ void GeoZonePreflightCheck::update()
             const GeoZoneVehicleMonitor *const vehicleMonitor = _vehicleMonitor();
             const GeoZoneFenceWarning *const fenceWarning = vehicleMonitor ? vehicleMonitor->fenceWarning() : nullptr;
             fenceInput.vehicleFenceUnknown = fenceWarning && fenceWarning->fenceUnknown();
+            fenceInput.fenceDisabled = fenceWarning && fenceWarning->fenceDisabled();
         }
         for (const GeoZoneSource *const source : _manager->repository()->sourceList()) {
             fenceInput.sources.append(GeoZoneSourceVersion::fromSource(source));
@@ -303,6 +305,10 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::fenceItem(const FenceInput &i
     QStringList problems;
     if (!input.unfenced.isEmpty()) {
         problems.append(tr("The vehicle's fence doesn't exclude the prohibited geozones the mission enters: %1.").arg(names(input.unfenced)));
+    }
+    if (input.fenceDisabled) {
+        problems.append(tr("The vehicle's fence was disabled with Disable Fence: the vehicle doesn't act on breaches until it is enabled again, "
+                           "with Enable Fence on the page of the geozone indicator."));
     }
     if (input.vehicleFenceUnknown) {
         // What the fence manager has isn't what the vehicle stores, so it is neither compared nor reported as no fence

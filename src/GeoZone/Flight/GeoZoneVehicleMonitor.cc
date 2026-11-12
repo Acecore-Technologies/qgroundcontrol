@@ -71,6 +71,9 @@ void GeoZoneVehicleMonitor::_setFenceStatus(bool known, bool breached, int breac
     _fenceBreached = breached;
     _fenceBreachType = breachType;
     _fenceBreachCount = breachCount;
+    if (_fenceWarning) {
+        _fenceWarning->setBreachReported(known && breached);
+    }
     if (started) {
         emit fenceBreachStarted(fenceBreachText());
     }

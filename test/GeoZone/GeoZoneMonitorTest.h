@@ -29,6 +29,7 @@ private slots:
     void _testFenceStatus();
     void _testFenceWarning();
     void _testFenceBreachWithoutStatus();
+    void _testFenceTakeControl();
     void _testFenceAlertSequence();
     void _testVehicleMonitors();
     void _testAlertArbiter();

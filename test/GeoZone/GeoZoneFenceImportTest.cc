@@ -992,6 +992,36 @@ void GeoZoneFenceImportTest::_testFenceOverrideCommands()
         QVERIFY(warning.commandText().contains(QStringLiteral("can't disable")));
         QTRY_VERIFY_WITH_TIMEOUT(warning.commandText().contains(QStringLiteral("you have control")), 10000);
         QCOMPARE(vehicle->flightMode(), QStringLiteral("Position"));
+        // Nothing was breached, so no fence action is claimed to be overridden
+        QVERIFY2(!warning.commandText().contains(QStringLiteral("overridden")), qPrintable(warning.commandText()));
+
+        // Outside an enabled fence whose action is a manoeuvre, the switch overrides it
+        const QGeoCoordinate center(47.397, 8.5455);
+        GeoZoneFenceWarning::Config config;
+        config.enabled = true;
+        config.firmware = GeoZoneFenceWarning::Firmware::PX4;
+        config.action = 3;
+        config.fence.circles.append({ QGeoCircle(center, 100), false });
+        config.takeControlMode = QStringLiteral("Position");
+        warning.setConfig(config);
+        vehicle->setFlightMode(QStringLiteral("Return"));
+        QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Return"));
+        warning.evaluate(center, 30, GeoZoneFenceWarning::Velocity());
+        QVERIFY(warning.breached());
+        QVERIFY(warning.canTakeControl());
+        warning.takeControl();
+        QTRY_VERIFY_WITH_TIMEOUT(warning.commandText().contains(QStringLiteral("the fence action is overridden")), 10000);
+
+        // Flight termination can't be overridden once the fence is breached, so nothing is sent
+        vehicle->setFlightMode(QStringLiteral("Hold"));
+        QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Hold"));
+        config.action = 4;
+        warning.setConfig(config);
+        QVERIFY(!warning.canTakeControl());
+        warning.takeControl();
+        QVERIFY2(warning.commandText().contains(QStringLiteral("can't be overridden")), qPrintable(warning.commandText()));
+        QTest::qWait(1500);
+        QCOMPARE(vehicle->flightMode(), QStringLiteral("Hold"));
     }
     _disconnectMockLink();
 

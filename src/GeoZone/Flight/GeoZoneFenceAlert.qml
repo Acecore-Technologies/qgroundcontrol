@@ -70,19 +70,29 @@ ColumnLayout {
         Layout.fillWidth:   true
         spacing:            ScreenTools.defaultFontPixelWidth
 
+        // Shown disabled while the vehicle wouldn't switch, which the text above explains
         QGCButton {
             text:       control._warning ? qsTr("Take Control (%1)").arg(control._warning.takeControlMode) : ""
             visible:    !!control._warning && control._warning.takeControlMode !== ""
+            enabled:    !!control._warning && control._warning.canTakeControl
             onClicked:  control._warning.takeControl()
         }
 
         QGCButton {
             text:       qsTr("Disable Fence")
             visible:    !!control._warning && control._warning.canDisableFence && !control._warning.fenceDisabled
-            onClicked:  mainWindow.showMessageDialog(qsTr("Disable Fence"),
-                                                     qsTr("Disable the vehicle's fence? It then no longer acts on any fence breach until the fence is enabled again."),
-                                                     Dialog.Ok | Dialog.Cancel,
-                                                     function() { control._warning.disableFence() })
+            onClicked: {
+                // The fence of the vehicle asked about, also when another one is active once the pilot answers
+                const warning = control._warning
+                mainWindow.showMessageDialog(qsTr("Disable Fence"),
+                                             qsTr("Disable the vehicle's fence? It then no longer acts on any fence breach until the fence is enabled again."),
+                                             Dialog.Ok | Dialog.Cancel,
+                                             function() {
+                                                 if (warning) {
+                                                     warning.disableFence()
+                                                 }
+                                             })
+            }
         }
 
         // Disabled by the pilot, who enables it again once in control
