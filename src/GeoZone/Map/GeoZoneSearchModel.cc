@@ -12,6 +12,8 @@
 
 #include <QtCore/QTimer>
 
+#include <algorithm>
+
 GeoZoneSearchModel::GeoZoneSearchModel(QObject *parent)
     : GeoZoneSearchModel(nullptr, parent)
 {
@@ -50,6 +52,8 @@ void GeoZoneSearchModel::setText(const QString &text)
 
 void GeoZoneSearchModel::setMaxResults(int maxResults)
 {
+    // At least one result, so that hasMore never tells of more results than none listed
+    maxResults = (std::max)(maxResults, minResults);
     if (maxResults != _maxResults) {
         _maxResults = maxResults;
         emit maxResultsChanged();

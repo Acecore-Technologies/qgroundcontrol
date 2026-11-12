@@ -266,6 +266,19 @@ void GeoZoneManagerTest::_testZoneSearch()
     searchModel.setMaxResults(8);
     QCOMPARE(searchModel.count(), 2);
     QVERIFY(!searchModel.hasMore());
+    // A limit below one result lists one, so that more results are never reported with none listed
+    searchModel.setMaxResults(-1);
+    QCOMPARE(searchModel.maxResults(), GeoZoneSearchModel::minResults);
+    QCOMPARE(searchModel.count(), 1);
+    QVERIFY(searchModel.hasMore());
+    searchModel.setText(QStringLiteral("no such zone"));
+    QTRY_VERIFY(!searchModel.pending());
+    QCOMPARE(searchModel.count(), 0);
+    QVERIFY(!searchModel.hasMore());
+    searchModel.setMaxResults(8);
+    searchModel.setText(QStringLiteral("zurich"));
+    QTRY_VERIFY(!searchModel.pending());
+    QCOMPARE(searchModel.count(), 2);
     // A copy of a zone in another source is one zone, found once
     QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("copy.json"), QJsonArray{ airport }), errorString), qPrintable(errorString));
     QCOMPARE(manager.zoneCount(), 3);

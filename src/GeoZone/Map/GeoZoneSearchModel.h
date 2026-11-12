@@ -27,7 +27,7 @@ class GeoZoneSearchModel : public QAbstractListModel
     Q_OBJECT
 
     Q_PROPERTY(QString  text        READ text       WRITE setText       NOTIFY textChanged FINAL)
-    Q_PROPERTY(int      maxResults  READ maxResults WRITE setMaxResults NOTIFY maxResultsChanged FINAL)
+    Q_PROPERTY(int      maxResults  READ maxResults WRITE setMaxResults NOTIFY maxResultsChanged FINAL)   ///< Zones listed at most, at least minResults
     Q_PROPERTY(int      count       READ count                          NOTIFY countChanged FINAL)
     Q_PROPERTY(bool     hasMore     READ hasMore                        NOTIFY countChanged FINAL)    ///< More zones match than maxResults
     Q_PROPERTY(bool     pending     READ pending                        NOTIFY pendingChanged FINAL)  ///< The text changed and the zones aren't searched yet
@@ -42,6 +42,8 @@ public:
         SourceCountRole,    ///< Sources publishing the zone, see GeoZone::sourceCount
     };
     Q_ENUM(Roles)
+
+    static constexpr int minResults = 1;
 
     explicit GeoZoneSearchModel(QObject *parent = nullptr);
     /// @param manager Zones searched, GeoZoneManager::instance() when null
