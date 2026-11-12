@@ -95,11 +95,13 @@ public:
     /// @return Number of files deleted
     int removeOldLogs(const QDate &today, int days);
 
+    /// The pilot acknowledged the alert of the row, or all alerts, in the list of alerts: logged, see pilotAcknowledged
     Q_INVOKABLE void acknowledge(int row);
     Q_INVOKABLE void acknowledgeAll();
-    /// Acknowledges the alert by GeoZoneMonitor::AlertEvent::id
+    /// Acknowledges the alert by GeoZoneMonitor::AlertEvent::id, for the monitor, which logs what the pilot answered
     void acknowledgeAlert(int alertId);
-    /// Shows the zone of the alert with its details and the vehicle position on the visible map
+    /// Shows the zone of the alert with its details and the vehicle position on the visible map, which acknowledges
+    /// it like acknowledge()
     Q_INVOKABLE void show(int row);
     Q_INVOKABLE void clearShownPosition();
 
@@ -121,6 +123,9 @@ signals:
     void unacknowledgedCountChanged();
     /// An alert of the session was acknowledged, by GeoZoneMonitor::AlertEvent::id
     void alertAcknowledged(int alertId);
+    /// The pilot acknowledged the alert here rather than in the alert popup, which GeoZoneMonitor logs as dismissed
+    /// @param detail What the pilot pressed, like "Acknowledge all"
+    void pilotAcknowledged(const GeoZoneMonitor::AlertEvent &alert, const QString &detail);
     void allAcknowledged();
     void shownPositionChanged();
     /// logFailing() or logStatus() changed
@@ -134,6 +139,8 @@ private:
     };
 
     void _loadLog(const QString &filePath);
+    /// @param pilotAction What the pilot pressed, empty when the monitor acknowledges
+    void _acknowledge(int row, const QString &pilotAction);
     /// Logs the event within logFlushIntervalMSecs once the log is started
     void _log(const GeoZoneMonitor::AlertEvent &event);
     /// Opens the log file of the date, starting it with the header

@@ -105,6 +105,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     // Alerts acknowledged in the history are no longer repeated
     (void) connect(_alertHistory, &GeoZoneAlertHistory::alertAcknowledged, this, [this](int alertId) { _arbiter.acknowledge(alertId); });
     (void) connect(_alertHistory, &GeoZoneAlertHistory::allAcknowledged, this, [this]() { _arbiter.acknowledgeAll(); });
+    (void) connect(_alertHistory, &GeoZoneAlertHistory::pilotAcknowledged, this, &GeoZoneMonitor::_logAcknowledgement);
 
     // Zones are approved for the active vehicle, whose alerts offer its actions
     (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::approvalsChanged);
@@ -116,6 +117,15 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZoneMonitor::_zonesChanged);
     (void) connect(_manager->repository(), &GeoZoneSourceRepository::validityWarningChanged, this, &GeoZoneMonitor::_updateAwareness);
+    // Sources turned off and authorisations take zones out of the alerts, which the log tells
+    for (const GeoZoneSource *const source : _manager->repository()->sourceList()) {
+        _sourcesEnabled.insert(source->key(), source->enabled());
+    }
+    (void) connect(_manager->repository(), &GeoZoneSourceRepository::sourceAppended, this, [this](GeoZoneSource *source) {
+        _sourcesEnabled.insert(source->key(), source->enabled());
+    });
+    _authorisations = _manager->planning()->authorisations()->authorisations();
+    (void) connect(_manager->planning()->authorisations(), &GeoZoneAuthorisations::changed, this, &GeoZoneMonitor::_authorisationsChanged);
     (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::_updateAwareness);
 
     // Permits acknowledged from QML are for the active vehicle's flight
@@ -946,7 +956,24 @@ void GeoZoneMonitor::_logPilotEvent(int alertId, AlertEvent::Kind kind, const QS
     if (subject == _alertSubjects.cend()) {
         return;
     }
-    AlertEvent event = subject->event;
+    _logPilotEvent(subject->event, (subject->vehicleKey > 0) ? _monitorByKey(subject->vehicleKey) : nullptr, kind, detail);
+}
+
+void GeoZoneMonitor::_logAcknowledgement(const AlertEvent &alert, const QString &detail)
+{
+    // Also the alerts whose actions are gone, and those of the fence
+    const auto subject = _alertSubjects.constFind(alert.id);
+    const GeoZoneVehicleMonitor *monitor = ((subject != _alertSubjects.cend()) && (subject->vehicleKey > 0)) ? _monitorByKey(subject->vehicleKey) : nullptr;
+    if (!monitor && (subject == _alertSubjects.cend()) && (alert.vehicleId != noVehicle)) {
+        const auto it = std::find_if(_monitors.cbegin(), _monitors.cend(), [&alert](const GeoZoneVehicleMonitor *candidate) { return candidate->vehicleId() == alert.vehicleId; });
+        monitor = (it != _monitors.cend()) ? *it : nullptr;
+    }
+    _logPilotEvent(alert, monitor, AlertEvent::Dismissed, detail);
+}
+
+void GeoZoneMonitor::_logPilotEvent(const AlertEvent &alert, const GeoZoneVehicleMonitor *monitor, AlertEvent::Kind kind, const QString &detail)
+{
+    AlertEvent event = alert;
     event.time = GeoZoneEnvironment::currentDateTimeUtc();
     event.kind = kind;
     event.detail = detail;
@@ -957,7 +984,7 @@ void GeoZoneMonitor::_logPilotEvent(int alertId, AlertEvent::Kind kind, const QS
     event.warningTime = qQNaN();
     event.groundSpeed = qQNaN();
     event.verticalSpeed = qQNaN();
-    if (const GeoZoneVehicleMonitor *const monitor = (subject->vehicleKey > 0) ? _monitorByKey(subject->vehicleKey) : nullptr) {
+    if (monitor) {
         event.position = monitor->position();
         const QList<GeoZoneAlertTracker::Nearby> &nearby = monitor->nearby();
         const auto zone = std::find_if(nearby.cbegin(), nearby.cend(), [&event](const GeoZoneAlertTracker::Nearby &candidate) {
@@ -1297,9 +1324,102 @@ void GeoZoneMonitor::_forgetZones(GeoZoneSource *source)
     }
 }
 
+void GeoZoneMonitor::_logDataEvent(AlertEvent event)
+{
+    event.time = GeoZoneEnvironment::currentDateTimeUtc();
+    event.level = GeoZoneAlertLevel::Advisory;
+    event.distance = qQNaN();
+    // In the flight record of the vehicle the pilot flies
+    if (const GeoZoneVehicleMonitor *const active = _activeMonitor) {
+        event.vehicleId = active->vehicleId();
+        event.position = active->position();
+    }
+    event.message = alertMessage(event, event.zoneName.isEmpty() ? event.zoneIdentifier : event.zoneName, GeoZoneText::restriction(event.restriction));
+    qCDebug(GeoZoneMonitorLog) << event.message << event.detail;
+    _alertHistory->logPilotEvent(event);
+}
+
+void GeoZoneMonitor::_noteSourceSwitch(GeoZoneSource *source)
+{
+    const QString key = source->key();
+    if (!_manager->repository()->source(key)) {
+        // Removed
+        (void) _sourcesEnabled.remove(key);
+        return;
+    }
+    const auto known = _sourcesEnabled.find(key);
+    if (known == _sourcesEnabled.end()) {
+        _sourcesEnabled.insert(key, source->enabled());
+        return;
+    }
+    if (*known == source->enabled()) {
+        return;
+    }
+    *known = source->enabled();
+    AlertEvent event;
+    event.kind = source->enabled() ? AlertEvent::SourceOn : AlertEvent::SourceOff;
+    event.zoneName = source->name().isEmpty() ? key : source->name();
+    event.sourceText = key;
+    event.detail = QStringLiteral("%1 zones").arg(source->zoneCount());
+    _logDataEvent(event);
+}
+
+void GeoZoneMonitor::_authorisationsChanged()
+{
+    const QList<GeoZoneAuthorisation> current = _manager->planning()->authorisations()->authorisations();
+    const auto sameZone = [](const GeoZoneAuthorisation &a, const GeoZoneAuthorisation &b) { return (a.zoneKey == b.zoneKey) && (a.notification == b.notification); };
+    const auto log = [this](const GeoZoneAuthorisation &authorisation, AlertEvent::Kind kind) {
+        AlertEvent event;
+        event.kind = kind;
+        event.zoneIdentifier = authorisation.zoneKey;
+        event.zoneName = authorisation.zoneName;
+        // The zone it is for, when it is loaded
+        for (const GeoZone *zone : _manager->zoneList()) {
+            if (GeoZoneAuthorisations::zoneKey(zone) == authorisation.zoneKey) {
+                event.zoneIdentifier = zone->identifier();
+                event.zoneName = zone->name();
+                event.restriction = zone->restriction();
+                event.sourceText = zone->sourceText();
+                event.zoneKey = zone->key();
+                break;
+            }
+        }
+        QStringList detail = { authorisation.notification ? QStringLiteral("notification") : QStringLiteral("authorisation") };
+        if (!authorisation.permit.isEmpty()) {
+            detail.append(authorisation.permit);
+        }
+        if (authorisation.validFrom.isValid()) {
+            detail.append(QStringLiteral("from %1").arg(authorisation.validFrom.toUTC().toString(Qt::ISODate)));
+        }
+        detail.append(authorisation.validTo.isValid() ? QStringLiteral("until %1").arg(authorisation.validTo.toUTC().toString(Qt::ISODate)) : QStringLiteral("without end"));
+        if (authorisation.limitsPath()) {
+            detail.append(QStringLiteral("limited scope"));
+        }
+        event.detail = detail.join(QStringLiteral(" "));
+        _logDataEvent(event);
+    };
+    for (const GeoZoneAuthorisation &previous : std::as_const(_authorisations)) {
+        if (std::none_of(current.cbegin(), current.cend(), [&](const GeoZoneAuthorisation &authorisation) { return sameZone(authorisation, previous); })) {
+            log(previous, AlertEvent::AuthorisationRemoved);
+        }
+    }
+    for (const GeoZoneAuthorisation &authorisation : current) {
+        const auto previous = std::find_if(_authorisations.cbegin(), _authorisations.cend(), [&](const GeoZoneAuthorisation &candidate) { return sameZone(candidate, authorisation); });
+        const bool changed = (previous == _authorisations.cend()) || (previous->permit != authorisation.permit) || (previous->validFrom != authorisation.validFrom) ||
+                             (previous->validTo != authorisation.validTo) || (previous->limitsPath() != authorisation.limitsPath());
+        if (changed) {
+            log(authorisation, AlertEvent::Authorised);
+        }
+    }
+    _authorisations = current;
+}
+
 void GeoZoneMonitor::_zonesChanged(GeoZoneSource *source)
 {
     _policy.reset();
+    if (source) {
+        _noteSourceSwitch(source);
+    }
     // Zones whose data changed alert again, their limits or schedule may differ
     if (source && !source->changedZoneKeys().isEmpty()) {
         for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
@@ -1382,6 +1502,14 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         return tr("Pilot acknowledged the permit to enter geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::PermitEnded:
         return tr("Permit to enter geozone %1 (%2) ended").arg(zoneName, restrictionText);
+    case AlertEvent::SourceOff:
+        return tr("Geozone source %1 turned off, its zones are no longer checked").arg(zoneName);
+    case AlertEvent::SourceOn:
+        return tr("Geozone source %1 turned on").arg(zoneName);
+    case AlertEvent::Authorised:
+        return tr("Authorisation recorded for geozone %1 (%2)").arg(zoneName, restrictionText);
+    case AlertEvent::AuthorisationRemoved:
+        return tr("Authorisation removed for geozone %1 (%2)").arg(zoneName, restrictionText);
     case AlertEvent::Approach:
         break;
     }

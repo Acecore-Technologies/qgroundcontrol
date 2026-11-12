@@ -37,7 +37,9 @@ const QStringList &eventNames()
                                        QStringLiteral("outside_volume"), QStringLiteral("on_ground"), QStringLiteral("geo_awareness"),
                                        QStringLiteral("fence_warning"), QStringLiteral("fence_breached"), QStringLiteral("activated"),
                                        QStringLiteral("activation_soon"), QStringLiteral("notified"), QStringLiteral("approved"),
-                                       QStringLiteral("dismissed"), QStringLiteral("muted"), QStringLiteral("permit"), QStringLiteral("permit_ended") };
+                                       QStringLiteral("dismissed"), QStringLiteral("muted"), QStringLiteral("permit"), QStringLiteral("permit_ended"),
+                                       QStringLiteral("source_off"), QStringLiteral("source_on"), QStringLiteral("authorisation"),
+                                       QStringLiteral("authorisation_removed") };
     return names;
 }
 
@@ -529,8 +531,16 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
 
 void GeoZoneAlertHistory::acknowledge(int row)
 {
+    _acknowledge(row, QStringLiteral("Acknowledge"));
+}
+
+void GeoZoneAlertHistory::_acknowledge(int row, const QString &pilotAction)
+{
     if ((row < 0) || (row >= _entries.count()) || _entries[row].acknowledged) {
         return;
+    }
+    if (!pilotAction.isEmpty()) {
+        emit pilotAcknowledged(_entries[row].event, pilotAction);
     }
     _entries[row].acknowledged = true;
     emit dataChanged(index(row), index(row), { AcknowledgedRole });
@@ -547,7 +557,8 @@ void GeoZoneAlertHistory::acknowledgeAlert(int alertId)
     }
     const auto it = std::find_if(_entries.cbegin(), _entries.cend(), [alertId](const Entry &entry) { return entry.event.id == alertId; });
     if (it != _entries.cend()) {
-        acknowledge(static_cast<int>(std::distance(_entries.cbegin(), it)));
+        // The monitor logs what the pilot answered in the popup
+        _acknowledge(static_cast<int>(std::distance(_entries.cbegin(), it)), QString());
     }
 }
 
@@ -556,8 +567,12 @@ void GeoZoneAlertHistory::acknowledgeAll()
     if (unacknowledgedCount() == 0) {
         return;
     }
-    for (Entry &entry : _entries) {
-        entry.acknowledged = true;
+    // The oldest first, like they were raised
+    for (auto entry = _entries.rbegin(); entry != _entries.rend(); ++entry) {
+        if (!entry->acknowledged) {
+            emit pilotAcknowledged(entry->event, QStringLiteral("Acknowledge all"));
+            entry->acknowledged = true;
+        }
     }
     emit dataChanged(index(0), index(count() - 1), { AcknowledgedRole });
     emit unacknowledgedCountChanged();
@@ -569,7 +584,7 @@ void GeoZoneAlertHistory::show(int row)
     if ((row < 0) || (row >= _entries.count())) {
         return;
     }
-    acknowledge(row);
+    _acknowledge(row, QStringLiteral("Show on map"));
     const GeoZoneMonitor::AlertEvent &event = _entries[row].event;
     _shownPosition = event.position.coordinate;
     _shownTimer.start();

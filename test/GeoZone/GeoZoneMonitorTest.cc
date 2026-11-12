@@ -983,6 +983,79 @@ void GeoZoneMonitorTest::_testPilotEventLog()
     const std::optional<GeoZoneMonitor::AlertEvent> read = GeoZoneAlertHistory::parseLogLine(lines[3]);
     QVERIFY(read && read->pilotEvent());
     QCOMPARE(read->detail, QStringLiteral("I do"));
+
+    // What the pilot acknowledges in the list of alerts is logged like in the popup, with what was pressed: one
+    // alert, the alert shown on the map, and all the others, the oldest first
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    monitor.evaluate({ uSpaceCenter.atDistanceAndAzimuth(2000, 0), 450, 400 }, 3);
+    monitor.evaluate({ uSpaceCenter, 450, 400 }, 3);
+    monitor.closeAlerts();
+    log.acknowledge(0);
+    log.acknowledge(0);
+    monitor.evaluate(inside, 3);
+    monitor.evaluate({ uSpaceCenter, 450, 400 }, 3);
+    QCOMPARE(eventSpy.count(), 3);
+    const QString listed = QString::number(eventSpy[0].first().value<GeoZoneMonitor::AlertEvent>().id);
+    const QString prohibited = QString::number(eventSpy[1].first().value<GeoZoneMonitor::AlertEvent>().id);
+    const QString last = QString::number(eventSpy[2].first().value<GeoZoneMonitor::AlertEvent>().id);
+    log.show(1);
+    log.acknowledgeAll();
+    QCOMPARE(log.unacknowledgedCount(), 0);
+
+    // So is what takes zones out of the alerts: a source turned off, and on again, and an authorisation recorded
+    // and removed, with the vehicle the pilot flies
+    monitor.setActiveVehicleId(3);
+    GeoZoneSource *const source = manager.sources()->value<GeoZoneSource*>(0);
+    QVERIFY(source);
+    source->setEnabled(false);
+    QCOMPARE(manager.zoneCount(), 0);
+    source->setEnabled(true);
+    QCOMPARE(manager.zoneCount(), 2);
+    const GeoZone *const zone = manager.zoneList().constFirst();
+    QCOMPARE(zone->identifier(), QStringLiteral("P1"));
+    GeoZoneAuthorisations *const authorisations = manager.planning()->authorisations();
+    QVERIFY(authorisations->authorise(QVariant::fromValue(GeoZoneInfo(zone)), QStringLiteral("PERMIT-7"), QString(), QStringLiteral("2031-12-31")).isEmpty());
+    authorisations->revoke(GeoZoneAuthorisations::zoneKey(zone));
+    QVERIFY(log.flushLog());
+
+    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
+    const QStringList added = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).mid(lines.count());
+    file.close();
+    QStringList pilot;
+    QString switchedOff;
+    for (const QString &line : added) {
+        const QStringList fields = GeoZoneAlertHistory::logFields(line);
+        QCOMPARE(fields.count(), 22);
+        if ((fields[6] != QStringLiteral("entered")) && (fields[6] != QStringLiteral("notified"))) {
+            pilot.append(QStringList{ fields[1], fields[6], fields[8].isEmpty() ? fields[9] : fields[8], fields[14], fields[15] }.join(QLatin1Char('|')));
+        }
+        if (fields[6] == QStringLiteral("source_off")) {
+            switchedOff = line;
+        }
+    }
+    const QString permit = QStringLiteral("authorisation PERMIT-7 until %1").arg(QDateTime(QDate(2032, 1, 1), QTime(0, 0)).toUTC().toString(Qt::ISODate));
+    QCOMPARE(pilot, (QStringList{
+        QStringLiteral("3|dismissed|U1|%1|Close").arg(listed),
+        QStringLiteral("3|dismissed|U1|%1|Acknowledge").arg(listed),
+        QStringLiteral("3|dismissed|P1|%1|Show on map").arg(prohibited),
+        QStringLiteral("3|dismissed|U1|%1|Acknowledge all").arg(uSpaceAgain),
+        QStringLiteral("3|dismissed|U1|%1|Acknowledge all").arg(last),
+        QStringLiteral("3|source_off|zones.json||2 zones"),
+        QStringLiteral("3|source_on|zones.json||2 zones"),
+        QStringLiteral("3|authorisation|P1||%1").arg(permit),
+        QStringLiteral("3|authorisation_removed|P1||%1").arg(permit),
+    }));
+    const std::optional<GeoZoneMonitor::AlertEvent> switched = GeoZoneAlertHistory::parseLogLine(switchedOff);
+    QVERIFY(switched);
+    QVERIFY(switched->pilotEvent());
+    QCOMPARE(switched->message, QStringLiteral("Geozone source zones.json turned off, its zones are no longer checked"));
+    // Acknowledged by the monitor, like when the pilot answers the popup, nothing more is logged here
+    monitor.evaluate({ uSpaceCenter.atDistanceAndAzimuth(2000, 0), 450, 400 }, 3);
+    monitor.evaluate({ uSpaceCenter, 450, 400 }, 3);
+    QSignalSpy acknowledgedSpy(&log, &GeoZoneAlertHistory::pilotAcknowledged);
+    monitor.dismissAlert(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().id);
+    QCOMPARE(log.unacknowledgedCount(), 0);
+    QVERIFY(acknowledgedSpy.isEmpty());
 }
 
 void GeoZoneMonitorTest::_testAlertHistory()

@@ -30,6 +30,7 @@
 #include "GeoZoneAlertModel.h"
 #include "GeoZoneAlertThresholds.h"
 #include "GeoZoneAlertTracker.h"
+#include "GeoZoneAuthorisations.h"
 #include "GeoZoneAwareness.h"
 #include "GeoZonePermits.h"
 #include "GeoZonePolicy.h"
@@ -69,6 +70,8 @@ class Vehicle;
 /// pre-arm check, and again when it tries to arm there, see AlertEvent::OnGround.
 /// Whether geo-awareness is available for the active vehicle is published as awareness(), and the changes of state of
 /// flying vehicles are alerted, see AlertEvent::Awareness.
+/// What the pilot changes about the zones the alerts come from is logged too: a source turned off or on, and an
+/// authorisation recorded, changed or removed, see AlertEvent::SourceOff and AlertEvent::Authorised.
 /// Zones requiring an authorisation or a notification take a permit for the flight instead of an approval, see
 /// permits(): acknowledged before the flight or by answering the question, it stops their alerts for its vehicle until
 /// the flight ends.
@@ -144,6 +147,11 @@ public:
             Muted,                  ///< The pilot muted the alerts while the alert was shown
             Permit,                 ///< The pilot acknowledged the permit to enter the zone, detail tells where, see GeoZonePermits
             PermitEnded,            ///< The permit ended, detail tells why: "flight ended", "vehicle disconnected" or "withdrawn"
+            SourceOff,              ///< A source was turned off, so its zones are no longer checked: the zone name is the source's
+            SourceOn,               ///< A source was turned on
+            Authorised,             ///< An authorisation or notification of the zone was recorded or changed, which stops its
+                                    ///< alerts while it is valid: detail has its kind, reference and validity
+            AuthorisationRemoved,   ///< An authorisation or notification of the zone was removed
         };
 
         /// @return true for what the pilot was shown and answered
@@ -399,6 +407,16 @@ private:
     void _updateActiveLevel();
     /// Logs what the pilot was shown or answered about a geozone alert, with where its vehicle is now
     void _logPilotEvent(int alertId, AlertEvent::Kind kind, const QString &detail);
+    /// @param monitor Of the vehicle of the alert, null when it is gone or the alert has none
+    void _logPilotEvent(const AlertEvent &alert, const GeoZoneVehicleMonitor *monitor, AlertEvent::Kind kind, const QString &detail);
+    /// Logs that the pilot acknowledged the alert in the alert history
+    void _logAcknowledgement(const AlertEvent &alert, const QString &detail);
+    /// Logs what the pilot changed about the data the alerts come from, with where the active vehicle is
+    void _logDataEvent(AlertEvent event);
+    /// Logs a source turned off or on since it was last seen
+    void _noteSourceSwitch(GeoZoneSource *source);
+    /// Logs the authorisations recorded, changed or removed since they were last seen
+    void _authorisationsChanged();
     /// Acknowledges an alert and removes it from the shown alerts
     void _dismiss(int alertId);
     /// Sets the actions of a shown alert from the state of its vehicle
@@ -450,6 +468,8 @@ private:
     GeoZonePermits *_permits = nullptr;
     QSet<int> _flying;                          ///< Keys of the vehicles armed since they were on the ground
     QHash<int, int> _fenceWarningAlerts;        ///< Alert ids of the active fence warnings by vehicle key
+    QHash<QString, bool> _sourcesEnabled;       ///< Whether the sources were turned on when last seen, by key
+    QList<GeoZoneAuthorisation> _authorisations;    ///< As last seen
     QTimer _evaluateTimer;
     QElapsedTimer _elapsed;
     Clock _clock;                               ///< _elapsed when empty
