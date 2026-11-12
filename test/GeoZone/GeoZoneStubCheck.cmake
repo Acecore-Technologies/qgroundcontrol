@@ -1,8 +1,11 @@
 # Checks that the stub of the QGroundControl.GeoZone QML module in src/GeoZone/Stub, which builds without geozones
 # (QGC_DISABLE_GEOZONE) use, declares what the QML outside src/GeoZone uses of the module: its types, the properties set
-# and signals handled on them, the members used through their ids and the members of its singletons. A hook added to
-# that QML without its stub would otherwise only break the builds without geozones, at runtime.
+# and signals handled on them, the members used through their ids, the members of its singletons and the enumeration
+# values of its types, like GeoZone.Prohibited, also where the module is imported with a qualifier (as Name). A hook
+# added to that QML without its stub would otherwise only break the builds without geozones, at runtime.
 #   cmake -DSOURCE_DIR=<source dir> -P GeoZoneStubCheck.cmake
+# The check compares text, so it runs without building anything. GeoZoneStubLoad (GeoZoneStubLoad.cc) checks the same
+# uses with the QML engine.
 
 if(NOT SOURCE_DIR)
     message(FATAL_ERROR "Usage: cmake -DSOURCE_DIR=<source dir> -P GeoZoneStubCheck.cmake")
@@ -10,23 +13,61 @@ endif()
 
 set(stubDir "${SOURCE_DIR}/src/GeoZone/Stub")
 file(READ "${stubDir}/CMakeLists.txt" stubList)
-# Properties of the base types of the stubs (Item, QtObject, ToolStripAction), which the QML may set without the stub
-# declaring them
-set(baseProperties id anchors Layout x y z width height visible enabled opacity text)
+# Members of the base type of each stub, which the QML may use without the stub declaring them: a property set on an
+# Item isn't one of a QtObject or a ToolStripAction. Those of ToolStripAction are read from its header.
+set(baseMembers_Item id anchors Layout x y z width height implicitWidth implicitHeight visible enabled opacity clip parent)
+set(baseMembers_QtObject id objectName)
+set(baseMembers_ToolStripAction id)
+set(toolStripActionHeader "${SOURCE_DIR}/src/QmlControls/ToolStripAction.h")
+if(EXISTS "${toolStripActionHeader}")
+    file(READ "${toolStripActionHeader}" toolStripAction)
+    string(REGEX MATCHALL "Q_PROPERTY\\([^)]*[ \t]+[A-Za-z0-9_]+[ \t]+READ" properties "${toolStripAction}")
+    foreach(property IN LISTS properties)
+        string(REGEX REPLACE "^.*[ \t]([A-Za-z0-9_]+)[ \t]+READ$" "\\1" property "${property}")
+        list(APPEND baseMembers_ToolStripAction ${property})
+    endforeach()
+    list(APPEND baseMembers_ToolStripAction triggered)
+endif()
 set(errors "")
 set(fileCount 0)
 set(useCount 0)
 
-# Sets result to TRUE when the stub of type declares member as a property, function or signal, or when there is no stub
-# (reported as a missing type). The properties of the base types count unless the member belongs to a singleton.
+# Sets result to the base type of the stub of type, the type of its root object, empty when it can't be told
+function(stub_base type result)
+    file(READ "${stubDir}/${type}.qml" stub)
+    string(REGEX REPLACE "//[^\n]*" "" stub "${stub}")
+    set(${result} "" PARENT_SCOPE)
+    if(stub MATCHES "(^|\n)([A-Z][A-Za-z0-9_]*)[ \t]*{")
+        set(${result} "${CMAKE_MATCH_2}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Sets result to TRUE when the stub of type declares member as a property, function or signal, or for a member with a
+# capital letter as an enumeration or one of its values, or when there is no stub (reported as a missing type). The
+# members of the base type of the stub count unless the member belongs to a singleton.
 function(stub_declares type member singleton result)
     set(${result} TRUE PARENT_SCOPE)
     set(file "${stubDir}/${type}.qml")
-    if(NOT EXISTS "${file}" OR (NOT singleton AND member IN_LIST baseProperties))
+    if(NOT EXISTS "${file}")
         return()
     endif()
+    if(NOT singleton)
+        stub_base(${type} base)
+        if(NOT DEFINED baseMembers_${base})
+            set(${result} "unknown base type" PARENT_SCOPE)
+            return()
+        endif()
+        if(member IN_LIST baseMembers_${base})
+            return()
+        endif()
+    endif()
     file(READ "${file}" stub)
-    if(NOT stub MATCHES "(property[ \t]+[A-Za-z0-9_<>.]+|function|signal)[ \t]+${member}[^A-Za-z0-9_]")
+    string(REGEX REPLACE "//[^\n]*" "" stub "${stub}")
+    if(member MATCHES "^[A-Z]")
+        if(NOT stub MATCHES "enum[ \t]+${member}[^A-Za-z0-9_]" AND NOT stub MATCHES "enum[ \t]+[A-Za-z0-9_]+[ \t\n]*{[^}]*[^A-Za-z0-9_]${member}[^A-Za-z0-9_]")
+            set(${result} FALSE PARENT_SCOPE)
+        endif()
+    elseif(NOT stub MATCHES "(property[ \t]+[A-Za-z0-9_<>.]+|function|signal)[ \t]+${member}[^A-Za-z0-9_]")
         set(${result} FALSE PARENT_SCOPE)
     endif()
 endfunction()
@@ -51,7 +92,9 @@ endmacro()
 macro(check_member where type member singleton)
     math(EXPR useCount "${useCount} + 1")
     stub_declares(${type} ${member} ${singleton} declared)
-    if(NOT declared)
+    if(declared STREQUAL "unknown base type")
+        list(APPEND errors "${stubDir}/${type}.qml: the members of its base type aren't known to GeoZoneStubCheck.cmake")
+    elseif(NOT declared)
         list(APPEND errors "${where}: ${type}.${member}")
     endif()
 endmacro()
@@ -62,14 +105,20 @@ list(SORT qmlFiles)
 
 foreach(qmlFile IN LISTS qmlFiles)
     file(READ "${SOURCE_DIR}/${qmlFile}" content)
-    if(NOT content MATCHES "import[ \t]+QGroundControl\\.GeoZone[ \t\r]*\n")
+    # The module imported as is, with a version, or with a qualifier
+    if(NOT content MATCHES "import[ \t]+QGroundControl\\.GeoZone([ \t]+[0-9.]+)?([ \t]+as[ \t]+([A-Za-z_][A-Za-z0-9_]*))?[ \t\r]*\n")
         continue()
     endif()
+    set(qualifier "${CMAKE_MATCH_3}")
     math(EXPR fileCount "${fileCount} + 1")
 
     # The lines as a list, without comments and the characters having a meaning in lists
     string(REPLACE "\\" "/" text "${content}")
     string(REGEX REPLACE "//[^\n]*" "" text "${text}")
+    # The types are used through the qualifier of the import, which is left out to check them like the others
+    if(NOT qualifier STREQUAL "")
+        string(REGEX REPLACE "([^A-Za-z0-9_.])${qualifier}\\.GeoZone" "\\1GeoZone" text "${text}")
+    endif()
     string(REPLACE ";" "<semicolon>" text "${text}")
     string(REPLACE "[" "(" text "${text}")
     string(REPLACE "]" ")" text "${text}")
@@ -134,8 +183,9 @@ foreach(qmlFile IN LISTS qmlFiles)
         endforeach()
     endforeach()
 
-    # The members of the singletons, like GeoZoneManager.settings.visible
-    string(REGEX MATCHALL "[^A-Za-z0-9_./]GeoZone[A-Z][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+" uses "${text}")
+    # The members of the singletons, like GeoZoneManager.settings.visible, and the enumeration values of the types,
+    # like GeoZone.Prohibited
+    string(REGEX MATCHALL "[^A-Za-z0-9_./]GeoZone[A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+" uses "${text}")
     foreach(use IN LISTS uses)
         string(REGEX REPLACE "^[^G]+" "" use "${use}")
         string(REPLACE "." ";" members "${use}")

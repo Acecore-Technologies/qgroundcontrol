@@ -3,6 +3,42 @@
 # none of the other tests of the module.
 add_test(NAME GeoZoneStubCheck COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneStubCheck.cmake)
 set_tests_properties(GeoZoneStubCheck PROPERTIES LABELS "geozone;core")
+
+# GeoZoneStubLoad checks the same uses with the QML engine, which knows the members of the base types of the stubs: it
+# loads the stub types from their files, needing no display and nothing of the application but ToolStripAction, which
+# the stub of GeoZoneToolStripAction derives from. Built in all builds like the check above. Its test builds it first,
+# so that it also runs where only some targets were built.
+qt_add_executable(GeoZoneStubLoad
+    GeoZoneStubLoad.cc
+    ${CMAKE_SOURCE_DIR}/src/QmlControls/ToolStripAction.cc
+    ${CMAKE_SOURCE_DIR}/src/QmlControls/ToolStripAction.h
+)
+target_include_directories(GeoZoneStubLoad PRIVATE ${CMAKE_SOURCE_DIR}/src/QmlControls)
+target_link_libraries(GeoZoneStubLoad PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+set_target_properties(GeoZoneStubLoad PROPERTIES
+    MACOSX_BUNDLE FALSE
+    WIN32_EXECUTABLE FALSE
+    QT_EXCLUDE_FROM_TRANSLATION ON
+)
+add_dependencies(check GeoZoneStubLoad)
+add_test(NAME GeoZoneStubLoad.build COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target GeoZoneStubLoad)
+add_test(NAME GeoZoneStubLoad COMMAND GeoZoneStubLoad ${CMAKE_SOURCE_DIR})
+
+# Both checks report what a stub lacks: test/GeoZone/stubcheck is a stub module with QML using it, Good.qml what the
+# stubs declare and Bad.qml what they lack, through a qualified import. Each use of Bad.qml is reported, in the order
+# of the regular expressions, and none of Good.qml.
+add_test(NAME GeoZoneStubCheck.reports COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/stubcheck -P ${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneStubCheck.cmake)
+set_tests_properties(GeoZoneStubCheck.reports PROPERTIES
+    PASS_REGULAR_EXPRESSION "Bad.qml:12: GeoZoneThing.text.*Bad.qml:13: GeoZoneThing.missing.*Bad.qml:14: GeoZoneThing.gone.*Bad.qml:18: GeoZonePart.visible.*Bad.qml:21: type GeoZoneUnknown.*Bad.qml: GeoZoneThing.absentFunction.*Bad.qml: type GeoZone[^A-Za-z].*Bad.qml: GeoZoneManager.absent.*Bad.qml: GeoZoneThing.Turbo"
+)
+add_test(NAME GeoZoneStubLoad.reports COMMAND GeoZoneStubLoad ${CMAKE_CURRENT_SOURCE_DIR}/stubcheck)
+set_tests_properties(GeoZoneStubLoad.reports PROPERTIES
+    PASS_REGULAR_EXPRESSION "Bad.qml:12: GeoZoneThing.text.*Bad.qml:13: GeoZoneThing.missing.*Bad.qml:14: GeoZoneThing.onGone.*Bad.qml:18: GeoZonePart.visible.*Bad.qml:21: type GeoZoneUnknown.*Bad.qml: thing.absentFunction.*Bad.qml: GZ.GeoZone.Prohibited.*Bad.qml: GZ.GeoZoneManager.settings.absent.*Bad.qml: GZ.GeoZoneThing.Turbo"
+)
+set_tests_properties(GeoZoneStubCheck.reports GeoZoneStubLoad.reports PROPERTIES FAIL_REGULAR_EXPRESSION "Good.qml")
+set_tests_properties(GeoZoneStubLoad.build PROPERTIES FIXTURES_SETUP GeoZoneStubLoad)
+set_tests_properties(GeoZoneStubLoad GeoZoneStubLoad.reports PROPERTIES FIXTURES_REQUIRED GeoZoneStubLoad ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+set_tests_properties(GeoZoneStubCheck.reports GeoZoneStubLoad.build GeoZoneStubLoad GeoZoneStubLoad.reports PROPERTIES LABELS "geozone;core")
 if(QGC_DISABLE_GEOZONE)
     return()
 endif()
