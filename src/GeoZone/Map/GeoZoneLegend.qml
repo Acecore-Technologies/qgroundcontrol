@@ -9,6 +9,7 @@
 
 pragma ComponentBehavior: Bound
 
+import QtQml.Models
 import QtQuick
 import QtQuick.Layouts
 
@@ -175,6 +176,24 @@ ColumnLayout {
         indexModel:         false
     }
 
+    // The Source choice is as wide as its longest text, and so is its popup: the names as the feeds give them would
+    // make it wider than the panel, and its popup run off a small screen. The middle of a long name is left out, since
+    // sources are told apart by how their names begin and end: what is kept, with the paddings of the popup, is
+    // narrower than the legend, which is at least as wide as its last text.
+    Instantiator {
+        id:     sourceNames
+        model:  root._sources.count
+
+        TextMetrics {
+            required property int index
+
+            font:       sourceCombo.comboBox.font
+            elide:      Text.ElideMiddle
+            elideWidth: ScreenTools.defaultFontPixelWidth * 24
+            text:       root._sources.get(index)?.name ?? ""
+        }
+    }
+
     LabelledComboBox {
         id:                 sourceCombo
         Layout.fillWidth:   true
@@ -183,8 +202,8 @@ ColumnLayout {
         currentIndex:       root._sourceIndex
         model: {
             const names = [ qsTr("All sources") ]
-            for (let i = 0; i < root._sources.count; i++) {
-                names.push(root._sources.get(i).name)
+            for (let i = 0; i < sourceNames.count; i++) {
+                names.push(sourceNames.objectAt(i).elidedText)
             }
             return names
         }
