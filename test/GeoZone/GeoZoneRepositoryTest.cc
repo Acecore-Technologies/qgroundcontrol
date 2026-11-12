@@ -2303,6 +2303,99 @@ void GeoZoneRepositoryTest::_testFeedDatasetLink()
     QCOMPARE(restartedFeed->etag(), QStringLiteral("\"20210101_XML.zip\""));
 }
 
+void GeoZoneRepositoryTest::_testAiracDateStored()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 11, 10), QTime(12, 0)));
+    QFile fixture(QStringLiteral(":/unittest/uk_aixm_test.xml"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QByteArray dataset = fixture.readAll();
+
+    // A service publishing by AIRAC cycle whose page lists the effective date of each dataset beside its link, not in it
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/datasets", "<html><body><table><tr><td><a href=\"/files/a81f.zip\">zones</a></td><td>2026-10-29</td></tr></table></body></html>");
+    server.files.insert("/files/a81f.zip", dataset);
+    const QString url = server.url(QStringLiteral("/datasets"));
+    GeoZoneFeedCatalogue::Catalogue catalogue = GeoZoneFeedCatalogue::builtIn();
+    GeoZoneFeedCatalogue::Catalogue overlay;
+    QString catalogueError;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(QStringLiteral(R"json({ "feeds": [ { "id": "table", "name": "Table", "url": "%1", "format": "aixm", "airac": true,
+        "datasetLink": { "pattern": "href=\"([^\"]{1,200}\\.zip)\">[^<]{0,50}</a></td><td>(\\d{4}-\\d{2}-\\d{2})", "dateFormat": "yyyy-MM-dd" } } ] })json").arg(url).toUtf8(),
+        QStringLiteral("feeds.json"), overlay, catalogueError), qPrintable(catalogueError));
+    QVERIFY2(overlay.warnings.isEmpty(), qPrintable(overlay.warnings.join(QLatin1Char('\n'))));
+    GeoZoneFeedCatalogue::apply(catalogue, overlay);
+    GeoZoneProviders::setCatalogue(catalogue.feeds, catalogue.templates);
+    const auto restoreCatalogue = qScopeGuard([]() { GeoZoneProviders::resetCatalogue(); });
+    const QDate effective(2026, 10, 29);
+    const QString cycle = QStringLiteral("AIRAC %1").arg(GeoZoneAirac::cycleName(effective));
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    {
+        GeoZoneManager manager(storageDir.path());
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        manager.repository()->addUrl(url);
+        QVERIFY(addedSpy.wait(stepTimeoutMSecs));
+        QTRY_VERIFY(!manager.repository()->busy());
+        const GeoZoneSource *const feed = manager.repository()->source(url);
+        QVERIFY(feed);
+        QVERIFY(feed->datasetUrl().endsWith(QStringLiteral("/files/a81f.zip")));
+        QCOMPARE(feed->airacDate(), effective);
+        QVERIFY2(feed->detailsText().contains(cycle), qPrintable(feed->detailsText()));
+    }
+
+    // The index keeps the date with the dataset. A later session hasn't read the page: here the link of the stored copy
+    // is one no page was read for.
+    QFile indexFile(QDir(storageDir.path()).filePath(QStringLiteral("sources.json")));
+    const auto readIndex = [&indexFile]() {
+        const QJsonObject index = indexFile.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(indexFile.readAll()).object() : QJsonObject();
+        indexFile.close();
+        return index;
+    };
+    const auto writeEntry = [&indexFile](QJsonObject index, const QJsonObject &entry) {
+        index[QStringLiteral("sources")] = QJsonArray{ entry };
+        const bool written = indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate) && (indexFile.write(QJsonDocument(index).toJson()) > 0);
+        indexFile.close();
+        return written;
+    };
+    const QJsonObject index = readIndex();
+    QCOMPARE(index[QStringLiteral("sources")].toArray().count(), 1);
+    QJsonObject entry = index[QStringLiteral("sources")].toArray()[0].toObject();
+    QCOMPARE(entry[QStringLiteral("airacDate")].toString(), QStringLiteral("2026-10-29"));
+    const QString earlierLink = server.url(QStringLiteral("/files/earlier-session.zip"));
+    QVERIFY(!GeoZoneProviders::airacDatasetDate(earlierLink).isValid());
+    entry[QStringLiteral("datasetUrl")] = earlierLink;
+    QVERIFY(writeEntry(index, entry));
+    {
+        GeoZoneManager restarted(storageDir.path());
+        restarted.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+        GeoZoneSource *const feed = restarted.repository()->source(url);
+        QVERIFY(feed);
+        QCOMPARE(feed->datasetUrl(), earlierLink);
+        QCOMPARE(feed->airacDate(), effective);
+        QVERIFY2(feed->detailsText().contains(cycle), qPrintable(feed->detailsText()));
+        QVERIFY2(feed->validityText().isEmpty(), qPrintable(feed->validityText()));
+        // So the stored copy is outdated once the next cycle takes effect
+        environment.setNow(QDateTime(GeoZoneAirac::nextCycleStart(effective), QTime(0, 0), QTimeZone::UTC));
+        feed->updateValidity(environment.now());
+        QVERIFY2(feed->validityText().startsWith(QStringLiteral("AIRAC cycle")), qPrintable(feed->validityText()));
+        // The index written again by this session still has the date
+        feed->setEnabled(false);
+        QCOMPARE(readIndex()[QStringLiteral("sources")].toArray()[0].toObject()[QStringLiteral("airacDate")].toString(), QStringLiteral("2026-10-29"));
+    }
+
+    // The index of an earlier version, without the date, loads: the cycle is then only known where the link holds it
+    entry.remove(QStringLiteral("airacDate"));
+    QVERIFY(writeEntry(index, entry));
+    GeoZoneManager earlier(storageDir.path());
+    earlier.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+    const GeoZoneSource *const feed = earlier.repository()->source(url);
+    QVERIFY(feed);
+    QVERIFY(feed->zoneCount() > 0);
+    QVERIFY(!feed->airacDate().isValid());
+}
+
 void GeoZoneRepositoryTest::_testPageMerge()
 {
     // A response downloaded in three pages, which the loader puts together before parsing and storing it

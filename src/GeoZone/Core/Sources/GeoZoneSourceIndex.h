@@ -36,6 +36,7 @@ public:
         QString lastModified;
         bool enabled = true;    ///< See GeoZoneSource::enabled
         QString datasetUrl;     ///< Dataset the feed's page linked to, whose download the validators belong to
+        QDate airacDate;        ///< Effective date of the AIRAC cycle of the dataset, as its link was found with, invalid for other data
         qint64 maxAgeSecs = -1; ///< How long the server said the data stays current, negative when it didn't
         QDateTime checkedAt;    ///< When the server last confirmed the stored copy current, at least loadedAt
         QJsonObject service;    ///< See GeoZoneService::toJson, empty for plain feeds and files. Holds no secrets.

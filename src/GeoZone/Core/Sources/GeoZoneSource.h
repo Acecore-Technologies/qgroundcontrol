@@ -189,10 +189,13 @@ public:
     /// Dataset a feed's page linked to, like the current AIRAC cycle, empty when the feed URL is the dataset. The
     /// validators are those of the dataset.
     QString datasetUrl() const { return _datasetUrl; }
-    void setDatasetUrl(const QString &datasetUrl);
+    /// @param airacDate Effective date of the AIRAC cycle of the dataset kept with its stored copy, invalid when it
+    ///                  wasn't kept or the dataset has none
+    void setDatasetUrl(const QString &datasetUrl, const QDate &airacDate = QDate());
     /// @return Effective date of the AIRAC cycle of the data, invalid unless the feed's dataset is published by AIRAC
-    ///         cycle, see GeoZoneProviders::airacDatasetDate. The data is outdated once the next cycle takes effect.
-    QDate airacDate() const { return GeoZoneProviders::airacDatasetDate(_datasetUrl); }
+    ///         cycle: the date kept with the stored copy, see setDatasetUrl, or else the one of
+    ///         GeoZoneProviders::airacDatasetDate. The data is outdated once the next cycle takes effect.
+    QDate airacDate() const { return _airacDate.isValid() ? _airacDate : GeoZoneProviders::airacDatasetDate(_datasetUrl); }
 
     /// Replaces the zones. The previous zones are deleted.
     /// @param fileDate Date of the data when the file has no issue date: file modification or download time
@@ -285,6 +288,7 @@ private:
     QString _etag;
     QString _lastModified;
     QString _datasetUrl;
+    QDate _airacDate;                   ///< Of _datasetUrl, as kept with the stored copy
     GeoZoneService _service;
     bool _credentialsMissing = false;
     QGeoRectangle _area;

@@ -629,7 +629,7 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
     }
     if (source->isFeed() && job.downloaded) {
         source->setValidators(job.etag, job.lastModified);
-        source->setDatasetUrl(job.datasetUrl);
+        source->setDatasetUrl(job.datasetUrl, job.airacDate);
         source->setArea(job.area);
     }
 
@@ -822,7 +822,7 @@ void GeoZoneSourceRepository::loadStoredSources(LoadMode mode)
         GeoZoneSource *const placeholder = _newSource(job.key, job.url, entry.enabled);
         placeholder->setStoredDates(job.loadedAt, job.fileDate, job.checkedAt);
         placeholder->setValidators(job.etag, job.lastModified);
-        placeholder->setDatasetUrl(job.datasetUrl);
+        placeholder->setDatasetUrl(job.datasetUrl, job.airacDate);
         placeholder->setArea(entry.area);
         placeholder->setProvenance(GeoZoneProvenance::fromJson(entry.provenance));
         placeholder->setChanges(GeoZoneSourceChanges::fromJson(entry.changes));

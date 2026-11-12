@@ -100,10 +100,11 @@ void GeoZoneSource::setCredentialsMissing(bool missing)
     }
 }
 
-void GeoZoneSource::setDatasetUrl(const QString &datasetUrl)
+void GeoZoneSource::setDatasetUrl(const QString &datasetUrl, const QDate &airacDate)
 {
-    if (datasetUrl != _datasetUrl) {
+    if ((datasetUrl != _datasetUrl) || (airacDate != _airacDate)) {
         _datasetUrl = datasetUrl;
+        _airacDate = airacDate;
         updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
         emit changed();
     }

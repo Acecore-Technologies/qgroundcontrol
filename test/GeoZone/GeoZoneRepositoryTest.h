@@ -27,6 +27,7 @@ private slots:
     void _testManagerBackgroundLoad();
     void _testFeedNotModified();
     void _testFeedDatasetLink();
+    void _testAiracDateStored();
     void _testWfsPaging();
     void _testPageMerge();
     void _testArcGisPaging();

@@ -52,6 +52,7 @@ public:
         QString etag;               ///< HTTP validators of a downloaded feed
         QString lastModified;
         QString datasetUrl;         ///< Dataset the feed's page linked to, which was downloaded
+        QDate airacDate;            ///< Effective date of the AIRAC cycle of the dataset, see GeoZoneProviders::airacDatasetDate, invalid for other data
         qint64 maxAgeSecs = -1;     ///< How long the server said a downloaded feed stays current, negative when it didn't
         QStringList pagePaths;      ///< Further pages of a response the server limited, merged into sourcePath and removed
         QString responseMember;     ///< Member of a downloaded JSON response holding the zones, see GeoZoneService::responseMember

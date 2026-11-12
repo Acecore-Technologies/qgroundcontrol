@@ -99,6 +99,8 @@ GeoZoneLoader::Job GeoZoneLoader::downloadJob(const GeoZoneFeedFetch::Request &r
     job.etag = result.etag;
     job.lastModified = result.lastModified;
     job.datasetUrl = result.datasetUrl;
+    // Found with the link of the dataset on the page just read, kept with the stored copy for the next sessions
+    job.airacDate = GeoZoneProviders::airacDatasetDate(result.datasetUrl);
     job.maxAgeSecs = result.maxAgeSecs;
     job.area = request.area;
 
@@ -128,6 +130,7 @@ void GeoZoneLoader::_setEntry(Job &job, const GeoZoneSourceIndex::Entry &entry)
     job.etag = entry.etag;
     job.lastModified = entry.lastModified;
     job.datasetUrl = entry.datasetUrl;
+    job.airacDate = entry.airacDate;
     job.maxAgeSecs = entry.maxAgeSecs;
     job.area = entry.area;
     job.provenance = GeoZoneProvenance::fromJson(entry.provenance);
@@ -175,6 +178,7 @@ GeoZoneSourceIndex::Entry GeoZoneLoader::indexEntry(const Job &job, const GeoZon
         entry.etag = job.etag;
         entry.lastModified = job.lastModified;
         entry.datasetUrl = job.datasetUrl;
+        entry.airacDate = job.airacDate;
         entry.maxAgeSecs = job.maxAgeSecs;
         entry.area = job.area;
     }

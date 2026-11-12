@@ -30,6 +30,7 @@ constexpr const char *fileDateKey = "fileDate";
 constexpr const char *etagKey = "etag";
 constexpr const char *lastModifiedKey = "lastModified";
 constexpr const char *datasetUrlKey = "datasetUrl";
+constexpr const char *airacDateKey = "airacDate";
 constexpr const char *enabledKey = "enabled";
 constexpr const char *maxAgeKey = "maxAge";
 constexpr const char *checkedAtKey = "checkedAt";
@@ -137,6 +138,8 @@ GeoZoneSourceIndex::Entry GeoZoneSourceIndex::entryFromJson(const QJsonObject &o
     entry.lastModified = object.value(lastModifiedKey).toString();
     entry.enabled = object.value(enabledKey).toBool(true);
     entry.datasetUrl = object.value(datasetUrlKey).toString();
+    // Indexes of earlier versions don't have it: the date is then read from the link where the link holds it
+    entry.airacDate = QDate::fromString(object.value(airacDateKey).toString(), Qt::ISODate);
     entry.maxAgeSecs = object.value(maxAgeKey).toInteger(-1);
     // Only written once the server confirmed the copy after downloading it
     entry.checkedAt = QDateTime::fromString(object.value(checkedAtKey).toString(), Qt::ISODate);
@@ -177,6 +180,9 @@ QJsonObject GeoZoneSourceIndex::entryToJson(const Entry &entry)
         if (!text.isEmpty()) {
             object.insert(QLatin1String(name), text);
         }
+    }
+    if (entry.airacDate.isValid() && !entry.datasetUrl.isEmpty()) {
+        object.insert(airacDateKey, entry.airacDate.toString(Qt::ISODate));
     }
     if (!entry.enabled) {
         object.insert(enabledKey, false);
