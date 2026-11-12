@@ -371,7 +371,7 @@ void GeoZoneMapModel::setVehicleAltitudes(bool vehicleAltitudes)
 
 void GeoZoneMapModel::setAltitudeRange(const GeoZoneAltitudeRange &altitudeRange)
 {
-    if (altitudeRange.near(_altitudeRange, altitudeTolerance)) {
+    if (altitudeRange.isNear(_altitudeRange, altitudeTolerance)) {
         return;
     }
     _altitudeRange = altitudeRange;

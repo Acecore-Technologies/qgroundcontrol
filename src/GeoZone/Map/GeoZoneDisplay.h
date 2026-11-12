@@ -31,7 +31,7 @@ struct GeoZoneAltitudeRange
     /// Positions without altitude are ignored.
     void add(const GeoZone::Position &position);
     /// @return true if the altitudes differ by less than tolerance meters, unknown ones being equal
-    bool near(const GeoZoneAltitudeRange &other, double tolerance) const;
+    bool isNear(const GeoZoneAltitudeRange &other, double tolerance) const;
 };
 
 /// Which zones the maps show, see GeoZoneDisplay::filter. Filters only hide zones on the maps: the mission check,

@@ -28,7 +28,7 @@ void GeoZoneAltitudeRange::add(const GeoZone::Position &position)
     }
 }
 
-bool GeoZoneAltitudeRange::near(const GeoZoneAltitudeRange &other, double tolerance) const
+bool GeoZoneAltitudeRange::isNear(const GeoZoneAltitudeRange &other, double tolerance) const
 {
     const auto close = [tolerance](double a, double b) {
         return (std::isnan(a) && std::isnan(b)) || (std::abs(a - b) < tolerance);

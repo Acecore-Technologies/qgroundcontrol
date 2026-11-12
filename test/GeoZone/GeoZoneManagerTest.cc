@@ -7,6 +7,14 @@
  *
  ****************************************************************************/
 
+// The Windows SDK defines near and far as macros (minwindef.h). The header of the map filters is compiled with them
+// first, so a member with such a name fails here rather than only in a Windows build.
+#define near
+#define far
+#include "GeoZoneDisplay.h"
+#undef near
+#undef far
+
 #include "GeoZoneManagerTest.h"
 #include "GeoZoneSearchModel.h"
 #include "GeoZoneTestBase.h"
@@ -216,13 +224,13 @@ void GeoZoneManagerTest::_testZoneSearch()
     airport[QStringLiteral("name")] = QStringLiteral("Z\u00FCrich airport");
     QJsonObject prison = _circleFeature(QStringLiteral("GZW1"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(500, 90), 300);
     prison[QStringLiteral("name")] = QStringLiteral("Prison Zurich West");
-    QJsonObject far = _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(46, 7), 300);
-    far[QStringLiteral("name")] = QStringLiteral("Bern area");
+    QJsonObject distant = _circleFeature(QStringLiteral("FAR"), QStringLiteral("PROHIBITED"), QGeoCoordinate(46, 7), 300);
+    distant[QStringLiteral("name")] = QStringLiteral("Bern area");
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
     GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
     QString errorString;
-    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ airport, prison, far }), errorString), qPrintable(errorString));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ airport, prison, distant }), errorString), qPrintable(errorString));
 
     const auto identifiers = [](const QVariantList &zones) {
         QStringList result;
