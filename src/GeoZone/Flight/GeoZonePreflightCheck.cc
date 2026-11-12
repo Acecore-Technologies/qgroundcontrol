@@ -491,7 +491,7 @@ QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneC
     QList<const GeoZone*> zones;
     for (const GeoZone *zone : catalog.zonesInArea(area, GeoZonePolicy::alerts())) {
         const QList<GeoZone::Volume> &volumes = zone->data().volumes;
-        const bool near = std::any_of(volumes.cbegin(), volumes.cend(), [&](const GeoZone::Volume &volume) {
+        const bool nearAltitudes = std::any_of(volumes.cbegin(), volumes.cend(), [&](const GeoZone::Volume &volume) {
             for (const GeoZoneVertical::Limit side : { GeoZoneVertical::Limit::Lower, GeoZoneVertical::Limit::Upper }) {
                 if (GeoZoneVertical::reference(volume, side) != GeoZone::VerticalReference::FlightLevel) {
                     continue;
@@ -504,7 +504,7 @@ QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneC
             }
             return false;
         });
-        if (near) {
+        if (nearAltitudes) {
             zones.append(zone);
         }
     }

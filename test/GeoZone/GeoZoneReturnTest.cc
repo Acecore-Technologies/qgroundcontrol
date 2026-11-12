@@ -59,7 +59,7 @@ double highest(const Model::Path &path)
     return altitude - kHomeAltitude;
 }
 
-bool near(const QGeoCoordinate &a, const QGeoCoordinate &b)
+bool isNear(const QGeoCoordinate &a, const QGeoCoordinate &b)
 {
     return a.distanceTo(b) < 0.5;
 }
@@ -240,22 +240,22 @@ void GeoZoneReturnTest::_testPx4Destination()
     switch (static_cast<Model::Destination>(destination)) {
     case Model::Destination::Home:
         // Down to the descend altitude, then landing
-        QVERIFY(near(path.positions.last().coordinate, kHome));
+        QVERIFY(isNear(path.positions.last().coordinate, kHome));
         QCOMPARE(path.positions.last().altitudeAMSL, kHomeAltitude);
         QCOMPARE(path.positions[path.positions.count() - 2].altitudeAMSL, kHomeAltitude + 30);
         break;
     case Model::Destination::RallyPoint:
-        QVERIFY(near(path.positions.last().coordinate, destinations.rallyPoints.first().coordinate));
+        QVERIFY(isNear(path.positions.last().coordinate, destinations.rallyPoints.first().coordinate));
         QCOMPARE(path.positions.last().altitudeAMSL, kHomeAltitude + 20);
         break;
     case Model::Destination::MissionLanding:
-        QVERIFY(near(path.positions.last().coordinate, missionLanding.entry.coordinate));
+        QVERIFY(isNear(path.positions.last().coordinate, missionLanding.entry.coordinate));
         QCOMPARE(path.positions.last().altitudeAMSL, missionLanding.entry.altitudeAMSL);
         break;
     case Model::Destination::ReverseMission:
         // Climbing at the first waypoint, then home
-        QVERIFY(near(path.positions.first().coordinate, destinations.firstWaypoint.coordinate));
-        QVERIFY(near(path.positions.last().coordinate, kHome));
+        QVERIFY(isNear(path.positions.first().coordinate, destinations.firstWaypoint.coordinate));
+        QVERIFY(isNear(path.positions.last().coordinate, kHome));
         break;
     default:
         QVERIFY(path.positions.isEmpty());
@@ -357,9 +357,9 @@ void GeoZoneReturnTest::_testArduCopterPath()
     QCOMPARE(static_cast<int>(path.destination), static_cast<int>(Model::Destination::Home));
     QVERIFY(path.altitudeKnown);
     QCOMPARE(path.positions.count(), 4);
-    QVERIFY(near(path.positions[1].coordinate, offset(1000, 0)));
+    QVERIFY(isNear(path.positions[1].coordinate, offset(1000, 0)));
     QCOMPARE(path.positions[1].altitudeAMSL, kHomeAltitude + 30);
-    QVERIFY(near(path.positions[2].coordinate, kHome));
+    QVERIFY(isNear(path.positions[2].coordinate, kHome));
     QCOMPARE(path.positions[3].altitudeAMSL, kHomeAltitude);
 
     // Descending to RTL_ALT_FINAL above home instead
@@ -558,7 +558,7 @@ void GeoZoneReturnTest::_testBreachPath()
     QCOMPARE(path.positions.last().altitudeAMSL, kHomeAltitude + altitude);
     const QGeoCoordinate expected = (path.destination == Model::Destination::BreachReturnPoint) ? destinations.breachReturnPoint.coordinate :
                                     (path.destination == Model::Destination::RallyPoint) ? destinations.rallyPoints.first().coordinate : kHome;
-    QVERIFY(near(path.positions.last().coordinate, expected));
+    QVERIFY(isNear(path.positions.last().coordinate, expected));
     QVERIFY(!path.loiter.isEmpty());
 }
 
@@ -581,7 +581,7 @@ void GeoZoneReturnTest::_testMissionDestinations()
         landItem.land = true;
         return landItem;
     };
-    const auto near = [](const GeoZone::Position &a, const GeoZone::Position &b) {
+    const auto isNear = [](const GeoZone::Position &a, const GeoZone::Position &b) {
         return a.coordinate.isValid() && (a.coordinate.distanceTo(b.coordinate) < 0.01) && qIsNaN(a.coordinate.altitude()) && (a.altitudeAMSL == b.altitudeAMSL);
     };
 
@@ -609,23 +609,23 @@ void GeoZoneReturnTest::_testMissionDestinations()
         item(Kind::Other, 10, position(300, 300, 30)),
     };
     const Model::Destinations destinations = GeoZoneReturnDestinations::fromMission(items);
-    QVERIFY(near(destinations.firstWaypoint, position(1000, 0, 50)));
+    QVERIFY(isNear(destinations.firstWaypoint, position(1000, 0, 50)));
     QCOMPARE(destinations.landings.count(), 1);
     QCOMPARE(destinations.landings[0].sequenceNumber, 3);
     QVERIFY(destinations.landings[0].marker.distanceTo(offset(2000, 0)) < 0.01);
     QVERIFY(qIsNaN(destinations.landings[0].marker.altitude()));
-    QVERIFY(near(destinations.landings[0].entry, position(1500, 0, 40)));
-    QVERIFY(near(destinations.landings[0].touchdown, position(1800, 0, 0)));
+    QVERIFY(isNear(destinations.landings[0].entry, position(1500, 0, 40)));
+    QVERIFY(isNear(destinations.landings[0].touchdown, position(1800, 0, 0)));
     QCOMPARE(destinations.returnPath.count(), 2);
-    QVERIFY(near(destinations.returnPath[0], position(500, 500, 60)));
-    QVERIFY(near(destinations.returnPath[1], position(200, 200, 30)));
+    QVERIFY(isNear(destinations.returnPath[0], position(500, 500, 60)));
+    QVERIFY(isNear(destinations.returnPath[1], position(200, 200, 30)));
 
     // PX4 doesn't fly back to the takeoff, it lands at home once the return along the mission reaches it
     QList<GeoZoneMissionItem> takeoffFirst = items;
     takeoffFirst.prepend(item(Kind::Takeoff, 0, position(0, 0, 30)));
-    QVERIFY(near(GeoZoneReturnDestinations::fromMission(takeoffFirst).firstWaypoint, position(1000, 0, 50)));
+    QVERIFY(isNear(GeoZoneReturnDestinations::fromMission(takeoffFirst).firstWaypoint, position(1000, 0, 50)));
     takeoffFirst[0].kind = Kind::Other;
-    QVERIFY(near(GeoZoneReturnDestinations::fromMission(takeoffFirst).firstWaypoint, position(0, 0, 30)));
+    QVERIFY(isNear(GeoZoneReturnDestinations::fromMission(takeoffFirst).firstWaypoint, position(0, 0, 30)));
 
     // A DO_LAND_START without a coordinate is marked by its first position, a landing pattern is a sequence of its own
     landStart.marker = QGeoCoordinate();
@@ -637,19 +637,19 @@ void GeoZoneReturnTest::_testMissionDestinations()
     QCOMPARE(landings.landings.count(), 2);
     QVERIFY(landings.landings[0].marker.distanceTo(offset(1500, 0)) < 0.01);
     QCOMPARE(landings.landings[1].sequenceNumber, 6);
-    QVERIFY(near(landings.landings[1].entry, position(-1000, 0, 80)));
-    QVERIFY(near(landings.landings[1].touchdown, position(-1500, 0, 0)));
+    QVERIFY(isNear(landings.landings[1].entry, position(-1000, 0, 80)));
+    QVERIFY(isNear(landings.landings[1].touchdown, position(-1500, 0, 0)));
     QVERIFY(landings.landings[1].marker.distanceTo(offset(-1000, 0)) < 0.01);
     // The destinations of the plan are taken as given, without the altitudes of their coordinates
     const GeoZone::Position rallyPoint{ QGeoCoordinate(offset(0, 1000).latitude(), offset(0, 1000).longitude(), 30), kHomeAltitude + 30 };
     const GeoZone::Position breachReturnPoint{ offset(0, -1000), kHomeAltitude + 40 };
     const Model::Destinations plan = GeoZoneReturnDestinations::fromMission(items, position(0, 0, 0), { rallyPoint, GeoZone::Position() }, breachReturnPoint);
-    QVERIFY(near(plan.home, position(0, 0, 0)));
+    QVERIFY(isNear(plan.home, position(0, 0, 0)));
     QCOMPARE(plan.rallyPoints.count(), 1);
-    QVERIFY(near(plan.rallyPoints[0], position(0, 1000, 30)));
-    QVERIFY(near(plan.breachReturnPoint, position(0, -1000, 40)));
+    QVERIFY(isNear(plan.rallyPoints[0], position(0, 1000, 30)));
+    QVERIFY(isNear(plan.breachReturnPoint, position(0, -1000, 40)));
     QCOMPARE(plan.landings.count(), 1);
-    QVERIFY(near(plan.firstWaypoint, destinations.firstWaypoint));
+    QVERIFY(isNear(plan.firstWaypoint, destinations.firstWaypoint));
 
     // A DO_LAND_START without a landing after it isn't a landing sequence
     QVERIFY(GeoZoneReturnDestinations::fromMission({ landStart, item(Kind::Other, 4, position(1500, 0, 40)) }).landings.isEmpty());

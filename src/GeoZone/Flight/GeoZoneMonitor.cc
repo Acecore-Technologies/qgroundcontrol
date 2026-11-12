@@ -897,10 +897,10 @@ void GeoZoneMonitor::_setAlertActions(GeoZoneAlertModel::Alert &alert) const
     const auto zone = std::find_if(nearby.cbegin(), nearby.cend(), [&alert](const GeoZoneAlertTracker::Nearby &candidate) {
         return candidate.zone->key() == alert.zoneKey;
     });
-    const bool near = (zone != nearby.cend());
-    const bool known = near && !monitor->positionUnavailable();
+    const bool zoneNearby = (zone != nearby.cend());
+    const bool known = zoneNearby && !monitor->positionUnavailable();
     // Once the vehicle left the zone and its approach range, the permission no longer matters
-    alert.question = subject->asksPermission && near && !_arbiter.zoneApproved(subject->vehicleKey, alert.zoneKey) &&
+    alert.question = subject->asksPermission && zoneNearby && !_arbiter.zoneApproved(subject->vehicleKey, alert.zoneKey) &&
                      !_permits->contains(subject->permitKey, monitor->vehicleId());
     alert.activeVehicle = (monitor == _activeMonitor);
     alert.inside = known && zone->inside;

@@ -173,13 +173,13 @@ int GeoZoneRouteGraph::includeZones(const QList<const GeoZone*> &zones)
 
 QList<int> GeoZoneRouteGraph::shortestPath(Length length, QSet<int> *blockers, Search search)
 {
-    const bool near = (search == Search::Near) && nearSearchIncomplete();
-    const QList<int> path = _astar(length == Length::WithinLimit, near, blockers);
-    return (near && !path.isEmpty()) ? _straightened(path) : path;
+    const bool nearEdges = (search == Search::Near) && nearSearchIncomplete();
+    const QList<int> path = _astar(length == Length::WithinLimit, nearEdges, blockers);
+    return (nearEdges && !path.isEmpty()) ? _straightened(path) : path;
 }
 
-/// @param near Only along the near edges, see GeoZoneRouteGraph
-QList<int> GeoZoneRouteGraph::_astar(bool limited, bool near, QSet<int> *blockers)
+/// @param nearEdges Only along the near edges, see GeoZoneRouteGraph
+QList<int> GeoZoneRouteGraph::_astar(bool limited, bool nearEdges, QSet<int> *blockers)
 {
     // Edges are tested lazily, like by Lazy Weighted A*: candidate edges are queued by the estimated length of the paths
     // through them, and only tested when they would reach a node first.
@@ -219,7 +219,7 @@ QList<int> GeoZoneRouteGraph::_astar(bool limited, bool near, QSet<int> *blocker
             }
             return true;
         };
-        if (!near) {
+        if (!nearEdges) {
             for (int next = 1; next < count; next++) {
                 (void) consider(next);
             }
@@ -286,7 +286,7 @@ QList<int> GeoZoneRouteGraph::_astar(bool limited, bool near, QSet<int> *blocker
         // their limit is checked with aren't those of the zigzags between near nodes
         const int before = previous[from];
         int shortcutBlocker = -1;
-        if (near && (before >= 0) && _visible(before, to, shortcutBlocker)) {
+        if (nearEdges && (before >= 0) && _visible(before, to, shortcutBlocker)) {
             previous[to] = before;
             distances[to] = distances[before] + length(nodes[to].point - nodes[before].point);
         }

@@ -95,7 +95,7 @@ private:
     static int _ends(int from, int to);
     void _addWork(qint64 work);
     bool _visible(int from, int to, int &blocker);
-    QList<int> _astar(bool limited, bool near, QSet<int> *blockers);
+    QList<int> _astar(bool limited, bool nearEdges, QSet<int> *blockers);
     QList<int> _straightened(const QList<int> &path);
 
     GeoZoneRouteObstacles &_obstacles;

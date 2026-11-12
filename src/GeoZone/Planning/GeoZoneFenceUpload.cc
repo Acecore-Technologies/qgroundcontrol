@@ -758,7 +758,7 @@ GeoZoneFenceUpload::FenceSnapshot GeoZoneFenceUpload::snapshot(const QList<QGCFe
 
 QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const FenceSnapshot &received)
 {
-    const auto near = [](const QGeoCoordinate &a, const QGeoCoordinate &b) {
+    const auto isNear = [](const QGeoCoordinate &a, const QGeoCoordinate &b) {
         return a.isValid() && b.isValid() && (QGeoCoordinate(a.latitude(), a.longitude()).distanceTo(QGeoCoordinate(b.latitude(), b.longitude())) <= verifyTolerance);
     };
     QList<bool> polygonMatched(received.polygons.count(), false);
@@ -773,7 +773,7 @@ QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const Fence
             }
             found = true;
             for (qsizetype v = 0; (v < polygon.vertices.count()) && found; v++) {
-                found = near(polygon.vertices[v], other.vertices[v]);
+                found = isNear(polygon.vertices[v], other.vertices[v]);
             }
             polygonMatched[i] = found;
         }
@@ -788,7 +788,7 @@ QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const Fence
             if (circleMatched[i]) {
                 continue;
             }
-            found = (other.inclusion == circle.inclusion) && near(circle.circle.center(), other.circle.center()) &&
+            found = (other.inclusion == circle.inclusion) && isNear(circle.circle.center(), other.circle.center()) &&
                     (qAbs(circle.circle.radius() - other.circle.radius()) <= verifyTolerance);
             circleMatched[i] = found;
         }
@@ -803,7 +803,7 @@ QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const Fence
     }
     if (sent.returnPoint.isValid() != received.returnPoint.isValid()) {
         differences.append(sent.returnPoint.isValid() ? tr("The vehicle has no breach return point.") : tr("The vehicle has a breach return point the plan doesn't."));
-    } else if (sent.returnPoint.isValid() && !near(sent.returnPoint, received.returnPoint)) {
+    } else if (sent.returnPoint.isValid() && !isNear(sent.returnPoint, received.returnPoint)) {
         differences.append(tr("The breach return point on the vehicle differs from the plan."));
     }
     return differences.join(QLatin1Char(' '));

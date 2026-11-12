@@ -755,12 +755,12 @@ void GeoZoneMonitorTest::_testUnknownVelocity()
     GeoZoneVehicleMonitor slow(nullptr, vehicleId, 4, clock);
     slow.setVehicleClass(QStringLiteral("multirotor"));
     slow.setArmed(true);
-    const GeoZone::Position far{ center.atDistanceAndAzimuth(5000, 0), 450, 400 };
+    const GeoZone::Position farAway{ center.atDistanceAndAzimuth(5000, 0), 450, 400 };
     for (qint64 msecs = 0; msecs <= 30000; msecs += 1000) {
         if ((msecs % 10000) == 0) {
             slow.handleMessage(gps, msecs);
         }
-        (void) slow.evaluateAt(msecs, far, context);
+        (void) slow.evaluateAt(msecs, farAway, context);
         QVERIFY2(slow.thresholds().result().speedSource == Source::Assumed, qPrintable(QString::number(msecs)));
     }
     // The velocity sent with such positions is as current as they are
@@ -770,7 +770,7 @@ void GeoZoneMonitorTest::_testUnknownVelocity()
         if ((msecs % 10000) == 0) {
             reporting.handleMessage(globalPositionMessage(vehicleId, 1200, 0, 0), msecs);
         }
-        (void) reporting.evaluateAt(msecs, far, context);
+        (void) reporting.evaluateAt(msecs, farAway, context);
         if (msecs >= 10000) {
             QVERIFY2(reporting.thresholds().result().speedSource == Source::Velocity, qPrintable(QString::number(msecs)));
             QCOMPARE(reporting.thresholds().result().groundSpeed, 12.0);
@@ -781,7 +781,7 @@ void GeoZoneMonitorTest::_testUnknownVelocity()
     inconsistent.setArmed(true);
     inconsistent.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), 1000);
     inconsistent.handleMessage(hud, 1000);
-    (void) inconsistent.evaluateAt(1000, far, context);
+    (void) inconsistent.evaluateAt(1000, farAway, context);
     QCOMPARE(inconsistent.thresholds().result().speedSource, Source::Reported);
     QCOMPARE(inconsistent.thresholds().result().groundSpeed, 5.0);
 }
@@ -2706,7 +2706,7 @@ void GeoZoneMonitorTest::_testTraffic()
     };
     const GeoZoneMonitor::Aircraft inP = aircraft(0x4B1234, QStringLiteral("SWR123 ") + QChar(0), center.atDistanceAndAzimuth(100, 90), 600);
     const GeoZoneMonitor::Aircraft nearP = aircraft(0x4B5678, QString(), center.atDistanceAndAzimuth(360, 90), 700);
-    const GeoZoneMonitor::Aircraft far = aircraft(0x4B9999, QStringLiteral("FAR"), center.atDistanceAndAzimuth(20000, 0), 600);
+    const GeoZoneMonitor::Aircraft farP = aircraft(0x4B9999, QStringLiteral("FAR"), center.atDistanceAndAzimuth(20000, 0), 600);
 
     // Traffic is checked around the active vehicle, here 5 km north of the prohibited zone, within the radius
     monitor.evaluateTraffic({ inP });
@@ -2714,7 +2714,7 @@ void GeoZoneMonitorTest::_testTraffic()
     monitor.evaluate({ center.atDistanceAndAzimuth(5000, 0), 500, 400 });
     QCOMPARE(alertSpy.count(), 0);
     QSignalSpy trafficSpy(&monitor, &GeoZoneMonitor::trafficChanged);
-    monitor.evaluateTraffic({ far, nearP, inP });
+    monitor.evaluateTraffic({ farP, nearP, inP });
     QCOMPARE(trafficSpy.count(), 1);
     const QVariantList listed = monitor.traffic();
     QCOMPARE(listed.count(), 2);
@@ -3615,8 +3615,8 @@ void GeoZoneMonitorTest::_testActivationCaution()
     monitor.setAudioSink(sink);
     QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
     const GeoZone::Position inside{ center.atDistanceAndAzimuth(100, 0), 500, 450 };
-    const GeoZone::Position near{ center.atDistanceAndAzimuth(350, 0), 500, 450 };
-    const GeoZone::Position far{ center.atDistanceAndAzimuth(2000, 0), 500, 450 };
+    const GeoZone::Position nearPosition{ center.atDistanceAndAzimuth(350, 0), 500, 450 };
+    const GeoZone::Position farPosition{ center.atDistanceAndAzimuth(2000, 0), 500, 450 };
 
     // More than the 10 min of the setting before, nothing
     monitor.evaluate(inside, 1);
@@ -3643,7 +3643,7 @@ void GeoZoneMonitorTest::_testActivationCaution()
     QCOMPARE(GeoZoneAlertHistory::logFields(GeoZoneAlertHistory::logLine(event))[6], QStringLiteral("activation_soon"));
     at(QTime(11, 55));
     monitor.evaluate(inside, 1);
-    monitor.evaluate(far, 1);
+    monitor.evaluate(farPosition, 1);
     monitor.evaluate(inside, 1);
     QCOMPARE(eventSpy.count(), 1);
 
@@ -3655,12 +3655,12 @@ void GeoZoneMonitorTest::_testActivationCaution()
 
     // The next activation cautions again, also a vehicle within the approach distance, but not one farther
     at(QTime(13, 0, 30));
-    monitor.evaluate(near, 1);
-    monitor.evaluate(far, 2);
+    monitor.evaluate(nearPosition, 1);
+    monitor.evaluate(farPosition, 2);
     at(QTime(13, 59, 50));
     eventSpy.clear();
-    monitor.evaluate(near, 1);
-    monitor.evaluate(far, 2);
+    monitor.evaluate(nearPosition, 1);
+    monitor.evaluate(farPosition, 2);
     QCOMPARE(eventSpy.count(), 1);
     event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
     QCOMPARE(event.kind, GeoZoneMonitor::AlertEvent::ActivationSoon);

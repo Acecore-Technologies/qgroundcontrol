@@ -124,14 +124,14 @@ QList<QPointF> _openOverlaps(const QList<QPointF> &ring)
 bool _boundaryWithin(const QList<QGeoCoordinate> &polygon, const GeoZoneGeometry::LocalProjection &projection, const QList<QList<QPointF>> &fenceRings)
 {
     const QList<QPointF> &ring = fenceRings.first();
-    const auto near = [&ring](const QPointF &point) {
+    const auto within = [&ring](const QPointF &point) {
         return GeoZoneGeometry::ringContains(ring, point, Qt::OddEvenFill) || (GeoZoneGeometry::distanceToRing(point, ring) <= boundaryTolerance);
     };
     for (qsizetype i = 0; i < polygon.count(); i++) {
         // Vertices inside, and edges not leaving the fence between them, like around a notch of the fence
         const QPointF a = projection.toLocal(polygon[i]);
         const QPointF b = projection.toLocal(polygon[(i + 1) % polygon.count()], a);
-        if (!near(a)) {
+        if (!within(a)) {
             return false;
         }
         double covered = 0;
@@ -140,7 +140,7 @@ bool _boundaryWithin(const QList<QGeoCoordinate> &polygon, const GeoZoneGeometry
         for (const GeoZoneGeometry::Interval &interval : std::as_const(inside)) {
             if (interval.first > covered) {
                 for (const double fraction : { 0.25, 0.5, 0.75 }) {
-                    if (!near(a + ((b - a) * (covered + ((interval.first - covered) * fraction))))) {
+                    if (!within(a + ((b - a) * (covered + ((interval.first - covered) * fraction))))) {
                         return false;
                     }
                 }
