@@ -11,7 +11,6 @@ import QtQuick
 import QtQuick.Layouts
 import QtPositioning
 
-import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.GeoZone
 import QGroundControl.Palette

@@ -11,10 +11,8 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 
-import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.GeoZone
 import QGroundControl.Palette
