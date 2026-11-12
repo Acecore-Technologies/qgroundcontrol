@@ -26,6 +26,7 @@ private slots:
     void _testFeedNotModified();
     void _testFeedDatasetLink();
     void _testWfsPaging();
+    void _testPageMerge();
     void _testArcGisPaging();
     void _testFeedCompanions();
     void _testFeedFetchFormatCompanions();

@@ -27,6 +27,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QSaveFile>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QSet>
 #include <QtCore/QUrl>
@@ -199,44 +200,61 @@ QByteArray GeoZoneLoader::extractZipFile(const QString &archivePath, QString &er
 namespace {
 
 /// Appends the features of the further pages of a paged response to its first page, so that the stored copy holds all
-/// of them, and removes the pages. Pages which can't be read are left out, the response then still misses zones.
+/// of them, and removes the pages. A page which can't be read fails the merge: a response missing zones isn't stored.
+/// The first page is replaced as a whole, it is left as it was when the merged document can't be written.
 /// @param member Member of the pages holding the zones, see GeoZoneService::responseMember, empty for GeoJSON pages
-void mergePages(const QString &filePath, const QStringList &pagePaths, const QString &member)
+bool mergePages(const QString &filePath, const QStringList &pagePaths, const QString &member, QString &errorString)
 {
     const auto removePages = qScopeGuard([&pagePaths]() {
         for (const QString &pagePath : pagePaths) {
             (void) QFile::remove(pagePath);
         }
     });
+    const QString featuresKey = QStringLiteral("features");
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        return;
+        errorString = GeoZoneLoader::tr("Unable to open file %1: %2").arg(filePath, file.errorString());
+        return false;
     }
     QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
     file.close();
-    if (!root.value(QStringLiteral("features")).isArray()) {
-        return;
+    if (!root.value(featuresKey).isArray()) {
+        errorString = GeoZoneLoader::tr("The pages of the response could not be put together: its first page has no features.");
+        return false;
     }
-    QJsonArray features = root.value(QStringLiteral("features")).toArray();
+    QJsonArray features = root.value(featuresKey).toArray();
     for (const QString &pagePath : pagePaths) {
         QFile page(pagePath);
         if (!page.open(QIODevice::ReadOnly)) {
-            continue;
+            errorString = GeoZoneLoader::tr("Unable to open file %1: %2").arg(pagePath, page.errorString());
+            return false;
         }
         QByteArray document = page.readAll();
         if (!member.isEmpty()) {
-            QString errorString;
             document = GeoZoneService::extractMember(document, member, errorString);
+            if (document.isEmpty()) {
+                return false;
+            }
         }
-        for (const QJsonValue &feature : QJsonDocument::fromJson(document).object().value(QStringLiteral("features")).toArray()) {
+        const QJsonValue pageFeatures = QJsonDocument::fromJson(document).object().value(featuresKey);
+        if (!pageFeatures.isArray()) {
+            errorString = GeoZoneLoader::tr("The pages of the response could not be put together: page %1 of %2 has no features.")
+                              .arg(pagePaths.indexOf(pagePath) + 2).arg(pagePaths.count() + 1);
+            return false;
+        }
+        for (const QJsonValue &feature : pageFeatures.toArray()) {
             features.append(feature);
         }
     }
-    root.insert(QStringLiteral("features"), features);
+    root.insert(featuresKey, features);
     root.insert(QStringLiteral("numberReturned"), features.count());
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        (void) file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    const QByteArray merged = QJsonDocument(root).toJson(QJsonDocument::Compact);
+    QSaveFile mergedFile(filePath);
+    if (!mergedFile.open(QIODevice::WriteOnly) || (mergedFile.write(merged) != merged.size()) || !mergedFile.commit()) {
+        errorString = GeoZoneLoader::tr("Unable to write file %1: %2").arg(filePath, mergedFile.errorString());
+        return false;
     }
+    return true;
 }
 
 /// Replaces a service's response with the member holding the zones, so that the stored copy is the zones' document
@@ -372,8 +390,8 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     if (job.downloaded && !job.responseMember.isEmpty() && !extractMember(job.sourcePath, job.responseMember, loadResult.errorString)) {
         return loadResult;
     }
-    if (!job.pagePaths.isEmpty()) {
-        mergePages(job.sourcePath, job.pagePaths, job.responseMember);
+    if (!job.pagePaths.isEmpty() && !mergePages(job.sourcePath, job.pagePaths, job.responseMember, loadResult.errorString)) {
+        return loadResult;
     }
 
     QFile file(job.sourcePath);

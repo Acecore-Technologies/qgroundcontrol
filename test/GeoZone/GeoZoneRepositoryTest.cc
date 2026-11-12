@@ -1838,6 +1838,70 @@ void GeoZoneRepositoryTest::_testFeedDatasetLink()
     QCOMPARE(restarted.repository()->source(url)->etag(), QStringLiteral("\"20210101_XML.zip\""));
 }
 
+void GeoZoneRepositoryTest::_testPageMerge()
+{
+    // A response downloaded in three pages, which the loader puts together before parsing and storing it
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const GeoZoneStore store(dir.filePath(QStringLiteral("store")));
+    const QGeoCoordinate center(47, 8);
+    const auto writePages = [&dir, &center](GeoZoneLoader::Job &job) {
+        job = GeoZoneLoader::Job();
+        job.key = job.url = QStringLiteral("https://example.com/zones");
+        job.downloaded = true;
+        job.loadedAt = job.fileDate = QDateTime::currentDateTimeUtc();
+        job.storedFileName = QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json");
+        job.sourcePath = _writeFeatures(dir, QStringLiteral("page0.part"), QJsonArray{ _circleFeature(QStringLiteral("Z0"), QStringLiteral("PROHIBITED"), center, 100) });
+        for (int page = 1; page <= 2; page++) {
+            job.pagePaths.append(_writeFeatures(dir, QStringLiteral("page%1.part").arg(page), QJsonArray{
+                _circleFeature(QStringLiteral("Z%1").arg(page), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(page * 1000, 90), 100) }));
+        }
+    };
+    const auto downloadsLeft = [&dir]() { return QDir(dir.path()).entryList({ QStringLiteral("*.part") }, QDir::Files); };
+    GeoZoneLoader::Job job;
+
+    writePages(job);
+    GeoZoneLoader::Result result = GeoZoneLoader::run(job, store);
+    QVERIFY2(result.errorString.isEmpty(), qPrintable(result.errorString));
+    QCOMPARE(result.result.zones.count(), 3);
+    QVERIFY(result.stored);
+    QCOMPARE(downloadsLeft(), QStringList());
+    QFile stored(store.path(job.storedFileName));
+    QVERIFY(stored.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(stored.readAll()).object().value(QStringLiteral("features")).toArray().count(), 3);
+    stored.close();
+    store.removeFile(job.storedFileName);
+
+    // A page which can't be read fails the load, rather than storing a response which misses its zones
+    const QList<std::function<bool(const QString &pagePath)>> damages = {
+        [](const QString &pagePath) { return QFile::remove(pagePath); },
+        [](const QString &pagePath) { QFile page(pagePath); return page.open(QIODevice::WriteOnly | QIODevice::Truncate) && (page.write("{ \"features\": [") > 0); },
+        [](const QString &pagePath) { QFile page(pagePath); return page.open(QIODevice::WriteOnly | QIODevice::Truncate) && (page.write("{ \"error\": 429 }") > 0); },
+    };
+    for (const auto &damage : damages) {
+        writePages(job);
+        QVERIFY(damage(job.pagePaths.constLast()));
+        result = GeoZoneLoader::run(job, store);
+        QVERIFY(!result.errorString.isEmpty());
+        QVERIFY(!result.stored);
+        QVERIFY(result.result.zones.isEmpty());
+        QVERIFY(!QFile::exists(store.path(job.storedFileName)));
+        QCOMPARE(downloadsLeft(), QStringList());
+    }
+
+    // So does a first page which can't be replaced by the merged document
+    writePages(job);
+    QVERIFY(QFile::setPermissions(job.sourcePath, QFile::ReadOwner));
+    if (!QFileInfo(job.sourcePath).isWritable()) {
+        result = GeoZoneLoader::run(job, store);
+        QVERIFY2(result.errorString.startsWith(QStringLiteral("Unable to write file")), qPrintable(result.errorString));
+        QVERIFY(!result.stored);
+        QVERIFY(!QFile::exists(store.path(job.storedFileName)));
+    }
+    (void) QFile::remove(job.sourcePath);
+    QCOMPARE(downloadsLeft(), QStringList());
+}
+
 void GeoZoneRepositoryTest::_testWfsPaging()
 {
     // A WFS limiting its responses to 2 of the 5 features of the area, like the IGN and DiPUL servers
