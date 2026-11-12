@@ -394,7 +394,9 @@ double GeoZone::distanceTo(const Position &position, double verticalMargin, doub
             }
             continue;
         }
-        if (volume.rings.isEmpty() || (_volumeBoxes[i].distanceTo(position.coordinate) > (std::min)(minDistance, maxDistance))) {
+        // A polygon without an outer boundary, like one of a damaged cache, is nowhere
+        if (volume.rings.isEmpty() || !_volumeBoxes[i].isValid() ||
+            (_volumeBoxes[i].distanceTo(position.coordinate) > (std::min)(minDistance, maxDistance))) {
             continue;
         }
 
@@ -445,7 +447,8 @@ bool GeoZone::intersectsArea(const Area &area) const
             continue;
         }
 
-        if (volume.rings.isEmpty()) {
+        // A polygon without an outer boundary, like one of a damaged cache, has no vertex to test and overlaps nothing
+        if (volume.rings.isEmpty() || volume.rings.constFirst().isEmpty() || !_volumeBoxes[v].isValid()) {
             continue;
         }
         const QList<QList<QPointF>> &rings = projected.volumeRings[v];

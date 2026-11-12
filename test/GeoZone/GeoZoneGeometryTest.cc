@@ -1488,6 +1488,32 @@ void GeoZoneGeometryTest::_testAreaIntersection()
     QVERIFY(!GeoZone(large).intersectsArea(area(survey, 100, 200)));
     QVERIFY(!GeoZone(small).intersectsArea(area(square(center.atDistanceAndAzimuth(3000, 0), 500), 100, 200)));
 
+    // A polygon without an outer boundary, as a damaged parse cache can restore, overlaps nothing: the other volumes
+    // of the zone are still found, and its holes are no boundary to measure a distance to
+    GeoZone::Data damaged;
+    damaged.volumes.append(GeoZone::Volume{ false, { GeoZone::Ring(), GeoZone::toRing(square(center, 100)) } });
+    damaged.volumes.append(GeoZone::Volume{ false, { GeoZone::Ring() } });
+    damaged.volumes.append(GeoZone::Volume{ false, { GeoZone::toRing(square(center.atDistanceAndAzimuth(2000, 90), 100)) } });
+    {
+        const GeoZone zone(damaged);
+        // Over the hole of the first volume and north of the third
+        const QList<QGeoCoordinate> triangle = { _offsetFrom(center, -500, 0), _offsetFrom(center, 500, 0), _offsetFrom(center, 500, 2500) };
+        QVERIFY(zone.box().intersects(GeoZoneBox::fromPath(triangle)));
+        QVERIFY(!zone.intersectsArea(area(triangle, 100, 200)));
+        QVERIFY(zone.intersectsArea(area(square(center.atDistanceAndAzimuth(1800, 90), 500), 100, 200)));
+        QVERIFY(!zone.contains(center));
+        QVERIFY(!zone.intersectsPath({ center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }));
+        QVERIFY(_near(zone.distanceTo(center), 1900, 2));
+    }
+    damaged.volumes.removeLast();
+    {
+        const GeoZone zone(damaged);
+        QVERIFY(!zone.box().isValid());
+        QVERIFY(!zone.intersectsArea(area(survey, 100, 200)));
+        QCOMPARE(zone.distanceTo(center), qInf());
+        QVERIFY(zone.exclusionPolygons().isEmpty());
+    }
+
     // Vertical limits: 150 m above ground and higher, the area flown 80 to 150 m above the ground
     GeoZone::Data elevated = circleZone(center, 100);
     elevated.volumes[0].lowerLimit = 150;
