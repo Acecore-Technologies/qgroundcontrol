@@ -264,20 +264,20 @@ double distanceTo(const ZoneFences &fences, const QList<QList<QGeoCoordinate>> &
 void Usage::addPolygon(qsizetype vertexCount)
 {
     items += static_cast<int>(vertexCount);
-    bytes += 2 + (8 * static_cast<int>(vertexCount));
+    bytes += Capacity::arduPilotPolygonBytes + (Capacity::arduPilotVertexBytes * static_cast<int>(vertexCount));
     largestPolygon = (std::max)(largestPolygon, static_cast<int>(vertexCount));
 }
 
 void Usage::addCircle()
 {
     items++;
-    bytes += 13;
+    bytes += Capacity::arduPilotCircleBytes;
 }
 
 void Usage::addReturnPoint()
 {
     items++;
-    bytes += 9;
+    bytes += Capacity::arduPilotReturnPointBytes;
 }
 
 void Usage::add(const ZoneFences &fences)
@@ -316,7 +316,7 @@ constexpr std::array<int, 3> arduPilotOtherLayouts = { 672, 416, 160 };
 
 int _arduPilotMaxItems(int storageBytes)
 {
-    return (std::max)(storageBytes - Capacity::arduPilotHeaderBytes, 0) / Capacity::arduPilotItemBytes;
+    return (std::max)(storageBytes - Capacity::arduPilotHeaderBytes, 0) / Capacity::arduPilotVertexBytes;
 }
 
 } // namespace

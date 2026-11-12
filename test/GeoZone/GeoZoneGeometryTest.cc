@@ -778,7 +778,7 @@ void GeoZoneGeometryTest::_testFenceCapacity()
     reduced = reduced.reducedBelow(polygonOf(30));
     QCOMPARE(reduced.storageBytes, 160);
     reduced = reduced.reducedBelow(polygonOf(4));
-    QCOMPARE(reduced.storageBytes, 2 + (4 * 8) + Capacity::arduPilotFixedBytes - 1);
+    QCOMPARE(reduced.storageBytes, Capacity::arduPilotPolygonBytes + (4 * Capacity::arduPilotVertexBytes) + Capacity::arduPilotFixedBytes - 1);
     QVERIFY(!reduced.fits(polygonOf(4)));
     // ... also when the fence was to be on the SD card, like without the card
     reduced = sdCard.reducedBelow(polygonOf(200));

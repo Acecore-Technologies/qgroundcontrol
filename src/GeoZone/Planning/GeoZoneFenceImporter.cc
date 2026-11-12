@@ -784,7 +784,7 @@ QString GeoZoneFenceImporter::_parameterWarning() const
     QStringList warnings;
     if (vehicle->apmFirmware()) {
         const QVariant type = value(QStringLiteral("FENCE_TYPE"));
-        if (type.isValid() && !(type.toInt() & 4)) {
+        if (type.isValid() && !(type.toInt() & GeoZoneFences::arduPilotFenceTypePolygons)) {
             warnings.append(tr("FENCE_TYPE doesn't include polygon fences, so the vehicle ignores exclusion fences."));
         }
         const QVariant enabled = value(QStringLiteral("FENCE_ENABLE"));

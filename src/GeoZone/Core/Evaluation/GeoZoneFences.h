@@ -24,6 +24,9 @@ namespace GeoZoneFences {
 
 constexpr double boundaryTolerance = 1;     ///< Meters zones may extend past fences covering them, for rounding
 
+/// Bit of ArduPilot's FENCE_TYPE parameter for polygon fences, which the vehicle ignores without it
+inline constexpr int arduPilotFenceTypePolygons = 4;
+
 /// Exclusion fences of a zone
 struct ZoneFences {
     QList<QList<QGeoCoordinate>> polygons;
@@ -109,7 +112,10 @@ struct Capacity {
     static constexpr int arduPilotMaxPolygonVertices = 255; ///< ArduPilot stores the vertex count of a polygon in a byte
     static constexpr int arduPilotHeaderBytes = 4;          ///< ArduPilot fence storage format header
     static constexpr int arduPilotFixedBytes = arduPilotHeaderBytes + 1;    ///< With the end marker
-    static constexpr int arduPilotItemBytes = 8;            ///< Storage ArduPilot counts per item for its item limit
+    static constexpr int arduPilotVertexBytes = 8;          ///< Latitude and longitude of a polygon vertex, which ArduPilot's item limit counts per item
+    static constexpr int arduPilotPolygonBytes = 2;         ///< Type and vertex count of a polygon, before its vertices
+    static constexpr int arduPilotCircleBytes = 13;         ///< Type, center and radius of a circle
+    static constexpr int arduPilotReturnPointBytes = 9;     ///< Type and position of the return point
     static constexpr int arduPilotMaxBytes = 65535;         ///< ArduPilot addresses fence storage with 16 bits
 
     /// Fence storage of ArduPilot's storage layouts, by the storage of the flight controller

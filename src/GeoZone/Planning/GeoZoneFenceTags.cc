@@ -49,6 +49,11 @@ constexpr const char *notFencedZonesKey = "zones";
 constexpr const char *notFencedFingerprintKey = "fences";
 constexpr const char *notFencedReasonKey = "reason";
 
+// The fingerprint of the fences from geozones takes their coordinates in units of 1e-7 degrees, about a centimeter,
+// and their radii alike, as the degrees of about as many meters. Plan files keep fingerprints made with these.
+constexpr double fingerprintUnitsPerDegree = 1e7;
+constexpr double fingerprintMetersPerDegree = 1e5;
+
 /// Calls the function with each fence of the controller
 template <typename Function>
 void forEachFence(GeoFenceController *geoFenceController, Function function)
@@ -374,7 +379,7 @@ QString GeoZoneFenceTags::geoZoneFencesFingerprint(GeoFenceController *geoFenceC
     // Rounded like plan files keep them, to the centimeter
     QCryptographicHash hash(QCryptographicHash::Sha1);
     const auto add = [&hash](double value) {
-        const qint64 rounded = std::llround(value * 1e7);
+        const qint64 rounded = std::llround(value * fingerprintUnitsPerDegree);
         hash.addData(QByteArrayView(reinterpret_cast<const char*>(&rounded), sizeof(rounded)));
     };
     QmlObjectListModel *const polygons = geoFenceController->polygons();
@@ -398,7 +403,7 @@ QString GeoZoneFenceTags::geoZoneFencesFingerprint(GeoFenceController *geoFenceC
         hash.addData(circle->inclusion() ? "i" : "c");
         add(circle->center().latitude());
         add(circle->center().longitude());
-        add(circle->radius()->rawValue().toDouble() / 1e5);
+        add(circle->radius()->rawValue().toDouble() / fingerprintMetersPerDegree);
     }
     return QString::fromLatin1(hash.result().toHex());
 }
