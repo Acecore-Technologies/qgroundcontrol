@@ -9,7 +9,6 @@
 
 #pragma once
 
-#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QList>
 #include <QtCore/QStringList>
@@ -44,8 +43,6 @@
 /// a time.
 class GeoZoneRouteSearch
 {
-    Q_DECLARE_TR_FUNCTIONS(GeoZoneRouteSearch)
-
 public:
     /// What routes keep from the zones, the terrain and the leg, and the weights of their costs
     struct Settings {

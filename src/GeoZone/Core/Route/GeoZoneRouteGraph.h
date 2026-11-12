@@ -68,8 +68,6 @@ public:
     /// @return true if nodes were left out since the graph had too many, or a search stopped when the work of the
     ///         graph reached its limit
     bool limitReached() const { return _nodeLimitReached || _workLimitReached; }
-    /// @return Units of work of the searches so far: nodes and edges considered, and visibility tests weighted by their cost
-    qint64 work() const { return _work; }
 
     QPointF point(int node) const { return _nodes[node].point; }
     double lengthOf(const QList<int> &path) const;
@@ -107,7 +105,7 @@ private:
     QList<Node> _nodes;             ///< The start, the end, then around the obstacles of the graph
     GeoZoneRouteGrid _nodeGrid;
     bool _nodeLimitReached = false;
-    qint64 _work = 0;
+    qint64 _work = 0;               ///< Units of the searches so far: nodes and edges considered, and visibility tests weighted by their cost
     bool _workLimitReached = false;
     QSet<int> _nodeBlockers;        ///< Obstacles outside the graph which left out nodes
     QHash<quint64, Visibility> _visibility;

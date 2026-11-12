@@ -275,25 +275,3 @@ GeoZoneReturnModel::Parameters GeoZoneMissionReader::returnParameters(Vehicle *v
         return parameterManager->getParameter(ParameterManager::defaultComponentId, name)->rawValue().toDouble();
     });
 }
-
-double GeoZoneMissionReader::returnAltitude(Vehicle *vehicle)
-{
-    if (!vehicle || vehicle->isOfflineEditingVehicle() || !vehicle->parameterManager() || !vehicle->parameterManager()->parametersReady()) {
-        return qQNaN();
-    }
-    // PX4 and ArduPlane in meters, ArduCopter and older ArduPlane in centimeters. Zero or less returns at the current altitude.
-    static const QList<std::pair<QString, double>> parameters = {
-        { QStringLiteral("RTL_RETURN_ALT"), 1.0 },
-        { QStringLiteral("RTL_ALTITUDE"), 1.0 },
-        { QStringLiteral("RTL_ALT"), 0.01 },
-        { QStringLiteral("ALT_HOLD_RTL"), 0.01 },
-    };
-    ParameterManager *const parameterManager = vehicle->parameterManager();
-    for (const auto &[name, scale] : parameters) {
-        if (parameterManager->parameterExists(ParameterManager::defaultComponentId, name)) {
-            const double value = parameterManager->getParameter(ParameterManager::defaultComponentId, name)->rawValue().toDouble() * scale;
-            return (value > 0) ? value : 0;
-        }
-    }
-    return qQNaN();
-}

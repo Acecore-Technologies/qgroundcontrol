@@ -113,7 +113,7 @@ void GeoZoneReturnTest::_testParameters_data()
     row("ArduPlane in meters", Firmware::ArduPilot, VehicleClass::FixedWing,
         { { "RTL_ALTITUDE", 120 }, { "RTL_CLIMB_MIN", 10 }, { "RTL_RADIUS", -150 }, { "WP_LOITER_RAD", 80 }, { "RALLY_LIMIT_KM", 5 },
           { "FENCE_ENABLE", 1 }, { "FENCE_ACTION", 6 } },
-        Autopilot::ArduPlane, 120, 10, 0, 150, 5000, Breach::ReturnPoint);
+        Autopilot::ArduPlane, 120, 0, 0, 150, 5000, Breach::ReturnPoint);
     row("ArduPlane until 4.4 in centimeters", Firmware::ArduPilot, VehicleClass::FixedWing,
         { { "ALT_HOLD_RTL", 10000 }, { "RTL_RADIUS", 0 }, { "WP_LOITER_RAD", 80 }, { "FENCE_RETALT", 0 }, { "FENCE_ACTION", 1 } },
         Autopilot::ArduPlane, 100, 0, 0, 80, 0, Breach::ReturnPoint);

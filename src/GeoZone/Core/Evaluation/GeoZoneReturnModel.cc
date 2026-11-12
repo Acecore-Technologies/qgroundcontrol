@@ -444,7 +444,6 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::parametersFrom(Firmware firmw
     } else if (const std::optional<double> altitude = lookup(QStringLiteral("ALT_HOLD_RTL"))) {
         parameters.returnAltitude = (*altitude < 0) ? -1.0 : (*altitude / 100);
     }
-    parameters.climbMinimum = value("RTL_CLIMB_MIN", 0);
     parameters.autoLand = qRound(value("RTL_AUTOLAND", 0));
     const double rtlRadius = std::abs(value("RTL_RADIUS", 0));
     parameters.loiterRadius = (rtlRadius > 0) ? rtlRadius : std::abs(value("WP_LOITER_RAD", 0));
@@ -499,7 +498,7 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::defaultParameters(Firmware fi
                      { QStringLiteral("FENCE_ENABLE"), 0 }, { QStringLiteral("FENCE_AUTOENABLE"), 0 }, { QStringLiteral("FENCE_ACTION"), 1 } };
     } else if ((firmware == Firmware::ArduPilot) && ((vehicleClass == VehicleClass::FixedWing) || (vehicleClass == VehicleClass::Vtol))) {
         // ArduPlane 4.5 and later, with the fence disabled
-        defaults = { { QStringLiteral("RTL_ALTITUDE"), 100 }, { QStringLiteral("RTL_CLIMB_MIN"), 0 }, { QStringLiteral("RTL_AUTOLAND"), 0 },
+        defaults = { { QStringLiteral("RTL_ALTITUDE"), 100 }, { QStringLiteral("RTL_AUTOLAND"), 0 },
                      { QStringLiteral("RTL_RADIUS"), 0 }, { QStringLiteral("WP_LOITER_RAD"), 60 }, { QStringLiteral("RALLY_INCL_HOME"), 0 },
                      { QStringLiteral("RALLY_LIMIT_KM"), 5 }, { QStringLiteral("FENCE_ENABLE"), 0 }, { QStringLiteral("FENCE_AUTOENABLE"), 0 },
                      { QStringLiteral("FENCE_ACTION"), 1 } };

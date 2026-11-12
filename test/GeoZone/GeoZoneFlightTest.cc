@@ -343,7 +343,7 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     QVERIFY(vehicle->parameterManager()->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("RTL_RETURN_ALT")));
     const double returnAltitude = vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, QStringLiteral("RTL_RETURN_ALT"))->rawValue().toDouble();
     QVERIFY(returnAltitude > 0);
-    QCOMPARE(GeoZoneMissionReader::returnAltitude(vehicle), returnAltitude);
+    QCOMPARE(GeoZoneMissionReader::returnParameters(vehicle).returnAltitude, returnAltitude);
 
     // A parked vehicle is on the ground below the CTRs, even before terrain data is received
     QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);

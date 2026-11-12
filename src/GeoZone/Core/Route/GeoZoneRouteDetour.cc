@@ -43,7 +43,6 @@ GeoZoneRouteDetour::GeoZoneRouteDetour(const GeoZone::Position &from, const GeoZ
                                        const GeoZoneCancelToken &cancel, GeoZoneRouteSearch::Cache &cache, GeoZoneRouteSearch::Statistics &statistics)
     : _from(from)
     , _to(to)
-    , _margin(margin)
     , _maxLength(maxLength)
     , _maxWork(maxWork)
     , _cancel(cancel)

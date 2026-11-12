@@ -65,7 +65,6 @@ private:
 
     const GeoZone::Position _from;
     const GeoZone::Position _to;
-    const double _margin;
     const double _maxLength;
     const qint64 _maxWork;
     const GeoZoneCancelToken _cancel;

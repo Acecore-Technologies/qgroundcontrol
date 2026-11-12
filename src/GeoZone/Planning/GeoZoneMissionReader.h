@@ -34,9 +34,6 @@ public:
     /// @return The visual items of the mission, the planned home first
     static QList<GeoZoneMissionItem> items(MissionController *missionController);
 
-    /// @return Return altitude above home in meters from the vehicle's parameters, 0 to return at the current
-    ///         altitude, NaN when unknown like for the offline vehicle
-    static double returnAltitude(Vehicle *vehicle);
     /// @return The parameters the vehicle returns with. Without them, like for the offline vehicle or before they are
     ///         loaded, the defaults of its firmware and vehicle class, see GeoZoneReturnModel::defaultParameters.
     ///         GeoZoneReturnModel::Autopilot::Unknown without vehicle.

@@ -67,7 +67,7 @@ public:
         /// ArduPlane RTL_ALTITUDE above home, negative to return at the current altitude. Otherwise above home, 0 or less
         /// to return at the current altitude. NaN when unknown.
         double returnAltitude = qQNaN();
-        double climbMinimum = 0;                ///< ArduPilot RTL_CLIMB_MIN, climbed before turning home
+        double climbMinimum = 0;                ///< ArduCopter RTL_CLIMB_MIN, climbed before turning home
 
         int returnType = 0;                     ///< PX4 RTL_TYPE
         double descendAltitude = qQNaN();       ///< PX4 RTL_DESCEND_ALT above the destination, NaN to land without loitering above it
