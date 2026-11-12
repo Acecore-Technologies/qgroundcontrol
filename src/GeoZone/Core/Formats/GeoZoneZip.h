@@ -44,19 +44,24 @@ QList<File> files(const QByteArray &archive, const QStringList &suffixes, qint64
 bool forEachFile(const QByteArray &archive, const QStringList &suffixes, qint64 maxBytes, QString &errorString,
                  const std::function<bool(const File &file)> &callback);
 
-/// Writes a zip archive, the files deflated unless that doesn't make them smaller. Sizes are limited to 4 GiB.
+/// Writes a zip archive, the files deflated unless that doesn't make them smaller. The archive is limited to 4 GiB,
+/// the range of its 32 bit sizes and offsets: add() and finish() fail rather than write one which can't be read.
 class Writer
 {
 public:
     explicit Writer(QIODevice *device);
 
+    /// @return false, with errorString(), when the file can't be written or the archive would get too large with it
     bool add(const QString &name, const QByteArray &data);
     /// Writes the central directory
+    /// @return false, with errorString(), when it can't be written or its offset or size don't fit the archive
     bool finish();
     QString errorString() const { return _errorString; }
 
 private:
     bool _write(const QByteArray &bytes);
+    /// @return true if the size or offset can be written in a 32 bit field
+    bool _fits(qint64 size) const;
 
     QIODevice *_device = nullptr;
     QByteArray _directory;      ///< Central directory of the files added

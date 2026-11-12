@@ -16,6 +16,9 @@
 #include "GeoZoneText.h"
 #include "GeoZoneZip.h"
 
+#include <QtCore/QBuffer>
+#include <QtCore/QIODevice>
+
 #include <zlib.h>
 
 using namespace GeoZoneTestHelpers;
@@ -222,6 +225,22 @@ QByteArray _aixmMessage(const QString &segments, const QString &limits = QString
         xmlns:gml="http://www.opengis.net/gml/3.2">)") + airspace.arg(QStringLiteral("TESTED"), limits, surfaceAttributes, segments) +
             airspace.arg(QStringLiteral("VALID"), QString(), QString(), circle) + QStringLiteral("</message:AIXMBasicMessage>")).toUtf8();
 }
+
+/// Counts what is written to it from a start position, without keeping it: an archive of any size
+class CountingDevice : public QIODevice
+{
+public:
+    explicit CountingDevice(qint64 start) : _start(start) {}
+
+    qint64 pos() const override { return _start + QIODevice::pos(); }
+
+protected:
+    qint64 readData(char *, qint64) override { return -1; }
+    qint64 writeData(const char *, qint64 size) override { return size; }
+
+private:
+    qint64 _start = 0;
+};
 
 /// Canceled by cancelOnSkippedFeature
 const GeoZoneCancelToken *s_cancelOnSkip = nullptr;
@@ -2630,6 +2649,61 @@ void GeoZoneParserTest::_testXmlAndPackages()
     QCOMPARE(files.count(), 3);
     QVERIFY(files.first().data.size() >= files.last().data.size());
 #endif
+}
+
+void GeoZoneParserTest::_testZipWriterLimit()
+{
+    // Sizes and offsets of an archive have 32 bits. A file which doesn't deflate, so that its size in the archive is known
+    constexpr qint64 limit = 0xFFFFFFFFLL;
+    QByteArray data(1000, Qt::Uninitialized);
+    QRandomGenerator random(28);
+    for (char &byte : data) {
+        byte = static_cast<char>(random.bounded(256));
+    }
+    const QString name = QStringLiteral("zones.json");
+    const qint64 entrySize = 30 + name.size() + data.size();
+    const QString tooLarge = QStringLiteral("The zip archive is too large.");
+
+    // An archive whose last file ends within the limit is written
+    {
+        CountingDevice device(limit - entrySize - 1);
+        QVERIFY(device.open(QIODevice::WriteOnly));
+        GeoZoneZip::Writer writer(&device);
+        QVERIFY2(writer.add(name, data), qPrintable(writer.errorString()));
+        QCOMPARE(device.pos(), limit - 1);
+        QVERIFY2(writer.finish(), qPrintable(writer.errorString()));
+    }
+    // A file which starts within the limit and ends beyond it isn't added: the offset of the directory after it
+    // would be truncated, and the archive reported as written couldn't be read
+    {
+        CountingDevice device(limit - entrySize);
+        QVERIFY(device.open(QIODevice::WriteOnly));
+        GeoZoneZip::Writer writer(&device);
+        QVERIFY(!writer.add(name, data));
+        QCOMPARE(writer.errorString(), tooLarge);
+        QCOMPARE(device.pos(), limit - entrySize);
+    }
+    // Nor is an archive finished whose directory would start beyond the limit
+    {
+        CountingDevice device(limit);
+        QVERIFY(device.open(QIODevice::WriteOnly));
+        GeoZoneZip::Writer writer(&device);
+        QVERIFY(!writer.finish());
+        QCOMPARE(writer.errorString(), tooLarge);
+    }
+
+    // What is written is read back
+    QBuffer buffer;
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    GeoZoneZip::Writer writer(&buffer);
+    QVERIFY(writer.add(name, data) && writer.add(QStringLiteral("text.json"), QByteArray(5000, 'z')) && writer.finish());
+    QString errorString;
+    const QList<GeoZoneZip::File> files = GeoZoneZip::files(buffer.data(), { QStringLiteral(".json") }, 1 << 20, errorString);
+    QVERIFY2(errorString.isEmpty(), qPrintable(errorString));
+    QCOMPARE(files.count(), 2);
+    QCOMPARE(files[0].data, QByteArray(5000, 'z'));
+    QCOMPARE(files[1].name, name);
+    QCOMPARE(files[1].data, data);
 }
 
 void GeoZoneParserTest::_testParseCancel()

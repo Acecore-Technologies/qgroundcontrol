@@ -302,10 +302,16 @@ bool Writer::_write(const QByteArray &bytes)
     return true;
 }
 
+bool Writer::_fits(qint64 size) const
+{
+    // 0xFFFFFFFF itself tells readers to look for the zip64 fields, which aren't written
+    constexpr qint64 maxSize = 0xFFFFFFFFLL;
+    return (size >= 0) && (size < maxSize);
+}
+
 bool Writer::add(const QString &name, const QByteArray &data)
 {
-    constexpr qint64 maxSize = 0xFFFFFFFFLL;
-    if ((data.size() >= maxSize) || (_device->pos() >= maxSize) || (_count >= maxEntries)) {
+    if (!_fits(data.size()) || !_fits(_device->pos()) || (_count >= maxEntries)) {
         _errorString = tr("The zip archive is too large.");
         return false;
     }
@@ -316,6 +322,13 @@ bool Writer::add(const QString &name, const QByteArray &data)
     const bool deflated = !compressed.isEmpty() && (compressed.size() < data.size());
     if (!deflated) {
         compressed = data;
+    }
+    // The directory starts after the file, and its offset has 32 bits like the offsets of the files: a file which
+    // ends beyond them isn't written, since the archive couldn't be finished
+    const qint64 directorySize = _directory.size() + kCentralEntrySize + utf8Name.size();
+    if (!_fits(_device->pos() + kLocalHeaderSize + utf8Name.size() + compressed.size()) || !_fits(directorySize)) {
+        _errorString = tr("The zip archive is too large.");
+        return false;
     }
     // From the version needed to extract to the extra field length, alike in the local header and the directory
     QByteArray fields;
@@ -350,6 +363,12 @@ bool Writer::add(const QString &name, const QByteArray &data)
 
 bool Writer::finish()
 {
+    // Checked again where the fields are written: a larger offset or size would be truncated to 32 bits, and the
+    // archive reported as written couldn't be read
+    if (!_fits(_device->pos()) || !_fits(_directory.size())) {
+        _errorString = tr("The zip archive is too large.");
+        return false;
+    }
     QByteArray end;
     appendU32(end, kEndOfCentralDirectory);
     appendU16(end, 0);                  // Disk number

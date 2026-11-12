@@ -38,6 +38,7 @@ private slots:
     void _testDurations_data();
     void _testDurations();
     void _testXmlAndPackages();
+    void _testZipWriterLimit();
     void _testParseCancel();
     void _testParseCacheRoundTrip_data();
     void _testParseCacheRoundTrip();
