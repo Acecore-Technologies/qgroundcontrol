@@ -9,6 +9,7 @@
 
 #include "GeoZoneRepositoryTest.h"
 #include "GeoZoneAirac.h"
+#include "GeoZoneAwareness.h"
 #include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
@@ -16,6 +17,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QLocale>
 #include <QtCore/QUuid>
+#include <QtCore/QUrlQuery>
 
 using namespace GeoZoneTestHelpers;
 
@@ -42,6 +44,40 @@ public:
         return requests;
     }
 };
+
+/// @return The feature of the IGN test file as many times, each with its own identifier and area
+QJsonArray wfsFeatures(const QJsonObject &collection, int count)
+{
+    QJsonArray features;
+    for (int i = 0; i < count; i++) {
+        QJsonObject feature = collection.value(QStringLiteral("features")).toArray().first().toObject();
+        feature.insert(QStringLiteral("id"), QStringLiteral("carte_restriction_drones_lf.%1").arg(i));
+        QJsonObject geometry = feature.value(QStringLiteral("geometry")).toObject();
+        const double west = 2.0 + (i * 0.1);
+        geometry.insert(QStringLiteral("coordinates"), QJsonArray{ QJsonArray{ QJsonArray{
+            QJsonArray{ west, 48.0 }, QJsonArray{ west + 0.05, 48.0 }, QJsonArray{ west + 0.05, 48.05 }, QJsonArray{ west, 48.0 } } } });
+        feature.insert(QStringLiteral("geometry"), geometry);
+        features.append(feature);
+    }
+    return features;
+}
+
+/// @return Response of a WFS limiting its responses to pageSize features, to a GetFeature request from its STARTINDEX
+QByteArray wfsPage(const QJsonObject &collection, const QJsonArray &allFeatures, const QByteArray &request, int pageSize)
+{
+    const QUrlQuery query(QUrl(QString::fromLatin1(request.split(' ').value(1))));
+    const int start = query.queryItemValue(QStringLiteral("STARTINDEX")).toInt();
+    QJsonObject page = collection;
+    QJsonArray features;
+    for (int i = start; (i < (start + pageSize)) && (i < allFeatures.count()); i++) {
+        features.append(allFeatures[i]);
+    }
+    page.insert(QStringLiteral("features"), features);
+    page.insert(QStringLiteral("numberMatched"), allFeatures.count());
+    page.insert(QStringLiteral("totalFeatures"), allFeatures.count());
+    page.insert(QStringLiteral("numberReturned"), features.count());
+    return QJsonDocument(page).toJson(QJsonDocument::Compact);
+}
 
 } // namespace
 
@@ -2164,10 +2200,100 @@ void GeoZoneRepositoryTest::_testWfsPaging()
 
     // A page which fails leaves the zones of the others, and the source tells how many are missing
     failThirdPage = true;
+    QSignalSpy failedSpy(&restarted, &GeoZoneManager::loadFailed);
     restarted.repository()->refreshFeeds();
     QTRY_VERIFY(!restarted.repository()->busy());
     QCOMPARE(restarted.zoneCount(), 4);
-    QVERIFY(restarted.repository()->source(url)->warningText().contains(QStringLiteral("left out 1 zone(s)")));
+    const GeoZoneSource *const partial = restarted.repository()->source(url);
+    QVERIFY(partial);
+    QVERIFY(partial->warningText().contains(QStringLiteral("left out 1 zone(s)")));
+    // It counts as a failed refresh: the user is told, geo-awareness is degraded and it is retried as one
+    QCOMPARE(partial->errorString(), QStringLiteral("The download is incomplete: 1 zone(s) are missing."));
+    QCOMPARE(failedSpy.count(), 1);
+    QCOMPARE(GeoZoneAwareness::dataInput(&restarted).failedSources, QStringList{ partial->name() });
+    QVERIFY(restarted.repository()->scheduler()->retryAt(url).isValid());
+    // also after a restart
+    {
+        GeoZoneManager reloaded(storageDir.path());
+        reloaded.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+        QCOMPARE(reloaded.zoneCount(), 4);
+        QCOMPARE(GeoZoneAwareness::dataInput(&reloaded).failedSources.count(), 1);
+    }
+
+    // until all its pages are downloaded again
+    failThirdPage = false;
+    restarted.repository()->refreshFeeds();
+    QTRY_VERIFY(!restarted.repository()->busy());
+    QCOMPARE(restarted.zoneCount(), 5);
+    QCOMPARE(partial->errorString(), QString());
+    QVERIFY(GeoZoneAwareness::dataInput(&restarted).failedSources.isEmpty());
+    QVERIFY(!restarted.repository()->scheduler()->retryAt(url).isValid());
+}
+
+void GeoZoneRepositoryTest::_testPageCap()
+{
+    QFile airspaces(QStringLiteral(":/unittest/faa_airspace_test.json"));
+    QVERIFY(airspaces.open(QIODevice::ReadOnly));
+    const QJsonObject arcGisDocument = QJsonDocument::fromJson(airspaces.readAll()).object();
+    QFile restrictions(QStringLiteral(":/unittest/france_uas_test.json"));
+    QVERIFY(restrictions.open(QIODevice::ReadOnly));
+    const QJsonObject wfsCollection = QJsonDocument::fromJson(restrictions.readAll()).object();
+    // A WFS with one page of 2 zones more than the pages downloaded
+    constexpr int wfsPageSize = 2;
+    const QJsonArray wfsZones = wfsFeatures(wfsCollection, (GeoZoneProviders::maxWfsPages + 2) * wfsPageSize);
+
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [&](const QByteArray &request, QByteArray &, QByteArray &content, QByteArray &) {
+        if (request.startsWith("GET /arcgis")) {
+            // An ArcGIS feature service which always has more features
+            QJsonObject page = arcGisDocument;
+            page.insert(QStringLiteral("properties"), QJsonObject{ { QStringLiteral("exceededTransferLimit"), true } });
+            content = QJsonDocument(page).toJson(QJsonDocument::Compact);
+        } else if (request.startsWith("GET /numbered")) {
+            // Numbered pages with more pages than downloaded
+            content = R"({"page":1,"totalPages":)" + QByteArray::number(GeoZoneProviders::maxWfsPages + 2) + R"(,"items":[]})";
+        } else {
+            content = wfsPage(wfsCollection, wfsZones, request, wfsPageSize);
+        }
+        return true;
+    };
+
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+
+    // A response still limited after the most pages downloaded would silently miss zones: it fails instead
+    const QString arcGisUrl = server.url(QStringLiteral("/arcgis/rest/services/Layer/FeatureServer/0/query?where=1%3D1&geometry=-77.6,38.3,-76.0,39.6"
+                                                        "&geometryType=esriGeometryEnvelope&f=geojson&resultRecordCount=3&resultOffset=0"));
+    manager.repository()->addUrl(arcGisUrl);
+    QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 1, 3 * stepTimeoutMSecs);
+    QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("more than 51 pages")), qPrintable(failedSpy.last()[1].toString()));
+    QCOMPARE(server.requestCount, GeoZoneProviders::maxWfsPages + 1);
+    QVERIFY(!manager.repository()->source(arcGisUrl));
+    QCOMPARE(manager.zoneCount(), 0);
+
+    // Numbered pages tell their count with the first one, the others aren't downloaded
+    const QString numberedUrl = server.url(QStringLiteral("/numbered?page=1"));
+    manager.repository()->addUrl(numberedUrl);
+    QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 2, stepTimeoutMSecs);
+    QVERIFY2(failedSpy.last()[1].toString().contains(QStringLiteral("more than 51 pages")), qPrintable(failedSpy.last()[1].toString()));
+    QCOMPARE(server.requestCount, GeoZoneProviders::maxWfsPages + 2);
+    QVERIFY(!manager.repository()->source(numberedUrl));
+
+    // A WFS tells how many zones the pages downloaded miss: they are loaded, and count as a failed refresh
+    const QString wfsUrl = server.url(QStringLiteral("/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=restrictions&OUTPUTFORMAT=application/json"));
+    manager.repository()->addUrl(wfsUrl);
+    QVERIFY(addedSpy.wait(3 * stepTimeoutMSecs));
+    QTRY_VERIFY_WITH_TIMEOUT(!manager.repository()->busy(), stepTimeoutMSecs);
+    const GeoZoneSource *const wfs = manager.repository()->source(wfsUrl);
+    QVERIFY(wfs);
+    QCOMPARE(wfs->zoneCount(), (GeoZoneProviders::maxWfsPages + 1) * wfsPageSize);
+    QCOMPARE(wfs->errorString(), QStringLiteral("The download is incomplete: 2 zone(s) are missing."));
+    QCOMPARE(failedSpy.count(), 3);
+    QCOMPARE(GeoZoneAwareness::dataInput(&manager).failedSources, QStringList{ wfs->name() });
 }
 
 void GeoZoneRepositoryTest::_testArcGisPaging()

@@ -30,6 +30,7 @@ private slots:
     void _testWfsPaging();
     void _testPageMerge();
     void _testArcGisPaging();
+    void _testPageCap();
     void _testFeedCompanions();
     void _testFeedFetchFormatCompanions();
     void _testFeedCancellation();

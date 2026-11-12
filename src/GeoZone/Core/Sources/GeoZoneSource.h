@@ -81,7 +81,7 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(bool         invalid         READ invalid        NOTIFY validityChanged FINAL)     ///< The data is outdated and treated as invalid, see SourceSettings::outdatedInvalid
     Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete or partly unreadable, empty when it is complete
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
-    Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed
+    Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed, or why the data it loaded is incomplete
     Q_PROPERTY(QString      nextCheckText   READ nextCheckText  NOTIFY nextCheckChanged FINAL)    ///< When the feed is checked next, like "next check 14:05", empty for files
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
     Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
@@ -112,6 +112,8 @@ public:
     QString provider() const { return _provider; }
     int zoneCount() const { return static_cast<int>(_zones.count()); }
     int skippedCount() const { return _skippedCount; }
+    /// @return Zones a WFS left out of its response beyond its limit, which the further pages didn't bring either
+    int missingCount() const { return _missingCount; }
     QDateTime loadedAt() const { return _loadedAt; }
     QDateTime fileDate() const { return _fileDate; }
     QDateTime dataDate() const { return _issued.isValid() ? _issued : _fileDate; }
@@ -134,7 +136,11 @@ public:
     bool invalid() const { return _invalid; }
     QString warningText() const;
     bool busy() const { return _busy; }
-    QString errorString() const { return _errorString; }
+    /// @return Why the last refresh failed, otherwise incompleteText: data known to miss zones counts as a failed
+    ///         refresh, for geo-awareness too
+    QString errorString() const { return _errorString.isEmpty() ? incompleteText() : _errorString; }
+    /// @return Why the data loaded misses zones, like those a WFS left out beyond its limit, empty when it is complete
+    QString incompleteText() const;
     bool enabled() const { return _enabled; }
     QString changesText() const { return _changes.summary(); }
     QString changesDetails() const { return _changes.details(); }

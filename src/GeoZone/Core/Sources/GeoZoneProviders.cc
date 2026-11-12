@@ -443,7 +443,9 @@ GeoZoneProviders::Paging GeoZoneProviders::paging(const QString &url, const QByt
     if ((counts.returned > 0) && (counts.matched > counts.returned) && !wfsPageUrl(url, counts.returned).isEmpty()) {
         paging.scheme = Paging::Scheme::WfsStartIndex;
         paging.pageSize = counts.returned;
-        paging.pageCount = static_cast<int>((std::min)((counts.matched - 1) / counts.returned, qint64{ maxWfsPages }));
+        const qint64 pageCount = (counts.matched - 1) / counts.returned;
+        paging.pageCount = static_cast<int>((std::min)(pageCount, qint64{ maxWfsPages }));
+        paging.truncated = pageCount > maxWfsPages;
         return paging;
     }
 
@@ -472,6 +474,7 @@ GeoZoneProviders::Paging GeoZoneProviders::paging(const QString &url, const QByt
     if (totalPages > page) {
         paging.scheme = Paging::Scheme::PageNumber;
         paging.pageCount = static_cast<int>((std::min)(totalPages - page, qint64{ maxWfsPages }));
+        paging.truncated = (totalPages - page) > maxWfsPages;
     }
     return paging;
 }

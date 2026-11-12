@@ -131,6 +131,8 @@ private:
     /// @return false when the response isn't one the server limited
     bool _startPages();
     void _fetchNextPage();
+    /// Fails the fetch of a response which still has pages after the most downloaded
+    void _finishTruncated();
     void _fetchCompanions();
     void _companionsReceived();
     void _finish(Result::Status status, const QString &errorString = QString());

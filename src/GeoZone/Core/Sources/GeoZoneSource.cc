@@ -207,6 +207,11 @@ QString GeoZoneSource::warningText() const
     return lines.join(QStringLiteral("\n"));
 }
 
+QString GeoZoneSource::incompleteText() const
+{
+    return (_missingCount > 0) ? tr("The download is incomplete: %n zone(s) are missing.", nullptr, _missingCount) : QString();
+}
+
 QString GeoZoneSource::_dateText() const
 {
     if (_issued.isValid()) {
@@ -260,7 +265,11 @@ void GeoZoneSource::_setMetadata(const GeoZoneParser::Result &result, const QDat
 
 void GeoZoneSource::markCurrent(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate)
 {
+    const QString previousError = errorString();
     _setMetadata(result, loadedAt, fileDate);
+    if (errorString() != previousError) {
+        emit errorStringChanged();
+    }
     // The zones are published: workers may read their source text, which they share with the label
     if (_sourceLabel) {
         _sourceLabel->setText(_sourceText());
@@ -323,7 +332,11 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
         previous.append(summary);
     }
     _clearZones();
+    const QString previousError = errorString();
     _setMetadata(result, loadedAt, fileDate);
+    if (errorString() != previousError) {
+        emit errorStringChanged();
+    }
 
     // A label for the zones of this load: those of the previous one, which values in QML may still share, keep theirs
     _sourceLabel = QSharedPointer<GeoZoneSourceLabel>::create(_sourceText());
@@ -526,8 +539,9 @@ void GeoZoneSource::setBusy(bool busy)
 
 void GeoZoneSource::setErrorString(const QString &errorString)
 {
-    if (errorString != _errorString) {
-        _errorString = errorString;
+    const QString previousError = this->errorString();
+    _errorString = errorString;
+    if (this->errorString() != previousError) {
         emit errorStringChanged();
     }
 }

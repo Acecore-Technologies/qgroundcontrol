@@ -154,6 +154,8 @@ public:
         Scheme scheme = Scheme::None;
         qint64 pageSize = 0;    ///< Features per page of the offset schemes
         int pageCount = 0;      ///< Further pages after the first, at most maxWfsPages. For ArcGIS the most requested.
+        /// The response has more pages than maxWfsPages, whose zones would be missing. For ArcGIS the last page tells.
+        bool truncated = false;
     };
     /// @return How the further pages of a response are requested, from its first and last bytes, where servers write
     ///         their counts, without parsing it

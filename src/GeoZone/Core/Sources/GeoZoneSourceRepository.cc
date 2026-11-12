@@ -353,8 +353,8 @@ void GeoZoneSourceRepository::_download(const QString &url, GeoZoneLoader::Reque
         fetchRequest.area = _areaOfInterest.requestArea(existing ? existing->area() : QGeoRectangle(), fetchRequest.service.maxAreaKm2);
     }
     if (existing && existing->loaded()) {
-        // The validators are those of the area downloaded
-        if (!fetchRequest.service.areaOfInterest || (existing->area() == fetchRequest.area)) {
+        // The validators are those of the area downloaded. A copy missing zones is downloaded again, not confirmed.
+        if ((!fetchRequest.service.areaOfInterest || (existing->area() == fetchRequest.area)) && (existing->missingCount() == 0)) {
             fetchRequest.etag = existing->etag();
             fetchRequest.lastModified = existing->lastModified();
         }
@@ -569,7 +569,14 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         source->setIntegrityFailed(false);
     }
     source->setErrorString(QString());
-    _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
+    // A download missing zones, like a WFS response which lost pages, counts as a failed refresh and is retried as one
+    const bool incomplete = job.downloaded && source->isFeed() && (source->missingCount() > 0);
+    if (incomplete) {
+        qCWarning(GeoZoneSourceLog) << "Incomplete download" << job.key << source->incompleteText();
+        _scheduler->refreshFailed(*source);
+    } else {
+        _scheduler->refreshSucceeded(job.key, job.maxAgeSecs);
+    }
     _updateNextCheck(source);
     // Companions of the stored copy are reused for the next download
     if (!loadResult.result.companions.isEmpty()) {
@@ -593,6 +600,9 @@ void GeoZoneSourceRepository::_applyLoad(const GeoZoneLoader::Job &job, const Ge
         _checkAreas();
     }
 
+    if (incomplete && (job.request != GeoZoneLoader::Request::Automatic)) {
+        emit loadFailed(job.key, tr("Geozone download from %1. %2").arg(job.key, source->incompleteText()));
+    }
     if (unchanged) {
         return;
     }

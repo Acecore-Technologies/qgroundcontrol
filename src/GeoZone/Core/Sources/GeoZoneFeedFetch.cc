@@ -318,14 +318,31 @@ bool GeoZoneFeedFetch::_startPages()
     }
 
     _stage = Stage::Pages;
+    // Numbered pages tell their count at once, the pages aren't downloaded for a response which stays incomplete
+    if (_paging.truncated && (_paging.scheme == GeoZoneProviders::Paging::Scheme::PageNumber)) {
+        _finishTruncated();
+        return true;
+    }
     qCDebug(GeoZoneSourceLog) << "Downloading up to" << _paging.pageCount << "more pages from" << _request.url;
     _fetchNextPage();
     return true;
 }
 
+void GeoZoneFeedFetch::_finishTruncated()
+{
+    _finish(Result::Status::Failed, tr("The response has more than %1 pages, the zones of the further pages would be missing. Download a smaller area.")
+                                        .arg(GeoZoneProviders::maxWfsPages + 1));
+}
+
 void GeoZoneFeedFetch::_fetchNextPage()
 {
     if (_nextPage > _paging.pageCount) {
+        // Only WFS responses tell how many zones are missing, which their source reports. The others would silently
+        // lack the zones of the pages beyond the most downloaded.
+        if (_paging.truncated && (_paging.scheme != GeoZoneProviders::Paging::Scheme::WfsStartIndex)) {
+            _finishTruncated();
+            return;
+        }
         _fetchCompanions();
         return;
     }
@@ -342,9 +359,13 @@ void GeoZoneFeedFetch::_fetchNextPage()
         const bool failed = (page.status != GeoZoneDownloader::Result::Status::Ok) || errorRegExp.match(QString::fromLatin1(head)).hasMatch();
         if (!failed) {
             _result.pagePaths.append(page.filePath);
-            // ArcGIS pages tell whether more follow
-            if ((_paging.scheme == GeoZoneProviders::Paging::Scheme::ArcGisOffset) && !GeoZoneProviders::arcGisExceeded(head, tail)) {
-                _paging.pageCount = _nextPage;
+            // ArcGIS pages tell whether more follow, the last one downloaded whether the response is still incomplete
+            if (_paging.scheme == GeoZoneProviders::Paging::Scheme::ArcGisOffset) {
+                if (!GeoZoneProviders::arcGisExceeded(head, tail)) {
+                    _paging.pageCount = _nextPage;
+                } else if (_nextPage >= _paging.pageCount) {
+                    _paging.truncated = true;
+                }
             }
             _nextPage++;
             _fetchNextPage();
