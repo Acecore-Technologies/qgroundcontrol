@@ -1237,6 +1237,108 @@ void GeoZoneFlightTest::_testChecklistReset()
     _disconnectMockLink();
 }
 
+void GeoZoneFlightTest::_testGuidedActionWarning()
+{
+    // The MockLink vehicle below a zone from 50 m above ground, 1.2 km west of a zone at all altitudes
+    const ScopedMetricUnits metricUnits;
+    ScopedEnvironment environment;
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->homePosition().isValid() && vehicle->coordinate().isValid() && !std::isnan(vehicle->altitudeAMSL()->rawValue().toDouble()), 30000);
+    const QGeoCoordinate home = vehicle->homePosition();
+    environment.setTerrain(home.altitude());
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    QString errorString;
+    QVERIFY2(manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        withHeightLimits(_circleFeature(QStringLiteral("ABOVE"), QStringLiteral("PROHIBITED"), home, 100), 50, 1000),
+        _circleFeature(QStringLiteral("EAST"), QStringLiteral("PROHIBITED"), home.atDistanceAndAzimuth(1500, 90), 300),
+    }), errorString), qPrintable(errorString));
+    QVERIFY(GeoZoneMonitor::instance()->guidedCheck());
+
+    QmlHarness harness;
+    QObject *const root = harness.create(R"(
+        import QtQuick
+        import QtQuick.Layouts
+        import QGroundControl.GeoZone
+        ColumnLayout {
+            id: root
+            property alias warning: warning
+            property real sliderValue: 0
+            property real loiterRadius: 0
+            property var loiterCenter
+            property var dialog: QtObject {
+                property bool visible: true
+                property int action: 0
+                property var actionData
+                property string optionText: ""
+                property bool optionChecked: false
+                property var guidedValueSlider: QtObject {
+                    function getOutputValue() { return root.sliderValue }
+                }
+                property var guidedController: QtObject {
+                    readonly property int actionRTL: 1
+                    readonly property int actionLand: 2
+                    readonly property int actionTakeoff: 3
+                    readonly property int actionArm: 4
+                    readonly property int actionChangeAlt: 7
+                    readonly property int actionGoto: 8
+                    readonly property int actionSetWaypoint: 9
+                    readonly property int actionOrbit: 10
+                    readonly property int actionStartMission: 12
+                    readonly property int actionContinueMission: 13
+                    readonly property int actionResumeMission: 14
+                    readonly property int actionResumeMissionUploadFail: 16
+                    readonly property int actionPause: 17
+                    readonly property int actionChangeLoiterRadius: 33
+                    property var missionController: null
+                    property var orbitMapCircle: null
+                    property var fwdFlightGotoMapCircle: QtObject {
+                        property var coordinate: root.loiterCenter
+                        property var radius: QtObject { property real rawValue: root.loiterRadius }
+                    }
+                }
+            }
+            GeoZoneGuidedActionWarning { id: warning; confirmDialog: root.dialog }
+        }
+    )");
+    QVERIFY2(root, qPrintable(harness.error));
+    QObject *const warning = root->property("warning").value<QObject*>();
+    QObject *const dialog = root->property("dialog").value<QObject*>();
+    QVERIFY(warning && dialog);
+    const auto text = [warning]() { return warning->property("text").toString(); };
+    constexpr int actionChangeAlt = 7;
+    constexpr int actionPause = 17;
+    constexpr int actionChangeLoiterRadius = 33;
+
+    // Hold applies the altitude of the slider like Change Altitude, so it is checked like it, as the slider moves
+    QVERIFY(root->setProperty("sliderValue", 100.0));
+    for (const int action : { actionChangeAlt, actionPause }) {
+        QVERIFY(root->setProperty("sliderValue", 100.0));
+        QVERIFY(dialog->setProperty("action", action));
+        QVERIFY2(text().contains(QStringLiteral("ABOVE")), qPrintable(QStringLiteral("action %1: %2").arg(action).arg(text())));
+        QVERIFY(root->setProperty("sliderValue", 20.0));
+        QVERIFY2(text().isEmpty(), qPrintable(text()));
+    }
+
+    // The loiter of a go to in forward flight is checked with its radius, as it is changed
+    QVERIFY(root->setProperty("loiterCenter", QVariant::fromValue(home.atDistanceAndAzimuth(1000, 90))));
+    QVERIFY(root->setProperty("loiterRadius", 100.0));
+    QVERIFY(dialog->setProperty("action", actionChangeLoiterRadius));
+    QVERIFY2(text().isEmpty(), qPrintable(text()));
+    QVERIFY(root->setProperty("loiterRadius", 300.0));
+    QVERIFY2(text().contains(QStringLiteral("EAST")), qPrintable(text()));
+    // ... and nothing warns while the confirmation is hidden
+    QVERIFY(dialog->setProperty("visible", false));
+    QVERIFY(text().isEmpty());
+
+    harness.object.reset();
+    _disconnectMockLink();
+}
+
 void GeoZoneFlightTest::_testPreflightPermits()
 {
     using Check = GeoZonePreflightCheck;

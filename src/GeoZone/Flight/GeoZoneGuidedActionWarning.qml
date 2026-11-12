@@ -15,7 +15,8 @@ import QGroundControl.GeoZone
 import QGroundControl.Palette
 
 /// Geozone warning in the confirmation of a guided action, GuidedActionConfirm.qml: the zones a go to, orbit, altitude
-/// change or takeoff would enter, following the value slider, those a return to launch or a landing would enter, those
+/// change, hold or takeoff would enter, following the value slider, those the loiter of a fixed wing after a go to
+/// would enter, following its radius, those a return to launch or a landing would enter, those
 /// of the mission flown from the item set as current or resumed at, and the check of the mission on the vehicle when
 /// starting it. Arming, taking off and starting the mission also warn when the vehicle is on the ground inside a
 /// restricted zone. Empty and hidden for other actions or without zones.
@@ -42,6 +43,12 @@ QGCLabel {
         return warnings.filter(text => text !== "").join("\n")
     }
 
+    /// @return Warning about flying to the location and, with a radius, around it, at the vehicle's altitude
+    function _loiterWarning(coordinate, radius) {
+        const check = GeoZoneMonitor.guidedCheck
+        return radius > 0 ? check.orbitWarning(_vehicle, coordinate, radius, NaN) : check.gotoWarning(_vehicle, coordinate)
+    }
+
     /// @return Warning about the geozones the action would enter, empty when there are none. Bound to the slider value.
     function warning(actionCode, actionData) {
         const controller = _guidedController
@@ -52,10 +59,15 @@ QGCLabel {
         const sliderMeters = QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsToMeters(confirmDialog.guidedValueSlider.getOutputValue())
         switch (actionCode) {
         case controller.actionGoto:
-            return check.gotoWarning(_vehicle, actionData)
+            // In forward flight the vehicle then loiters around the location
+            return _loiterWarning(actionData, _vehicle.inFwdFlight ? QGroundControl.settingsManager.flyViewSettings.forwardFlightGoToLocationLoiterRad.rawValue : 0)
+        case controller.actionChangeLoiterRadius:
+            return controller.fwdFlightGotoMapCircle ? _loiterWarning(controller.fwdFlightGotoMapCircle.coordinate, controller.fwdFlightGotoMapCircle.radius.rawValue) : ""
         case controller.actionOrbit:
             return check.orbitWarning(_vehicle, controller.orbitMapCircle.center, controller.orbitMapCircle.radius(), _vehicle.homePosition.altitude + sliderMeters)
         case controller.actionChangeAlt:
+        case controller.actionPause:
+            // Hold applies the altitude of the slider like Change Altitude
             return check.altitudeWarning(_vehicle, sliderMeters)
         case controller.actionArm:
             return check.groundWarning(_vehicle)

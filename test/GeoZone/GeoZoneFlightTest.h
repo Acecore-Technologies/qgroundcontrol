@@ -31,6 +31,7 @@ private slots:
     void _testGroundInsideZone();
     void _testChecklistButton();
     void _testChecklistReset();
+    void _testGuidedActionWarning();
     void _testPreflightPermits();
     void _testArduPilotTakeoff();
 };
