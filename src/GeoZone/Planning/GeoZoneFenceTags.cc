@@ -39,9 +39,8 @@ constexpr const char *zoneKeyKey = "zoneKey";
 constexpr const char *contentHashKey = "contentHash";
 constexpr const char *validToKey = "validTo";
 
-// Key of the GeoFence's import settings, and the controller property keeping them
+// Key of the GeoFence's import settings
 constexpr const char *importKey = "geoZoneImport";
-constexpr const char *importProperty = "_geoZoneFenceImport";
 
 // Keys of the zones the last selection left out, in the import settings
 constexpr const char *notFencedKey = "notFenced";
@@ -60,6 +59,39 @@ void forEachFence(GeoFenceController *geoFenceController, Function function)
         }
     }
 }
+
+/// The import settings of a fence controller with the zones its fences leave out, kept by the controller as a child
+/// object. They describe the fences they were set for: when the controller replaces its fences wholesale, like for a
+/// new plan, another plan file or the fence loaded from the vehicle, which reset its lists, they are forgotten, so
+/// that they aren't saved with a plan they don't belong to.
+class ImportRecord : public QObject
+{
+public:
+    explicit ImportRecord(GeoFenceController *geoFenceController)
+        : QObject(geoFenceController)
+    {
+        setObjectName(QLatin1String(objectNameText));
+        for (QmlObjectListModel *fences : { geoFenceController->polygons(), geoFenceController->circles() }) {
+            (void) connect(fences, &QAbstractItemModel::modelReset, this, [this]() {
+                if (keeping == 0) {
+                    settings = QJsonObject();
+                }
+            });
+        }
+    }
+
+    static ImportRecord *find(const GeoFenceController *geoFenceController)
+    {
+        // Only made here, with this name
+        return geoFenceController ? static_cast<ImportRecord*>(geoFenceController->findChild<QObject*>(QLatin1String(objectNameText), Qt::FindDirectChildrenOnly)) : nullptr;
+    }
+
+    QJsonObject settings;
+    int keeping = 0;    ///< While positive the settings stay through resets, like those deleting only the fences from geozones
+
+private:
+    static constexpr const char *objectNameText = "GeoZoneFenceImportRecord";
+};
 
 } // namespace
 
@@ -159,8 +191,17 @@ void GeoZoneFenceTags::deleteFences(GeoFenceController *geoFenceController, bool
         fences->setDirty(true);
         return true;
     };
+    // The lists are reset, as they are when the controller replaces its fences. Deleting the fences from geozones
+    // keeps the settings they were selected with, deleting all fences forgets them.
+    ImportRecord *const record = geoZoneOnly ? ImportRecord::find(geoFenceController) : nullptr;
+    if (record) {
+        record->keeping++;
+    }
     const bool deletedPolygons = deleteFrom(geoFenceController->polygons());
     const bool deletedCircles = deleteFrom(geoFenceController->circles());
+    if (record) {
+        record->keeping--;
+    }
     // The lists only signal becoming dirty, not a change while they are
     if (deletedPolygons || deletedCircles) {
         geoFenceController->setDirty(true);
@@ -307,13 +348,21 @@ QString GeoZoneFenceTags::staleText(const QList<StaleZone> &staleZones)
 
 QJsonObject GeoZoneFenceTags::importSettings(const GeoFenceController *geoFenceController)
 {
-    return geoFenceController ? geoFenceController->property(importProperty).toJsonObject() : QJsonObject();
+    const ImportRecord *const record = ImportRecord::find(geoFenceController);
+    return record ? record->settings : QJsonObject();
 }
 
 void GeoZoneFenceTags::setImportSettings(GeoFenceController *geoFenceController, const QJsonObject &settings)
 {
-    if (geoFenceController) {
-        (void) geoFenceController->setProperty(importProperty, settings);
+    if (!geoFenceController) {
+        return;
+    }
+    ImportRecord *record = ImportRecord::find(geoFenceController);
+    if (!record && !settings.isEmpty()) {
+        record = new ImportRecord(geoFenceController);
+    }
+    if (record) {
+        record->settings = settings;
     }
 }
 

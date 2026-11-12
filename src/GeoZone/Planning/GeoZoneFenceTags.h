@@ -73,7 +73,8 @@ private:
 /// The fence tags for QML, as the GeoZoneFenceTags singleton, and in plan files. A plan file keeps the tag of a fence
 /// as the optional "name", "geoZone", "zoneKey", "contentHash" and "validTo" keys of the fence's entry, and the
 /// settings the fences from geozones were selected with as "geoZoneImport" of the GeoFence, with the zones they left
-/// out ("notFenced"), which other ground stations ignore.
+/// out ("notFenced"), which other ground stations ignore. The controller keeps the settings while it keeps the fences,
+/// see importSettings.
 class GeoZoneFenceTags : public QObject
 {
     Q_OBJECT
@@ -86,7 +87,7 @@ public:
 
     /// Deletes many polygons and circles at once, with one reset of each list rather than a row removal per fence,
     /// which matters for the many fences added from geozones
-    /// @param geoZoneOnly Only the fences added from geozones, otherwise all of them
+    /// @param geoZoneOnly Only the fences added from geozones, otherwise all of them, with the import settings
     Q_INVOKABLE static void deleteFences(GeoFenceController *geoFenceController, bool geoZoneOnly);
 
     /// Adds the tags of the fences to their entries in the JSON of a plan, saved by PlanMasterController
@@ -118,7 +119,9 @@ public:
     static QString staleText(const QList<StaleZone> &staleZones);
 
     /// @return The settings the fences from geozones of the controller were last selected with, see
-    ///         GeoZoneFenceImporter::rebuild, empty without
+    ///         GeoZoneFenceImporter::rebuild, empty without. They are kept with the fences they were set for: once the
+    ///         controller replaces all its fences, like for a new plan or the fence loaded from the vehicle, they are
+    ///         empty, with the zones not fenced, see notFenced.
     static QJsonObject importSettings(const GeoFenceController *geoFenceController);
     static void setImportSettings(GeoFenceController *geoFenceController, const QJsonObject &settings);
 

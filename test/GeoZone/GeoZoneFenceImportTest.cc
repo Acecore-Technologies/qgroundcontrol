@@ -1005,6 +1005,96 @@ void GeoZoneFenceImportTest::_testGeoFenceRebuildSettings()
     QCOMPARE(fenceNames(), QStringList({ QStringLiteral("U") }));
 }
 
+void GeoZoneFenceImportTest::_testGeoFenceSettingsReplaced()
+{
+    // Three zones of 40 points, of which one fits into the 63 points of the MockLink PX4 without simplification
+    ZoneOwner zoneParent;
+    QList<const GeoZone*> zones;
+    for (int i = 0; i < 3; i++) {
+        GeoZone::Volume volume;
+        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
+        GeoZone::Data data;
+        data.identifier = QStringLiteral("Z%1").arg(i);
+        data.restriction = GeoZone::Prohibited;
+        data.volumes.append(volume);
+        zones.append(zoneParent.add(data));
+    }
+    const QString importKey = QStringLiteral("geoZoneImport");
+    const auto fenceJson = [](PlanMasterController &controller) { return controller.saveToJson().object()[PlanMasterController::kJsonGeoFenceObjectKey].toObject(); };
+
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(geoFenceController);
+    const auto applied = [&]() {
+        importer.select(zones);
+        return (importer.applySelection() == 1) && (importer.fenceNoteCount() == 2) && fenceJson(masterController).contains(importKey);
+    };
+
+    // The settings and the zones not fenced are those of the fences applied. A new plan has neither: they aren't
+    // saved with it, and its note is gone.
+    QVERIFY(applied());
+    masterController.removeAll();
+    QVERIFY(GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+    QTRY_COMPARE(importer.fenceNoteCount(), 0);
+    QVERIFY(importer.fenceNote().isEmpty());
+    QVERIFY(!fenceJson(masterController).contains(importKey));
+
+    // ... also when the selection left out all zones, so that the new plan has the same fences from geozones: none
+    for (const GeoZone *zone : std::as_const(zones)) {
+        importer.setZoneIncluded(zone->key(), false);
+    }
+    QCOMPARE(importer.applySelection(), 0);
+    QCOMPARE(importer.fenceNoteCount(), 3);
+    QVERIFY(fenceJson(masterController).contains(importKey));
+    masterController.removeAll();
+    QVERIFY(GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+    QTRY_COMPARE(importer.fenceNoteCount(), 0);
+    QVERIFY(!fenceJson(masterController).contains(importKey));
+    for (const GeoZone *zone : std::as_const(zones)) {
+        importer.setZoneIncluded(zone->key(), true);
+    }
+
+    // The fence loaded from the vehicle replaces the plan's: it wasn't selected with these settings
+    QVERIFY(applied());
+    masterController.loadFromVehicle();
+    QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), 15000);
+    QTRY_VERIFY(GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+    QTRY_COMPARE(importer.fenceNoteCount(), 0);
+    QVERIFY(!fenceJson(masterController).contains(importKey));
+
+    // Loading a plan file replaces them with those of the file, or with none
+    QVERIFY(applied());
+    const QJsonObject planJson = masterController.saveToJson().object();
+    QJsonObject otherFence = planJson[PlanMasterController::kJsonGeoFenceObjectKey].toObject();
+    otherFence.remove(importKey);
+    QString errorString;
+    QVERIFY2(geoFenceController->load(otherFence, errorString), qPrintable(errorString));
+    QVERIFY(GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+    QVERIFY2(geoFenceController->load(planJson[PlanMasterController::kJsonGeoFenceObjectKey].toObject(), errorString), qPrintable(errorString));
+    GeoZonePlanData::load(&masterController, planJson);
+    QVERIFY(!GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+    geoFenceController->setDirty(true);
+    QTRY_COMPARE(importer.fenceNoteCount(), 2);
+
+    // Deleting the fences from geozones keeps the settings they were selected with, deleting all fences doesn't
+    GeoZoneFenceTags::deleteFences(geoFenceController, true);
+    QVERIFY(!GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+    QVERIFY(applied());
+    GeoZoneFenceTags::deleteFences(geoFenceController, false);
+    QVERIFY(GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
+
+    _disconnectMockLink();
+}
+
 void GeoZoneFenceImportTest::_testGeoFenceUpload()
 {
     ZoneOwner zoneParent;

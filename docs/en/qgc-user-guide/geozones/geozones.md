@@ -509,7 +509,7 @@ The vehicle doesn't stop at a zone which is not fenced; _QGroundControl_ still [
 
 - in the dialog, in the warning color above the list of the zones left out, which lists every one of them;
 - before **Upload to Vehicle**, which asks for confirmation with a list of all of them. The question is about the selection as the dialog shows it, also right after a change: if the selection changes before you answer, it asks again;
-- in the GeoFence panel of the Plan View, as a summary with **Not Fenced...** listing all of them, and in the mission banner (_N left out of the fence_, listed under **Details**). The plan file keeps all of them, so they are shown again when the plan is opened. They are shown until the fences from geozones change: editing or deleting them, or applying another selection, which then gives its own list;
+- in the GeoFence panel of the Plan View, as a summary with **Not Fenced...** listing all of them, and in the mission banner (_N left out of the fence_, listed under **Details**). The plan file keeps all of them, so they are shown again when the plan is opened. They are shown until the fences from geozones change: editing or deleting them, or applying another selection, which then gives its own list. A new plan, another plan file or the fence loaded from the vehicle replaces the fences, so the list and the settings of the dialog aren't carried into it;
 - when uploading the plan, whose confirmation summarises them;
 - in the message of a verified upload, and in the **Fence** item of the [pre-flight checklist](#pre-flight-checklist), as a warning to accept, which names the first 20 in priority order.
 
