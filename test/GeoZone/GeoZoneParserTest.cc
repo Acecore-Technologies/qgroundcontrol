@@ -2159,6 +2159,7 @@ void GeoZoneParserTest::_testAixmReferenceSystems_data()
     row("EPSG:4326 URL", srs("http://www.opengis.net/def/crs/EPSG/0/4326"), line(latLon));
     row("EPSG:4326 code", srs("EPSG:4326"), line(latLon));
     row("none", QString(), line(latLon));
+    row("values on lines", epsg4326, line(QStringLiteral("\n\t52 4\r\n\t52   4.2\n\t52.1\t4.2\n\t52.1 4\n\t52 4\n")));
     // CRS84 lists the longitude first
     row("CRS84 URN", crs84, line(lonLat));
     row("CRS84 URL", srs("http://www.opengis.net/def/crs/OGC/1.3/CRS84"), line(lonLat));

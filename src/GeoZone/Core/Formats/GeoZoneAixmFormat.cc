@@ -197,26 +197,38 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
     // Adds the positions of a pos or posList in the reference system
     // @return Why they can't be read: the reference system isn't supported, a value isn't a number or a position isn't
     //         on the globe. Empty when they are read.
-    const auto parsePositions = [](const QString &text, const AixmCrs &crs, QList<QGeoCoordinate> &positions) {
+    const auto parsePositions = [](QStringView text, const AixmCrs &crs, QList<QGeoCoordinate> &positions) {
         if (!crs.supported) {
             return GeoZoneParser::tr("Boundary in the unsupported coordinate reference system %1 ignored").arg(crs.name);
         }
-        const QString invalid = GeoZoneParser::tr("Boundary with an invalid position ignored");
-        const QStringList values = text.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
-        if ((values.count() % crs.dimension) != 0) {
-            return invalid;
-        }
-        for (qsizetype i = 0; i < values.count(); i += crs.dimension) {
-            const double first = _numberFromText(values[i]);
-            const double second = _numberFromText(values[i + 1]);
-            const QGeoCoordinate coordinate(crs.latitudeFirst ? first : second, crs.latitudeFirst ? second : first);
+        // The values are separated by whitespace. Read in place: a message has a pos for each point of its boundaries.
+        double values[3] = {};
+        int count = 0;
+        qsizetype i = 0;
+        while (true) {
+            while ((i < text.size()) && text[i].isSpace()) {
+                i++;
+            }
+            if (i >= text.size()) {
+                break;
+            }
+            const qsizetype start = i;
+            while ((i < text.size()) && !text[i].isSpace()) {
+                i++;
+            }
+            values[count++] = _numberFromText(text.mid(start, i - start));
+            if (count < crs.dimension) {
+                continue;
+            }
+            count = 0;
+            const QGeoCoordinate coordinate(crs.latitudeFirst ? values[0] : values[1], crs.latitudeFirst ? values[1] : values[0]);
             // The height isn't used, the limits of the volume are
-            if (!coordinate.isValid() || ((crs.dimension == 3) && std::isnan(_numberFromText(values[i + 2])))) {
-                return invalid;
+            if (!coordinate.isValid() || ((crs.dimension == 3) && std::isnan(values[2]))) {
+                return GeoZoneParser::tr("Boundary with an invalid position ignored");
             }
             positions.append(coordinate);
         }
-        return QString();
+        return (count == 0) ? QString() : GeoZoneParser::tr("Boundary with an invalid position ignored");
     };
     // Reads the text of the element just started, which ends it
     const auto elementText = [&reader, &crsStack]() {
