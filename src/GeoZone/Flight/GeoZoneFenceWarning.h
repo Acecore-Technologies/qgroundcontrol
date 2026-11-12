@@ -22,6 +22,7 @@
 
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneFencePrediction.h"
+#include "GeoZoneVehicleType.h"
 #include "QGCMAVLink.h"
 
 class Vehicle;
@@ -87,19 +88,8 @@ public:
     /// Longer than the vehicle is asked again for the answer to a command, which without a link never comes
     static constexpr int fenceCommandTimeoutMSecs = 15000;
 
-    enum class Firmware {
-        Other,
-        PX4,
-        ArduPilot,
-    };
-
-    /// Type of vehicle, whose autopilot has its own fence actions and flight modes
-    enum class VehicleClass {
-        Copter,     ///< Multirotors, helicopters and VTOLs hovering
-        Plane,      ///< Fixed wings and VTOLs in forward flight
-        Rover,      ///< Rovers and boats
-        Sub,
-    };
+    using Firmware = GeoZoneVehicleType::Firmware;
+    using VehicleClass = GeoZoneVehicleType::VehicleClass;
 
     /// The polygons and circles the vehicle stores
     struct StoredFence {
@@ -112,7 +102,10 @@ public:
         bool enabled = false;       ///< The parameters of the vehicle enable the fence
         GeoZoneFencePrediction::Fence fence;
         Firmware firmware = Firmware::Other;
-        VehicleClass vehicleClass = VehicleClass::Copter;
+        /// Type of vehicle whose fence actions and flight modes the autopilot has: Multirotor also for VTOLs hovering
+        /// and for the types without their own, FixedWing also for VTOLs in forward flight. Other counts as
+        /// Multirotor and Vtol as FixedWing.
+        VehicleClass vehicleClass = VehicleClass::Multirotor;
         int action = -1;            ///< GF_ACTION or FENCE_ACTION, -1 when unknown
         bool modeChangeBlocked = false; ///< ArduPilot FENCE_OPTIONS bit 0: no mode change until the breach clears
         /// A VTOL hovering. ArduPilot's has the fence actions of planes, and the pilot takes control in its hover modes.

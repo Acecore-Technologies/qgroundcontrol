@@ -18,6 +18,7 @@
 #include <optional>
 
 #include "GeoZone.h"
+#include "GeoZoneVehicleType.h"
 
 /// Paths an autopilot flies when it returns after a return to launch command, a failsafe or a fence breach, computed
 /// from its parameters the way the firmware does: the destination among home, the rally points and the landing
@@ -37,18 +38,8 @@ public:
         ArduPlane,
     };
 
-    enum class Firmware {
-        Other,
-        PX4,
-        ArduPilot,
-    };
-
-    enum class VehicleClass {
-        Other,
-        Multirotor,
-        FixedWing,
-        Vtol,
-    };
+    using Firmware = GeoZoneVehicleType::Firmware;
+    using VehicleClass = GeoZoneVehicleType::VehicleClass;
 
     /// What the vehicle does after breaching the fence
     enum class BreachAction {

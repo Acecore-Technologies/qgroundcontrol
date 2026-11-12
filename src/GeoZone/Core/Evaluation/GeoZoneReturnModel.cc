@@ -490,6 +490,8 @@ GeoZoneReturnModel::Parameters GeoZoneReturnModel::defaultParameters(Firmware fi
             defaults.insert(QStringLiteral("RTL_TYPE"), ReturnTypeLandingOrRally);
             break;
         case VehicleClass::Other:
+        case VehicleClass::Rover:
+        case VehicleClass::Sub:
             break;
         }
     } else if ((firmware == Firmware::ArduPilot) && (vehicleClass == VehicleClass::Multirotor)) {

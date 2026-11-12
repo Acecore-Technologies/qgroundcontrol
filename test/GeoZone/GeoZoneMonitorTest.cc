@@ -1613,19 +1613,19 @@ void GeoZoneMonitorTest::_testFenceWarning()
 
     // The manoeuvres of the fence actions, and how the pilot overrides them
     using Warning = GeoZoneFenceWarning;
-    QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Copter, 2), QStringLiteral("Hold"));
-    QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Copter, 5), QStringLiteral("Land"));
-    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, 4), QStringLiteral("Brake or land"));
-    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, 0), QStringLiteral("Report only, no manoeuvre"));
-    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Plane, 1), QStringLiteral("RTL"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Multirotor, 2), QStringLiteral("Hold"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::PX4, Warning::VehicleClass::Multirotor, 5), QStringLiteral("Land"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, 4), QStringLiteral("Brake or land"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, 0), QStringLiteral("Report only, no manoeuvre"));
+    QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::FixedWing, 1), QStringLiteral("RTL"));
     QCOMPARE(Warning::actionText(Warning::Firmware::ArduPilot, Warning::VehicleClass::Rover, 2), QStringLiteral("Hold"));
     QVERIFY(Warning::isManoeuvre(Warning::Firmware::ArduPilot, 1) && !Warning::isManoeuvre(Warning::Firmware::ArduPilot, 0));
     QVERIFY(Warning::isManoeuvre(Warning::Firmware::PX4, 2) && !Warning::isManoeuvre(Warning::Firmware::PX4, 1));
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("Stabilize"), QStringLiteral("Loiter") }), QStringLiteral("Loiter"));
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("RTL"), QStringLiteral("POSHOLD"), QStringLiteral("LOITER") }), QStringLiteral("LOITER"));
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Plane, { QStringLiteral("Manual"), QStringLiteral("FBW A") }), QStringLiteral("FBW A"));
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Copter, { QStringLiteral("Hold"), QStringLiteral("Position") }), QStringLiteral("Position"));
-    QVERIFY(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Copter, { QStringLiteral("Hold") }).isEmpty());
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, { QStringLiteral("Stabilize"), QStringLiteral("Loiter") }), QStringLiteral("Loiter"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, { QStringLiteral("RTL"), QStringLiteral("POSHOLD"), QStringLiteral("LOITER") }), QStringLiteral("LOITER"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::FixedWing, { QStringLiteral("Manual"), QStringLiteral("FBW A") }), QStringLiteral("FBW A"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Multirotor, { QStringLiteral("Hold"), QStringLiteral("Position") }), QStringLiteral("Position"));
+    QVERIFY(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Multirotor, { QStringLiteral("Hold") }).isEmpty());
     Warning::Config arduPilot;
     arduPilot.firmware = Warning::Firmware::ArduPilot;
     arduPilot.action = 1;
@@ -1773,17 +1773,17 @@ void GeoZoneMonitorTest::_testFenceTakeControl()
     // control in its hover modes only, since its Loiter circles and FBW A and Manual fly as a fixed wing
     const QStringList planeModes = { QStringLiteral("Manual"), QStringLiteral("FBW A"), QStringLiteral("Loiter"), QStringLiteral("QuadPlane Hover"),
                                      QStringLiteral("QuadPlane Loiter") };
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, planeModes, true), QStringLiteral("QuadPlane Loiter"));
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("QHOVER"), QStringLiteral("MANUAL") }, true), QStringLiteral("QHOVER"));
-    QVERIFY(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Copter, { QStringLiteral("Manual"), QStringLiteral("Loiter") }, true).isEmpty());
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Plane, planeModes, false), QStringLiteral("FBW A"));
-    QCOMPARE(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Copter, { QStringLiteral("Hold"), QStringLiteral("Position") }, true), QStringLiteral("Position"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, planeModes, true), QStringLiteral("QuadPlane Loiter"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, { QStringLiteral("QHOVER"), QStringLiteral("MANUAL") }, true), QStringLiteral("QHOVER"));
+    QVERIFY(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::Multirotor, { QStringLiteral("Manual"), QStringLiteral("Loiter") }, true).isEmpty());
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::ArduPilot, Warning::VehicleClass::FixedWing, planeModes, false), QStringLiteral("FBW A"));
+    QCOMPARE(Warning::takeControlMode(Warning::Firmware::PX4, Warning::VehicleClass::Multirotor, { QStringLiteral("Hold"), QStringLiteral("Position") }, true), QStringLiteral("Position"));
     Vehicle vtol(MAV_AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_VTOL_TILTROTOR);
     Warning warning(&vtol);
     Warning::Config config;
     config.enabled = true;
     config.firmware = Warning::Firmware::ArduPilot;
-    config.vehicleClass = Warning::VehicleClass::Copter;
+    config.vehicleClass = Warning::VehicleClass::Multirotor;
     config.vtolHover = true;
     config.action = 6;
     config.fence.circles.append({ QGeoCircle(center, 100), false });

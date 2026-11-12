@@ -128,6 +128,7 @@ qt_add_library(GeoZoneCore STATIC
     Evaluation/GeoZoneReturnModel.h
     Evaluation/GeoZoneTerrain.cc
     Evaluation/GeoZoneTerrain.h
+    Evaluation/GeoZoneVehicleType.h
     Route/GeoZoneRouteDetour.cc
     Route/GeoZoneRouteDetour.h
     Route/GeoZoneRouteGraph.cc

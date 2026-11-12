@@ -15,6 +15,7 @@
 #include "GeoZoneBox.h"
 #include "GeoZoneMissionPathBuilder.h"
 #include "GeoZoneReturnDestinations.h"
+#include "GeoZoneVehicleType.h"
 #include "LandingComplexItem.h"
 #include "MissionController.h"
 #include "ParameterManager.h"
@@ -252,8 +253,8 @@ GeoZoneReturnModel::Parameters GeoZoneMissionReader::returnParameters(Vehicle *v
     if (!vehicle) {
         return GeoZoneReturnModel::Parameters();
     }
-    using Firmware = GeoZoneReturnModel::Firmware;
-    using VehicleClass = GeoZoneReturnModel::VehicleClass;
+    using Firmware = GeoZoneVehicleType::Firmware;
+    using VehicleClass = GeoZoneVehicleType::VehicleClass;
     const Firmware firmware = vehicle->px4Firmware() ? Firmware::PX4 : (vehicle->apmFirmware() ? Firmware::ArduPilot : Firmware::Other);
     VehicleClass vehicleClass = VehicleClass::Other;
     if (vehicle->vtol()) {

@@ -222,7 +222,7 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
     }
     config.vtolHover = vehicle->vtol() && !vehicle->vtolInFwdFlight();
     if (vehicle->fixedWing() || (vehicle->vtol() && vehicle->vtolInFwdFlight())) {
-        config.vehicleClass = VehicleClass::Plane;
+        config.vehicleClass = VehicleClass::FixedWing;
     } else if (vehicle->rover()) {
         config.vehicleClass = VehicleClass::Rover;
     } else if (vehicle->sub()) {
@@ -523,7 +523,7 @@ bool GeoZoneFenceWarning::isManoeuvre(Firmware firmware, int action)
 GeoZoneFenceWarning::VehicleClass GeoZoneFenceWarning::actionClass(const Config &config)
 {
     // ArduPilot's VTOLs run its plane firmware, also while they hover
-    return ((config.firmware == Firmware::ArduPilot) && config.vtolHover) ? VehicleClass::Plane : config.vehicleClass;
+    return ((config.firmware == Firmware::ArduPilot) && config.vtolHover) ? VehicleClass::FixedWing : config.vehicleClass;
 }
 
 QString GeoZoneFenceWarning::actionText(Firmware firmware, VehicleClass vehicleClass, int action)
@@ -553,7 +553,8 @@ QString GeoZoneFenceWarning::actionText(Firmware firmware, VehicleClass vehicleC
             return tr("Report only, no manoeuvre");
         }
         switch (vehicleClass) {
-        case VehicleClass::Copter:
+        case VehicleClass::Other:
+        case VehicleClass::Multirotor:
             switch (action) {
             case 1:
                 return tr("RTL or land");
@@ -569,7 +570,8 @@ QString GeoZoneFenceWarning::actionText(Firmware firmware, VehicleClass vehicleC
                 break;
             }
             break;
-        case VehicleClass::Plane:
+        case VehicleClass::FixedWing:
+        case VehicleClass::Vtol:
             switch (action) {
             case 1:
                 return tr("RTL");
@@ -654,8 +656,10 @@ QString GeoZoneFenceWarning::takeControlMode(Firmware firmware, VehicleClass veh
         generic.clear();
     } else if (firmware == Firmware::PX4) {
         switch (vehicleClass) {
-        case VehicleClass::Copter:
-        case VehicleClass::Plane:
+        case VehicleClass::Other:
+        case VehicleClass::Multirotor:
+        case VehicleClass::FixedWing:
+        case VehicleClass::Vtol:
             candidates = { QStringLiteral("Position"), QStringLiteral("Altitude"), QStringLiteral("Stabilized") };
             break;
         case VehicleClass::Rover:
@@ -665,12 +669,14 @@ QString GeoZoneFenceWarning::takeControlMode(Firmware firmware, VehicleClass veh
         }
     } else if (firmware == Firmware::ArduPilot) {
         switch (vehicleClass) {
-        case VehicleClass::Copter:
+        case VehicleClass::Other:
+        case VehicleClass::Multirotor:
             candidates = { QStringLiteral("Loiter"), QStringLiteral("Position Hold"), QStringLiteral("PosHold"), QStringLiteral("QuadPlane Loiter"),
                            QStringLiteral("QLoiter"), QStringLiteral("QuadPlane Hover"), QStringLiteral("QHover"), QStringLiteral("Altitude Hold"),
                            QStringLiteral("AltHold") };
             break;
-        case VehicleClass::Plane:
+        case VehicleClass::FixedWing:
+        case VehicleClass::Vtol:
             candidates = { QStringLiteral("FBW A"), QStringLiteral("FBWA"), QStringLiteral("Manual") };
             break;
         case VehicleClass::Rover:
