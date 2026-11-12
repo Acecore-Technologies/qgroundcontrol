@@ -81,21 +81,34 @@ void GeoZoneGeometryTest::_testIsActiveAt()
 
 void GeoZoneGeometryTest::_testDaylightEvents()
 {
+    // An event without a time is far from every time: QDateTime::secsTo is 0 for an invalid time
     const auto minutesFrom = [](const QDateTime &time, const QDateTime &expected) {
-        return qAbs(time.secsTo(expected)) / 60.0;
+        return time.isValid() ? (qAbs(time.secsTo(expected)) / 60.0) : qInf();
     };
 
     // Published times for Zurich at midsummer and London at midwinter
     const QGeoCoordinate zurich(47.37, 8.54);
     const QDate midsummer(2026, 6, 21);
-    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, zurich), _utc(midsummer, QTime(3, 30))) < 3);
-    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midsummer, zurich), _utc(midsummer, QTime(19, 26))) < 3);
-    QVERIFY(GeoZoneSchedule::daylightEventTime(QStringLiteral("BMCT"), midsummer, zurich) < GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, zurich));
-    QVERIFY(GeoZoneSchedule::daylightEventTime(QStringLiteral("EECT"), midsummer, zurich) > GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midsummer, zurich));
+    const QDateTime zurichSunrise = GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, zurich);
+    const QDateTime zurichSunset = GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midsummer, zurich);
+    const QDateTime zurichDawn = GeoZoneSchedule::daylightEventTime(QStringLiteral("BMCT"), midsummer, zurich);
+    const QDateTime zurichDusk = GeoZoneSchedule::daylightEventTime(QStringLiteral("EECT"), midsummer, zurich);
+    for (const QDateTime &time : { zurichSunrise, zurichSunset, zurichDawn, zurichDusk }) {
+        QVERIFY(time.isValid());
+        QCOMPARE(time.timeSpec(), Qt::UTC);
+    }
+    QCOMPARE_LT(minutesFrom(zurichSunrise, _utc(midsummer, QTime(3, 30))), 3.0);
+    QCOMPARE_LT(minutesFrom(zurichSunset, _utc(midsummer, QTime(19, 26))), 3.0);
+    // Civil twilight lasts 35 to 45 minutes there at midsummer
+    QCOMPARE_LT(zurichDawn, zurichSunrise);
+    QCOMPARE_GT(zurichDusk, zurichSunset);
+    QCOMPARE_LT(minutesFrom(zurichDawn, zurichSunrise.addSecs(-40 * 60)), 6.0);
+    QCOMPARE_LT(minutesFrom(zurichDusk, zurichSunset.addSecs(40 * 60)), 6.0);
     const QGeoCoordinate london(51.5, -0.13);
     const QDate midwinter(2026, 12, 21);
-    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midwinter, london), _utc(midwinter, QTime(8, 4))) < 3);
-    QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midwinter, london), _utc(midwinter, QTime(15, 54))) < 3);
+    QCOMPARE_LT(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midwinter, london), _utc(midwinter, QTime(8, 4))), 3.0);
+    QCOMPARE_LT(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midwinter, london), _utc(midwinter, QTime(15, 54))), 3.0);
+    QCOMPARE(minutesFrom(QDateTime(), _utc(midwinter, QTime(8, 4))), qInf());
     QVERIFY(!GeoZoneSchedule::daylightEventTime(QStringLiteral("XX"), midwinter, london).isValid());
 
     // The published codes are decoded in one place, whatever their case and the spaces around them
@@ -136,7 +149,9 @@ void GeoZoneGeometryTest::_testDaylightEvents()
         "applicability": [ { "permanent": "NO", "schedule": [ { "day": ["ANY"], "startEvent": "SR", "endEvent": "SS" } ] } ],
         "geometry": [ { "horizontalProjection": { "type": "Circle", "center": [25, 65], "radius": 100 } } ] } ] })", result, errorString), qPrintable(errorString));
     const GeoZone finland(result.zones[0]);
-    QVERIFY(GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, QGeoCoordinate(65, 25)) < _utc(midsummer, QTime(0, 0)));
+    const QDateTime finlandSunrise = GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, QGeoCoordinate(65, 25));
+    QVERIFY(finlandSunrise.isValid());
+    QCOMPARE_LT(finlandSunrise, _utc(midsummer, QTime(0, 0)));
     QVERIFY(finland.isActiveAt(_utc(midsummer.addDays(-1), QTime(23, 45))));
     QVERIFY(finland.isActiveDuring(_utc(midsummer.addDays(-1), QTime(23, 40)), _utc(midsummer.addDays(-1), QTime(23, 50))));
     QVERIFY(!finland.isActiveAt(_utc(midsummer.addDays(-1), QTime(22, 30))));
@@ -510,26 +525,41 @@ void GeoZoneGeometryTest::_testScheduleCacheValidation()
 
 void GeoZoneGeometryTest::_testOutwardSimplification()
 {
-    const auto verifyEncloses = [](const QList<QGeoCoordinate> &original, const QList<QGeoCoordinate> &simplified, double tolerance) {
+    // @return Why the simplified ring doesn't enclose the original one within the tolerance, empty when it does. The
+    //         caller asserts it, since an assertion in a lambda only returns from the lambda.
+    const auto enclosureFault = [](const QList<QGeoCoordinate> &original, const QList<QGeoCoordinate> &simplified, double tolerance) {
+        if (original.isEmpty() || simplified.isEmpty()) {
+            return QStringLiteral("empty ring");
+        }
         const GeoZoneGeometry::LocalProjection projection(original.first());
         const QList<QPointF> originalPoints = projection.toLocal(original);
         const QList<QPointF> simplifiedPoints = projection.toLocal(simplified);
-        QVERIFY(GeoZoneGeometry::isSimple(simplifiedPoints));
+        if (!GeoZoneGeometry::isSimple(simplifiedPoints)) {
+            return QStringLiteral("the simplified ring crosses itself");
+        }
         for (qsizetype i = 0; i < originalPoints.count(); i++) {
-            QVERIFY(GeoZoneGeometry::ringContains(simplifiedPoints, originalPoints[i]));
-            QVERIFY(!GeoZoneGeometry::segmentIntersectsRing(originalPoints[i], originalPoints[(i + 1) % originalPoints.count()], simplifiedPoints));
+            if (!GeoZoneGeometry::ringContains(simplifiedPoints, originalPoints[i])) {
+                return QStringLiteral("vertex %1 is outside the simplified ring").arg(i);
+            }
+            if (GeoZoneGeometry::segmentIntersectsRing(originalPoints[i], originalPoints[(i + 1) % originalPoints.count()], simplifiedPoints)) {
+                return QStringLiteral("the edge from vertex %1 crosses the simplified ring").arg(i);
+            }
         }
         // Expanded by no more than twice the tolerance
-        for (const QPointF &point : simplifiedPoints) {
-            QVERIFY(GeoZoneGeometry::distanceToRing(point, originalPoints) <= (2 * tolerance) + 1);
+        for (qsizetype i = 0; i < simplifiedPoints.count(); i++) {
+            const double distance = GeoZoneGeometry::distanceToRing(simplifiedPoints[i], originalPoints);
+            if (distance > ((2 * tolerance) + 1)) {
+                return QStringLiteral("simplified vertex %1 is %2 m from the original ring").arg(i).arg(distance);
+            }
         }
+        return QString();
     };
 
     // Circle published as a polygon
     const QList<QGeoCoordinate> circle = _circleRing(QGeoCoordinate(47, 8), 500, 64);
     const QList<QGeoCoordinate> simplifiedCircle = GeoZoneGeometry::simplifyOutward(circle, 25);
     QVERIFY(simplifiedCircle.count() < 20);
-    verifyEncloses(circle, simplifiedCircle, 25);
+    QCOMPARE(enclosureFault(circle, simplifiedCircle, 25), QString());
 
     // Concave star with a jagged boundary
     QList<QGeoCoordinate> star;
@@ -539,7 +569,7 @@ void GeoZoneGeometryTest::_testOutwardSimplification()
     }
     const QList<QGeoCoordinate> simplifiedStar = GeoZoneGeometry::simplifyOutward(star, 10);
     QVERIFY(simplifiedStar.count() < star.count() / 2);
-    verifyEncloses(star, simplifiedStar, 10);
+    QCOMPARE(enclosureFault(star, simplifiedStar, 10), QString());
 
     // U shape with a notch narrower than the tolerance and sharp corners
     const QGeoCoordinate origin(47, 8);
@@ -560,7 +590,9 @@ void GeoZoneGeometryTest::_testOutwardSimplification()
     }
     const QList<QGeoCoordinate> simplifiedNotch = GeoZoneGeometry::simplifyOutward(denseNotch, 25);
     QVERIFY(simplifiedNotch.count() < denseNotch.count());
-    verifyEncloses(denseNotch, simplifiedNotch, 25);
+    QCOMPARE(enclosureFault(denseNotch, simplifiedNotch, 25), QString());
+    // The check finds a ring which doesn't enclose the original one
+    QVERIFY(!enclosureFault(circle, _circleRing(QGeoCoordinate(47, 8), 400, 16), 25).isEmpty());
 
     // Nothing to do
     QCOMPARE(GeoZoneGeometry::simplifyOutward(circle, 0), circle);
@@ -811,9 +843,14 @@ void GeoZoneGeometryTest::_testFenceSelection()
     const QList<const GeoZone*> zones = { uSpace, smallConditional, farProhibited, overflown, nearConditional, enteredRestricted, fartherProhibited, nearProhibited, enteredRound, duplicate };
     const QList<Candidate> candidateList = candidates(zones, evaluation, flight);
     QCOMPARE(candidateList.count(), zones.count());
+    // A candidate without zone for a zone which has none: each zone is checked to have one before they are read
     const auto candidateOf = [&candidateList](const GeoZone *zone) {
-        return *std::find_if(candidateList.cbegin(), candidateList.cend(), [zone](const Candidate &candidate) { return candidate.zone == zone; });
+        const auto candidate = std::find_if(candidateList.cbegin(), candidateList.cend(), [zone](const Candidate &entry) { return entry.zone == zone; });
+        return (candidate != candidateList.cend()) ? *candidate : Candidate();
     };
+    for (const GeoZone *zone : zones) {
+        QCOMPARE(candidateOf(zone).zone, zone);
+    }
     QCOMPARE(candidateOf(enteredRound).proximity, Proximity::Entered);
     QCOMPARE(candidateOf(overflown).proximity, Proximity::Overflown);
     QVERIFY(candidateOf(overflown).excluded);
@@ -822,7 +859,9 @@ void GeoZoneGeometryTest::_testFenceSelection()
     QCOMPARE(candidateOf(farProhibited).proximity, Proximity::Far);
     QVERIFY(candidateOf(fartherProhibited).distance > candidateOf(farProhibited).distance);
     // Without a flight all zones are far
-    QCOMPARE(candidates({ nearProhibited }, GeoZonePathEvaluator::Result(), {}).first().proximity, Proximity::Far);
+    const QList<Candidate> withoutFlight = candidates({ nearProhibited }, GeoZonePathEvaluator::Result(), {});
+    QCOMPARE(withoutFlight.count(), 1);
+    QCOMPARE(withoutFlight.constFirst().proximity, Proximity::Far);
 
     // Prohibited zones first, entered, near, then by distance, then other restricted zones, then the others
     const auto names = [](const auto &list, auto zoneOf) {
@@ -848,9 +887,21 @@ void GeoZoneGeometryTest::_testFenceSelection()
                                                                  QStringLiteral("U-space") }));
     QCOMPARE(selection.usage.items, 64);
     QCOMPARE(selection.selectedZones().count(), 6);
+    // A choice without zone for a zone which has none: each selection is checked to have a choice for every zone
+    // before they are read
     const auto choiceOf = [&selection](const GeoZone *zone) {
-        return *std::find_if(selection.choices.cbegin(), selection.choices.cend(), [zone](const Choice &choice) { return choice.candidate.zone == zone; });
+        const auto choice = std::find_if(selection.choices.cbegin(), selection.choices.cend(), [zone](const Choice &entry) { return entry.candidate.zone == zone; });
+        return (choice != selection.choices.cend()) ? *choice : Choice();
     };
+    const QSet<const GeoZone*> allZones(zones.cbegin(), zones.cend());
+    const auto choiceZones = [&selection]() {
+        QSet<const GeoZone*> result;
+        for (const Choice &choice : std::as_const(selection.choices)) {
+            result.insert(choice.candidate.zone);
+        }
+        return result;
+    };
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(overflown).status, Status::Excluded);
     QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
     QCOMPARE(choiceOf(duplicate).duplicateOf, farProhibited);
@@ -875,6 +926,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
         candidate.excluded = candidate.excluded || (candidate.zone == farProhibited);
     }
     selection = select(withoutFar, Capacity::px4());
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(farProhibited).status, Status::Excluded);
     QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
     QVERIFY(!choiceOf(duplicate).duplicateSelected);
@@ -886,6 +938,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     Usage kept;
     kept.addPolygon(30);
     selection = select(candidateList, Capacity::px4(), kept);
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(enteredRound).status, Status::TooLarge);
     QCOMPARE(choiceOf(nearProhibited).status, Status::Selected);
     QCOMPARE(selection.reserved, kept);
@@ -897,6 +950,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     userChoice.erase(std::remove_if(userChoice.begin(), userChoice.end(), [uSpace](const Candidate &candidate) { return candidate.zone == uSpace; }), userChoice.end());
     userChoice.append(leftOut);
     selection = select(userChoice, Capacity::px4(), kept, { 0, 10, 25, 50 });
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(uSpace).status, Status::Excluded);
     QCOMPARE(statusText(choiceOf(uSpace)), QStringLiteral("Left out by you"));
     QCOMPARE(choiceOf(enteredRound).status, Status::Selected);
@@ -914,11 +968,13 @@ void GeoZoneGeometryTest::_testFenceSelection()
     QCOMPARE(total, selection.usage);
     // With room to spare nothing is simplified
     selection = select(userChoice, Capacity::arduPilot(true, 8), Usage(), { 0, 10, 25, 50 });
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(enteredRound).simplifyTolerance, 0.0);
     QCOMPARE(choiceOf(nearConditional).status, Status::Selected);
 
     // Vehicles without exclusion fences store none
     selection = select(candidateList, Capacity::unsupported());
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(enteredRound).status, Status::Unsupported);
     QCOMPARE(selection.usage, Usage());
 
@@ -929,6 +985,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
         candidate.partTime = (candidate.zone == enteredRound) || (candidate.zone == farProhibited);
     }
     selection = select(partTime, Capacity::arduPilot(true, 8));
+    QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(enteredRound).status, Status::PartTime);
     QVERIFY(!choiceOf(enteredRound).includable());
     QVERIFY(!choiceOf(enteredRound).fenced());
@@ -955,7 +1012,6 @@ void GeoZoneGeometryTest::_testFencePrediction()
     const auto square = [&local](double east, double north, double half) {
         return QList<QGeoCoordinate>{ local(east - half, north + half), local(east + half, north + half), local(east + half, north - half), local(east - half, north - half) };
     };
-    const auto near = [](double actual, double expected, double tolerance) { return std::abs(actual - expected) <= tolerance; };
     const Velocity east{ 0, 10, 0, true };
 
     // An exclusion polygon whose west edge is 450 m east: reached in 45 s, at the margin 0.2 s sooner
@@ -966,22 +1022,28 @@ void GeoZoneGeometryTest::_testFencePrediction()
     QCOMPARE(breach->boundary, Boundary::Polygon);
     QVERIFY(!breach->inclusion);
     QCOMPARE(breach->index, 0);
-    QVERIFY2(near(breach->time, 45, 0.1), qPrintable(QString::number(breach->time)));
-    QVERIFY(near(breach->distance, 450, 1));
-    QVERIFY(near(origin.distanceTo(breach->coordinate), 450, 1));
+    QVERIFY2(_near(breach->time, 45, 0.1), qPrintable(QString::number(breach->time)));
+    QVERIFY(_near(breach->distance, 450, 1));
+    QVERIFY(_near(origin.distanceTo(breach->coordinate), 450, 1));
     QCOMPARE(breach->altitude, 50.0);
     QVERIFY(!predict(fence, origin, 50, east, 30));
     QVERIFY(!predict(fence, origin, 50, Velocity{ 0, -10, 0, true }, 60));
     QVERIFY(!predict(fence, origin, 50, Velocity(), 60));
     fence.horizontalMargin = 2;
-    QVERIFY(near(predict(fence, origin, 50, east, 60)->time, 44.8, 0.05));
+    breach = predict(fence, origin, 50, east, 60);
+    QVERIFY(breach);
+    QVERIFY(_near(breach->time, 44.8, 0.05));
     // Within the margin already, the polygon itself is reached
-    QVERIFY(near(predict(fence, local(449, 0), 50, east, 60)->time, 0.1, 0.02));
+    breach = predict(fence, local(449, 0), 50, east, 60);
+    QVERIFY(breach);
+    QVERIFY(_near(breach->time, 0.1, 0.02));
     // Inside it, the vehicle breaches it already
     QVERIFY(breached(fence, local(500, 0), 50));
     QVERIFY(!predict(fence, local(500, 0), 50, east, 60));
     // Climbing at 10 m/s too, the distance is along the velocity
-    QVERIFY(near(predict(fence, origin, 50, Velocity{ 0, 10, 10, true }, 60)->distance, 44.8 * std::sqrt(200.0), 2));
+    breach = predict(fence, origin, 50, Velocity{ 0, 10, 10, true }, 60);
+    QVERIFY(breach);
+    QVERIFY(_near(breach->distance, 44.8 * std::sqrt(200.0), 2));
 
     // Inclusion polygons: leaving one of them, or the last of them for their union
     fence = Fence();
@@ -990,11 +1052,11 @@ void GeoZoneGeometryTest::_testFencePrediction()
     QVERIFY(!breached(fence, origin, qQNaN()));
     breach = predict(fence, origin, qQNaN(), east, 400);
     QVERIFY(breach && breach->inclusion && (breach->index == 0));
-    QVERIFY(near(breach->time, 100, 0.2));
+    QVERIFY(_near(breach->time, 100, 0.2));
     fence.inclusionUnion = true;
     breach = predict(fence, origin, qQNaN(), east, 400);
     QVERIFY(breach && (breach->index == 1));
-    QVERIFY(near(breach->time, 300, 0.5));
+    QVERIFY(_near(breach->time, 300, 0.5));
     // Outside one of them is a breach of their intersection only
     QVERIFY(!breached(fence, local(2000, 0), qQNaN()));
     fence.inclusionUnion = false;
@@ -1005,12 +1067,12 @@ void GeoZoneGeometryTest::_testFencePrediction()
     fence.circles.append({ QGeoCircle(local(0, 300), 100), false });
     breach = predict(fence, origin, qQNaN(), Velocity{ 5, 0, 0, true }, 60);
     QVERIFY(breach && (breach->boundary == Boundary::Circle) && !breach->inclusion);
-    QVERIFY(near(breach->time, 40, 0.2));
+    QVERIFY(_near(breach->time, 40, 0.2));
     fence.circles = { { QGeoCircle(origin, 200), true } };
     fence.horizontalMargin = 10;
     breach = predict(fence, origin, qQNaN(), Velocity{ 10, 0, 0, true }, 60);
     QVERIFY(breach && breach->inclusion);
-    QVERIFY(near(breach->time, 19, 0.1));
+    QVERIFY(_near(breach->time, 19, 0.1));
 
     // The circle around home, and the altitude limits above home with the margin
     fence = Fence();
@@ -1018,19 +1080,19 @@ void GeoZoneGeometryTest::_testFencePrediction()
     fence.maxDistance = 150;
     breach = predict(fence, origin, 30, east, 60);
     QVERIFY(breach && (breach->boundary == Boundary::MaxDistance));
-    QVERIFY(near(breach->time, 10, 0.1));
+    QVERIFY(_near(breach->time, 10, 0.1));
     fence = Fence();
     fence.maxAltitude = 100;
     fence.minAltitude = 20;
     fence.verticalMargin = 2;
     breach = predict(fence, origin, 50, Velocity{ 0, 0, 2, true }, 60);
     QVERIFY(breach && (breach->boundary == Boundary::MaxAltitude));
-    QVERIFY(near(breach->time, 24, 0.01));
-    QVERIFY(near(breach->altitude, 98, 0.01));
+    QVERIFY(_near(breach->time, 24, 0.01));
+    QVERIFY(_near(breach->altitude, 98, 0.01));
     QVERIFY(breach->coordinate.distanceTo(origin) < 0.01);
     breach = predict(fence, origin, 50, Velocity{ 0, 0, -5, true }, 60);
     QVERIFY(breach && (breach->boundary == Boundary::MinAltitude));
-    QVERIFY(near(breach->time, 5.6, 0.01));
+    QVERIFY(_near(breach->time, 5.6, 0.01));
     // Unknown altitudes aren't predicted, those beyond the limits breach them
     QVERIFY(!predict(fence, origin, qQNaN(), Velocity{ 0, 0, 2, true }, 60));
     QVERIFY(breached(fence, origin, 101));
@@ -2461,9 +2523,13 @@ void GeoZoneGeometryTest::_testConcurrentQueries()
     for (int i = 0; i < 200; i++) {
         (void) zone->updateActive(now.addSecs(i));
     }
+    // All workers are done before the first assertion can return, since they use the zone, the shape and the lists
+    // of this test
+    QList<bool> results;
     for (QFuture<bool> &future : futures) {
-        QVERIFY(future.result());
+        results.append(future.result());
     }
+    QCOMPARE(results, QList<bool>(futures.count(), true));
     // Each tolerance is simplified once and returned the same way afterwards
     QCOMPARE(zone->exclusionPolygons(10), zone->exclusionPolygons(10));
 }
