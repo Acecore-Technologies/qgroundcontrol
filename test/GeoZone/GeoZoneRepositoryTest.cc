@@ -254,17 +254,21 @@ void GeoZoneRepositoryTest::_testManagerStoreFailures()
 
     // A copy which can't be written keeps the previous one, which is still loaded at the next start
     const QFile::Permissions permissions = QFile::permissions(storageDir.path());
-    QVERIFY(QFile::setPermissions(storageDir.path(), QFile::ReadOwner | QFile::ExeOwner));
-    if (!QFileInfo(storageDir.path()).isWritable()) {
-        GeoZoneManager manager(storageDir.path());
-        QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
-        manager.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
-        QCOMPARE(manager.zoneCount(), 3);
-        QVERIFY2(manager.repository()->loadFile(ed318File, errorString), qPrintable(errorString));
-        QCOMPARE(storageSpy.count(), 1);
-        QCOMPARE(manager.repository()->storedFileName(key), storedFile);
+    {
+        // Writable again whatever fails, or the folder and what follows it in the test process couldn't be removed
+        const auto restorePermissions = qScopeGuard([&storageDir, permissions]() { (void) QFile::setPermissions(storageDir.path(), permissions); });
+        QVERIFY(QFile::setPermissions(storageDir.path(), QFile::ReadOwner | QFile::ExeOwner));
+        if (!QFileInfo(storageDir.path()).isWritable()) {
+            GeoZoneManager manager(storageDir.path());
+            QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
+            manager.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+            QCOMPARE(manager.zoneCount(), 3);
+            QVERIFY2(manager.repository()->loadFile(ed318File, errorString), qPrintable(errorString));
+            QCOMPARE(storageSpy.count(), 1);
+            QCOMPARE(manager.repository()->storedFileName(key), storedFile);
+        }
     }
-    QVERIFY(QFile::setPermissions(storageDir.path(), permissions));
+    QCOMPARE(QFile::permissions(storageDir.path()), permissions);
     QVERIFY(dir.exists(storedFile));
 
     // An index from a newer version is kept as is and its sources aren't touched
