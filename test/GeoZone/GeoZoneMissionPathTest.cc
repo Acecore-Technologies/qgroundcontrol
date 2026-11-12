@@ -248,6 +248,96 @@ void GeoZoneMissionPathTest::_testMissionJumpWalk()
     QCOMPARE(walk.lastCoordinateItem, 5);
 }
 
+void GeoZoneMissionPathTest::_testFlightEndsAtReturn()
+{
+    using Kind = GeoZoneMissionItem::Kind;
+    // Home, two waypoints, a return to launch with the drawn segment home, then a pattern with a flight line of its own,
+    // which the mission controller keeps drawing though the mission ends at the return
+    const QGeoCoordinate home(47, 8);
+    const QGeoCoordinate first = _offsetFrom(home, 1000, 0);
+    const QGeoCoordinate second = _offsetFrom(home, 1000, 1000);
+    const QGeoCoordinate patternEntry = _offsetFrom(home, 0, 3000);
+    const QGeoCoordinate patternExit = _offsetFrom(home, 0, 4000);
+    const auto segment = [](const QGeoCoordinate &from, const QGeoCoordinate &to) {
+        GeoZoneMissionPath::Segment drawn;
+        drawn.from = from;
+        drawn.to = to;
+        drawn.fromAltitudeAMSL = drawn.toAltitudeAMSL = 450;
+        drawn.distance = from.distanceTo(to);
+        return drawn;
+    };
+    const auto item = [](int sequenceNumber, Kind kind, const QGeoCoordinate &entry = QGeoCoordinate(), const QGeoCoordinate &exit = QGeoCoordinate()) {
+        GeoZoneMissionPathBuilder::Item builderItem;
+        builderItem.item.kind = kind;
+        builderItem.item.sequenceNumber = builderItem.item.lastSequenceNumber = sequenceNumber;
+        builderItem.item.flies = entry.isValid();
+        builderItem.item.entry = GeoZone::Position{ entry, 450 };
+        builderItem.item.exit = GeoZone::Position{ exit.isValid() ? exit : entry, 450 };
+        return builderItem;
+    };
+    QList<GeoZoneMissionPathBuilder::Item> items = { item(0, Kind::Other, home), item(1, Kind::Other, first), item(2, Kind::Other, second), item(3, Kind::ReturnToLaunch),
+                                                     item(4, Kind::Pattern, patternEntry, patternExit) };
+    items[1].outgoing = segment(first, second);
+    items[2].outgoing = segment(second, home);
+    items[4].segments = { segment(patternEntry, patternExit) };
+    GeoZoneMissionPathBuilder::Parameters parameters;
+    parameters.home = home;
+    const double untilReturn = first.distanceTo(second) + second.distanceTo(home);
+    const auto flownTo = [](const GeoZoneMissionPath &path, const QGeoCoordinate &coordinate) {
+        return std::any_of(path.paths().cbegin(), path.paths().cend(), [&coordinate](const GeoZoneMissionPath::Path &flown) {
+            return std::any_of(flown.positions.cbegin(), flown.positions.cend(), [&coordinate](const GeoZone::Position &position) {
+                return position.coordinate.distanceTo(coordinate) < 1;
+            });
+        });
+    };
+    const QDateTime start = _utc(QDate(2027, 1, 1), QTime(10, 0));
+    const QDateTime end = start.addSecs(600);
+
+    // The flight ends at the return: the flight line of the pattern after it isn't flown, nor counted in the distance the
+    // duration of the mission is of
+    const GeoZoneMissionPath path = GeoZoneMissionPathBuilder::build(items, parameters);
+    QCOMPARE(path.segments().count(), 3);
+    QVERIFY(flownTo(path, second));
+    QVERIFY(flownTo(path, home));
+    QVERIFY(!flownTo(path, patternEntry));
+    QVERIFY(!flownTo(path, patternExit));
+    QVERIFY(_near(path.flightDistance(), untilReturn, 0.01));
+    QVERIFY(_near(path.drawnFlightDistance(), untilReturn, 0.01));
+    QVERIFY(_near(path.totalDistance(), untilReturn + 1000, 1));
+    QCOMPARE(path.flightEnd(start, end), end);
+    const QList<GeoZonePathEvaluator::Path> evaluatorPaths = path.evaluatorPaths(start, end);
+    QCOMPARE(evaluatorPaths.count(), 1);
+    QVERIFY(!evaluatorPaths.constFirst().vertices.isEmpty());
+    QCOMPARE(evaluatorPaths.constFirst().vertices.constLast().time, end);
+
+    // Like the flight which follows a DO_JUMP repeating the leg before the return
+    QList<GeoZoneMissionPathBuilder::Item> jumping = items;
+    jumping.insert(3, item(3, Kind::Jump));
+    jumping[3].item.jumpSequence = 1;
+    jumping[3].item.jumpRepeat = 1;
+    for (int i = 4; i < jumping.count(); i++) {
+        jumping[i].item.sequenceNumber = jumping[i].item.lastSequenceNumber = i;
+    }
+    const GeoZoneMissionPath jumped = GeoZoneMissionPathBuilder::build(jumping, parameters);
+    QVERIFY(flownTo(jumped, second));
+    QVERIFY(flownTo(jumped, home));
+    QVERIFY(!flownTo(jumped, patternEntry));
+    QVERIFY(!flownTo(jumped, patternExit));
+    const double loop = first.distanceTo(second) + second.distanceTo(first);
+    QVERIFY(_near(jumped.flightDistance(), untilReturn + loop, 0.01));
+    QVERIFY(_near(jumped.drawnFlightDistance(), untilReturn, 0.01));
+    // The repeat lengthens the flight at the pace of the drawn flight path, without the pattern
+    QVERIFY(_near(static_cast<double>(start.msecsTo(jumped.flightEnd(start, end))), 600000 * (untilReturn + loop) / untilReturn, 2));
+
+    // Without a return the pattern is flown
+    QList<GeoZoneMissionPathBuilder::Item> withoutReturn = items;
+    withoutReturn[3] = item(3, Kind::Other);
+    const GeoZoneMissionPath whole = GeoZoneMissionPathBuilder::build(withoutReturn, parameters);
+    QVERIFY(flownTo(whole, patternExit));
+    QVERIFY(_near(whole.flightDistance(), whole.totalDistance(), 0.01));
+    QVERIFY(_near(whole.drawnFlightDistance(), whole.totalDistance(), 0.01));
+}
+
 #ifndef GEOZONE_CORE_TEST
 // The paths of the missions of a MissionController, read by GeoZoneMissionReader
 

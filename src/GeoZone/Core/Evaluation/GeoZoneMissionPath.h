@@ -24,7 +24,9 @@
 /// terrain, the areas of patterns, and the legs between mission items. Besides the flight path the mission
 /// controller draws, it covers loiter circles, the loiter of landing patterns, the distance VTOL transitions
 /// overshoot, the loops of DO_JUMP items and the return to launch the vehicle flies, see GeoZoneReturnModel. The
-/// contingency paths are the returns the vehicle would fly from along the mission after a failsafe or a fence breach.
+/// flight ends at the first return to launch it reaches: the flight lines of the patterns after it aren't flown, with
+/// or without DO_JUMP items, though their areas, like the loiter circles after it, are still checked.
+/// The contingency paths are the returns the vehicle would fly from along the mission after a failsafe or a fence breach.
 /// Built by GeoZoneMissionPathBuilder, from the MissionController by GeoZoneMissionReader in QGroundControl, on the GUI
 /// thread, then only read, so that zone checks can run on other threads.
 class GeoZoneMissionPath
@@ -103,9 +105,14 @@ public:
     QList<QList<GeoZone::Position>> positionLists() const;
     /// @return Meters along the whole mission, the sum of the segment distances
     double totalDistance() const;
+    /// @return Meters along the drawn flight path up to the first return to launch, where the mission ends, which the
+    ///         duration the mission controller estimates is of. Less than totalDistance when items after the return
+    ///         have segments of their own, like the flight lines of a pattern, which aren't flown.
+    double drawnFlightDistance() const { return _drawnFlightDistance; }
     /// @return Meters along the mission where the vehicle reaches the item, NaN for unknown items
     double itemDistance(int itemIndex) const { return _itemDistances.value(itemIndex, qQNaN()); }
-    /// @return Meters the vehicle flies along the mission, more than totalDistance when DO_JUMP items repeat parts of it
+    /// @return Meters the vehicle flies along the mission, more than drawnFlightDistance when DO_JUMP items repeat
+    ///         parts of it
     double flightDistance() const { return _flightDistance; }
     /// @return Meters flown along the mission when the vehicle first reaches the item, NaN for unknown items
     double itemFlightDistance(int itemIndex) const { return _itemFlightDistances.value(itemIndex, qQNaN()); }
@@ -164,6 +171,7 @@ private:
     QHash<int, double> _itemFlightDistances;
     QHash<int, int> _sequenceNumbers;   ///< Of the visual items, by index
     double _flightDistance = 0;
+    double _drawnFlightDistance = 0;
     bool _repeatsIndefinitely = false;
     int _returnSegment = -1;            ///< Index of the drawn segment home after a return to launch item
     QList<ContingencyStart> _contingencyStarts;

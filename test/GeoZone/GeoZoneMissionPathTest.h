@@ -39,6 +39,7 @@ private slots:
 
     void _testMissionPathTimes();
     void _testMissionJumpWalk();
+    void _testFlightEndsAtReturn();
 #ifndef GEOZONE_CORE_TEST
     void _testMissionCoverage();
     void _testMissionJumps();

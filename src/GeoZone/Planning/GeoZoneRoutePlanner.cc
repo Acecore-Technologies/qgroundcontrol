@@ -302,8 +302,8 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
         // When the vehicle flies the leg, like for the mission check, which detours take too
         const double legEndDistance = missionPath.itemDistance(missionLeg.toItemIndex);
         const double legStartDistance = legEndDistance - ((segment.distance > 0) ? segment.distance : length);
-        legJob.leg.start = GeoZoneMissionPath::timeAt(legStartDistance, missionPath.totalDistance(), start, end);
-        legJob.leg.end = GeoZoneMissionPath::timeAt(legEndDistance, missionPath.totalDistance(), start, end);
+        legJob.leg.start = GeoZoneMissionPath::timeAt(legStartDistance, missionPath.drawnFlightDistance(), start, end);
+        legJob.leg.end = GeoZoneMissionPath::timeAt(legEndDistance, missionPath.drawnFlightDistance(), start, end);
 
         // The terrain along the leg from its samples or the terrain tiles, which climbs and descents need
         const int steps = std::clamp(static_cast<int>(std::ceil(length / kLegTerrainSpacing)), 1, kMaxLegTerrainSteps);

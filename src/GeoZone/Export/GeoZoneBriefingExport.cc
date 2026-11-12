@@ -440,8 +440,9 @@ GeoZoneBriefing GeoZoneBriefingExport::briefing() const
     const double missionTime = missionController ? missionController->missionTime() : qQNaN();
     if (start.isValid()) {
         mission.duration = static_cast<double>(start.secsTo(flightEnd));
-    } else if ((missionTime > 0) && (path.totalDistance() > 0)) {
-        mission.duration = missionTime * (path.flightDistance() / path.totalDistance());
+    } else if ((missionTime > 0) && (path.drawnFlightDistance() > 0)) {
+        // At the pace of the drawn flight path, which the mission time is of, through the repeats of DO_JUMP items
+        mission.duration = missionTime * ((std::max)(path.flightDistance(), path.drawnFlightDistance()) / path.drawnFlightDistance());
     }
     if (missionController) {
         mission.home = missionController->plannedHomePosition();

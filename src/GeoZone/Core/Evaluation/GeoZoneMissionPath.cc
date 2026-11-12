@@ -144,6 +144,7 @@ GeoZoneMissionPath GeoZoneMissionPath::fromSegments(const QList<Segment> &segmen
     path._areas = areas;
     path._paths = pathsFromSegments(segments);
     path._flightDistance = path.totalDistance();
+    path._drawnFlightDistance = path._flightDistance;
     return path;
 }
 
@@ -200,11 +201,12 @@ QDateTime GeoZoneMissionPath::timeAt(double distance, double totalDistance, cons
 
 QDateTime GeoZoneMissionPath::flightEnd(const QDateTime &start, const QDateTime &end) const
 {
-    const double total = totalDistance();
-    if (!start.isValid() || !end.isValid() || !(total > 0) || !(_flightDistance > total)) {
+    // The duration from start to end is that of the drawn flight path up to the first return to launch
+    const double drawn = _drawnFlightDistance;
+    if (!start.isValid() || !end.isValid() || !(drawn > 0) || !(_flightDistance > drawn)) {
         return end;
     }
-    return start.addMSecs(std::llround(static_cast<double>((std::max)(start.msecsTo(end), qint64{ 0 })) * (_flightDistance / total)));
+    return start.addMSecs(std::llround(static_cast<double>((std::max)(start.msecsTo(end), qint64{ 0 })) * (_flightDistance / drawn)));
 }
 
 QList<GeoZonePathEvaluator::Path> GeoZoneMissionPath::evaluatorPaths(const QDateTime &start, const QDateTime &end) const

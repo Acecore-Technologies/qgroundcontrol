@@ -85,6 +85,13 @@ GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, co
         path._legs.append(leg);
     }
 
+    // Without the segments of the items after the first return to launch, like the flight lines of a pattern
+    for (const GeoZoneMissionPath::Segment &segment : std::as_const(path._segments)) {
+        if ((returnItem < 0) || (segment.itemIndex < returnItem)) {
+            path._drawnFlightDistance += segment.distance;
+        }
+    }
+
     const FlightPaths flight = _flightPaths(path, missionItems, itemSegments);
     path._paths = flight.paths;
     path._itemFlightDistances = flight.itemDistances;
@@ -111,11 +118,6 @@ GeoZoneMissionPathBuilder::FlightPaths GeoZoneMissionPathBuilder::_flightPaths(c
     const QList<GeoZoneMissionPath::Segment> &segments = path._segments;
     FlightPaths flight;
     if (!GeoZoneMissionJumps::hasJumps(items)) {
-        flight.paths = GeoZoneMissionPath::pathsFromSegments(segments);
-        flight.itemDistances = path._itemDistances;
-        for (const GeoZoneMissionPath::Segment &segment : segments) {
-            flight.distance += segment.distance;
-        }
         // The mission ends at the first return to launch
         int returnFromItem = -1;
         for (int i = 0; i < items.count(); i++) {
@@ -128,6 +130,18 @@ GeoZoneMissionPathBuilder::FlightPaths GeoZoneMissionPathBuilder::_flightPaths(c
                 returnFromItem = i;
             }
         }
+        // Like the flight following DO_JUMP items, see GeoZoneMissionJumps::walk: the drawn segments of the items after
+        // the return, like the flight lines of a pattern, aren't flown. The segments are in the order of the items.
+        QList<GeoZoneMissionPath::Segment> flown;
+        for (const GeoZoneMissionPath::Segment &segment : segments) {
+            if ((flight.returnItem >= 0) && (segment.itemIndex > flight.returnItem)) {
+                break;
+            }
+            flown.append(segment);
+            flight.distance += segment.distance;
+        }
+        flight.paths = GeoZoneMissionPath::pathsFromSegments(flown);
+        flight.itemDistances = path._itemDistances;
         return flight;
     }
 
