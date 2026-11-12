@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <tuple>
 
 namespace {
@@ -640,8 +641,16 @@ QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation
 {
     // Zones authorised during the whole flight are listed for information
     const GeoZonePolicy policy = GeoZonePolicy::mission(evaluation.start, evaluation.end).excludingAuthorised(authorisations);
-    // Vehicles which support a fence can be stopped at prohibited zones by it
+    // Vehicles which support a fence can be stopped at prohibited zones by it. Its exclusion fences are the same for
+    // all zones, and only read once a prohibited zone needs them.
     const bool fenced = geoFenceController && geoFenceController->supported();
+    std::optional<GeoZoneFences::ZoneFences> exclusionFences;
+    const auto fenceExcludesZone = [&exclusionFences, geoFenceController](const GeoZone *zone) {
+        if (!exclusionFences) {
+            exclusionFences = GeoZoneFenceImporter::exclusionFences(geoFenceController);
+        }
+        return GeoZoneFences::fencesCover(*exclusionFences, zone);
+    };
     QList<Entry> entries;
     for (const GeoZone *zone : evaluation.zones) {
         Kinds kinds;
@@ -655,7 +664,7 @@ QList<GeoZoneMissionCheck::Entry> GeoZoneMissionCheck::classify(const Evaluation
         } else if (covering && (!covering->limitsPath() || scopeIssue.isEmpty())) {
             kinds = Authorised;
         } else if (GeoZonePolicy::isRestricted(zone->restriction())) {
-            const bool unfenced = fenced && (zone->restriction() == GeoZone::Prohibited) && !fenceExcludes(geoFenceController, zone);
+            const bool unfenced = fenced && (zone->restriction() == GeoZone::Prohibited) && !fenceExcludesZone(zone);
             kinds = unfenced ? (Crossed | Unfenced) : Kinds(Crossed);
             // A permit for another time or another part of the zone still leaves the zone to warn about
             if (covering) {
