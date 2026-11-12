@@ -377,6 +377,50 @@ void GeoZoneRepositoryTest::_testStoredCopyKeptUntilIndexSaved()
     QVERIFY(!QFile::exists(indexPath));
 }
 
+void GeoZoneRepositoryTest::_testInterruptedCopiesRemoved()
+{
+    const QTemporaryDir storageDir;
+    const QTemporaryDir sourceDir;
+    QVERIFY(storageDir.isValid() && sourceDir.isValid());
+    const QString ed318File = sourceDir.filePath(QStringLiteral("zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), ed318File));
+    const QDir dir(storageDir.path());
+    QString errorString;
+    QString storedFile;
+    {
+        GeoZoneManager manager(storageDir.path());
+        QVERIFY2(manager.repository()->loadFile(ed318File, errorString), qPrintable(errorString));
+        storedFile = manager.repository()->storedFileName(GeoZoneLoader::fileKey(ed318File));
+    }
+
+    // What a copy into the store, a download or the import of a pack left when the application died: the partial copy
+    // of the source's own copy, of another, and files of the downloads folder
+    const QString otherCopy = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QStringList partials = { storedFile + QStringLiteral(".part"), otherCopy + QStringLiteral(".zip.part"),
+                                   QStringLiteral("downloads/%1.part").arg(otherCopy), QStringLiteral("downloads/%1.json").arg(otherCopy) };
+    // Not the store's
+    const QStringList otherFiles = { QStringLiteral("notes.part"), QStringLiteral("notes.json.part") };
+    QVERIFY(dir.mkpath(QStringLiteral("downloads")));
+    for (const QString &name : partials + otherFiles) {
+        QFile file(dir.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(file.write("{ \"features\": [") > 0);
+    }
+
+    GeoZoneManager manager(storageDir.path());
+    manager.repository()->init();
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(manager.zoneCount(), 3);
+    for (const QString &name : partials) {
+        QVERIFY2(!dir.exists(name), qPrintable(name));
+    }
+    for (const QString &name : otherFiles) {
+        QVERIFY2(dir.exists(name), qPrintable(name));
+    }
+    QVERIFY(dir.exists(storedFile));
+    manager.repository()->clear();
+}
+
 void GeoZoneRepositoryTest::_testManagerBackgroundLoad()
 {
     const ScopedEnvironment environment;

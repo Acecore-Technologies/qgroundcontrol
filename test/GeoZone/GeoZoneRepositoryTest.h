@@ -21,6 +21,7 @@ private slots:
     void _testManagerLoadPersistClear();
     void _testManagerStoreFailures();
     void _testStoredCopyKeptUntilIndexSaved();
+    void _testInterruptedCopiesRemoved();
     void _testManagerBackgroundLoad();
     void _testFeedNotModified();
     void _testFeedDatasetLink();

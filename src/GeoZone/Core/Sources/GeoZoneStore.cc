@@ -21,6 +21,8 @@
 
 namespace {
 
+constexpr QLatin1StringView kPartialSuffix(".part");    ///< Of a copy being written, see GeoZoneStore::copyFile
+
 bool saveFile(const QString &path, const QByteArray &bytes, QString &errorString)
 {
     (void) QDir().mkpath(QFileInfo(path).absolutePath());
@@ -105,7 +107,7 @@ bool GeoZoneStore::copyFile(const QString &sourcePath, const QString &fileName, 
     }
     // Copied under a temporary name first, so an interrupted copy is never taken for a complete one
     const QString target = path(fileName);
-    const QString partial = target + QStringLiteral(".part");
+    const QString partial = target + kPartialSuffix;
     (void) QFile::remove(partial);
     QFile source(sourcePath);
     if (!source.copy(partial)) {
@@ -168,6 +170,14 @@ void GeoZoneStore::removeOrphanFiles(const QSet<QString> &referencedFileNames) c
     // Only what the store named itself: the directory also has files of others
     const QDir dir(_dir);
     for (const QString &fileName : dir.entryList(QDir::Files)) {
+        // What an interrupted copy left, see copyFile, is never a complete copy
+        if (fileName.endsWith(kPartialSuffix)) {
+            if (isStoredFileName(fileName.chopped(kPartialSuffix.size()))) {
+                qCDebug(GeoZoneSourceLog) << "Removing interrupted copy" << fileName;
+                (void) QFile::remove(dir.filePath(fileName));
+            }
+            continue;
+        }
         // The copies, and the caches of those removed or left by an interrupted removal
         const QString copyName = GeoZoneParseCache::isCacheFileName(fileName) ? QFileInfo(fileName).completeBaseName() : fileName;
         if (isStoredFileName(copyName) && !referencedFileNames.contains(copyName)) {

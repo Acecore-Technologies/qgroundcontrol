@@ -53,12 +53,13 @@ public:
 
     /// Directory in which downloads are written until they are adopted
     QString downloadDir() const;
-    /// Removes downloads left by a previous session
+    /// Removes the downloads and the files extracted from packs which a previous session left, also unfinished ones
     void clearDownloads() const;
     /// Removes a stored copy with its parse cache, see GeoZoneParseCache. Of a file the store didn't name, see
     /// isStoredFileName, only the cache is removed.
     void removeFile(const QString &fileName) const;
-    /// Removes the stored copies which aren't referenced, with their parse caches. Other files are left alone.
+    /// Removes the stored copies which aren't referenced, with their parse caches, and what interrupted copies left
+    /// (".part"). Other files are left alone. For startup, before anything is copied.
     void removeOrphanFiles(const QSet<QString> &referencedFileNames) const;
 
 private:
