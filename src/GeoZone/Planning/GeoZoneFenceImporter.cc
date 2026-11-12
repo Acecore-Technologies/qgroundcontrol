@@ -44,6 +44,11 @@ GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
     _fenceNoteTimer.setSingleShot(true);
     _fenceNoteTimer.setInterval(0);
     (void) connect(&_fenceNoteTimer, &QTimer::timeout, this, &GeoZoneFenceImporter::_updateFenceNote);
+    (void) connect(_upload, &GeoZoneFenceUpload::stateChanged, this, [this]() {
+        if (_upload->state() == GeoZoneFenceUpload::Sending) {
+            _rejectionHandled = false;
+        }
+    });
     (void) connect(GeoZoneManager::instance(), &GeoZoneManager::zonesChanged, this, [this]() {
         // The zones of the last selection may be gone
         _worker->invalidate();
@@ -125,6 +130,8 @@ void GeoZoneFenceImporter::_connectVehicle()
     if (Vehicle *const vehicle = _vehicle()) {
         // The capacity and warnings depend on the parameters
         (void) connect(vehicle->parameterManager(), &ParameterManager::parametersReadyChanged, _vehicleConnections, [this]() { _updateCapacity(); });
+        // ... and for PX4 on the firmware version
+        (void) connect(vehicle, &Vehicle::firmwareVersionChanged, _vehicleConnections, [this]() { _updateCapacity(); });
         // The fence the vehicle stores and its record change with its transfers, once those following them are done
         GeoFenceManager *const manager = vehicle->geoFenceManager();
         const auto transferred = [this]() { _fenceNoteTimer.start(); };
@@ -135,6 +142,38 @@ void GeoZoneFenceImporter::_connectVehicle()
     _fenceNoteTimer.start();
 }
 
+namespace {
+
+/// The capacities lowered after a rejected fence, of the vehicles connected
+QHash<const Vehicle*, GeoZoneFences::Capacity> &_reducedCapacities()
+{
+    static QHash<const Vehicle*, GeoZoneFences::Capacity> capacities;
+    return capacities;
+}
+
+GeoZoneFences::Capacity _firmwareCapacity(Vehicle *vehicle)
+{
+    if (vehicle->px4Firmware()) {
+        // 64 items from v1.15, 63 before
+        return GeoZoneFences::Capacity::px4(vehicle->firmwareMajorVersion(), vehicle->firmwareMinorVersion());
+    }
+    if (vehicle->apmFirmware()) {
+        int sdCardKB = 0;
+        // Flight controllers which can keep the fence on the SD card have 16 KB of storage or more. The others are
+        // assumed to have the smallest storage in common use, since the vehicle doesn't report it.
+        GeoZoneFences::Capacity::ArduPilotStorage storage = GeoZoneFences::Capacity::ArduPilotStorage::Common;
+        ParameterManager *const parameters = vehicle->parameterManager();
+        if (parameters->parametersReady() && parameters->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("BRD_SD_FENCE"))) {
+            sdCardKB = parameters->getParameter(ParameterManager::defaultComponentId, QStringLiteral("BRD_SD_FENCE"))->rawValue().toInt();
+            storage = GeoZoneFences::Capacity::ArduPilotStorage::Large;
+        }
+        return GeoZoneFences::Capacity::arduPilot(vehicle->multiRotor(), sdCardKB, storage);
+    }
+    return GeoZoneFences::Capacity::conservative();
+}
+
+} // namespace
+
 GeoZoneFences::Capacity GeoZoneFenceImporter::vehicleCapacity(Vehicle *vehicle)
 {
     if (!vehicle || vehicle->isOfflineEditingVehicle()) {
@@ -143,18 +182,44 @@ GeoZoneFences::Capacity GeoZoneFenceImporter::vehicleCapacity(Vehicle *vehicle)
     if (vehicle->capabilitiesKnown() && !(vehicle->capabilityBits() & MAV_PROTOCOL_CAPABILITY_MISSION_FENCE)) {
         return GeoZoneFences::Capacity::unsupported();
     }
-    if (vehicle->px4Firmware()) {
-        return GeoZoneFences::Capacity::px4();
+    const GeoZoneFences::Capacity capacity = _firmwareCapacity(vehicle);
+    const auto reduced = _reducedCapacities().constFind(vehicle);
+    if (reduced == _reducedCapacities().cend()) {
+        return capacity;
     }
-    if (vehicle->apmFirmware()) {
-        int sdCardKB = 0;
-        ParameterManager *const parameters = vehicle->parameterManager();
-        if (parameters->parametersReady() && parameters->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("BRD_SD_FENCE"))) {
-            sdCardKB = parameters->getParameter(ParameterManager::defaultComponentId, QStringLiteral("BRD_SD_FENCE"))->rawValue().toInt();
-        }
-        return GeoZoneFences::Capacity::arduPilot(vehicle->multiRotor(), sdCardKB);
+    // What the vehicle rejected stays rejected, whatever is learned about it since
+    const bool lower = (reduced->storageBytes > 0) ? ((capacity.storageBytes <= 0) || (reduced->storageBytes < capacity.storageBytes))
+                                                   : ((capacity.maxItems <= 0) || (reduced->maxItems < capacity.maxItems));
+    return lower ? *reduced : capacity;
+}
+
+void GeoZoneFenceImporter::reduceCapacity(Vehicle *vehicle, const GeoZoneFences::Usage &rejected)
+{
+    if (!vehicle || vehicle->isOfflineEditingVehicle()) {
+        return;
     }
-    return GeoZoneFences::Capacity::conservative();
+    const GeoZoneFences::Capacity reduced = vehicleCapacity(vehicle).reducedBelow(rejected);
+    if (!_reducedCapacities().contains(vehicle)) {
+        // The address of a destroyed vehicle may be reused by the next one
+        (void) connect(vehicle, &QObject::destroyed, vehicle, [vehicle]() { (void) _reducedCapacities().remove(vehicle); });
+    }
+    _reducedCapacities().insert(vehicle, reduced);
+}
+
+void GeoZoneFenceImporter::retryWithFewerZones()
+{
+    Vehicle *const vehicle = _vehicle();
+    if (!vehicle || !_geoFenceController || !_upload->rejectedForRoom()) {
+        return;
+    }
+    // Once for each fence rejected, also when the question which follows is cancelled and asked again
+    if (!_rejectionHandled) {
+        _rejectionHandled = true;
+        reduceCapacity(vehicle, _upload->sentUsage());
+    }
+    // Selects again for the smaller storage, then asks about the zones no longer fenced
+    _updateCapacity();
+    requestUpload();
 }
 
 GeoZoneFences::Usage GeoZoneFenceImporter::keptUsage(GeoFenceController *geoFenceController)
@@ -611,16 +676,30 @@ QString GeoZoneFenceImporter::_capacityNote() const
         return tr("The vehicle doesn't support fences through the mission protocol, like ArduPilot before 4.0.");
     }
     if (!vehicle || vehicle->isOfflineEditingVehicle() || (_geoFenceController->masterController() && _geoFenceController->masterController()->offline())) {
-        return tr("No vehicle connected: limits PX4 and ArduPilot copters both meet, with circles as polygons.");
+        return tr("No vehicle connected: estimated limits which PX4 and ArduPilot copters with 8 KB of storage or more both meet, with circles as polygons.");
+    }
+    const QString retry = tr("The vehicle rejects a fence which doesn't fit: the upload then offers to retry with fewer zones.");
+    if (_capacity.reduced) {
+        return tr("The vehicle rejected a larger fence for lack of room, so less storage is assumed until it reconnects.") + QLatin1Char(' ') + retry;
     }
     if (vehicle->px4Firmware()) {
-        return tr("PX4 stores at most %1 fence points, a firmware limit: it rejects larger fences.").arg(GeoZoneFences::Capacity::px4MaxItems);
+        const QString constrained = tr("Flight controllers with constrained memory only store %1, which the vehicle doesn't report.").arg(GeoZoneFences::Capacity::px4ConstrainedMaxItems);
+        if (_capacity.estimated) {
+            return tr("PX4 stores %1 fence points from v%2.%3 and %4 before. The firmware version isn't known, so %4 are assumed.")
+                .arg(GeoZoneFences::Capacity::px4MaxItems).arg(GeoZoneFences::Capacity::px4FullItemsMajor).arg(GeoZoneFences::Capacity::px4FullItemsMinor)
+                .arg(GeoZoneFences::Capacity::px4LegacyMaxItems) + QLatin1Char(' ') + constrained + QLatin1Char(' ') + retry;
+        }
+        return tr("PX4 %1.%2 stores at most %3 fence points, a firmware limit.").arg(vehicle->firmwareMajorVersion()).arg(vehicle->firmwareMinorVersion()).arg(_capacity.maxItems) +
+               QLatin1Char(' ') + constrained + QLatin1Char(' ') + retry;
     }
     if (vehicle->apmFirmware()) {
         if (!_capacity.estimated) {
-            return tr("ArduPilot fence stored on the SD card (BRD_SD_FENCE), a firmware limit: it rejects larger fences.");
+            return tr("ArduPilot fence stored on the SD card (BRD_SD_FENCE), a firmware limit. Without the card the flight controller stores less.") + QLatin1Char(' ') + retry;
         }
-        return tr("Estimated for ArduPilot flight controllers with 16 KB storage, others store fewer points. ArduPilot rejects a fence which doesn't fit, the upload then reports it.");
+        const bool large = _capacity.storageBytes == GeoZoneFences::Capacity::arduPilotBytes(vehicle->multiRotor(), GeoZoneFences::Capacity::ArduPilotStorage::Large);
+        return (large ? tr("ArduPilot doesn't report its fence storage: estimated for flight controllers with 16 KB of storage or more, like those which can store the fence on the SD card.")
+                      : tr("ArduPilot doesn't report its fence storage: estimated for flight controllers with 8 KB of storage. Those with 16 KB store more, those with 4 KB fewer points.")) +
+               QLatin1Char(' ') + retry;
     }
     return tr("Estimated, the autopilot doesn't report its fence storage. Circles are added as polygons.");
 }
@@ -668,9 +747,19 @@ QVariantMap GeoZoneFenceImporter::capacityInfo() const
     if (!_capacity.exclusions) {
         text = tr("Vehicle fence: not supported");
     } else if (_capacity.maxItems > 0) {
-        text = tr("Vehicle fence: %1 of %n points", nullptr, _capacity.maxItems).arg(usage.items);
-        if (_capacity.storageBytes > 0) {
-            text += tr(", %1 of %n bytes", nullptr, _capacity.storageBytes).arg(usage.items > 0 ? usage.bytes + GeoZoneFences::Capacity::arduPilotFixedBytes : 0);
+        // An estimate isn't shown like a limit the vehicle is known to have
+        const int usedBytes = (usage.items > 0) ? (usage.bytes + GeoZoneFences::Capacity::arduPilotFixedBytes) : 0;
+        if (_capacity.estimated) {
+            text = tr("Vehicle fence: %1 of about %n points", nullptr, _capacity.maxItems).arg(usage.items);
+            if (_capacity.storageBytes > 0) {
+                text += tr(", %1 of about %n bytes", nullptr, _capacity.storageBytes).arg(usedBytes);
+            }
+            text += tr(" (estimated)");
+        } else {
+            text = tr("Vehicle fence: %1 of %n points", nullptr, _capacity.maxItems).arg(usage.items);
+            if (_capacity.storageBytes > 0) {
+                text += tr(", %1 of %n bytes", nullptr, _capacity.storageBytes).arg(usedBytes);
+            }
         }
     } else {
         text = tr("Vehicle fence: %n point(s)", nullptr, usage.items);
@@ -688,6 +777,7 @@ QVariantMap GeoZoneFenceImporter::capacityInfo() const
         { QStringLiteral("circles"),        _capacity.circles },
         { QStringLiteral("supported"),      _capacity.exclusions },
         { QStringLiteral("estimated"),      _capacity.estimated },
+        { QStringLiteral("reduced"),        _capacity.reduced },
     };
 }
 

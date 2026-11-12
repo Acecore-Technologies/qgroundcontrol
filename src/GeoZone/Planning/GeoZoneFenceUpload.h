@@ -21,6 +21,7 @@
 #include <optional>
 
 #include "GeoZoneFenceTags.h"
+#include "GeoZoneFences.h"
 #include "GeoZoneSourceVersion.h"
 
 class GeoFenceController;
@@ -50,6 +51,10 @@ class GeoZoneFenceUpload : public QObject
     Q_PROPERTY(QString              message             READ message            NOTIFY stateChanged FINAL)
     Q_PROPERTY(bool                 busy                READ busy               NOTIFY stateChanged FINAL)          ///< Sending or Verifying
     Q_PROPERTY(bool                 canUpload           READ canUpload          NOTIFY canUploadChanged FINAL)      ///< A vehicle supporting fences is connected
+    /// The upload failed because the vehicle has no room for the fence: it answered MAV_MISSION_NO_SPACE, or ArduPilot
+    /// MAV_MISSION_ERROR, which it does for fences exceeding its storage. A smaller fence may be stored, see
+    /// GeoZoneFenceImporter::retryWithFewerZones.
+    Q_PROPERTY(bool                 rejectedForRoom     READ rejectedForRoom    NOTIFY stateChanged FINAL)
 
 public:
     explicit GeoZoneFenceUpload(QObject *parent = nullptr);
@@ -78,6 +83,9 @@ public:
     QString message() const { return _message; }
     bool busy() const { return (_state == Sending) || (_state == Verifying); }
     bool canUpload() const;
+    bool rejectedForRoom() const { return (_state == Failed) && _rejectedForRoom; }
+    /// @return Storage the fence of the last upload takes on the vehicle, see rejectedForRoom
+    GeoZoneFences::Usage sentUsage() const;
 
     /// Sends the fence of the controller to the plan's vehicle, unless an upload is in progress
     Q_INVOKABLE void start();
@@ -183,4 +191,5 @@ private:
     Verification _sentRecord;                           ///< Of the fence sent, with the zones the plan didn't fence then
     QString _error;                                     ///< Reported by the fence manager
     int _ackResult = 0;                                 ///< MAV_MISSION_RESULT of the last fence MISSION_ACK, 0 when accepted
+    bool _rejectedForRoom = false;
 };

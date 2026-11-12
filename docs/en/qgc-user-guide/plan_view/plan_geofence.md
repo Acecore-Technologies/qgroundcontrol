@@ -51,7 +51,7 @@ You can then edit the region on the map as described in the previous section.
 Regions can be deleted by pressing the associated **Del** button.
 
 Fences added from geozones are also listed by the name of their zone under **Geozone Fences**, with their place in the lists of polygon and circular fences: click a name to select the fence, which also moves the map to it, and press **Delete Geozone Fences** to delete all of them.
-The panel also shows the number of fence points (polygon vertices, one point per circle and the breach return point) and, for PX4 vehicles, which store at most 64 points, how many the vehicle can store.
+The panel also shows the number of fence points (polygon vertices, one point per circle and the breach return point) and, with a connected vehicle, how many it can store, marked as estimated when the vehicle may store fewer (see [the fence storage of PX4 and ArduPilot](../geozones/geozones.md#add-geozones-to-the-geofence)).
 
 ## Upload a GeoFence
 

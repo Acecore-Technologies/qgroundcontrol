@@ -462,13 +462,23 @@ If the vehicle supports GeoFences, loaded zones can be converted into exclusion 
 
 **Help** shows the explanations of the dialog. The selected zones are listed first, then the zones left out under a line like _193 geozones NOT fenced, 2 covered by other fences_ in the warning color, listed in gray except prohibited zones the planned flight enters, which stay red. **Hide** collapses that list.
 
-The dialog shows how much of the vehicle's fence the selection uses, like _Vehicle fence: 52 of 64 points_:
+The dialog shows how much of the vehicle's fence the selection uses, like _Vehicle fence: 52 of 64 points_. Autopilots don't report how much fence they store, so a limit which the vehicle may not have is shown as an estimate, like _Vehicle fence: 30 of about 37 points, 250 of about 304 bytes (estimated)_, also for the fence points in the GeoFence panel:
 
-- **PX4** stores 64 fence items: one per polygon vertex, circle and breach return point.
-- **ArduPilot** (4.0 and later) stores the fence in a storage area of the flight controller: each polygon takes 2 bytes plus 8 bytes per vertex, each circle 13 bytes and the return point 9 bytes, and a polygon has at most 255 vertices. On flight controllers with 16 KB of storage, like the Pixhawk and Cube, Copter (and Heli) has 560 bytes (70 items) and Plane, Rover and Sub have 672 bytes (84 items). Flight controllers with less storage hold fewer points; a rejected upload is reported. When `BRD_SD_FENCE` stores the fence on the SD card, its size is used instead. `FENCE_TOTAL` only counts the points of the last upload and is not a limit.
-- Without a connected vehicle the fence is fitted to what both PX4 and ArduPilot copters store (64 points, 560 bytes) and circles are added as polygons enclosing them.
+- **PX4** stores 64 fence items from v1.15 and 63 before: one per polygon vertex, circle and breach return point. The limit follows the firmware version the vehicle reports; without one, 63 are assumed as an estimate. Flight controllers with constrained memory only store 16, which the vehicle doesn't report.
+- **ArduPilot** (4.0 and later) stores the fence in a storage area of the flight controller: each polygon takes 2 bytes plus 8 bytes per vertex, each circle 13 bytes and the return point 9 bytes, after a 4 byte header, and a polygon has at most 255 vertices. The size of the area depends on the storage of the flight controller and isn't reported:
 
-The fence budget is a hard limit of the autopilot, not of _QGroundControl_: PX4 rejects a fence of more than 64 items (`MAV_MISSION_NO_SPACE`), ArduPilot rejects more items than its storage holds (`MAV_MISSION_NO_SPACE`, "Only N items are supported") and fences which need more bytes than its storage has (`MAV_MISSION_ERROR`, "Fence exceeds storage size"). PX4's limit is fixed in its firmware (`DM_KEY_FENCE_POINTS_MAX`); ArduPilot's depends on the flight controller and isn't reported, so _QGroundControl_ estimates it unless the fence is on the SD card. When the vehicle rejects an upload, the dialog says why, the fence on the vehicle stays as it was and the plan's fence stays marked as changed: leave out zones or allow more simplification and upload again.
+  | Storage of the flight controller | Copter and Heli | Plane, Rover and Sub |
+  |---|---|---|
+  | 16 KB and more (Pixhawk, Cube), or 15 KB with CAN | 560 bytes (69 items) | 672 bytes (83 items) |
+  | 8 KB, or 15 KB without CAN | 304 bytes (37 items) | 416 bytes (51 items) |
+  | 4 KB | 48 bytes (5 items) | 160 bytes (19 items) |
+
+  _QGroundControl_ assumes the 8 KB row, the smallest storage in common use, so that it doesn't promise room a small flight controller lacks: a Pixhawk or Cube stores more than shown. A vehicle with the `BRD_SD_FENCE` parameter can keep the fence on the SD card and has 16 KB of storage or more: with the parameter at 0 the first row is assumed, otherwise the size it sets is used and not marked as estimated (without the card the flight controller stores less). `FENCE_TOTAL` only counts the points of the last upload and is not a limit.
+- Without a connected vehicle the fence is fitted to what both PX4 and ArduPilot copters with 8 KB of storage hold (63 points, 304 bytes), as an estimate, and circles are added as polygons enclosing them.
+
+The fence budget is a hard limit of the autopilot, not of _QGroundControl_: PX4 rejects a fence of more items than it stores (`MAV_MISSION_NO_SPACE`), ArduPilot rejects more items than its storage holds (`MAV_MISSION_NO_SPACE`, "Only N items are supported") and fences which need more bytes than its storage has (`MAV_MISSION_ERROR`, "Fence exceeds storage size"). When the vehicle rejects an upload, the dialog says why, the fence on the vehicle stays as it was and the plan's fence stays marked as changed.
+
+When the vehicle rejects the fence for lack of room, it stores less than assumed, and the dialog offers **Retry with Fewer Zones**: it assumes the next smaller storage known for the autopilot which doesn't hold the rejected fence (for PX4 63, then 16 points; for ArduPilot the next row of the table; then one point less each time), selects the zones which fit into it, asks about the zones this leaves out and uploads again. The smaller storage is assumed for the vehicle until it disconnects, and shown as an estimate. You can also leave out zones or allow more simplification yourself and upload again.
 
 The panel warns when the vehicle won't enforce exclusion fences: ArduPilot with `FENCE_TYPE` lacking polygon fences or `FENCE_ENABLE` at 0, PX4 with `GF_ACTION` set to None.
 
@@ -515,7 +525,7 @@ Each fence from a geozone also keeps the zone's key, the content hash of its dat
 
 ::: warning
 GeoFences have no altitude limits, so a zone's vertical limits are not transferred and the whole zone is excluded at all altitudes.
-Holes in zone polygons are also dropped. The ArduPilot fence storage is estimated, so verify the upload.
+Holes in zone polygons are also dropped. The fence storage of the vehicle is estimated unless the dialog shows it without "about", so verify the upload.
 Autopilots fill a fence polygon with the even-odd rule: where the published boundary of a zone crosses itself and encloses an area twice, its fence leaves that area open. The [mission check](#mission-check) and the pre-flight checklist then report the zone as not excluded by the fence.
 :::
 
@@ -689,13 +699,13 @@ PX4 doesn't send `FENCE_STATUS`. For a vehicle which doesn't report its fence st
 
 | | PX4 | ArduPilot (Copter 4.x) |
 |---|---|---|
-| Fence storage | 64 items, a firmware limit | Storage of the flight controller (estimated, 560 bytes for Copter on 16 KB boards) or the SD card (`BRD_SD_FENCE`), at most 255 vertices per polygon |
+| Fence storage | 64 items from v1.15, 63 before, 16 on flight controllers with constrained memory: a firmware limit | Storage of the flight controller (estimated, 304 bytes for Copter on 8 KB boards, 560 on 16 KB boards) or the SD card (`BRD_SD_FENCE`), at most 255 vertices per polygon |
 | Fence types | Inclusion and exclusion polygons and circles (inclusions as their union), `GF_MAX_HOR_DIST` from home, `GF_MAX_VER_DIST` above home | `FENCE_TYPE`: inclusion and exclusion polygons and circles (inclusions as their intersection, or union with `FENCE_OPTIONS` bit 1), the `FENCE_RADIUS` circle around home, `FENCE_ALT_MAX`, `FENCE_ALT_MIN` |
 | Enabled | Unless `GF_ACTION` is None | `FENCE_ENABLE`, `FENCE_AUTOENABLE`, an RC switch or `MAV_CMD_DO_FENCE_ENABLE` |
 | Action at a breach | `GF_ACTION`: none, warning, hold, return, flight termination, land | `FENCE_ACTION`: report only, RTL or land, land, SmartRTL or RTL or land, brake or land, SmartRTL or land; land beyond 100 m outside; disarm when landed |
 | Margin | None | `FENCE_MARGIN` / `FENCE_MARGIN_XY`, counted by the geofence warning |
 | Override | Flight mode change (Hold: mode switch only); termination can't be overridden | Flight mode change (10 s manual recovery), unless `FENCE_OPTIONS` bit 0; disabling the fence |
-| In _QGroundControl_ | Fence import capacity 64 points; geofence warning; breach alert; **Take Control** (_Position_) | Fence import capacity estimated or from the SD card; geofence warning with the margin; breach alert; **Take Control** (_Loiter_), **Disable Fence** |
+| In _QGroundControl_ | Fence import capacity 64 or 63 points by firmware version; geofence warning; breach alert; **Take Control** (_Position_) | Fence import capacity estimated or from the SD card; geofence warning with the margin; breach alert; **Take Control** (_Loiter_), **Disable Fence** |
 
 In both cases a flight towards a fenced zone gives, in this order: the geozone approach alert (spoken, asking for the permission for restricted zones), the geofence warning about 8 seconds before the fence (with the default profile) (red, above the geozone alerts, spoken), then the breach alert when the vehicle reports it (ArduPilot) or its position is past the fence (PX4), which replaces the warning. The vehicle stops at the fence, before the zone, so there is no entry alert. The breach is announced by _QGroundControl_ and the vehicle ("boundary fence breached", the new flight mode), not repeated by the geozone alerts.
 

@@ -28,9 +28,11 @@ Column {
 
     readonly property var   _polygons:  geoFenceController.polygons
     readonly property var   _circles:   geoFenceController.circles
-    readonly property var   _vehicle:   geoFenceController.masterController ? geoFenceController.masterController.managerVehicle : null
     readonly property real  _margin:    ScreenTools.defaultFontPixelWidth / 2
-    readonly property int   _pointLimit: (_vehicle && _vehicle.px4Firmware) ? 64 : 0   // PX4 dataman fence storage (DM_KEY_FENCE_POINTS_MAX)
+    // What a connected vehicle stores, see GeoZoneFenceImporter::capacityInfo: estimated unless the vehicle is known to have it
+    readonly property var   _capacity:      staleImporter.capacity
+    readonly property int   _pointLimit:    staleImporter.upload.canUpload ? (_capacity.maxItems ?? 0) : 0
+    readonly property bool  _limitEstimated: _capacity.estimated ?? false
 
     // Polygon vertices, one point per circle and the breach return point, as vehicles store them
     readonly property int _pointCount: {
@@ -84,7 +86,9 @@ Column {
         wrapMode:       Text.WordWrap
         font.pointSize: ScreenTools.smallFontPointSize
         color:          (_pointLimit > 0 && _pointCount > _pointLimit) ? qgcPal.warningText : qgcPal.text
-        text:           _pointLimit > 0 ? qsTr("Fence points: %1 of %2 the vehicle can store").arg(_pointCount).arg(_pointLimit) : qsTr("Fence points: %1").arg(_pointCount)
+        text:           _pointLimit > 0 ? (_limitEstimated ? qsTr("Fence points: %1 of about %2 the vehicle can store (estimated)").arg(_pointCount).arg(_pointLimit)
+                                                           : qsTr("Fence points: %1 of %2 the vehicle can store").arg(_pointCount).arg(_pointLimit))
+                                        : qsTr("Fence points: %1").arg(_pointCount)
         visible:        _pointCount > 0
     }
 

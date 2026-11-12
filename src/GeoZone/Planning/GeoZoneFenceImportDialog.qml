@@ -552,5 +552,28 @@ QGCPopupDialog {
                 color:              (_upload.state === GeoZoneFenceUpload.Failed || _upload.state === GeoZoneFenceUpload.Mismatch || _upload.state === GeoZoneFenceUpload.Aborted) ? qgcPal.warningText : qgcPal.text
             }
         }
+
+        // The vehicle had no room for the fence: the capacity shown was more than it stores
+        RowLayout {
+            Layout.preferredWidth:  _contentWidth
+            spacing:                _margin
+            visible:                _upload.rejectedForRoom
+
+            QGCButton {
+                text:       qsTr("Retry with Fewer Zones")
+                enabled:    !control._uploading
+                onClicked: {
+                    control._flushSelection()
+                    importer.retryWithFewerZones()
+                }
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                text:               qsTr("Assumes the next smaller fence storage for this vehicle, selects the zones which fit into it and uploads them.")
+            }
+        }
     }
 }

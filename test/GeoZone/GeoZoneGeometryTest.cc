@@ -705,38 +705,85 @@ void GeoZoneGeometryTest::_testFenceCapacity()
     usage.addReturnPoint();
     QCOMPARE(usage, (Usage{ 6, 34 + 13 + 9, 4 }));
 
-    // PX4 stores 64 items
-    Usage polygon64;
-    polygon64.addPolygon(64);
-    QVERIFY(Capacity::px4().fits(polygon64));
-    QVERIFY(!Capacity::px4().fits(polygon64 + usage));
+    // PX4 stores 64 items from v1.15 and 63 before. Without the version the smaller is assumed, as an estimate.
+    const auto polygonOf = [](int vertexCount) {
+        Usage polygon;
+        polygon.addPolygon(vertexCount);
+        return polygon;
+    };
+    QVERIFY(Capacity::px4(1, 15).fits(polygonOf(64)));
+    QVERIFY(!Capacity::px4(1, 15).fits(polygonOf(64) + usage));
+    QVERIFY(!Capacity::px4(1, 15).estimated);
+    QCOMPARE(Capacity::px4(2, 0).maxItems, Capacity::px4MaxItems);
+    QCOMPARE(Capacity::px4(1, 14).maxItems, 63);
+    QVERIFY(!Capacity::px4(1, 14).estimated);
+    QVERIFY(!Capacity::px4(1, 14).fits(polygonOf(64)));
+    QCOMPARE(Capacity::px4().maxItems, 63);
+    QVERIFY(Capacity::px4().estimated);
+    QVERIFY(Capacity::px4(1, -1).estimated);
 
-    // ArduPilot copters store 70 items in 560 bytes, so the polygon bytes fill the storage before the items
+    // ArduPilot doesn't report its fence storage: what flight controllers with 8 KB of storage have is assumed, 304 bytes
+    // for copters, whose item limit leaves out the 4 byte header. The polygon bytes fill the storage before the items.
     const Capacity copter = Capacity::arduPilot(true);
-    QCOMPARE(copter.maxItems, 70);
+    QCOMPARE(copter.storageBytes, 304);
+    QCOMPARE(copter.maxItems, 37);
     QVERIFY(copter.estimated);
-    Usage polygon69;
-    polygon69.addPolygon(69);
-    Usage polygon70;
-    polygon70.addPolygon(70);
-    QVERIFY(copter.fits(polygon69));
-    QVERIFY(!copter.fits(polygon70));
-    QCOMPARE(Capacity::arduPilot(false).maxItems, 84);
+    QVERIFY(copter.fits(polygonOf(37)));
+    QVERIFY(!copter.fits(polygonOf(38)));
+    QCOMPARE(Capacity::arduPilot(false).storageBytes, 416);
+    QCOMPARE(Capacity::arduPilot(false).maxItems, 51);
+    // Flight controllers known to have 16 KB of storage hold 560 or 672 bytes, those with 4 KB 48 or 160
+    const Capacity large = Capacity::arduPilot(true, 0, Capacity::ArduPilotStorage::Large);
+    QCOMPARE(large.maxItems, 69);
+    QVERIFY(large.estimated);
+    QVERIFY(large.fits(polygonOf(69)));
+    QVERIFY(!large.fits(polygonOf(70)));
+    QCOMPARE(Capacity::arduPilotBytes(false, Capacity::ArduPilotStorage::Large), 672);
+    QCOMPARE(Capacity::arduPilot(true, 0, Capacity::ArduPilotStorage::Small).maxItems, 5);
+    QCOMPARE(Capacity::arduPilot(false, 0, Capacity::ArduPilotStorage::Small).storageBytes, 160);
     // Fences stored on the SD card hold more, but no polygon of more than 255 vertices
     const Capacity sdCard = Capacity::arduPilot(true, 4);
     QVERIFY(!sdCard.estimated);
-    QCOMPARE(sdCard.maxItems, 512);
-    Usage polygon255;
-    polygon255.addPolygon(255);
-    Usage polygon256;
-    polygon256.addPolygon(256);
-    QVERIFY(sdCard.fits(polygon255));
-    QVERIFY(!sdCard.fits(polygon256));
+    QCOMPARE(sdCard.storageBytes, 4096);
+    QCOMPARE(sdCard.maxItems, 511);
+    QVERIFY(sdCard.fits(polygonOf(255)));
+    QVERIFY(!sdCard.fits(polygonOf(256)));
+    // ... at most what ArduPilot addresses, whatever the parameter says
+    QCOMPARE(Capacity::arduPilot(true, 64).storageBytes, Capacity::arduPilotMaxBytes);
+    QCOMPARE(Capacity::arduPilot(true, (std::numeric_limits<int>::max)()).storageBytes, Capacity::arduPilotMaxBytes);
+    QVERIFY(Capacity::arduPilot(true, -3).estimated);
     // Without a vehicle the fence fits both, without circles
     QVERIFY(!Capacity::conservative().circles);
-    QVERIFY(!Capacity::conservative().fits(polygon70));
+    QVERIFY(Capacity::conservative().estimated);
+    QVERIFY(Capacity::conservative().fits(polygonOf(37)));
+    QVERIFY(!Capacity::conservative().fits(polygonOf(38)));
     QVERIFY(Capacity::unsupported().fits(Usage()));
     QVERIFY(!Capacity::unsupported().fits(usage));
+
+    // A vehicle rejecting a fence for lack of room stores less than assumed: the next smaller storage known which
+    // doesn't hold the fence, as an estimate
+    Capacity reduced = Capacity::px4(1, 15).reducedBelow(polygonOf(64));
+    QCOMPARE(reduced.maxItems, 63);
+    QVERIFY(reduced.estimated && reduced.reduced);
+    reduced = reduced.reducedBelow(polygonOf(40));
+    QCOMPARE(reduced.maxItems, Capacity::px4ConstrainedMaxItems);
+    reduced = reduced.reducedBelow(polygonOf(12));
+    QCOMPARE(reduced.maxItems, 11);
+    QCOMPARE(reduced.reducedBelow(polygonOf(1)).maxItems, 1);
+    reduced = large.reducedBelow(polygonOf(50));
+    QCOMPARE(reduced.storageBytes, 304);
+    QCOMPARE(reduced.maxItems, 37);
+    QVERIFY(reduced.estimated && reduced.reduced);
+    QVERIFY(!reduced.fits(polygonOf(50)));
+    reduced = reduced.reducedBelow(polygonOf(30));
+    QCOMPARE(reduced.storageBytes, 160);
+    reduced = reduced.reducedBelow(polygonOf(4));
+    QCOMPARE(reduced.storageBytes, 2 + (4 * 8) + Capacity::arduPilotFixedBytes - 1);
+    QVERIFY(!reduced.fits(polygonOf(4)));
+    // ... also when the fence was to be on the SD card, like without the card
+    reduced = sdCard.reducedBelow(polygonOf(200));
+    QCOMPARE(reduced.storageBytes, 672);
+    QVERIFY(reduced.estimated);
 
     // Circles become polygons enclosing them for vehicles without fence circles, fewer vertices when simplified
     ZoneOwner owner;
@@ -925,7 +972,8 @@ void GeoZoneGeometryTest::_testFenceSelection()
 
     // PX4 stores 64 points: the zones fit in priority order, a smaller one after a zone without room still fits
     const auto choiceZone = [](const Choice &choice) { return choice.candidate.zone; };
-    Selection selection = select(candidateList, Capacity::px4());
+    const Capacity px4 = Capacity::px4(Capacity::px4FullItemsMajor, Capacity::px4FullItemsMinor);
+    Selection selection = select(candidateList, px4);
     QCOMPARE(names(selection.choices, choiceZone), QStringList({ QStringLiteral("Prohibited entered"), QStringLiteral("Prohibited near"), QStringLiteral("Prohibited far"),
                                                                  QStringLiteral("Prohibited farther"), QStringLiteral("Authorisation entered"), QStringLiteral("Conditional small"),
                                                                  QStringLiteral("Overflown"), QStringLiteral("Prohibited far copy"), QStringLiteral("Conditional near"),
@@ -970,7 +1018,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     for (Candidate &candidate : withoutFar) {
         candidate.excluded = candidate.excluded || (candidate.zone == farProhibited);
     }
-    selection = select(withoutFar, Capacity::px4());
+    selection = select(withoutFar, px4);
     QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(farProhibited).status, Status::Excluded);
     QCOMPARE(choiceOf(duplicate).status, Status::Duplicate);
@@ -982,7 +1030,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     // Kept fences take room, and fences which don't fit even alone are too large
     Usage kept;
     kept.addPolygon(30);
-    selection = select(candidateList, Capacity::px4(), kept);
+    selection = select(candidateList, px4, kept);
     QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(enteredRound).status, Status::TooLarge);
     QCOMPARE(choiceOf(nearProhibited).status, Status::Selected);
@@ -994,7 +1042,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     QList<Candidate> userChoice = candidateList;
     userChoice.erase(std::remove_if(userChoice.begin(), userChoice.end(), [uSpace](const Candidate &candidate) { return candidate.zone == uSpace; }), userChoice.end());
     userChoice.append(leftOut);
-    selection = select(userChoice, Capacity::px4(), kept, { 0, 10, 25, 50 });
+    selection = select(userChoice, px4, kept, { 0, 10, 25, 50 });
     QCOMPARE(choiceZones(), allZones);
     QCOMPARE(choiceOf(uSpace).status, Status::Excluded);
     QCOMPARE(statusText(choiceOf(uSpace)), QStringLiteral("Left out by you"));
@@ -1003,7 +1051,7 @@ void GeoZoneGeometryTest::_testFenceSelection()
     QVERIFY(choiceOf(enteredRound).usage.items < 40);
     QCOMPARE(choiceOf(enteredRound).fences, zoneFences(enteredRound, choiceOf(enteredRound).simplifyTolerance));
     QVERIFY(fencesCover(choiceOf(enteredRound).fences, enteredRound));
-    QVERIFY(Capacity::px4().fits(selection.usage));
+    QVERIFY(px4.fits(selection.usage));
     Usage total = kept;
     for (const Choice &choice : selection.choices) {
         if (choice.status == Status::Selected) {

@@ -16,6 +16,7 @@
 #include <QtCore/QHash>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
@@ -307,23 +308,51 @@ bool Capacity::fits(const Usage &usage) const
            ((maxPolygonVertices <= 0) || (usage.largestPolygon <= maxPolygonVertices));
 }
 
-Capacity Capacity::px4()
+namespace {
+
+// Fence areas of ArduPilot's StorageManager layouts, largest first, see Capacity::ArduPilotStorage
+constexpr std::array<int, 3> arduPilotCopterLayouts = { 560, 304, 48 };
+constexpr std::array<int, 3> arduPilotOtherLayouts = { 672, 416, 160 };
+
+int _arduPilotMaxItems(int storageBytes)
+{
+    return (std::max)(storageBytes - Capacity::arduPilotHeaderBytes, 0) / Capacity::arduPilotItemBytes;
+}
+
+} // namespace
+
+Capacity Capacity::px4(int majorVersion, int minorVersion)
 {
     Capacity capacity;
-    capacity.maxItems = px4MaxItems;
+    if ((majorVersion < 0) || (minorVersion < 0)) {
+        // The smaller of both, since the version isn't known
+        capacity.maxItems = px4LegacyMaxItems;
+        capacity.estimated = true;
+    } else {
+        const bool full = (majorVersion > px4FullItemsMajor) || ((majorVersion == px4FullItemsMajor) && (minorVersion >= px4FullItemsMinor));
+        capacity.maxItems = full ? px4MaxItems : px4LegacyMaxItems;
+    }
     return capacity;
 }
 
-Capacity Capacity::arduPilot(bool copter, int sdCardKB)
+int Capacity::arduPilotBytes(bool copter, ArduPilotStorage storage)
+{
+    const int index = (storage == ArduPilotStorage::Large) ? 0 : ((storage == ArduPilotStorage::Common) ? 1 : 2);
+    return copter ? arduPilotCopterLayouts[index] : arduPilotOtherLayouts[index];
+}
+
+Capacity Capacity::arduPilot(bool copter, int sdCardKB, ArduPilotStorage storage)
 {
     Capacity capacity;
     if (sdCardKB > 0) {
-        capacity.storageBytes = (std::min)(sdCardKB * 1024, arduPilotMaxBytes);
+        // Clamped before it is multiplied: the parameter is a number the vehicle sent
+        constexpr int maxKB = (arduPilotMaxBytes / 1024) + 1;
+        capacity.storageBytes = (std::min)((std::min)(sdCardKB, maxKB) * 1024, arduPilotMaxBytes);
     } else {
-        capacity.storageBytes = copter ? arduPilotCopterBytes : arduPilotOtherBytes;
+        capacity.storageBytes = arduPilotBytes(copter, storage);
         capacity.estimated = true;
     }
-    capacity.maxItems = capacity.storageBytes / 8;
+    capacity.maxItems = _arduPilotMaxItems(capacity.storageBytes);
     capacity.maxPolygonVertices = arduPilotMaxPolygonVertices;
     return capacity;
 }
@@ -331,11 +360,47 @@ Capacity Capacity::arduPilot(bool copter, int sdCardKB)
 Capacity Capacity::conservative()
 {
     Capacity capacity;
-    capacity.maxItems = px4MaxItems;
+    capacity.maxItems = px4LegacyMaxItems;
     capacity.storageBytes = arduPilotCopterBytes;
     capacity.maxPolygonVertices = arduPilotMaxPolygonVertices;
     capacity.circles = false;
     capacity.estimated = true;
+    return capacity;
+}
+
+Capacity Capacity::reducedBelow(const Usage &rejected) const
+{
+    Capacity capacity = *this;
+    capacity.estimated = true;
+    capacity.reduced = true;
+    if (storageBytes > 0) {
+        // The largest storage of a layout the fence doesn't fit, less than the storage now
+        const int needed = rejected.bytes + arduPilotFixedBytes;
+        int bytes = 0;
+        for (const auto &layouts : { arduPilotCopterLayouts, arduPilotOtherLayouts }) {
+            for (const int layout : layouts) {
+                if ((layout < needed) && (layout < storageBytes)) {
+                    bytes = (std::max)(bytes, layout);
+                }
+            }
+        }
+        if (bytes == 0) {
+            bytes = (std::min)(needed, storageBytes) - 1;
+        }
+        capacity.storageBytes = (std::max)(bytes, arduPilotFixedBytes);
+        capacity.maxItems = (maxItems > 0) ? (std::min)(maxItems, _arduPilotMaxItems(capacity.storageBytes)) : _arduPilotMaxItems(capacity.storageBytes);
+        return capacity;
+    }
+    // Items only, like PX4: its smaller limits, then one item less each time. Never without a limit.
+    const int limit = (maxItems > 0) ? (std::min)(maxItems, rejected.items) : rejected.items;
+    int items = limit - 1;
+    for (const int known : { px4LegacyMaxItems, px4ConstrainedMaxItems }) {
+        if ((known < rejected.items) && (known < limit)) {
+            items = known;
+            break;
+        }
+    }
+    capacity.maxItems = (std::max)(items, 1);
     return capacity;
 }
 

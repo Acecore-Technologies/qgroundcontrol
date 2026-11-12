@@ -89,9 +89,14 @@ public:
     /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
     static GeoZoneFences::ZoneFences exclusionFences(GeoFenceController *geoFenceController);
 
-    /// @return What the fence of the vehicle can store: PX4's dataman, ArduPilot's fence storage for the vehicle type or
-    ///         on the SD card, a conservative estimate without a vehicle, nothing without fence support
+    /// @return What the fence of the vehicle can store: PX4's dataman for its firmware version, ArduPilot's fence
+    ///         storage on the SD card, or estimated for the vehicle type and the storage of its flight controller, a
+    ///         conservative estimate without a vehicle, nothing without fence support. Less after the vehicle rejected
+    ///         a fence for lack of room, see reduceCapacity.
     static GeoZoneFences::Capacity vehicleCapacity(Vehicle *vehicle);
+    /// Lowers the capacity assumed for the vehicle, until it disconnects, after it rejected a fence with the usage for
+    /// lack of room, see GeoZoneFences::Capacity::reducedBelow
+    static void reduceCapacity(Vehicle *vehicle, const GeoZoneFences::Usage &rejected);
 
     /// @return Storage of the plan fences selections keep: those not from geozones and the breach return point
     static GeoZoneFences::Usage keptUsage(GeoFenceController *geoFenceController);
@@ -162,10 +167,15 @@ public:
     /// Uploads the selection whose zones not fenced were confirmed, see uploadConfirmationRequired. A selection which
     /// changed since, so that other zones aren't fenced, is asked about again instead.
     Q_INVOKABLE void confirmUpload(const QString &confirmation);
+    /// After the vehicle rejected the fence for lack of room, see GeoZoneFenceUpload::rejectedForRoom: assumes the next
+    /// smaller fence storage for it, see reduceCapacity, selects the zones which fit into it and asks to upload them,
+    /// see requestUpload
+    Q_INVOKABLE void retryWithFewerZones();
 
-    /// @return Map with text ("Vehicle fence: 40 of 64 points"), note (where the limits come from), warning (fence
-    ///         parameters which keep the vehicle from enforcing exclusion fences), usedItems, maxItems, usedBytes,
-    ///         storageBytes, keptItems, circles, supported and estimated
+    /// @return Map with text ("Vehicle fence: 40 of 64 points", or "40 of about 37 points (estimated)" for limits the
+    ///         vehicle may not have), note (where the limits come from), warning (fence parameters which keep the
+    ///         vehicle from enforcing exclusion fences), usedItems, maxItems, usedBytes, storageBytes, keptItems,
+    ///         circles, supported, estimated and reduced
     QVariantMap capacityInfo() const;
 
 signals:
@@ -260,6 +270,7 @@ private:
     GeoZoneFences::Selection _selection;
     int _selectedCount = 0;
     bool _busy = false;
+    bool _rejectionHandled = false;                     ///< The capacity was lowered for the fence the vehicle rejected last
     QObject *_vehicleConnections = nullptr;
     QObject *_fenceConnections = nullptr;
     QObject *_fenceEditConnections = nullptr;           ///< Receiver of the edits of the fences from geozones, replaced to disconnect them

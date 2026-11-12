@@ -430,6 +430,7 @@ void GeoZoneFenceUpload::start()
     _sentRecord = _record(_sentFence);
     _error.clear();
     _ackResult = MAV_MISSION_ACCEPTED;
+    _rejectedForRoom = false;
     (void) _transition(Sending, tr("Uploading the fence…"));
 
     _uploadConnections = new QObject(this);
@@ -493,10 +494,10 @@ QString GeoZoneFenceUpload::_rejectionText(const QString &errorMessage) const
     const int points = _sentFence.pointCount() + _sentFence.circles.count() + (_sentFence.returnPoint.isValid() ? 1 : 0);
     switch (_ackResult) {
     case MAV_MISSION_NO_SPACE:
-        return tr("The vehicle has no room for this fence of %n point(s). Leave out zones or allow more simplification.", nullptr, points);
+        return tr("The vehicle has no room for this fence of %n point(s). Retry with fewer zones, leave out zones or allow more simplification.", nullptr, points);
     case MAV_MISSION_ERROR:
         if (_vehicle && _vehicle->apmFirmware()) {
-            return tr("The vehicle rejected the fence. ArduPilot does when the fence exceeds its storage, leave out zones or allow more simplification.");
+            return tr("The vehicle rejected the fence. ArduPilot does when the fence exceeds its storage: retry with fewer zones, leave out zones or allow more simplification.");
         }
         break;
     case MAV_MISSION_DENIED:
@@ -513,6 +514,7 @@ void GeoZoneFenceUpload::_sent(bool error)
         return;
     }
     if (error) {
+        _rejectedForRoom = (_ackResult == MAV_MISSION_NO_SPACE) || ((_ackResult == MAV_MISSION_ERROR) && _vehicle && _vehicle->apmFirmware());
         (void) _transition(Failed, _rejectionText(_error));
         return;
     }
@@ -645,6 +647,21 @@ void GeoZoneFenceUpload::clearVerification(Vehicle *vehicle)
 void GeoZoneFenceUpload::setRecordsFile(const QString &fileName)
 {
     records().setFileName(fileName);
+}
+
+GeoZoneFences::Usage GeoZoneFenceUpload::sentUsage() const
+{
+    GeoZoneFences::Usage usage;
+    for (const FenceSnapshot::Polygon &polygon : _sentFence.polygons) {
+        usage.addPolygon(polygon.vertices.count());
+    }
+    for (qsizetype i = 0; i < _sentFence.circles.count(); i++) {
+        usage.addCircle();
+    }
+    if (_sentFence.returnPoint.isValid()) {
+        usage.addReturnPoint();
+    }
+    return usage;
 }
 
 int GeoZoneFenceUpload::FenceSnapshot::pointCount() const
