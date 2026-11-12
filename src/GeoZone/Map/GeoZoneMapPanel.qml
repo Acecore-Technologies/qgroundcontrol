@@ -37,20 +37,41 @@ ColumnLayout {
     readonly property bool  _planned:           !isNaN(_geoZoneManager.planning.plannedStart.getTime())
     readonly property string _timeFormat:       "yyyy-MM-dd HH:mm"
 
-    property bool _invalidTime: false
+    property bool _invalidTime: false   ///< The text of the planned start can't be read, the previous start is kept
+
+    // Without a planned start its field is hidden, with what can't be read in it
+    on_PlannedChanged: {
+        if (!_planned) {
+            _invalidTime = false
+        }
+    }
 
     /// Sets the planned start from local time text, keeping the previous one when the text is invalid
+    /// @return false when the text is invalid
     function _applyPlannedTime(text) {
         const date = Date.fromLocaleString(Qt.locale(), text.trim(), _timeFormat)
         _invalidTime = isNaN(date.getTime())
         if (!_invalidTime) {
-            _geoZoneManager.planning.plannedStart = date
-            plannedTimeField.text = Qt.formatDateTime(date, _timeFormat)
+            _setPlannedStart(date)
         }
+        return !_invalidTime
+    }
+
+    function _setPlannedStart(date) {
+        _invalidTime = false
+        _geoZoneManager.planning.plannedStart = date
+        plannedTimeField.text = Qt.formatDateTime(date, _timeFormat)
+    }
+
+    /// @return The current time to the minute, like the times entered
+    function _now() {
+        const now = new Date()
+        now.setSeconds(0, 0)
+        return now
     }
 
     function _nowText() {
-        return Qt.formatDateTime(new Date(), _timeFormat)
+        return Qt.formatDateTime(_now(), _timeFormat)
     }
 
     Component.onCompleted: plannedTimeField.text = _planned ? Qt.formatDateTime(_geoZoneManager.planning.plannedStart, _timeFormat) : _nowText()
@@ -85,11 +106,14 @@ ColumnLayout {
         text:               qsTr("Check zones at the flight time")
         checked:            root._planned
         onClicked: {
-            if (checked) {
-                root._applyPlannedTime(plannedTimeField.text)
-            } else {
+            if (!checked) {
                 root._geoZoneManager.planning.clearPlannedStart()
+            } else if (!root._applyPlannedTime(plannedTimeField.text)) {
+                // The switch never stays on without a start and its field: a text which can't be read starts from now
+                root._setPlannedStart(root._now())
             }
+            // The switch shows whether there is a planned start, whatever the click did
+            checked = Qt.binding(() => root._planned)
         }
     }
 
@@ -106,13 +130,13 @@ ColumnLayout {
 
         QGCButton {
             text:       qsTr("Now")
-            onClicked:  root._applyPlannedTime(root._nowText())
+            onClicked:  root._setPlannedStart(root._now())
         }
     }
 
     QGCLabel {
         Layout.preferredWidth:  root._textWidth
-        visible:                root._planned || root._invalidTime
+        visible:                root._planned
         wrapMode:               Text.WordWrap
         font.pointSize:         ScreenTools.smallFontPointSize
         color:                  root._invalidTime ? qgcPal.warningText : qgcPal.text
