@@ -26,6 +26,8 @@ private slots:
     void _testParseNationalFormats();
     void _testParseNationalVariants();
     void _testParseFaaAirspace();
+    void _testFaaSecurityLimits_data();
+    void _testFaaSecurityLimits();
     void _testParseOpenAip();
     void _testEd318Writer();
 #ifndef GEOZONE_CORE_TEST

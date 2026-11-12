@@ -13,6 +13,9 @@
 
 #include <QtCore/QRegularExpression>
 
+#include <cmath>
+#include <optional>
+
 using namespace GeoZoneParserUtils;
 
 namespace {
@@ -65,20 +68,78 @@ void _setFaaLimit(GeoZone::Volume &volume, bool upper, const QJsonValue &valueJs
     volume.setReferences(upper ? volume.lowerReferenceCode : reference, upper ? reference : volume.upperReferenceCode);
 }
 
-/// @return Feet and reference of a national security restriction limit like "Surface", "400' AGL" or "1,200 ft MSL"
-std::pair<double, QString> _faaLimitText(const QString &text)
+/// A national security restriction limit in feet with its reference
+struct FaaLimitText {
+    double feet = qQNaN();
+    QString reference;
+};
+
+/// @return One limit like "Surface", "400' AGL" or "1,200 ft MSL", nothing when the text isn't one. The reference is
+///         empty when the text gives none.
+std::optional<FaaLimitText> _faaLimitPart(const QString &text)
+{
+    static const QStringList surface = { QStringLiteral("SURFACE"), QStringLiteral("SFC"), QStringLiteral("GND"), QStringLiteral("GROUND") };
+    if (surface.contains(text)) {
+        return FaaLimitText{ 0, QStringLiteral("SFC") };
+    }
+    // A number with at least a digit, whose commas group thousands, then the unit and the reference
+    static const QRegularExpression limitRegExp(QRegularExpression::anchoredPattern(
+        QStringLiteral("(\\d{1,3}(?:,\\d{3})+|\\d+)(\\.\\d+)?\\s*(?:'|FT\\.?|FEET|FOOT)?\\s*(AGL|MSL|AMSL)?")));
+    const QRegularExpressionMatch match = limitRegExp.match(text);
+    if (!match.hasMatch()) {
+        return std::nullopt;
+    }
+    bool ok = false;
+    const double feet = QString(match.captured(1).remove(QLatin1Char(',')) + match.captured(2)).toDouble(&ok);
+    if (!ok || !std::isfinite(feet)) {
+        return std::nullopt;
+    }
+    const QString reference = match.captured(3);
+    return FaaLimitText{ feet, reference.isEmpty() ? QString() : ((reference == QStringLiteral("AGL")) ? QStringLiteral("SFC") : QStringLiteral("MSL")) };
+}
+
+/// @return The floor or ceiling of a national security restriction from its text, like "Surface", "400' AGL" or
+///         "1,200 ft MSL". A range like "0-400 FT AGL" gives its upper bound for the ceiling and its lower bound for
+///         the floor. The limit is unknown, with an issue, unless the whole text is understood, tells its reference
+///         and gives a ceiling above the surface: the restriction then applies at all altitudes on that side rather
+///         than up to a wrong ceiling.
+FaaLimitText _faaLimitText(const QString &text, bool upper, QStringList &issues)
 {
     const QString value = text.trimmed().toUpper();
-    if (value.startsWith(QStringLiteral("SURFACE")) || (value == QStringLiteral("SFC")) || (value == QStringLiteral("GND"))) {
-        return { 0, QStringLiteral("SFC") };
+    if (value.isEmpty()) {
+        return FaaLimitText();
     }
-    static const QRegularExpression limitRegExp(QStringLiteral("([\\d,]+)\\s*(?:'|FT|FEET)?\\s*(AGL|MSL|AMSL)?"));
-    const QRegularExpressionMatch match = limitRegExp.match(value);
-    if (!match.hasMatch()) {
-        return { qQNaN(), QString() };
+    static const QStringList unlimited = { QStringLiteral("UNLIMITED"), QStringLiteral("UNLTD"), QStringLiteral("UNL") };
+    if (upper && unlimited.contains(value)) {
+        return FaaLimitText{ kUnlimitedSentinel, QStringLiteral("MSL") };
     }
-    const QString reference = match.captured(2);
-    return { QString(match.captured(1)).remove(QLatin1Char(',')).toDouble(), (reference == QStringLiteral("AGL")) ? QStringLiteral("SFC") : QStringLiteral("MSL") };
+
+    std::optional<FaaLimitText> limit = _faaLimitPart(value);
+    if (!limit) {
+        static const QRegularExpression rangeRegExp(QStringLiteral("^(.+?)\\s*(?:-|\\bTO\\b)\\s*(.+)$"));
+        const QRegularExpressionMatch range = rangeRegExp.match(value);
+        std::optional<FaaLimitText> first = range.hasMatch() ? _faaLimitPart(range.captured(1)) : std::nullopt;
+        const std::optional<FaaLimitText> second = range.hasMatch() ? _faaLimitPart(range.captured(2)) : std::nullopt;
+        if (first && second) {
+            // "0-400 FT AGL": the reference is that of both bounds
+            if (first->reference.isEmpty()) {
+                first->reference = second->reference;
+            }
+            if (first->reference == second->reference) {
+                limit = ((first->feet > second->feet) == upper) ? first : second;
+            } else {
+                limit = upper ? second : first;
+            }
+        }
+    }
+    // A ceiling at the surface or the sea level would leave no altitude for the restriction to apply at
+    if (!limit || limit->reference.isEmpty() || (upper && (limit->feet <= 0))) {
+        constexpr qsizetype maxShown = 40;
+        issues.append(upper ? GeoZoneParser::tr("Ceiling \"%1\" isn't understood, the zone has no ceiling").arg(text.trimmed().left(maxShown))
+                            : GeoZoneParser::tr("Floor \"%1\" isn't understood, the zone starts at the ground").arg(text.trimmed().left(maxShown)));
+        return FaaLimitText();
+    }
+    return *limit;
 }
 
 void _faaCommon(GeoZone::Data &zone)
@@ -168,11 +229,11 @@ bool _nationalSecurityFeature(const QJsonObject &feature, const QJsonObject &pro
 
     GeoZone::Volume layer;
     layer.feet = true;
-    const auto [floor, floorReference] = _faaLimitText(_trimmed(properties, "Floor"));
-    const auto [ceiling, ceilingReference] = _faaLimitText(_trimmed(properties, "Ceiling"));
-    layer.lowerLimit = floor;
-    layer.upperLimit = ceiling;
-    layer.setReferences(floorReference, ceilingReference);
+    const FaaLimitText floor = _faaLimitText(_trimmed(properties, "Floor"), false, zone.issues);
+    const FaaLimitText ceiling = _faaLimitText(_trimmed(properties, "Ceiling"), true, zone.issues);
+    layer.lowerLimit = floor.feet;
+    layer.upperLimit = ceiling.feet;
+    layer.setReferences(floor.reference, ceiling.reference);
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
     return !zone.volumes.isEmpty();
 }

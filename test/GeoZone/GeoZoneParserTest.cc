@@ -764,6 +764,82 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     QCOMPARE(errorString, QStringLiteral("The server reported an error: Unable to perform query. Too many requests. Retry after 60 sec."));
 }
 
+void GeoZoneParserTest::_testFaaSecurityLimits_data()
+{
+    QTest::addColumn<QString>("floor");
+    QTest::addColumn<QString>("ceiling");
+    QTest::addColumn<double>("lowerLimit");     ///< Feet, NaN when unknown
+    QTest::addColumn<double>("upperLimit");
+    QTest::addColumn<int>("upperReference");
+    QTest::addColumn<QStringList>("issues");
+
+    const auto row = [](const char *name, const char *floor, const char *ceiling, double lowerLimit, double upperLimit, GeoZone::VerticalReference upperReference,
+                        const QStringList &issues = QStringList()) {
+        QTest::newRow(name) << QString::fromLatin1(floor) << QString::fromLatin1(ceiling) << lowerLimit << upperLimit << static_cast<int>(upperReference) << issues;
+    };
+    using Reference = GeoZone::VerticalReference;
+    const double unknown = qQNaN();
+    const auto noCeiling = [](const char *text) { return QStringList{ QStringLiteral("Ceiling \"%1\" isn't understood, the zone has no ceiling").arg(QLatin1String(text)) }; };
+
+    // The texts of the FAA layer
+    row("published", "Surface", "400' AGL", 0, 400, Reference::Ground);
+    row("thousands", "SFC", "1,200 ft MSL", 0, 1200, Reference::MeanSeaLevel);
+    row("without unit", "GND", "400 AGL", 0, 400, Reference::Ground);
+    row("unlimited", "Surface", "Unlimited", 0, 99999, Reference::MeanSeaLevel);
+    row("not published", "", "", unknown, unknown, Reference::Unknown);
+    // A range gives its upper bound as ceiling and its lower bound as floor
+    row("range", "Surface", "0-400 FT AGL", 0, 400, Reference::Ground);
+    row("range in words", "0' AGL", "Surface to 1,000' AGL", 0, 1000, Reference::Ground);
+    row("range as floor", "200-400 FT AGL", "400 FT AGL", 200, 400, Reference::Ground);
+    // A text which isn't understood entirely leaves the limit unknown instead of a ceiling at or near the ground
+    row("lone comma", "Surface", ",", 0, unknown, Reference::Unknown, noCeiling(","));
+    row("words with a comma", "Surface", "TBD, see NOTAM", 0, unknown, Reference::Unknown, noCeiling("TBD, see NOTAM"));
+    row("trailing text", "Surface", "400' AGL or as assigned", 0, unknown, Reference::Unknown, noCeiling("400' AGL or as assigned"));
+    row("misplaced comma", "Surface", "4,00 FT AGL", 0, unknown, Reference::Unknown, noCeiling("4,00 FT AGL"));
+    row("without reference", "Surface", "400 FT", 0, unknown, Reference::Unknown, noCeiling("400 FT"));
+    row("range without reference", "Surface", "0-400", 0, unknown, Reference::Unknown, noCeiling("0-400"));
+    row("at the sea level", "Surface", "0 FT MSL", 0, unknown, Reference::Unknown, noCeiling("0 FT MSL"));
+    row("at the surface", "Surface", "Surface", 0, unknown, Reference::Unknown, noCeiling("Surface"));
+    row("floor in words", "Above the trees", "400' AGL", unknown, 400, Reference::Ground,
+        { QStringLiteral("Floor \"Above the trees\" isn't understood, the zone starts at the ground") });
+}
+
+void GeoZoneParserTest::_testFaaSecurityLimits()
+{
+    QFETCH(QString, floor);
+    QFETCH(QString, ceiling);
+    QFETCH(double, lowerLimit);
+    QFETCH(double, upperLimit);
+    QFETCH(int, upperReference);
+    QFETCH(QStringList, issues);
+
+    const QJsonArray ring{ QJsonArray{ -77.07, 38.92 }, QJsonArray{ -77.06, 38.92 }, QJsonArray{ -77.06, 38.93 }, QJsonArray{ -77.07, 38.93 }, QJsonArray{ -77.07, 38.92 } };
+    const QJsonObject feature{ { "type", "Feature" }, { "geometry", QJsonObject{ { "type", "Polygon" }, { "coordinates", QJsonArray{ ring } } } },
+                               { "properties", QJsonObject{ { "Base", "TEST BASE" }, { "Facility", "TEST BASE" }, { "FAA_ID", "TEST-1" }, { "Reason", "National Security" },
+                                                            { "Floor", floor }, { "Ceiling", ceiling } } } };
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(QJsonDocument(QJsonObject{ { "type", "FeatureCollection" }, { "features", QJsonArray{ feature } } }).toJson(), result, errorString),
+             qPrintable(errorString));
+    QCOMPARE(result.format, GeoZoneParser::Format::FaaAirspace);
+    QCOMPARE(result.zones.count(), 1);
+    const GeoZone::Data &data = result.zones.first();
+    QCOMPARE(data.restrictionCode, QStringLiteral("NSUFR"));
+    QCOMPARE(data.issues, issues);
+    QCOMPARE(result.issues.count(), issues.count());
+    QCOMPARE(data.volumes.count(), 1);
+    const GeoZone::Volume &volume = data.volumes.first();
+    QVERIFY(volume.feet);
+    QCOMPARE(volume.lowerLimit, lowerLimit);
+    QCOMPARE(volume.upperLimit, upperLimit);
+    QCOMPARE(static_cast<int>(volume.upperReference), upperReference);
+
+    // A drone 30 m above the ground is in the restriction, whatever its ceiling text, unless its floor is above
+    const GeoZone zone(data);
+    constexpr double terrain = 100;
+    QCOMPARE(zone.contains(GeoZone::Position{ QGeoCoordinate(38.925, -77.065), terrain + 30, terrain }), qIsNaN(lowerLimit) || (lowerLimit < 90));
+}
+
 void GeoZoneParserTest::_testParseOpenAip()
 {
     // A synthetic export of OpenAIP airspaces, of which those concerning drones flying low are kept
