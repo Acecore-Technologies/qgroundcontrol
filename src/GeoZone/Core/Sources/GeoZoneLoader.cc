@@ -181,29 +181,6 @@ GeoZoneSourceIndex::Entry GeoZoneLoader::indexEntry(const Job &job, const GeoZon
     return entry;
 }
 
-QByteArray GeoZoneLoader::extractZip(const QByteArray &data, QString &errorString)
-{
-    if (!data.startsWith("PK\x03\x04")) {
-        return data;
-    }
-
-    return GeoZoneZip::largestFile(data, kZipSuffixes, GeoZoneDownloader::defaultMaxBytes, errorString);
-}
-
-QByteArray GeoZoneLoader::extractZipFile(const QString &archivePath, QString &errorString)
-{
-    QFile archive(archivePath);
-    if (archive.size() > GeoZoneDownloader::defaultMaxBytes) {
-        errorString = tr("The zip archive is too large.");
-        return QByteArray();
-    }
-    if (!archive.open(QIODevice::ReadOnly)) {
-        errorString = tr("Unable to extract the zip archive: %1").arg(archive.errorString());
-        return QByteArray();
-    }
-    return extractZip(archive.readAll(), errorString);
-}
-
 namespace {
 
 /// Appends the features of the further pages of a paged response to its first page, so that the stored copy holds all

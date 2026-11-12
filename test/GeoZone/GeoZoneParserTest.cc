@@ -1338,8 +1338,9 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(QGCZip::zipDirectory(zipDir.filePath(QStringLiteral("content")), zipDir.filePath(QStringLiteral("data.zip"))));
     QFile zipFile(zipDir.filePath(QStringLiteral("data.zip")));
     QVERIFY(zipFile.open(QIODevice::ReadOnly));
-    QCOMPARE(GeoZoneLoader::extractZip(zipFile.readAll(), errorString), aixmBytes);
-    QCOMPARE(GeoZoneLoader::extractZip(QByteArray("PK\x03\x04" "broken"), errorString), QByteArray());
+    const QStringList zipSuffixes = { QStringLiteral(".xml"), QStringLiteral(".json"), QStringLiteral(".geojson") };
+    QCOMPARE(GeoZoneZip::largestFile(zipFile.readAll(), zipSuffixes, GeoZoneDownloader::defaultMaxBytes, errorString), aixmBytes);
+    QCOMPARE(GeoZoneZip::largestFile(QByteArray("PK\x03\x04" "broken"), zipSuffixes, GeoZoneDownloader::defaultMaxBytes, errorString), QByteArray());
     QVERIFY(!errorString.isEmpty());
 #endif
 

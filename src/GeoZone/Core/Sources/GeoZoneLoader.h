@@ -90,13 +90,6 @@ public:
     /// @return Index entry of the stored copy a job writes, updating the previous entry of the source
     static GeoZoneSourceIndex::Entry indexEntry(const Job &job, const GeoZoneSourceIndex::Entry &previous);
 
-
-    /// @return The largest XML file of a zip archive, or the data itself when it isn't a zip archive. Empty when the
-    ///         archive can't be extracted.
-    static QByteArray extractZip(const QByteArray &data, QString &errorString);
-    /// @return The largest XML or JSON file of a zip archive, empty when it can't be extracted
-    static QByteArray extractZipFile(const QString &archivePath, QString &errorString);
-
     /// Parses the content of a source: a geozone document, or a zip package whose XML and JSON files are parsed
     /// together, the files of the format of the largest one which parses
     /// @param maxBytes Limit of the total size of the files of a zip package
