@@ -91,8 +91,10 @@ public:
         QDateTime exitTime;
         double pathAltitudeMin = qQNaN();   ///< Meters AMSL flown inside the zone, NaN when unknown
         double pathAltitudeMax = qQNaN();
-        double zoneFloor = qQNaN();         ///< Meters AMSL at the entry, NaN when the zone extends to the ground or the limit is unknown
-        double zoneCeiling = qQNaN();       ///< NaN without ceiling or when unknown
+        /// Meters AMSL at the entry, of the volume of the zone entered there, the lowest of those entered at once: volumes
+        /// the path passes above or below don't count. NaN when it extends to the ground or the limit is unknown.
+        double zoneFloor = qQNaN();
+        double zoneCeiling = qQNaN();       ///< Of the volume entered, the highest of those entered at once, NaN without ceiling or when unknown
         bool active = true;                 ///< See GeoZonePathEvaluator::Crossing::active
     };
 

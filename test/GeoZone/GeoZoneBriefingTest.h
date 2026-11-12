@@ -18,5 +18,6 @@ class GeoZoneBriefingTest : public GeoZoneTestBase
 
 private slots:
     void _testBriefing();
+    void _testEnteredVolume();
     void _testPlanAuditRecord();
 };

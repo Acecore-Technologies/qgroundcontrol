@@ -82,6 +82,51 @@ void GeoZoneBriefingTest::_testBriefing()
     QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2019, 12, 31)), QStringLiteral("1913"));
 }
 
+void GeoZoneBriefingTest::_testEnteredVolume()
+{
+    // A zone of two volumes above each other, up to 50 m and from 200 m to 300 m, and one of two volumes which overlap,
+    // from 100 m to 260 m and from 240 m to 400 m
+    const QGeoCoordinate center(47, 8);
+    const auto twoVolumes = [](QJsonObject feature, double lower, double upper) {
+        QJsonArray geometry = feature[QStringLiteral("geometry")].toArray();
+        QJsonObject volume = geometry[0].toObject();
+        volume[QStringLiteral("lowerLimit")] = lower;
+        volume[QStringLiteral("upperLimit")] = upper;
+        geometry.append(volume);
+        feature[QStringLiteral("geometry")] = geometry;
+        return feature;
+    };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        twoVolumes(_withLimits(_circleFeature(QStringLiteral("STACKED"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(1000, 90), 200),
+                               0, QStringLiteral("AMSL"), 50, QStringLiteral("AMSL")), 200, 300),
+        twoVolumes(_withLimits(_circleFeature(QStringLiteral("OVERLAPPING"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(3000, 90), 200),
+                               100, QStringLiteral("AMSL"), 260, QStringLiteral("AMSL")), 240, 400),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 2);
+    QCOMPARE(zones.zoneList().constFirst()->data().volumes.count(), 2);
+
+    GeoZoneBriefing::Input input;
+    input.paths = { GeoZonePathEvaluator::Path::fromPositions({ GeoZone::Position{ center, 250 }, GeoZone::Position{ center.atDistanceAndAzimuth(4000, 90), 250 } }) };
+    const GeoZoneBriefing briefing = GeoZoneBriefing::build(zones.catalog(), input);
+    const QList<const GeoZoneBriefing::Zone*> entered = briefing.zonesWith(GeoZoneBriefing::Involvement::Entered);
+    QCOMPARE(entered.count(), 2);
+
+    // The limits at the entry are those of the volume entered, not also of the one passed above
+    QCOMPARE(entered[0]->identifier, QStringLiteral("STACKED"));
+    QCOMPARE(entered[0]->crossings.count(), 1);
+    QCOMPARE(entered[0]->crossings.constFirst().zoneFloor, 200.0);
+    QCOMPARE(entered[0]->crossings.constFirst().zoneCeiling, 300.0);
+    // Of volumes entered at once, the lowest floor and the highest ceiling
+    QCOMPARE(entered[1]->identifier, QStringLiteral("OVERLAPPING"));
+    QCOMPARE(entered[1]->crossings.count(), 1);
+    QCOMPARE(entered[1]->crossings.constFirst().zoneFloor, 100.0);
+    QCOMPARE(entered[1]->crossings.constFirst().zoneCeiling, 400.0);
+}
+
 void GeoZoneBriefingTest::_testPlanAuditRecord()
 {
     // A zone of each restriction

@@ -23,6 +23,8 @@ namespace {
 
 using Evaluator = GeoZonePathEvaluator;
 
+constexpr double kEntryTolerance = 0.01;    ///< Meters along a path within which a volume is entered at the entry of a crossing
+
 void extend(double &minimum, double &maximum, double value)
 {
     if (qIsNaN(value)) {
@@ -263,11 +265,17 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
                 }
             }
 
-            // Limits of the volumes the path is inside at the entry
+            // Limits of the volumes the path enters there: those it is between the limits of at the entry, not those
+            // it only passes above or below
             QList<int> volumes;
             for (const Evaluator::Stretch &stretch : zoneResult.stretches) {
-                if ((stretch.entry.path == crossing.entry.path) && (stretch.entry.distance <= (crossing.entry.distance + 0.01)) &&
-                    (stretch.exit.distance >= (crossing.entry.distance - 0.01)) && !volumes.contains(stretch.volume)) {
+                if ((stretch.entry.path != crossing.entry.path) || volumes.contains(stretch.volume)) {
+                    continue;
+                }
+                if (std::any_of(stretch.parts.cbegin(), stretch.parts.cend(), [&crossing](const Evaluator::VerticalPart &part) {
+                        return (part.position == GeoZone::VerticalPosition::Inside) && (part.from.distance <= (crossing.entry.distance + kEntryTolerance)) &&
+                               (part.to.distance >= (crossing.entry.distance - kEntryTolerance));
+                    })) {
                     volumes.append(stretch.volume);
                 }
             }
