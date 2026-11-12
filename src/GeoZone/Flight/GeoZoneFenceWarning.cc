@@ -18,6 +18,7 @@
 #include "QGCFencePolygon.h"
 #include "RallyPointManager.h"
 #include "Vehicle.h"
+#include "VehicleLinkManager.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QLocale>
@@ -56,12 +57,6 @@ constexpr int kArduPilotCircleBit = 2;
 constexpr int kArduPilotAltMaxBit = 1;
 constexpr int kArduPilotAltMinBit = 8;
 
-/// Context of an override command until its result
-struct CommandContext {
-    QPointer<GeoZoneFenceWarning> warning;
-    bool enable = false;
-};
-
 } // namespace
 
 GeoZoneFenceWarning::GeoZoneFenceWarning(Vehicle *vehicle, const Clock &clock, QObject *parent)
@@ -74,6 +69,12 @@ GeoZoneFenceWarning::GeoZoneFenceWarning(Vehicle *vehicle, const Clock &clock, Q
         timer->start();
         _clock = [timer]() { return timer->elapsed(); };
     }
+    _modeTimer.setSingleShot(true);
+    _modeTimer.setInterval(modeSwitchTimeoutMSecs);
+    (void) connect(&_modeTimer, &QTimer::timeout, this, [this]() { _modeSwitched(true); });
+    _fenceCommandTimer.setSingleShot(true);
+    _fenceCommandTimer.setInterval(fenceCommandTimeoutMSecs);
+    (void) connect(&_fenceCommandTimer, &QTimer::timeout, this, &GeoZoneFenceWarning::_fenceCommandTimedOut);
     _connectVehicle();
     _updateConfig();
 }
@@ -111,6 +112,10 @@ void GeoZoneFenceWarning::_connectVehicle()
     if (RallyPointManager *const rallyPointManager = vehicle->rallyPointManager()) {
         (void) connect(rallyPointManager, &RallyPointManager::inProgressChanged, this, reload);
     }
+    (void) connect(vehicle, &Vehicle::flightModeChanged, this, [this]() { _modeSwitched(false); });
+    (void) connect(vehicle, &Vehicle::mavCommandResult, this, [this](int, int, int command, int ackResult, int failureCode) {
+        _commandResult(command, ackResult, failureCode);
+    });
     (void) connect(vehicle, &Vehicle::homePositionChanged, this, update);
     (void) connect(vehicle, &Vehicle::armedChanged, this, update);
     (void) connect(vehicle, &Vehicle::flightModesChanged, this, update);
@@ -627,21 +632,28 @@ void GeoZoneFenceWarning::takeControl()
         return;
     }
     qCInfo(GeoZoneMonitorLog) << "Pilot takes control from the fence action:" << mode;
+    _pendingMode = mode;
     _setCommandText(tr("Switching to %1\u2026").arg(mode));
-    vehicle->setFlightMode(mode);
     // The vehicle reports the mode with its next heartbeat, or refuses it, like ArduPilot in fence recovery
-    QPointer<Vehicle> guard = vehicle;
-    QTimer::singleShot(3000, this, [this, guard, mode]() {
-        if (guard && (_commandText == tr("Switching to %1\u2026").arg(mode))) {
-            _setCommandText((guard->flightMode() == mode) ? tr("%1: you have control, the fence action is overridden.").arg(mode)
-                                                          : tr("The vehicle didn't switch to %1.").arg(mode));
-        }
-    });
-    (void) connect(vehicle, &Vehicle::flightModeChanged, this, [this, mode](const QString &flightMode) {
-        if ((flightMode == mode) && (_commandText == tr("Switching to %1\u2026").arg(mode))) {
-            _setCommandText(tr("%1: you have control, the fence action is overridden.").arg(mode));
-        }
-    }, Qt::SingleShotConnection);
+    _modeTimer.start();
+    vehicle->setFlightMode(mode);
+}
+
+void GeoZoneFenceWarning::_modeSwitched(bool timedOut)
+{
+    const Vehicle *const vehicle = _vehicle;
+    if (_pendingMode.isEmpty() || !vehicle) {
+        return;
+    }
+    const bool switched = vehicle->flightMode() == _pendingMode;
+    if (!switched && !timedOut) {
+        // Another mode, like the one of the fence action, on the way
+        return;
+    }
+    const QString mode = _pendingMode;
+    _pendingMode.clear();
+    _modeTimer.stop();
+    _setCommandText(switched ? tr("%1: you have control, the fence action is overridden.").arg(mode) : tr("The vehicle didn't switch to %1.").arg(mode));
 }
 
 void GeoZoneFenceWarning::disableFence()
@@ -661,26 +673,63 @@ void GeoZoneFenceWarning::_sendFenceEnable(bool enable)
         _setCommandText(tr("The vehicle can't disable its fence in flight."));
         return;
     }
+    if (_pendingFenceEnable) {
+        // One at a time, since the answer doesn't tell which of the two it is for
+        return;
+    }
+    const VehicleLinkManager *const links = vehicle->vehicleLinkManager();
+    if (!links || !links->primaryLink().lock()) {
+        _setCommandText(tr("The vehicle isn't connected."));
+        return;
+    }
     qCInfo(GeoZoneMonitorLog) << "Pilot" << (enable ? "enables" : "disables") << "the fence";
+    _pendingFenceEnable = enable;
+    _unansweredFenceEnable.reset();
     _setCommandText(enable ? tr("Enabling the fence\u2026") : tr("Disabling the fence\u2026"));
-    static const auto result = [](void *data, int, const mavlink_command_ack_t &ack, Vehicle::MavCmdResultFailureCode_t failureCode) {
-        const std::unique_ptr<CommandContext> context(static_cast<CommandContext*>(data));
-        if (!context->warning) {
-            return;
-        }
-        QString text;
-        if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ack.result == MAV_RESULT_ACCEPTED)) {
-            text = context->enable ? tr("Fence enabled.") : tr("Fence disabled: the vehicle no longer acts on breaches until it is enabled again.");
-            context->warning->_fenceDisabled = !context->enable;
-        } else if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ack.result == MAV_RESULT_UNSUPPORTED)) {
-            text = tr("The vehicle doesn't support enabling or disabling its fence.");
-        } else if (failureCode == Vehicle::MavCmdResultCommandResultOnly) {
-            text = context->enable ? tr("The vehicle refused to enable the fence.") : tr("The vehicle refused to disable the fence.");
-        } else {
-            text = tr("The vehicle didn't answer the fence command.");
-        }
-        context->warning->_setCommandText(text);
-    };
-    const Vehicle::MavCmdAckHandlerInfo_t handlerInfo{ result, new CommandContext{ this, enable }, nullptr, nullptr };
-    vehicle->sendMavCommandWithHandler(&handlerInfo, vehicle->defaultComponentId(), MAV_CMD_DO_FENCE_ENABLE, enable ? 1.0f : 0.0f);
+    // Without a link the command gets no result, not even that it wasn't answered
+    _fenceCommandTimer.start();
+    vehicle->sendMavCommand(vehicle->defaultComponentId(), MAV_CMD_DO_FENCE_ENABLE, false /* showError */, enable ? 1.0f : 0.0f);
+}
+
+void GeoZoneFenceWarning::_commandResult(int command, int ackResult, int failureCode)
+{
+    const std::optional<bool> sent = _pendingFenceEnable ? _pendingFenceEnable : _unansweredFenceEnable;
+    if ((command != MAV_CMD_DO_FENCE_ENABLE) || !sent) {
+        return;
+    }
+    const bool enable = *sent;
+    _pendingFenceEnable.reset();
+    _unansweredFenceEnable.reset();
+    _fenceCommandTimer.stop();
+    QString text;
+    if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ackResult == MAV_RESULT_ACCEPTED)) {
+        text = enable ? tr("Fence enabled.") : tr("Fence disabled: the vehicle no longer acts on breaches until it is enabled again.");
+        _setFenceDisabled(!enable);
+    } else if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ackResult == MAV_RESULT_UNSUPPORTED)) {
+        text = tr("The vehicle doesn't support enabling or disabling its fence.");
+    } else if (failureCode == Vehicle::MavCmdResultCommandResultOnly) {
+        text = enable ? tr("The vehicle refused to enable the fence.") : tr("The vehicle refused to disable the fence.");
+    } else {
+        text = tr("The vehicle didn't answer the fence command.");
+    }
+    _setCommandText(text);
+}
+
+void GeoZoneFenceWarning::_setFenceDisabled(bool disabled)
+{
+    if (disabled != _fenceDisabled) {
+        _fenceDisabled = disabled;
+        emit fenceDisabledChanged();
+    }
+}
+
+void GeoZoneFenceWarning::_fenceCommandTimedOut()
+{
+    if (!_pendingFenceEnable) {
+        return;
+    }
+    qCWarning(GeoZoneMonitorLog) << "No answer to the fence command";
+    _unansweredFenceEnable = _pendingFenceEnable;
+    _pendingFenceEnable.reset();
+    _setCommandText(tr("The vehicle didn't answer the fence command."));
 }

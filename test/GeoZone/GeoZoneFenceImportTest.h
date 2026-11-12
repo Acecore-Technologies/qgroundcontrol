@@ -41,6 +41,7 @@ private slots:
     void _testGeoFenceUploadChanges();
     void _testFenceWarningVehicle();
     void _testFenceUploadRejected();
+    void _testFenceOverrideCommands();
 
 private:
     /// The texts compared are in meters, whatever the locale

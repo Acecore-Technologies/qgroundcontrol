@@ -960,4 +960,85 @@ void GeoZoneFenceImportTest::_testFenceUploadRejected()
     _disconnectMockLink();
 }
 
+void GeoZoneFenceImportTest::_testFenceOverrideCommands()
+{
+    // Without a link the command isn't left pending
+    {
+        Vehicle offline(MAV_AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_QUADROTOR);
+        GeoZoneFenceWarning warning(&offline);
+        GeoZoneFenceWarning::Config config;
+        config.firmware = GeoZoneFenceWarning::Firmware::ArduPilot;
+        warning.setConfig(config);
+        QVERIFY(warning.canDisableFence());
+        warning.disableFence();
+        QCOMPARE(warning.commandText(), QStringLiteral("The vehicle isn't connected."));
+        QVERIFY(!warning.fenceDisabled());
+    }
+
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    {
+        GeoZoneFenceWarning warning(vehicle);
+        QCOMPARE(warning.takeControlMode(), QStringLiteral("Position"));
+        vehicle->setFlightMode(QStringLiteral("Hold"));
+        QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Hold"));
+
+        // The switch is followed whatever else is reported meanwhile
+        warning.takeControl();
+        QVERIFY(warning.commandText().startsWith(QStringLiteral("Switching to Position")));
+        warning.disableFence();
+        QVERIFY(warning.commandText().contains(QStringLiteral("can't disable")));
+        QTRY_VERIFY_WITH_TIMEOUT(warning.commandText().contains(QStringLiteral("you have control")), 10000);
+        QCOMPARE(vehicle->flightMode(), QStringLiteral("Position"));
+    }
+    _disconnectMockLink();
+
+    _connectMockLink(MAV_AUTOPILOT_ARDUPILOTMEGA);
+    vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    {
+        GeoZoneFenceWarning warning(vehicle);
+        QVERIFY(warning.canDisableFence());
+        const auto answer = [vehicle](MAV_RESULT result, Vehicle::MavCmdResultFailureCode_t failureCode = Vehicle::MavCmdResultCommandResultOnly) {
+            emit vehicle->mavCommandResult(vehicle->id(), vehicle->defaultComponentId(), MAV_CMD_DO_FENCE_ENABLE, result, failureCode);
+        };
+
+        // The answers of the vehicle to the command sent, one command at a time
+        _mockLink->clearReceivedMavCommandCounts();
+        warning.disableFence();
+        QVERIFY(warning.commandText().startsWith(QStringLiteral("Disabling the fence")));
+        warning.enableFence();
+        QVERIFY(warning.commandText().startsWith(QStringLiteral("Disabling the fence")));
+        answer(MAV_RESULT_ACCEPTED);
+        QVERIFY(warning.fenceDisabled());
+        QVERIFY(warning.commandText().startsWith(QStringLiteral("Fence disabled")));
+        // The MockLink doesn't support the command, which answers nothing pending
+        const auto answered = [vehicle]() { return !vehicle->isMavCommandPending(vehicle->defaultComponentId(), MAV_CMD_DO_FENCE_ENABLE); };
+        QTRY_VERIFY(answered());
+        QCOMPARE(_mockLink->receivedMavCommandCount(MAV_CMD_DO_FENCE_ENABLE), 1);
+        QVERIFY(warning.fenceDisabled());
+        QVERIFY(warning.commandText().startsWith(QStringLiteral("Fence disabled")));
+
+        warning.enableFence();
+        answer(MAV_RESULT_DENIED);
+        QVERIFY(warning.fenceDisabled());
+        QCOMPARE(warning.commandText(), QStringLiteral("The vehicle refused to enable the fence."));
+        QTRY_VERIFY(answered());
+        warning.enableFence();
+        answer(MAV_RESULT_FAILED, Vehicle::MavCmdResultFailureNoResponseToCommand);
+        QVERIFY(warning.fenceDisabled());
+        QCOMPARE(warning.commandText(), QStringLiteral("The vehicle didn't answer the fence command."));
+        QTRY_VERIFY(answered());
+        warning.enableFence();
+        answer(MAV_RESULT_ACCEPTED);
+        QVERIFY(!warning.fenceDisabled());
+        QCOMPARE(warning.commandText(), QStringLiteral("Fence enabled."));
+        QTRY_VERIFY(answered());
+    }
+    _disconnectMockLink();
+}
+
 GEOZONE_TEST(GeoZoneFenceImportTest)

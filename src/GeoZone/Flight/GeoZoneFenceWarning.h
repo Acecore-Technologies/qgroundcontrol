@@ -13,6 +13,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <QtCore/QTimer>
 #include <QtCore/QVariantList>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -61,7 +62,7 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(QString          takeControlMode READ takeControlMode    NOTIFY configChanged FINAL)     ///< Flight mode takeControl() switches to, empty when there is none
     Q_PROPERTY(bool             canDisableFence READ canDisableFence    NOTIFY configChanged FINAL)     ///< The autopilot accepts disableFence()
     Q_PROPERTY(QString          commandText     READ commandText        NOTIFY commandTextChanged FINAL)    ///< Result of the last override
-    Q_PROPERTY(bool             fenceDisabled   READ fenceDisabled      NOTIFY commandTextChanged FINAL)    ///< The vehicle accepted disableFence(), until it accepts enableFence()
+    Q_PROPERTY(bool             fenceDisabled   READ fenceDisabled      NOTIFY fenceDisabledChanged FINAL)  ///< The vehicle accepted disableFence(), until it accepts enableFence()
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -76,6 +77,10 @@ public:
     static constexpr int outsideEndDelayMSecs = 2000;
     /// Times the fence is read back from the vehicle after a failed transfer, until a transfer succeeds
     static constexpr int maxFenceReloads = 3;
+    /// The vehicle reports a flight mode it switched to with its next heartbeat
+    static constexpr int modeSwitchTimeoutMSecs = 3000;
+    /// Longer than the vehicle is asked again for the answer to a command, which without a link never comes
+    static constexpr int fenceCommandTimeoutMSecs = 15000;
 
     enum class Firmware {
         Other,
@@ -189,6 +194,7 @@ signals:
     void configChanged();
     void fenceUnknownChanged();
     void commandTextChanged();
+    void fenceDisabledChanged();
 
 private:
     void _connectVehicle();
@@ -203,6 +209,12 @@ private:
     void _setOutside(const std::optional<GeoZoneFencePrediction::Boundary> &boundary, qint64 msecs);
     void _setCommandText(const QString &text);
     void _sendFenceEnable(bool enable);
+    /// The vehicle switched its flight mode, or the time for it is over
+    void _modeSwitched(bool timedOut);
+    /// Result of a command of the vehicle, see Vehicle::mavCommandResult
+    void _commandResult(int command, int ackResult, int failureCode);
+    void _fenceCommandTimedOut();
+    void _setFenceDisabled(bool disabled);
 
     QPointer<Vehicle> _vehicle;
     Clock _clock;
@@ -222,4 +234,9 @@ private:
     GeoZoneVelocityEstimator _estimator;
     QString _commandText;
     bool _fenceDisabled = false;
+    QString _pendingMode;                       ///< Flight mode takeControl() asked for which the vehicle hasn't reported yet
+    QTimer _modeTimer;
+    std::optional<bool> _pendingFenceEnable;    ///< Fence enable or disable command the vehicle hasn't answered yet
+    std::optional<bool> _unansweredFenceEnable; ///< The last one, once its answer is overdue: it may still come
+    QTimer _fenceCommandTimer;
 };
