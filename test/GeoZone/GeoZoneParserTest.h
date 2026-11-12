@@ -46,6 +46,7 @@ private slots:
     void _testParseCacheRoundTrip();
     void _testParseCacheValidation();
     void _testParseCacheChecksum();
+    void _testParseCacheAfterRefresh();
     void _testRingValidation_data();
     void _testRingValidation();
     void _testDroppedGeometry_data();

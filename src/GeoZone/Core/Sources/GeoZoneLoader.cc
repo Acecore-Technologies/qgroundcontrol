@@ -36,6 +36,13 @@ namespace {
 
 const QStringList kZipSuffixes = { QStringLiteral(".xml"), QStringLiteral(".json"), QStringLiteral(".geojson") };
 
+/// @return The format hint the stored copy of a source with the URL is restored with at startup, see
+///         GeoZoneLoader::storedJob, and which the parse cache of the copy is therefore written for
+GeoZoneParser::Format storedFormatHint(const QString &url)
+{
+    return GeoZoneProviders::formatHint(url);
+}
+
 } // namespace
 
 QString GeoZoneLoader::fileKey(const QString &fileName)
@@ -117,7 +124,7 @@ void GeoZoneLoader::_setEntry(Job &job, const GeoZoneSourceIndex::Entry &entry)
     job.loadedAt = entry.loadedAt;
     job.fileDate = entry.fileDate;
     job.checkedAt = entry.checkedAt;
-    job.formatHint = GeoZoneProviders::formatHint(entry.url);
+    job.formatHint = storedFormatHint(entry.url);
     job.etag = entry.etag;
     job.lastModified = entry.lastModified;
     job.datasetUrl = entry.datasetUrl;
@@ -448,7 +455,11 @@ GeoZoneLoader::Result GeoZoneLoader::run(const Job &job, const GeoZoneStore &sto
     }
     if (writeCache && (loadResult.stored || job.fromStore) && !job.cancelToken.isCancelled()) {
         const QString storedPath = job.fromStore ? job.sourcePath : store.path(job.storedFileName);
-        (void) GeoZoneParseCache::write(storedPath, contentSize, contentHash, cacheKey, loadResult.result);
+        // The cache is read by the job restoring the copy at the next start, whose hint is the one of the address.
+        // This load may have had another, like the format of the zones of the feed it refreshes: keyed with it, the
+        // cache would never be used and every start would parse the copy again.
+        const GeoZoneParseCache::Key storedKey{ job.language, job.fromStore ? job.formatHint : storedFormatHint(job.url) };
+        (void) GeoZoneParseCache::write(storedPath, contentSize, contentHash, storedKey, loadResult.result);
     }
 
     return loadResult;

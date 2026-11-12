@@ -3047,6 +3047,40 @@ void GeoZoneParserTest::_testParseCacheChecksum()
     QVERIFY(GeoZoneParseCache::checksum(bytes.left(999)) != whole);
 }
 
+void GeoZoneParserTest::_testParseCacheAfterRefresh()
+{
+    // A feed refreshed with the format of its zones as hint, as the repository refreshes a loaded source
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const GeoZoneStore store(dir.filePath(QStringLiteral("store")));
+    const QString downloadPath = dir.filePath(QStringLiteral("download.part"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed269_test.json"), downloadPath));
+    QVERIFY(QFile::setPermissions(downloadPath, QFile::ReadOwner | QFile::WriteOwner));
+    GeoZoneFeedFetch::Request request;
+    request.url = QStringLiteral("https://zones.example.org/current");
+    request.formatHint = GeoZoneParser::Format::ED269;
+    GeoZoneFeedFetch::Result fetched;
+    fetched.filePath = downloadPath;
+    GeoZoneLoader::Job refresh = GeoZoneLoader::downloadJob(request, fetched);
+    refresh.language = QStringLiteral("en");
+    QCOMPARE(refresh.formatHint, GeoZoneParser::Format::ED269);
+    const GeoZoneLoader::Result refreshed = GeoZoneLoader::run(refresh, store);
+    QVERIFY2(refreshed.errorString.isEmpty(), qPrintable(refreshed.errorString));
+    QVERIFY(refreshed.stored && !refreshed.fromCache);
+    QCOMPARE(refreshed.result.format, GeoZoneParser::Format::ED269);
+
+    // At the next start its address gives no hint: the cache written with the copy is used all the same
+    GeoZoneLoader::Job restore = GeoZoneLoader::storedJob(GeoZoneLoader::indexEntry(refresh, GeoZoneSourceIndex::Entry()), store.path(refresh.storedFileName));
+    restore.language = QStringLiteral("en");
+    QCOMPARE(restore.formatHint, GeoZoneParser::Format::Unknown);
+    const GeoZoneLoader::Result restored = GeoZoneLoader::run(restore, store);
+    QVERIFY2(restored.errorString.isEmpty(), qPrintable(restored.errorString));
+    QVERIFY(restored.fromCache);
+    QCOMPARE(restored.result.format, GeoZoneParser::Format::ED269);
+    QCOMPARE(restored.result.zones.count(), refreshed.result.zones.count());
+    QVERIFY(!restored.result.zones.isEmpty());
+}
+
 void GeoZoneParserTest::_testParseCacheValidation()
 {
     const QTemporaryDir dir;
