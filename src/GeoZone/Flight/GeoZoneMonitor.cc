@@ -176,9 +176,8 @@ const GeoZoneMonitor::Settings &GeoZoneMonitor::settings() const
 
 void GeoZoneMonitor::setSettings(const Settings &settings)
 {
-    const Settings previous = this->settings();
     _fixedSettings = settings;
-    _settingsChanged(previous);
+    _settingsChanged();
 }
 
 void GeoZoneMonitor::_applicationSettingsChanged()
@@ -186,26 +185,15 @@ void GeoZoneMonitor::_applicationSettingsChanged()
     if (_fixedSettings) {
         return;
     }
-    const Settings previous = settings();
     _settings.reset();
-    _settingsChanged(previous);
+    _settingsChanged();
 }
 
-void GeoZoneMonitor::_settingsChanged(const Settings &previous)
+void GeoZoneMonitor::_settingsChanged()
 {
-    Q_UNUSED(previous);
     if (!settings().trafficEnabled) {
         _clearTraffic();
     }
-}
-
-void GeoZoneMonitor::_resetMonitors()
-{
-    for (GeoZoneVehicleMonitor *const monitor : std::as_const(_monitors)) {
-        monitor->reset();
-    }
-    _activationTrackers.clear();
-    _arbiter.clear();
 }
 
 GeoZoneVehicleMonitor::Context GeoZoneMonitor::_context() const

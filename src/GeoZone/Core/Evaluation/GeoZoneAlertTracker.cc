@@ -164,12 +164,6 @@ QList<GeoZone::Position> GeoZoneAlertTracker::predictedPath(const GeoZone::Posit
     return GeoZoneTerrain::withTerrain({ position, predicted });
 }
 
-double GeoZoneAlertTracker::timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon)
-{
-    const std::optional<Entry> entry = predictedEntry(zone, path, horizon);
-    return entry ? entry->time : qQNaN();
-}
-
 std::optional<GeoZoneAlertTracker::Entry> GeoZoneAlertTracker::predictedEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon)
 {
     const auto entry = zone->pathEntry(path);

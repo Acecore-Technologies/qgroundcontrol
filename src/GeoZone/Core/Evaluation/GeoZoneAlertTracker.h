@@ -97,13 +97,6 @@ public:
     /// within the approach time are near too.
     Update update(const GeoZoneCatalog &catalog, const GeoZonePolicy &policy, const GeoZone::Position &position, const Velocity &velocity, const Limits &limits);
 
-    /// Forgets the states and the previous position, so that the alerts repeat
-    void reset()
-    {
-        _states.clear();
-        _entries.clear();
-        _previousPosition = GeoZone::Position();
-    }
     /// Forgets the states of zones by GeoZone::key, like zones whose data changed, so that they alert again. With
     /// asEntry, like for a withdrawn permit, a vehicle inside them is alerted as having entered them, not as their
     /// activation.
@@ -117,8 +110,6 @@ public:
     /// @return Straight path from the position at the velocity for the seconds, with the terrain along it from
     ///         GeoZoneTerrain where it is loaded, unknown elsewhere
     static QList<GeoZone::Position> predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds);
-    /// @return Seconds until the predicted path covering the horizon at a constant speed enters the zone, NaN if it doesn't
-    static double timeToEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon);
     /// @return Time and position where the predicted path covering the horizon at a constant speed enters the zone
     static std::optional<Entry> predictedEntry(const GeoZone *zone, const QList<GeoZone::Position> &path, double horizon);
 

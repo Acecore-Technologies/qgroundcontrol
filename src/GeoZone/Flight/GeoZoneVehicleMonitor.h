@@ -218,8 +218,6 @@ public:
     /// Description of the current fence breach, empty without
     QString fenceBreachText() const;
 
-    /// Forgets the alert states, nearby zones, bands and entry, so that the alerts repeat
-    void reset();
     /// Forgets the zones of a source which are about to be deleted, keeping their alert states
     void forgetZones(const QString &sourceKey);
     /// Forgets the alert states of zones by GeoZone::key, like zones whose data changed, so that they alert again

@@ -444,8 +444,7 @@ private:
     /// Sets the actions of a shown alert from the state of its vehicle
     void _setAlertActions(GeoZoneAlertModel::Alert &alert) const;
     void _updateAlertActions();
-    void _settingsChanged(const Settings &previous);
-    void _resetMonitors();
+    void _settingsChanged();
     /// Shows, updates or ends the fence warning of the vehicle, see GeoZoneFenceWarning
     void _updateFenceWarning(GeoZoneVehicleMonitor *monitor);
     /// Logs a fence warning or breach of the vehicle

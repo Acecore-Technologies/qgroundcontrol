@@ -489,27 +489,6 @@ QVariant GeoZoneVehicleMonitor::predictedEntryZone() const
     return predicted ? QVariant::fromValue(GeoZoneInfo(predicted->zone)) : QVariant();
 }
 
-void GeoZoneVehicleMonitor::reset()
-{
-    _alerts.reset();
-    const bool hadNearby = !_nearby.isEmpty();
-    const bool hadBands = !_bands.isEmpty() || _bandsPosition.coordinate.isValid();
-    const bool hadEntry = _entry.has_value();
-    _nearby.clear();
-    _bands.clear();
-    _bandsPosition = GeoZone::Position();
-    _entry.reset();
-    if (hadNearby) {
-        emit nearbyChanged();
-    }
-    if (hadBands) {
-        emit verticalBandsChanged();
-    }
-    if (hadEntry) {
-        emit predictionChanged();
-    }
-}
-
 void GeoZoneVehicleMonitor::forgetZones(const QString &sourceKey)
 {
     if (_entry && (_entry->zone->sourceKey() == sourceKey)) {
