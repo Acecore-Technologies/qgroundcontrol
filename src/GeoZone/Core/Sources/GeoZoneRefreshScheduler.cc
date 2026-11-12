@@ -70,10 +70,12 @@ void GeoZoneRefreshScheduler::setNetwork(Network network)
         emit networkChanged();
         return;
     }
-    // The refreshes which failed while the network was down don't wait for their retry
+    // The refreshes which failed while the network was down don't wait for their retry: they are due now, also those
+    // the schedule didn't ask for, like a refresh of the user or the download of another area
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
     for (State &state : _states) {
         if (state.unreachable) {
-            state.retryAt = QDateTime();
+            state.retryAt = now;
         }
     }
     check();

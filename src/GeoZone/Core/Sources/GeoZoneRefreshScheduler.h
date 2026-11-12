@@ -71,7 +71,8 @@ public:
 
     Network network() const { return _network; }
     /// Sets whether the network is up. When it comes back, the refreshes which failed for lack of a network are
-    /// retried at once with the feeds which became due meanwhile, without waiting for their retry.
+    /// retried at once with the feeds which became due meanwhile, without waiting for their retry: also those the
+    /// schedule didn't ask for, like a refresh of the user or the download of another area of interest.
     void setNetwork(Network network);
     /// @return true when the source is due but waits for the network
     bool waitingForNetwork(const GeoZoneSource &source, const QDateTime &now) const;

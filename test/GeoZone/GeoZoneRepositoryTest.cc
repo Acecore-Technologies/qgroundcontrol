@@ -1137,6 +1137,66 @@ void GeoZoneRepositoryTest::_testRefreshAfterOffline()
     QVERIFY(feed->errorString().isEmpty());
 }
 
+void GeoZoneRepositoryTest::_testRetryWhenOnline()
+{
+    using Network = GeoZoneRefreshScheduler::Network;
+    ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const quint16 port = server.serverPort();
+    server.files.insert("/zones", server.body);
+    const QString url = server.url(QStringLiteral("/zones"));
+    const QString areaUrl = server.url(QStringLiteral("/zones?bbox={bbox}"));
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    GeoZoneSourceRepository *const repository = manager.repository();
+    GeoZoneRefreshScheduler *const scheduler = repository->scheduler();
+    const auto settle = [repository]() { return QTest::qWaitFor([repository]() { return !repository->busy(); }, stepTimeoutMSecs); };
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    repository->addUrl(url);
+    QVERIFY(addedSpy.wait(stepTimeoutMSecs));
+    repository->setVehiclePosition(QGeoCoordinate(47.0, 8.0));
+    manager.addService(areaUrl, GeoZoneService().toVariantMap(), QString());
+    QVERIFY(addedSpy.wait(stepTimeoutMSecs));
+    QVERIFY(settle());
+    const GeoZoneSource *const feed = repository->source(url);
+    const GeoZoneSource *const areaFeed = repository->source(areaUrl);
+    QVERIFY(feed);
+    QVERIFY(areaFeed);
+    const QDateTime addedAt = environment.now();
+
+    // Without a connection, a refresh of the user fails an hour later, and so does the download of the area the
+    // vehicle flew to: neither is due by the schedule
+    server.close();
+    environment.addSecs(3600);
+    repository->refreshSource(url);
+    const QGeoCoordinate away(47.5, 8.5);
+    repository->setVehiclePosition(away);
+    QVERIFY(settle());
+    QVERIFY(scheduler->unreachable(url));
+    QVERIFY(scheduler->unreachable(areaUrl));
+    QVERIFY(!feed->errorString().isEmpty());
+    QVERIFY(!areaFeed->area().contains(away));
+    QCOMPARE(feed->checkedAt(), addedAt);
+
+    // Both are tried again as soon as the network is back, rather than at the next refresh a day later
+    repository->setNetwork(Network::Offline);
+    QVERIFY(server.listen(QHostAddress::LocalHost, port));
+    environment.addSecs(60);
+    const int requests = server.requestCount;
+    repository->setNetwork(Network::Online);
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, requests + 2, stepTimeoutMSecs);
+    QVERIFY(settle());
+    QCOMPARE(feed->errorString(), QString());
+    QCOMPARE(feed->checkedAt(), environment.now());
+    QCOMPARE(areaFeed->errorString(), QString());
+    QVERIFY(areaFeed->area().contains(away));
+    QVERIFY(!scheduler->unreachable(url));
+    QVERIFY(!scheduler->retryAt(url).isValid());
+    QVERIFY(!scheduler->retryAt(areaUrl).isValid());
+}
+
 void GeoZoneRepositoryTest::_testReloadChanges()
 {
     const QGeoCoordinate center(47, 8);
