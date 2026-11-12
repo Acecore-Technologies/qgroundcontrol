@@ -912,6 +912,28 @@ void GeoZoneServiceTest::_testAreaLookAhead()
     QTRY_VERIFY(!repository->busy());
 }
 
+void GeoZoneServiceTest::_testAreaTooLargeText()
+{
+    // A request for a larger area than the service answers, like one kept from before the service had a limit, fails
+    // with both areas as whole numbers, however large
+    GeoZoneDownloader downloader;
+    GeoZoneFeedFetch::Request request;
+    request.url = QStringLiteral("http://127.0.0.1:1/zones?bbox={bbox}");
+    request.service.areaOfInterest = true;
+    request.service.maxAreaKm2 = 1234567;
+    request.area = QGeoRectangle(QGeoCoordinate(60, -10), QGeoCoordinate(40, 20));
+    GeoZoneFeedFetch fetch(&downloader, request);
+    std::optional<GeoZoneFeedFetch::Result> result;
+    (void) connect(&fetch, &GeoZoneFeedFetch::finished, &fetch, [&result](const GeoZoneFeedFetch::Result &finished) { result = finished; });
+    fetch.start();
+    QVERIFY(result.has_value());
+    QCOMPARE(result->status, GeoZoneFeedFetch::Result::Status::Failed);
+    const QString area = QString::number(std::ceil(GeoZoneService::areaKm2(request.area)), 'f', 0);
+    QVERIFY(area.size() >= 7);
+    QCOMPARE(result->errorString, QStringLiteral("The area of the mission and the vehicle (%1 km²) is larger than the 1234567 km² the service answers.").arg(area));
+    QCOMPARE(downloader.count(), 0);
+}
+
 void GeoZoneServiceTest::_testCredentials()
 {
     // The secrets are in a file of their own, by the hash of the source key, apart from the settings and the store

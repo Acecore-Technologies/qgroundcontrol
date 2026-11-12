@@ -28,6 +28,7 @@ private slots:
     void _testServiceAreaOfInterest();
     void _testMapViewAreaOfInterest();
     void _testAreaLookAhead();
+    void _testAreaTooLargeText();
     void _testCredentials();
     void _testUrlKeysNotLogged();
 };

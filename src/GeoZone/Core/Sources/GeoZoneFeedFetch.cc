@@ -56,8 +56,9 @@ void GeoZoneFeedFetch::start()
         return;
     }
     if (service.areaOfInterest && !service.acceptsArea(_request.area)) {
+        // As whole numbers: a double would print a large area like 1.23457e+06
         _finish(Result::Status::Failed, tr("The area of the mission and the vehicle (%1 km²) is larger than the %2 km² the service answers.")
-                                            .arg(std::ceil(GeoZoneService::areaKm2(_request.area))).arg(service.maxAreaKm2));
+                                            .arg(QString::number(std::ceil(GeoZoneService::areaKm2(_request.area)), 'f', 0), QString::number(service.maxAreaKm2, 'f', 0)));
         return;
     }
     if (service.needsSecret() && _request.secret.isEmpty()) {
