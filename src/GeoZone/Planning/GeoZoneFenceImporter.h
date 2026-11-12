@@ -85,6 +85,7 @@ public:
 
     static constexpr int nowFlightSecs = 3600;      ///< Shortest time from now the zones fenced with Now must be active for
     static constexpr int maxActiveHours = 24 * 366; ///< Largest activeWithinHours, the others select like Now
+    static constexpr double maxSimplifyTolerance = 500;     ///< Meters, the largest tolerance fences are simplified by
 
     /// @return The exclusion polygons and circles of the GeoFence, see GeoZoneFences::fencesCover
     static GeoZoneFences::ZoneFences exclusionFences(GeoFenceController *geoFenceController);
@@ -112,12 +113,15 @@ public:
 
     /// Selects zones of GeoZoneManager like select, preparing them on the thread pool: the selection changes once they
     /// are prepared, unless another selection starts meanwhile
-    ///     @param restrictions: GeoZone::Restriction values of the zones
+    ///     @param restrictions: GeoZone::Restriction values of the zones. Other values select the zones of unknown
+    ///                          restriction.
     ///     @param area: Only zones intersecting this area. Invalid for zones anywhere.
     ///     @param activeWithinHours: Only zones active at some time in the next hours, or see ActiveTime. Except for
     ///                               AnyTime, the zones active only part of that time aren't fenced, see
     ///                               GeoZoneFences::Candidate::partTime, since the vehicle's fence has no schedule.
-    ///     @param maxSimplifyTolerance: Meters fences may be simplified by to fit, see GeoZoneFences::zoneFences
+    ///     @param maxSimplifyTolerance: Meters fences may be simplified by to fit, see GeoZoneFences::zoneFences, up
+    ///                                  to maxSimplifyTolerance. Not simplified for a negative tolerance or one which
+    ///                                  isn't a number.
     Q_INVOKABLE void updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours = Now, double maxSimplifyTolerance = 0);
 
     /// Selects which of the zones fit into the fence of the plan's vehicle besides the fences kept, the zones entered by or
@@ -287,5 +291,5 @@ private:
     GeoZoneFenceChoiceModel *const _choices = nullptr;
     GeoZoneFenceUpload *const _upload = nullptr;
 
-    static constexpr double _simplifySteps[] = { 0, 10, 25, 50, 100, 250, 500 };   ///< Meters, tried up to the maximum tolerance
+    static constexpr double _simplifySteps[] = { 0, 10, 25, 50, 100, 250, maxSimplifyTolerance };  ///< Meters, tried up to the maximum tolerance
 };

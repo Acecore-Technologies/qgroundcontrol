@@ -244,18 +244,57 @@ GeoZoneFences::Usage GeoZoneFenceImporter::keptUsage(GeoFenceController *geoFenc
     return usage;
 }
 
+namespace {
+
+/// @return The restriction of a value from QML or a plan file. A value which isn't one, like of a later version,
+///         selects the zones of unknown restriction rather than none.
+GeoZone::Restriction _validRestriction(const QVariant &value)
+{
+    bool isNumber = false;
+    const double number = (value.typeId() == QMetaType::Bool) ? qQNaN() : value.toDouble(&isNumber);
+    if (!isNumber || !(number >= GeoZone::Prohibited) || !(number <= GeoZone::Unknown) || (number != std::floor(number))) {
+        return GeoZone::Unknown;
+    }
+    return static_cast<GeoZone::Restriction>(static_cast<int>(number));
+}
+
+/// @return The hours as updateSelection takes them: an ActiveTime, or hours up to maxActiveHours, Now for the others
+int _validActiveHours(int activeWithinHours)
+{
+    const bool known = (activeWithinHours == GeoZoneFenceImporter::AnyTime) || (activeWithinHours == GeoZoneFenceImporter::AtFlightTime) ||
+                       ((activeWithinHours >= 0) && (activeWithinHours <= GeoZoneFenceImporter::maxActiveHours));
+    return known ? activeWithinHours : static_cast<int>(GeoZoneFenceImporter::Now);
+}
+
+/// @return The tolerance within 0 and maxSimplifyTolerance, 0 for one which isn't a number: fences aren't simplified
+///         by more than was asked for
+double _validSimplifyTolerance(double tolerance)
+{
+    return (std::isfinite(tolerance) && (tolerance > 0)) ? (std::min)(tolerance, GeoZoneFenceImporter::maxSimplifyTolerance) : 0.0;
+}
+
+} // namespace
+
 void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double maxSimplifyTolerance)
 {
+    // From QML or the import settings of a plan file, which may hold anything
     QList<GeoZone::Restriction> restrictionList;
-    for (const QVariant &restriction : restrictions) {
-        restrictionList.append(static_cast<GeoZone::Restriction>(restriction.toInt()));
+    QJsonArray restrictionSettings;
+    for (const QVariant &value : restrictions) {
+        const GeoZone::Restriction restriction = _validRestriction(value);
+        if (!restrictionList.contains(restriction)) {
+            restrictionList.append(restriction);
+            restrictionSettings.append(static_cast<int>(restriction));
+        }
     }
+    activeWithinHours = _validActiveHours(activeWithinHours);
+    maxSimplifyTolerance = _validSimplifyTolerance(maxSimplifyTolerance);
 
     // Fences can't follow schedules: the zones fenced must be active from the start to the end
     const auto [activeFrom, activeTo] = _activeTimes(activeWithinHours);
     _query = AreaQuery{ GeoZoneBox(area), GeoZonePolicy(restrictionList).activeDuring(activeFrom, activeTo), activeFrom, activeTo };
     _settings = QJsonObject{
-        { QStringLiteral("restrictions"), QJsonArray::fromVariantList(restrictions) },
+        { QStringLiteral("restrictions"), restrictionSettings },
         { QStringLiteral("activeWithinHours"), activeWithinHours },
         { QStringLiteral("maxSimplifyTolerance"), maxSimplifyTolerance },
     };
@@ -306,14 +345,16 @@ void GeoZoneFenceImporter::select(const QList<const GeoZone*> &zones, double max
 
 void GeoZoneFenceImporter::_setSimplifyTolerances(double maxSimplifyTolerance)
 {
-    _simplifyTolerances.clear();
+    // Always with the unsimplified fences, whatever the tolerance asked for
+    const double largest = _validSimplifyTolerance(maxSimplifyTolerance);
+    _simplifyTolerances = { 0 };
     for (const double tolerance : _simplifySteps) {
-        if (tolerance <= maxSimplifyTolerance) {
+        if ((tolerance > 0) && (tolerance <= largest)) {
             _simplifyTolerances.append(tolerance);
         }
     }
-    if (_simplifyTolerances.last() < maxSimplifyTolerance) {
-        _simplifyTolerances.append(maxSimplifyTolerance);
+    if (_simplifyTolerances.last() < largest) {
+        _simplifyTolerances.append(largest);
     }
 }
 
@@ -538,8 +579,9 @@ int GeoZoneFenceImporter::rebuild()
     }
     const QJsonObject settings = GeoZoneFenceTags::importSettings(_geoFenceController);
     _included.clear();
-    if (!settings.contains(QStringLiteral("restrictions"))) {
-        // Plans saved before the settings were kept: the zones of their fences still loaded
+    if (!settings.value(QStringLiteral("restrictions")).isArray()) {
+        // Plans saved before the settings were kept, or with settings which can't be read: the zones of their fences
+        // still loaded
         QSet<QString> keys;
         for (QmlObjectListModel *fences : { _geoFenceController->polygons(), _geoFenceController->circles() }) {
             for (int i = 0; i < fences->count(); i++) {
@@ -557,13 +599,25 @@ int GeoZoneFenceImporter::rebuild()
         }
         select(zones, rebuildSimplifyTolerance);
     } else {
+        // The settings are those of a plan file, which may hold anything: what can't be read selects more zones, not
+        // fewer. An area which isn't one is no area, so zones anywhere.
         const QJsonArray bounds = settings.value(QStringLiteral("area")).toArray();
-        const QGeoRectangle area = (bounds.count() == 4) ? QGeoRectangle(QGeoCoordinate(bounds[0].toDouble(), bounds[1].toDouble()),
-                                                                         QGeoCoordinate(bounds[2].toDouble(), bounds[3].toDouble())) : QGeoRectangle();
+        QGeoRectangle area;
+        if ((bounds.count() == 4) && std::all_of(bounds.cbegin(), bounds.cend(), [](const QJsonValue &bound) { return bound.isDouble(); })) {
+            const QGeoCoordinate topLeft(bounds[0].toDouble(), bounds[1].toDouble());
+            const QGeoCoordinate bottomRight(bounds[2].toDouble(), bounds[3].toDouble());
+            if (topLeft.isValid() && bottomRight.isValid()) {
+                area = QGeoRectangle(topLeft, bottomRight);
+            }
+        }
+        // Only what says whether a zone is included or left out: a zone isn't left out for anything else
         const QJsonObject included = settings.value(QStringLiteral("included")).toObject();
         for (auto it = included.constBegin(); it != included.constEnd(); ++it) {
-            _included.insert(it.key(), it.value().toBool());
+            if (it.value().isBool()) {
+                _included.insert(it.key(), it.value().toBool());
+            }
         }
+        // The restrictions, hours and tolerance are checked by updateSelection
         updateSelection(settings.value(QStringLiteral("restrictions")).toArray().toVariantList(), area,
                         settings.value(QStringLiteral("activeWithinHours")).toInt(Now), settings.value(QStringLiteral("maxSimplifyTolerance")).toDouble());
     }

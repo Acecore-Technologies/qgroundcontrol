@@ -899,6 +899,112 @@ void GeoZoneFenceImportTest::_testGeoFenceStale()
     QCOMPARE(importer.notFencedCount(), 1);
 }
 
+void GeoZoneFenceImportTest::_testGeoFenceRebuildSettings()
+{
+    // A prohibited zone, one of unknown restriction and a conditional one
+    ScopedEnvironment environment;
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    const auto clearZones = qScopeGuard([manager]() { manager->repository()->clear(); });
+    QString errorString;
+    QVERIFY2(manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _polygonFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), _circleRing(QGeoCoordinate(47, 8), 500, 16)),
+        _circleFeature(QStringLiteral("U"), QStringLiteral("NOT_A_RESTRICTION"), QGeoCoordinate(47, 8.1), 300),
+        _circleFeature(QStringLiteral("C"), QStringLiteral("CONDITIONAL"), QGeoCoordinate(47, 8.2), 300),
+    }), errorString), qPrintable(errorString));
+    QTRY_COMPARE(manager->zoneCount(), 3);
+    const QList<GeoZone*> loaded = manager->catalog().zones();
+    const auto found = std::find_if(loaded.cbegin(), loaded.cend(), [](const GeoZone *zone) { return zone->identifier() == QStringLiteral("A"); });
+    QVERIFY(found != loaded.cend());
+    const GeoZone *const prohibited = *found;
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(geoFenceController);
+    const auto fenceNames = [geoFenceController]() {
+        QStringList names;
+        for (QmlObjectListModel *const fences : { geoFenceController->polygons(), geoFenceController->circles() }) {
+            for (int i = 0; i < fences->count(); i++) {
+                const GeoZoneFenceTag *const tag = GeoZoneFenceTag::find(fences->get(i));
+                names.append(tag ? tag->name() : QStringLiteral("untagged"));
+            }
+        }
+        names.sort();
+        return names;
+    };
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), GeoZoneFenceImporter::AnyTime, 25);
+    QCOMPARE(importer.applySelection(), 1);
+    QCOMPARE(fenceNames(), QStringList({ QStringLiteral("A") }));
+    // Simplified as far as allowed to see whether it fits, then as little as needed: not at all
+    QCOMPARE(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->count(), 16);
+    QCOMPARE(importer.selection().choices.constFirst().simplifyTolerance, 0.0);
+
+    // The import settings of a plan file may hold anything. A negative tolerance left no simplification step, which
+    // crashed the rebuild: the fences are then not simplified.
+    QJsonObject settings = GeoZoneFenceTags::importSettings(geoFenceController);
+    QCOMPARE(settings[QStringLiteral("maxSimplifyTolerance")].toDouble(), 25.0);
+    settings[QStringLiteral("maxSimplifyTolerance")] = -5;
+    GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
+    QCOMPARE(importer.rebuild(), 1);
+    QCOMPARE(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->count(), 16);
+    QCOMPARE(GeoZoneFenceTags::importSettings(geoFenceController)[QStringLiteral("maxSimplifyTolerance")].toDouble(), 0.0);
+    // ... and one beyond the largest is the largest
+    settings[QStringLiteral("maxSimplifyTolerance")] = 1e300;
+    GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
+    QCOMPARE(importer.rebuild(), 1);
+    QCOMPARE(GeoZoneFenceTags::importSettings(geoFenceController)[QStringLiteral("maxSimplifyTolerance")].toDouble(), GeoZoneFenceImporter::maxSimplifyTolerance);
+    QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, prohibited));
+
+    // What can't be read selects more zones, not fewer: restrictions which aren't known select the zones of unknown
+    // restriction, an area which isn't one is no area, hours out of range are a flight starting now, and a zone is
+    // only left out by a value which says so
+    settings = QJsonObject{
+        { QStringLiteral("restrictions"), QJsonArray{ 0, 17, QStringLiteral("x"), 0.5, true } },
+        { QStringLiteral("activeWithinHours"), 2000000000 },
+        { QStringLiteral("maxSimplifyTolerance"), QStringLiteral("much") },
+        { QStringLiteral("area"), QJsonArray{ QStringLiteral("north"), 1, 2, 3 } },
+        { QStringLiteral("included"), QJsonObject{ { prohibited->key(), QStringLiteral("no") } } },
+    };
+    GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
+    QCOMPARE(importer.rebuild(), 2);
+    QCOMPARE(fenceNames(), QStringList({ QStringLiteral("A"), QStringLiteral("U") }));
+    const QJsonObject kept = GeoZoneFenceTags::importSettings(geoFenceController);
+    QCOMPARE(kept[QStringLiteral("restrictions")].toArray(), (QJsonArray{ static_cast<int>(GeoZone::Prohibited), static_cast<int>(GeoZone::Unknown) }));
+    QCOMPARE(kept[QStringLiteral("activeWithinHours")].toInt(-99), static_cast<int>(GeoZoneFenceImporter::Now));
+    QCOMPARE(kept[QStringLiteral("maxSimplifyTolerance")].toDouble(-1), 0.0);
+    QVERIFY(!kept.contains(QStringLiteral("area")));
+    // An area of coordinates which don't exist is no area either
+    settings[QStringLiteral("area")] = QJsonArray{ 500, 8, 46, 9 };
+    GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
+    QCOMPARE(importer.rebuild(), 2);
+    // While a zone left out by the user stays left out
+    settings[QStringLiteral("included")] = QJsonObject{ { prohibited->key(), false } };
+    GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
+    QCOMPARE(importer.rebuild(), 1);
+    QCOMPARE(fenceNames(), QStringList({ QStringLiteral("U") }));
+
+    // Settings without a list of restrictions are rebuilt like those of plans saved without settings: from the zones
+    // of the fences
+    settings[QStringLiteral("restrictions")] = QStringLiteral("all");
+    GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
+    QCOMPARE(importer.rebuild(), 1);
+    QCOMPARE(fenceNames(), QStringList({ QStringLiteral("U") }));
+
+    // Selections made directly take the same care
+    importer.select({ prohibited }, -1);
+    QCOMPARE(importer.selectedCount(), 1);
+    importer.select({ prohibited }, qQNaN());
+    QCOMPARE(importer.selectedCount(), 1);
+    QCOMPARE(importer.selection().choices.constFirst().simplifyTolerance, 0.0);
+    importer.updateSelection({ 99, -1 }, QGeoRectangle(), (std::numeric_limits<int>::min)(), qInf());
+    QCOMPARE(importer.applySelection(), 1);
+    QCOMPARE(fenceNames(), QStringList({ QStringLiteral("U") }));
+}
+
 void GeoZoneFenceImportTest::_testGeoFenceUpload()
 {
     ZoneOwner zoneParent;
