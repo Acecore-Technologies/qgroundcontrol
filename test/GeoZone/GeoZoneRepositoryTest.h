@@ -33,6 +33,7 @@ private slots:
     void _testPageCap();
     void _testFeedCompanions();
     void _testFeedFetchFormatCompanions();
+    void _testCompanionsWriteFailure();
     void _testFeedCancellation();
     void _testRefreshScheduler();
     void _testFeedCatalogueOverlays();

@@ -750,6 +750,44 @@ void GeoZoneRepositoryTest::_testFeedFetchFormatCompanions()
     QCOMPARE(GeoZoneDownloader::readFile(result->filePath, 1000), server.files.value("/list"));
 }
 
+void GeoZoneRepositoryTest::_testCompanionsWriteFailure()
+{
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/list", R"({ "details": true, "features": [ { "detail": "a" } ] })");
+    server.files.insert("/details/a", "detail of a");
+    server.delays.insert("/details/a", 500);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneDownloader downloader;
+    downloader.setDirectory(dir.path());
+    const DetailFormat format;
+
+    GeoZoneFeedFetch::Request request;
+    request.url = server.url(QStringLiteral("/list"));
+    request.formats = { &format };
+    GeoZoneFeedFetch fetch(&downloader, request);
+    std::optional<GeoZoneFeedFetch::Result> result;
+    (void) connect(&fetch, &GeoZoneFeedFetch::finished, &fetch, [&result](const GeoZoneFeedFetch::Result &fetchResult) { result = fetchResult; });
+    fetch.start();
+
+    // While the companion is downloaded, the folder of the downloads stops taking new files: the document can't be
+    // written with its companion
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, 2, stepTimeoutMSecs);
+    const QFile::Permissions permissions = QFile::permissions(dir.path());
+    const auto restore = qScopeGuard([&dir, permissions]() { (void) QFile::setPermissions(dir.path(), permissions); });
+    QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::ExeOwner));
+    if (QFileInfo(dir.path()).isWritable()) {
+        QSKIP("The folder can't be made read-only for this user");
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), stepTimeoutMSecs);
+
+    // The fetch fails rather than passing a document which wasn't written whole
+    QCOMPARE(result->status, GeoZoneFeedFetch::Result::Status::Failed);
+    QVERIFY2(result->errorString.startsWith(QStringLiteral("The download could not be saved")), qPrintable(result->errorString));
+    QVERIFY(result->filePath.isEmpty());
+}
+
 void GeoZoneRepositoryTest::_testFeedCancellation()
 {
     const ScopedEnvironment environment;

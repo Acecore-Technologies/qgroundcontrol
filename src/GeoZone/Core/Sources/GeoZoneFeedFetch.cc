@@ -18,6 +18,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QSaveFile>
 #include <QtCore/QUrl>
 #include <QtCore/QUuid>
 
@@ -442,11 +443,13 @@ void GeoZoneFeedFetch::_fetchCompanions()
 
 void GeoZoneFeedFetch::_companionsReceived()
 {
-    // The document is stored with its companions, so they are available offline
-    QFile file(_result.filePath);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        (void) file.write(GeoZoneParser::composite(_document, _companions));
-        file.close();
+    // The document is stored with its companions, so they are available offline. It is written beside the download and
+    // replaces it once complete: a short write must not pass for the document.
+    const QByteArray composite = GeoZoneParser::composite(_document, _companions);
+    QSaveFile file(_result.filePath);
+    if (!file.open(QIODevice::WriteOnly) || (file.write(composite) != composite.size()) || !file.commit()) {
+        _finish(Result::Status::Failed, tr("The download could not be saved: %1").arg(file.errorString()));
+        return;
     }
     _finish(Result::Status::Ready);
 }
