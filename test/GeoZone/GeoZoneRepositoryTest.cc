@@ -1727,6 +1727,33 @@ void GeoZoneRepositoryTest::_testDownloadSizeLimit()
     QCOMPARE(downloader.count(), 0);
 }
 
+void GeoZoneRepositoryTest::_testDownloadWithoutFile()
+{
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    // A folder for the downloads which can't be made: it is below a file
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QFile blocker(dir.filePath(QStringLiteral("file")));
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    GeoZoneDownloader downloader;
+    downloader.setDirectory(dir.filePath(QStringLiteral("file/downloads")));
+
+    std::optional<GeoZoneDownloader::Result> result;
+    downloader.get(server.url(QStringLiteral("/ok")), QString(), QString(), [&result](const GeoZoneDownloader::Result &downloadResult) { result = downloadResult; });
+    // The failure is reported like others, once the call returned
+    QVERIFY(!result.has_value());
+    QTRY_VERIFY_WITH_TIMEOUT(result.has_value(), stepTimeoutMSecs);
+    QCOMPARE(result->status, GeoZoneDownloader::Result::Status::Failed);
+    QVERIFY2(result->errorString.startsWith(QStringLiteral("The download could not be saved")), qPrintable(result->errorString));
+    QVERIFY(!result->unreachable);
+    QVERIFY(result->filePath.isEmpty());
+    // Nothing was requested, whose response would have piled up in memory
+    QCOMPARE(server.requestCount, 0);
+    QCOMPARE(downloader.count(), 0);
+}
+
 void GeoZoneRepositoryTest::_testDownloadFailures()
 {
     TestFeedServer server;

@@ -72,7 +72,13 @@ void GeoZoneDownloader::get(const QString &url, const QString &etag, const QStri
     (void) QDir().mkpath(_directory);
     download.file = QSharedPointer<QFile>::create(QDir(_directory).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".part")));
     if (!download.file->open(QIODevice::WriteOnly)) {
-        download.writeError = download.file->errorString();
+        // Nothing is requested: without its file, the response would pile up in memory. Reported like the other
+        // failures, once the caller is done.
+        Result result;
+        result.errorString = tr("The download could not be saved: %1").arg(download.file->errorString());
+        result.finalUrl = redacted(url, options.secrets);
+        (void) QMetaObject::invokeMethod(this, [callback = std::move(download.callback), result]() { callback(result); }, Qt::QueuedConnection);
+        return;
     }
     download.hash = QSharedPointer<QCryptographicHash>::create(QCryptographicHash::Sha256);
     _send(download, QUrl(url));
@@ -216,8 +222,10 @@ bool GeoZoneDownloader::_redirect(QNetworkReply *reply, Download &download, QStr
     download.received = 0;
     download.total = -1;
     download.hash->reset();
-    if (download.writeError.isEmpty() && !download.file->resize(0)) {
-        download.writeError = download.file->errorString();
+    // The redirect isn't followed without the file to write its response to
+    if (!download.writeError.isEmpty() || !download.file->resize(0)) {
+        errorString = tr("The download could not be saved: %1").arg(download.writeError.isEmpty() ? download.file->errorString() : download.writeError);
+        return true;
     }
     _send(download, next);
     return true;
