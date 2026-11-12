@@ -27,4 +27,5 @@ private slots:
     void _testServiceOriginsConfirmed();
     void _testSigningKeyFile();
     void _testTrustedPublishersSetting();
+    void _testMapLabelRows();
 };

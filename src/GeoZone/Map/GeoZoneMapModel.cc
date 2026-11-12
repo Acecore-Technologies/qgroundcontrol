@@ -11,6 +11,7 @@
 #include "GeoZone.h"
 #include "GeoZoneDisplay.h"
 #include "GeoZoneEnvironment.h"
+#include "GeoZoneLabelModel.h"
 #include "GeoZoneManager.h"
 #include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
@@ -38,6 +39,7 @@ GeoZoneMapModel::GeoZoneMapModel(QObject *parent)
 GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _labels(new GeoZoneLabelModel(this))
 {
     // Shapes are deleted when zones change, so the map layer must forget them first
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMapModel::_removeSource);
@@ -67,6 +69,16 @@ GeoZoneMapModel::GeoZoneMapModel(GeoZoneManager *manager, QObject *parent)
 GeoZoneMapModel::~GeoZoneMapModel()
 {
 
+}
+
+QAbstractItemModel *GeoZoneMapModel::labels() const
+{
+    return _labels;
+}
+
+QVariantList GeoZoneMapModel::labelZones() const
+{
+    return GeoZoneInfo::toVariantList(_labels->zones());
 }
 
 void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLevel, bool showLabels)
@@ -171,9 +183,7 @@ void GeoZoneMapModel::setView(const QGeoRectangle &visibleRegion, double zoomLev
         emit shapesChanged();
     }
 
-    const QVariantList labelInfos = GeoZoneInfo::toVariantList(showLabels ? _placeLabels(shownZones) : QList<const GeoZone*>());
-    if (labelInfos != _labelZones) {
-        _labelZones = labelInfos;
+    if (_labels->setZones(showLabels ? _placeLabels(shownZones) : QList<const GeoZone*>())) {
         emit labelZonesChanged();
     }
 
@@ -279,8 +289,7 @@ void GeoZoneMapModel::setLabelHeight(qreal labelHeight)
 
 void GeoZoneMapModel::_clear()
 {
-    if (!_labelZones.isEmpty()) {
-        _labelZones.clear();
+    if (_labels->setZones({})) {
         emit labelZonesChanged();
     }
     if (!_shapes.isEmpty()) {
@@ -406,9 +415,7 @@ void GeoZoneMapModel::_removeSource(GeoZoneSource *source)
         emit shapesChanged();
     }
     _invalidateFilter();
-    const qsizetype labelCount = _labelZones.count();
-    _labelZones.removeIf([source](const QVariant &value) { return GeoZoneInfo::fromVariant(value)->sourceKey() == source->key(); });
-    if (_labelZones.count() != labelCount) {
+    if (_labels->removeSource(source->key())) {
         emit labelZonesChanged();
     }
 }

@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QtCore/QAbstractItemModel>
 #include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
@@ -21,6 +22,7 @@
 #include "GeoZoneDisplay.h"
 #include "GeoZoneInfo.h"
 
+class GeoZoneLabelModel;
 class GeoZoneManager;
 class GeoZoneShape;
 class GeoZoneSource;
@@ -41,7 +43,7 @@ class GeoZoneMapModel : public QObject
     Q_OBJECT
     Q_MOC_INCLUDE("MissionController.h")
 
-    Q_PROPERTY(QVariantList         labelZones      READ labelZones         NOTIFY labelZonesChanged FINAL)       ///< GeoZoneInfo of the zones to label
+    Q_PROPERTY(QAbstractItemModel*  labels          READ labels             CONSTANT FINAL)                       ///< The zones to label, see GeoZoneLabelModel
     Q_PROPERTY(int                  hiddenZoneCount READ hiddenZoneCount    NOTIFY hiddenZoneCountChanged FINAL)  ///< Zones in view not shown because of the limit
     Q_PROPERTY(QVariantList         highlightedZones READ highlightedZones  WRITE setHighlightedZones NOTIFY highlightedZonesChanged FINAL)  ///< GeoZoneInfo of the zones drawn highlighted, which filters don't hide
     Q_PROPERTY(QVariantList         keptZones       READ keptZones          WRITE setKeptZones      NOTIFY keptZonesChanged FINAL)      ///< GeoZoneInfo of zones the filters don't hide
@@ -72,7 +74,11 @@ public:
     int detailLevel() const { return _detailLevel; }
     /// @return true if the zone is one of the highlightedZones
     bool highlighted(const GeoZone *zone) const { return _highlightedZoneSet.contains(zone); }
-    QVariantList labelZones() const { return _labelZones; }
+    /// The zones to label, whose rows are only inserted and removed for the zones which come and go, so that the map
+    /// keeps the labels of the others
+    QAbstractItemModel *labels() const;
+    /// @return GeoZoneInfo of the zones to label, in the order of the rows of labels()
+    QVariantList labelZones() const;
     int hiddenZoneCount() const { return _hiddenZoneCount; }
     QVariantList highlightedZones() const { return _highlightedZones; }
     void setHighlightedZones(const QVariantList &zones);
@@ -106,7 +112,7 @@ signals:
     void shapesChanged();
     void hiddenZoneCountChanged(int hiddenZoneCount);
     void highlightedZonesChanged();
-    void labelZonesChanged();
+    void labelZonesChanged();   ///< Rows of labels() were inserted or removed
     void keptZonesChanged();
     void filteredZoneCountChanged();
     void missionControllerChanged();
@@ -135,7 +141,7 @@ private:
     GeoZoneManager *_manager = nullptr;
     QSet<const GeoZoneShape*> _shapes;
     int _detailLevel = 0;
-    QVariantList _labelZones;
+    GeoZoneLabelModel *const _labels;
     int _hiddenZoneCount = 0;
     QVariantList _highlightedZones;
     QSet<const GeoZone*> _highlightedZoneSet;

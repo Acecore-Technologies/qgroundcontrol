@@ -311,28 +311,29 @@ Item {
         }
     }
 
-    // Clickable zone labels which show the zone details
+    // Clickable zone labels which show the zone details. The model has a row per zone, so that panning the map only
+    // makes the labels of the zones coming into view.
     Instantiator {
-        model: _mapModel.labelZones
+        model: _mapModel.labels
 
         delegate: MapQuickItem {
             id:             labelItem
-            coordinate:     modelData.center
+            coordinate:     zone.center
             anchorPoint.x:  sourceItem.width / 2
             anchorPoint.y:  sourceItem.height / 2
             z:              QGroundControl.zOrderMapItems - 1
 
-            required property var modelData
+            required property var zone  ///< GeoZoneInfo
 
             sourceItem: Rectangle {
                 width:          labelRow.implicitWidth + ScreenTools.defaultFontPixelWidth
                 height:         labelRow.implicitHeight + ScreenTools.defaultFontPixelHeight / 4
                 radius:         height / 4
                 color:          Qt.rgba(0, 0, 0, 0.6)
-                border.color:   GeoZoneStyle.restrictionColor(labelItem.modelData.restriction)
+                border.color:   GeoZoneStyle.restrictionColor(labelItem.zone.restriction)
 
                 Accessible.role:    Accessible.Button
-                Accessible.name:    labelItem.modelData.displayName + ", " + labelItem.modelData.restrictionText
+                Accessible.name:    labelItem.zone.displayName + ", " + labelItem.zone.restrictionText
 
                 // The restriction letter, so that the color isn't its only cue
                 Row {
@@ -342,14 +343,14 @@ Item {
 
                     GeoZoneBadge {
                         anchors.verticalCenter: parent.verticalCenter
-                        text:                   GeoZoneStyle.restrictionLetter(labelItem.modelData.restriction)
-                        color:                  GeoZoneStyle.restrictionColor(labelItem.modelData.restriction)
-                        textColor:              GeoZoneStyle.restrictionTextColor(labelItem.modelData.restriction)
+                        text:                   GeoZoneStyle.restrictionLetter(labelItem.zone.restriction)
+                        color:                  GeoZoneStyle.restrictionColor(labelItem.zone.restriction)
+                        textColor:              GeoZoneStyle.restrictionTextColor(labelItem.zone.restriction)
                     }
 
                     QGCLabel {
                         anchors.verticalCenter: parent.verticalCenter
-                        text:                   labelItem.modelData.displayName
+                        text:                   labelItem.zone.displayName
                         textFormat:             Text.PlainText
                         color:                  "white"
                         font.pointSize:         ScreenTools.smallFontPointSize
@@ -358,7 +359,7 @@ Item {
 
                 QGCMouseArea {
                     anchors.fill:   parent
-                    onClicked:      _root._showZoneInfo(labelItem.modelData)
+                    onClicked:      _root._showZoneInfo(labelItem.zone)
                 }
             }
         }

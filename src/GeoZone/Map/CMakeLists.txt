@@ -3,6 +3,8 @@ target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE
         GeoZoneDisplay.cc
         GeoZoneDisplay.h
+        GeoZoneLabelModel.cc
+        GeoZoneLabelModel.h
         GeoZoneMapLayer.cc
         GeoZoneMapLayer.h
         GeoZoneMapModel.cc

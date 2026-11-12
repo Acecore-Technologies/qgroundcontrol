@@ -628,4 +628,95 @@ void GeoZoneManagerTest::_testTrustedPublishersSetting()
     QVERIFY(manager.trustedPublishersWarning().isEmpty());
 }
 
+void GeoZoneManagerTest::_testMapLabelRows()
+{
+    // Panning a map keeps the labels of the zones which stay in view: only the rows of the zones which leave the view
+    // and come into it are removed and inserted, never all of them
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("WEST"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(4000, 270), 300),
+        _circleFeature(QStringLiteral("MID"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("EAST"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(4000, 90), 300) }), errorString), qPrintable(errorString));
+
+    GeoZoneMapModel model(&manager);
+    const QAbstractItemModel *const labels = model.labels();
+    QVERIFY(labels);
+    const int zoneRole = labels->roleNames().key("zone", -1);
+    QVERIFY(zoneRole >= 0);
+    const auto identifier = [labels, zoneRole](const QModelIndex &index) {
+        return index.data(zoneRole).value<GeoZoneInfo>().identifier();
+    };
+    const auto identifiers = [labels, &identifier]() {
+        QStringList result;
+        for (int row = 0; row < labels->rowCount(); row++) {
+            result.append(identifier(labels->index(row, 0)));
+        }
+        result.sort();
+        return result;
+    };
+    const auto viewAround = [](const QGeoCoordinate &viewCenter) {
+        return QGeoRectangle(viewCenter.atDistanceAndAzimuth(4500, 315), viewCenter.atDistanceAndAzimuth(4500, 135));
+    };
+    QSignalSpy insertedSpy(labels, &QAbstractItemModel::rowsInserted);
+    QSignalSpy removedSpy(labels, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy resetSpy(labels, &QAbstractItemModel::modelReset);
+    QSignalSpy changedSpy(&model, &GeoZoneMapModel::labelZonesChanged);
+    const auto rowCount = [](const QSignalSpy &spy) {
+        int rows = 0;
+        for (const QList<QVariant> &arguments : spy) {
+            rows += arguments[2].toInt() - arguments[1].toInt() + 1;
+        }
+        return rows;
+    };
+
+    model.setView(viewAround(center.atDistanceAndAzimuth(2000, 270)), 13, true);
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("MID"), QStringLiteral("WEST") }));
+    QCOMPARE(rowCount(insertedSpy), 2);
+    QCOMPARE(changedSpy.count(), 1);
+    QPersistentModelIndex midRow;
+    for (int row = 0; row < labels->rowCount(); row++) {
+        if (identifier(labels->index(row, 0)) == QStringLiteral("MID")) {
+            midRow = labels->index(row, 0);
+        }
+    }
+    QVERIFY(midRow.isValid());
+
+    // Panned east: WEST leaves, EAST comes, the row of MID stays
+    insertedSpy.clear();
+    model.setView(viewAround(center.atDistanceAndAzimuth(2000, 90)), 13, true);
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("EAST"), QStringLiteral("MID") }));
+    QCOMPARE(rowCount(removedSpy), 1);
+    QCOMPARE(rowCount(insertedSpy), 1);
+    QVERIFY(midRow.isValid());
+    QCOMPARE(identifier(midRow), QStringLiteral("MID"));
+    QCOMPARE(changedSpy.count(), 2);
+
+    // The same labels again change nothing
+    model.setView(viewAround(center.atDistanceAndAzimuth(2100, 90)), 13, true);
+    QCOMPARE(rowCount(removedSpy), 1);
+    QCOMPARE(rowCount(insertedSpy), 1);
+    QCOMPARE(changedSpy.count(), 2);
+    QCOMPARE(model.labelZones().count(), 2);
+
+    // The rows of a source go before its zones are deleted, and without labels
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("other.json"), QJsonArray{
+        _circleFeature(QStringLiteral("OTHER"), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(2000, 0), 300) }), errorString), qPrintable(errorString));
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("EAST"), QStringLiteral("MID"), QStringLiteral("OTHER") }));
+    QVERIFY(midRow.isValid());
+    int rowsBeforeRemoval = -1;
+    const QMetaObject::Connection removal = connect(&manager, &GeoZoneManager::zonesAboutToChange, &model, [&]() { rowsBeforeRemoval = labels->rowCount(); });
+    manager.repository()->removeSource(0);
+    (void) disconnect(removal);
+    QCOMPARE(rowsBeforeRemoval, 1);
+    QCOMPARE(identifiers(), QStringList({ QStringLiteral("OTHER") }));
+    QVERIFY(!midRow.isValid());
+    model.setView(viewAround(center), 13, false);
+    QCOMPARE(labels->rowCount(), 0);
+    QCOMPARE(resetSpy.count(), 0);
+}
+
 GEOZONE_TEST(GeoZoneManagerTest)
