@@ -514,8 +514,12 @@ qint64 _durationSecs(const QString &duration)
     for (int i = 0; i < 7; i++) {
         const QString number = match.captured(i + 1);
         if (!number.isEmpty()) {
-            seconds += QString(number).replace(QLatin1Char(','), QLatin1Char('.')).toDouble() * static_cast<double>(units[i]);
+            seconds += _numberFromText(QString(number).replace(QLatin1Char(','), QLatin1Char('.'))) * static_cast<double>(units[i]);
         }
+    }
+    // Any number of digits matches: a duration which isn't finite or out of range can't be rounded to an integer
+    if (!std::isfinite(seconds) || (seconds > kMaxDurationSecs)) {
+        return -1;
     }
     return std::llround(seconds);
 }

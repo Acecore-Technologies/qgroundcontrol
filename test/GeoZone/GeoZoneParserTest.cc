@@ -1474,6 +1474,43 @@ void GeoZoneParserTest::_testParseErrors()
     QCOMPARE(result.skippedFeatures, 1);
 }
 
+void GeoZoneParserTest::_testDurations_data()
+{
+    QTest::addColumn<QString>("duration");
+    QTest::addColumn<qint64>("seconds");    ///< -1 when invalid
+
+    constexpr qint64 day = 24 * 3600;
+    QTest::newRow("days") << QStringLiteral("P2D") << 2 * day;
+    QTest::newRow("hours") << QStringLiteral("PT12H") << qint64{ 12 * 3600 };
+    QTest::newRow("days and time") << QStringLiteral("P2DT12H30M15S") << (2 * day) + (12 * 3600) + (30 * 60) + 15;
+    QTest::newRow("weeks") << QStringLiteral("P1W") << 7 * day;
+    QTest::newRow("decimal comma") << QStringLiteral("PT1,5H") << qint64{ 5400 };
+    QTest::newRow("months and years") << QStringLiteral("P1Y2M") << (365 + 60) * day;
+    QTest::newRow("longest") << QStringLiteral("P100Y") << 100 * 365 * day;
+    QTest::newRow("empty") << QString() << qint64{ -1 };
+    QTest::newRow("no time") << QStringLiteral("PT") << qint64{ -1 };
+    QTest::newRow("text") << QStringLiteral("two days") << qint64{ -1 };
+    // Durations beyond 100 years, which can't be rounded to an integer when they are beyond its range
+    QTest::newRow("over a century") << QStringLiteral("P101Y") << qint64{ -1 };
+    QTest::newRow("beyond 64 bits") << QStringLiteral("P99999999999999999999Y") << qint64{ -1 };
+    QTest::newRow("beyond 64 bits in seconds") << QStringLiteral("PT99999999999999999999S") << qint64{ -1 };
+    QTest::newRow("beyond a double") << (QStringLiteral("P") + QString(400, QLatin1Char('9')) + QStringLiteral("D")) << qint64{ -1 };
+}
+
+void GeoZoneParserTest::_testDurations()
+{
+    QFETCH(QString, duration);
+    QFETCH(qint64, seconds);
+
+    QCOMPARE(GeoZoneParserUtils::_durationSecs(duration), seconds);
+
+    // The notice of a zone is due before the flight when its interval isn't a valid duration
+    GeoZone::Data zone;
+    GeoZoneParserUtils::_notification(QJsonArray{ QJsonObject{ { "name", "Tower" }, { "purpose", "NOTIFICATION" }, { "intervalBefore", duration } } }, zone);
+    QCOMPARE(zone.notificationAuthority, QStringLiteral("Tower"));
+    QCOMPARE(zone.notificationLeadSecs, (std::max)(seconds, qint64{ 0 }));
+}
+
 void GeoZoneParserTest::_testRingValidation_data()
 {
     QTest::addColumn<QJsonObject>("projection");

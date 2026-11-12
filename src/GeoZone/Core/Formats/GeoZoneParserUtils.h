@@ -26,6 +26,7 @@ inline constexpr double kUnlimitedSentinel = 99999.0;   ///< Upper limit of airs
 inline constexpr qsizetype kMaxRingVertices = 200000;
 inline constexpr qsizetype kMaxVolumesPerZone = 10000;
 inline constexpr double kMaxRadiusMeters = 1000000;
+inline constexpr double kMaxDurationSecs = 100.0 * 365 * 24 * 3600;    ///< Longer durations, 100 years, are invalid
 // Geometry checks of _normalizeVolumes
 inline constexpr double kDuplicateVertexMeters = 0.01;      ///< Consecutive vertices closer than this are one
 inline constexpr double kMinRingAreaSquareMeters = 1;       ///< Rings with less area are degenerate unless they cross themselves
@@ -90,7 +91,8 @@ QStringList _authorities(const QJsonValue &value);
 /// notificationLeadSecs, from its name or contact and its intervalBefore
 void _notification(const QJsonValue &value, GeoZone::Data &zone);
 
-/// @return Seconds of an ISO 8601 duration like P2D or PT12H, years as 365 days and months as 30, -1 when invalid
+/// @return Seconds of an ISO 8601 duration like P2D or PT12H, years as 365 days and months as 30, -1 when invalid or
+///         longer than kMaxDurationSecs
 qint64 _durationSecs(const QString &duration);
 
 bool _position(const QJsonValue &value, QGeoCoordinate &coordinate);

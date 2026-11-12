@@ -35,6 +35,8 @@ private slots:
     void _testLiveNationalFeeds();
 #endif
     void _testParseErrors();
+    void _testDurations_data();
+    void _testDurations();
     void _testXmlAndPackages();
     void _testParseCancel();
     void _testParseCacheRoundTrip_data();
