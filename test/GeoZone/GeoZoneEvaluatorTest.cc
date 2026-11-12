@@ -13,6 +13,7 @@
 #include "GeoZoneAlertTracker.h"
 #include "GeoZoneAuthorisations.h"
 #include "GeoZoneBriefing.h"
+#include "GeoZoneInfo.h"
 #include "GeoZoneTestHelpers.h"
 
 using namespace GeoZoneTestHelpers;
@@ -396,6 +397,93 @@ void GeoZoneEvaluatorTest::_testAuthorisationLimits()
         json.insert(QStringLiteral("validTo"), QStringLiteral("2026-06-01T00:00:00Z"));
         QVERIFY(!GeoZoneAuthorisation::fromJson(json));
     }
+}
+
+void GeoZoneEvaluatorTest::_testProhibitedAuthorisations()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(12, 0)));
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2000, 90), 300),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 2);
+    const GeoZone *const prohibited = zones.zoneList().constFirst();
+    const GeoZone *const restricted = zones.zoneList().constLast();
+    QCOMPARE(prohibited->restriction(), GeoZone::Prohibited);
+    const QVariant prohibitedInfo = QVariant::fromValue(GeoZoneInfo(prohibited));
+    GeoZoneAuthorisations authorisations{ QString() };
+    const GeoZonePolicy policy = GeoZonePolicy::alerts().excludingAuthorised(&authorisations);
+    const QString lastDay = QStringLiteral("2026-12-31");
+
+    // A prohibited zone is only authorised with a permit reference and a last day
+    QVERIFY(!authorisations.authorise(prohibitedInfo, QString(), QString(), QString()).isEmpty());
+    QVERIFY(!authorisations.authorise(prohibitedInfo, QStringLiteral("P-1"), QString(), QString()).isEmpty());
+    QVERIFY(!authorisations.authorise(prohibitedInfo, QStringLiteral("  "), QString(), lastDay).isEmpty());
+    QCOMPARE(authorisations.count(), 0);
+    QVERIFY(policy.accepts(prohibited));
+    QCOMPARE(authorisations.authorise(prohibitedInfo, QStringLiteral("P-1"), QString(), lastDay), QString());
+    QCOMPARE(authorisations.count(), 1);
+    QVERIFY(authorisations.find(prohibited));
+    QVERIFY(!policy.accepts(prohibited));
+    // Which ends
+    environment.setNow(_utc(QDate(2027, 1, 2), QTime(12, 0)));
+    QVERIFY(policy.accepts(prohibited));
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(12, 0)));
+
+    // Kept as the authorisation of a prohibited zone, which isn't read without them
+    const GeoZoneAuthorisation stored = authorisations.authorisations().constFirst();
+    QVERIFY(stored.prohibitedZone);
+    QJsonObject json = stored.toJson();
+    QCOMPARE(GeoZoneAuthorisation::fromJson(json), stored);
+    json.remove(QStringLiteral("validTo"));
+    QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+    json = stored.toJson();
+    json.remove(QStringLiteral("permit"));
+    QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+    json = stored.toJson();
+    json.insert(QStringLiteral("prohibited"), QStringLiteral("no"));
+    QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+
+    // An entry which doesn't say so, like one of an earlier version or of a plan, doesn't stand for the zone, which is
+    // prohibited now. It is shown to be completed.
+    authorisations.revoke(stored.zoneKey);
+    for (const GeoZoneAuthorisation &incomplete : { GeoZoneAuthorisation{ stored.zoneKey, stored.zoneName, QStringLiteral("P-1"), QDateTime(), QDateTime() },
+                                                    GeoZoneAuthorisation{ stored.zoneKey, stored.zoneName, QString(), QDateTime(), stored.validTo } }) {
+        QVERIFY(!incomplete.prohibitedZone);
+        authorisations.set(incomplete);
+        QCOMPARE(authorisations.count(), 1);
+        QVERIFY(!authorisations.find(prohibited));
+        QVERIFY(policy.accepts(prohibited));
+        QVERIFY(!policy.authorisedAt(prohibited, GeoZone::Position{ center, 100 }));
+        const QVariantMap shown = authorisations.authorisationOf(prohibitedInfo);
+        QCOMPARE(shown.value(QStringLiteral("permit")).toString(), incomplete.permit);
+        QCOMPARE(shown.value(QStringLiteral("statusText")).toString(),
+                 incomplete.permit.isEmpty() ? QStringLiteral("Not valid for a prohibited zone: add the permit reference") :
+                                               QStringLiteral("Not valid for a prohibited zone: add the last day"));
+    }
+    GeoZoneAuthorisation complete{ stored.zoneKey, stored.zoneName, QStringLiteral("P-1"), QDateTime(), stored.validTo };
+    authorisations.set(complete);
+    QVERIFY(authorisations.find(prohibited));
+    QVERIFY(!policy.accepts(prohibited));
+    authorisations.revoke(stored.zoneKey);
+
+    // The notification of its authority authorises nothing, its reference and end stay optional
+    QCOMPARE(authorisations.recordNotification(prohibitedInfo, QString(), QString(), QString()), QString());
+    QVERIFY(authorisations.findNotification(prohibited));
+    QVERIFY(!authorisations.find(prohibited));
+    QVERIFY(policy.accepts(prohibited));
+
+    // Other restricted zones keep their optional permit and end
+    QCOMPARE(authorisations.authorise(QVariant::fromValue(GeoZoneInfo(restricted)), QString(), QString(), QString()), QString());
+    QVERIFY(authorisations.find(restricted));
+    QVERIFY(!authorisations.find(restricted)->prohibitedZone);
+    QVERIFY(!policy.accepts(restricted));
 }
 
 void GeoZoneEvaluatorTest::_testUnknownTerrain()

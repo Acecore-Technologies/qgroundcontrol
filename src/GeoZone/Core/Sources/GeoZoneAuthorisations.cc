@@ -43,6 +43,7 @@ constexpr const char *aircraftKey = "aircraft";
 constexpr const char *kindKey = "kind";
 constexpr const char *notificationKind = "notification";
 constexpr const char *authorisationKind = "authorisation";  ///< Read, authorisations are written without kind
+constexpr const char *prohibitedKey = "prohibited";
 constexpr const char *versionKey = "version";
 constexpr const char *authorisationsKey = "authorisations";
 constexpr int fileVersion = 1;
@@ -200,7 +201,16 @@ QJsonObject GeoZoneAuthorisation::toJson() const
     if (notification) {
         json.insert(kindKey, QLatin1String(notificationKind));
     }
+    if (prohibitedZone) {
+        json.insert(prohibitedKey, true);
+    }
     return json;
+}
+
+bool GeoZoneAuthorisation::validFor(const GeoZone *zone) const
+{
+    const bool prohibited = prohibitedZone || (zone && (zone->restriction() == GeoZone::Prohibited));
+    return notification || !prohibited || hasPermitAndEnd();
 }
 
 bool GeoZoneAuthorisation::ceilingValid(double meters)
@@ -293,8 +303,18 @@ std::optional<GeoZoneAuthorisation> GeoZoneAuthorisation::fromJson(const QJsonOb
             return rejected(kindKey);
         }
     }
+    if (json.contains(QLatin1String(prohibitedKey))) {
+        if (!json.value(prohibitedKey).isBool()) {
+            return rejected(prohibitedKey);
+        }
+        authorisation.prohibitedZone = json.value(prohibitedKey).toBool();
+    }
     if (!authorisation.limitsValid()) {
         return rejected("limits");
+    }
+    if (!authorisation.validFor(nullptr)) {
+        qCWarning(GeoZoneAuthorisationsLog) << "Authorisation of the prohibited zone" << authorisation.zoneKey << "left out, it has no permit reference or no end";
+        return std::nullopt;
     }
     return authorisation;
 }
@@ -312,6 +332,13 @@ QString GeoZoneAuthorisations::zoneKey(const GeoZone *zone)
         return QString();
     }
     return zone->identifier().isEmpty() ? zone->key() : QStringLiteral("%1/%2").arg(zone->country(), zone->identifier());
+}
+
+const GeoZoneAuthorisation *GeoZoneAuthorisations::find(const GeoZone *zone) const
+{
+    // Checked against the zone as it is now: it may have become prohibited, or the entry may not say that it was
+    const GeoZoneAuthorisation *const authorisation = _find(zone, false);
+    return (authorisation && authorisation->validFor(zone)) ? authorisation : nullptr;
 }
 
 const GeoZoneAuthorisation *GeoZoneAuthorisations::_find(const GeoZone *zone, bool notification) const
@@ -416,16 +443,29 @@ void GeoZoneAuthorisations::dismissPending()
 
 QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo, const QVariantMap &scope)
 {
+    GeoZoneAuthorisation authorisation;
+    const QString error = _readInput(zone, permit, validFrom, validTo, scope, false, authorisation);
+    if (error.isEmpty()) {
+        set(authorisation);
+    }
+    return error;
+}
+
+QString GeoZoneAuthorisations::_readInput(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo, const QVariantMap &scope,
+                                     bool notification, GeoZoneAuthorisation &authorisation) const
+{
     const GeoZoneInfo info = zone.value<GeoZoneInfo>();
     if (!info.valid()) {
         return tr("The zone is no longer loaded.");
     }
 
     // Local days, the last one included
-    GeoZoneAuthorisation authorisation;
+    authorisation = GeoZoneAuthorisation();
     authorisation.zoneKey = zoneKey(info.zone());
     authorisation.zoneName = info.displayName();
     authorisation.permit = permit.trimmed();
+    authorisation.notification = notification;
+    authorisation.prohibitedZone = !notification && (info.zone()->restriction() == GeoZone::Prohibited);
     if (!validFrom.trimmed().isEmpty()) {
         const QDate date = QDate::fromString(validFrom.trimmed(), Qt::ISODate);
         if (!date.isValid()) {
@@ -442,6 +482,13 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
     }
     if (authorisation.validFrom.isValid() && authorisation.validTo.isValid() && (authorisation.validTo <= authorisation.validFrom)) {
         return tr("The last day is before the first day.");
+    }
+    // A prohibited zone is only left out for a permit which can be referred to and which ends
+    if (authorisation.prohibitedZone && authorisation.permit.isEmpty()) {
+        return tr("Enter the permit number or reference: a prohibited zone can only be authorised with one.");
+    }
+    if (authorisation.prohibitedZone && !authorisation.validTo.isValid()) {
+        return tr("Enter the last day of the permit: a prohibited zone can only be authorised until an end date.");
     }
 
     // The scope
@@ -474,7 +521,7 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
     }
     authorisation.aircraft = scope.value(QStringLiteral("aircraft")).toString().trimmed();
     if (scope.value(QStringLiteral("limitToMission")).toBool()) {
-        const GeoZoneAuthorisation *const existing = find(info.zone());
+        const GeoZoneAuthorisation *const existing = _find(info.zone(), false);
         const QGeoRectangle missionBounds = scope.value(QStringLiteral("missionArea")).value<QGeoRectangle>();
         if (missionBounds.isValid()) {
             authorisation.area = GeoZoneAuthorisation::missionArea(missionBounds);
@@ -489,23 +536,18 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
     if (!authorisation.limitsValid()) {
         return tr("The limits of the authorisation are not valid.");
     }
-
-    set(authorisation);
     return QString();
 }
 
 QString GeoZoneAuthorisations::recordNotification(const QVariant &zone, const QString &reference, const QString &validFrom, const QString &validTo)
 {
-    // Checked like an authorisation without scope, then recorded as the notification
-    GeoZoneAuthorisations checked{ QString() };
-    const QString error = checked.authorise(zone, reference, validFrom, validTo);
-    if (!error.isEmpty()) {
-        return error;
+    // Read like an authorisation without scope. It authorises nothing, so its reference and end stay optional.
+    GeoZoneAuthorisation notification;
+    const QString error = _readInput(zone, reference, validFrom, validTo, QVariantMap(), true, notification);
+    if (error.isEmpty()) {
+        set(notification);
     }
-    GeoZoneAuthorisation notification = checked.authorisations().constFirst();
-    notification.notification = true;
-    set(notification);
-    return QString();
+    return error;
 }
 
 void GeoZoneAuthorisations::revoke(const QString &zoneKey, bool notification)
@@ -521,9 +563,18 @@ void GeoZoneAuthorisations::revoke(const QString &zoneKey, bool notification)
 
 QVariantMap GeoZoneAuthorisations::authorisationOf(const QVariant &zone) const
 {
-    const GeoZoneAuthorisation *const authorisation = find(zone.value<GeoZoneInfo>().zone());
+    const GeoZone *const geoZone = zone.value<GeoZoneInfo>().zone();
+    const GeoZoneAuthorisation *const authorisation = _find(geoZone, false);
     if (!authorisation) {
         return QVariantMap();
+    }
+    QString status = statusText(*authorisation, GeoZoneEnvironment::currentDateTimeUtc());
+    if (!authorisation->validFor(geoZone)) {
+        // What it misses to stand for the zone
+        status = authorisation->permit.trimmed().isEmpty() ?
+                     (authorisation->validTo.isValid() ? tr("Not valid for a prohibited zone: add the permit reference") :
+                                                         tr("Not valid for a prohibited zone: add the permit reference and the last day")) :
+                     tr("Not valid for a prohibited zone: add the last day");
     }
     return QVariantMap{
         { QStringLiteral("zoneKey"), authorisation->zoneKey },
@@ -535,7 +586,7 @@ QVariantMap GeoZoneAuthorisations::authorisationOf(const QVariant &zone) const
         { QStringLiteral("dailyTo"), authorisation->hasDailyHours() ? timeText(authorisation->dailyTo) : QString() },
         { QStringLiteral("aircraft"), authorisation->aircraft },
         { QStringLiteral("limitToMission"), authorisation->hasArea() },
-        { QStringLiteral("statusText"), statusText(*authorisation, GeoZoneEnvironment::currentDateTimeUtc()) },
+        { QStringLiteral("statusText"), status },
     };
 }
 

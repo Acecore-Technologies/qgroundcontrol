@@ -1077,7 +1077,8 @@ void GeoZonePlanningTest::_testUploadReasons()
     // Nor once authorised
     GeoZone *const zone = manager.zoneList().constFirst()->identifier() == QStringLiteral("P") ? manager.zoneList().constFirst() : manager.zoneList().constLast();
     QCOMPARE(zone->identifier(), QStringLiteral("P"));
-    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(zone)), QStringLiteral("P-1"), QString(), QString()).isEmpty());
+    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(zone)), QStringLiteral("P-1"), QString(),
+                                                            environment.now().toLocalTime().date().addDays(30).toString(Qt::ISODate)).isEmpty());
     QTRY_VERIFY(check.uploadReasons().isEmpty());
     QCOMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
 

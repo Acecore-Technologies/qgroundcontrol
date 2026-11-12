@@ -46,6 +46,8 @@ struct GeoZoneAuthorisation
     /// A notification the operator gave the authority to notify, see GeoZone::Data::notificationLeadSecs, with its
     /// reference as permit, rather than a permit. A zone can have both.
     bool notification = false;
+    /// The zone was prohibited when it was authorised, see validFor
+    bool prohibitedZone = false;
 
     static constexpr double areaBuffer = 250;   ///< Meters around the mission area of an authorisation limited to it
 
@@ -67,6 +69,13 @@ struct GeoZoneAuthorisation
     /// @return The area around a mission's bounds, widened by areaBuffer
     static QList<QGeoCoordinate> missionArea(const QGeoRectangle &missionBounds);
 
+    /// @return true with what the authorisation of a prohibited zone needs: a permit reference and an end
+    bool hasPermitAndEnd() const { return !permit.trimmed().isEmpty() && validTo.isValid(); }
+    /// @return true if the authorisation can stand for the zone. A prohibited zone, now or when it was authorised, is
+    ///         only left out of the checks and alerts for a permit which can be referred to and which ends, see
+    ///         hasPermitAndEnd. Notifications authorise nothing and need neither.
+    bool validFor(const GeoZone *zone) const;
+
     /// @return true for a ceiling an authorisation can have: a height above 0
     static bool ceilingValid(double meters);
     /// @return true if the limits can be applied: the end after the start, the ceiling a valid one, the area a polygon
@@ -75,8 +84,9 @@ struct GeoZoneAuthorisation
     bool limitsValid() const;
 
     QJsonObject toJson() const;
-    /// @return Nothing without a zone key, or when a limit which is there can't be read or isn't valid, see
-    ///         limitsValid: taken as no limit it would authorise more than the permit does
+    /// @return Nothing without a zone key, when a limit which is there can't be read or isn't valid, see
+    ///         limitsValid: taken as no limit it would authorise more than the permit does, or for the authorisation
+    ///         of a prohibited zone without permit reference or end, see validFor
     static std::optional<GeoZoneAuthorisation> fromJson(const QJsonObject &json);
 
     friend bool operator==(const GeoZoneAuthorisation &, const GeoZoneAuthorisation &) = default;
@@ -114,8 +124,9 @@ public:
     int count() const { return static_cast<int>(_authorisations.count()); }
     const QList<GeoZoneAuthorisation> &authorisations() const { return _authorisations; }
 
-    /// @return Authorisation of the zone, null without
-    const GeoZoneAuthorisation *find(const GeoZone *zone) const { return _find(zone, false); }
+    /// @return Authorisation of the zone, null without or when it can't stand for the zone, see
+    ///         GeoZoneAuthorisation::validFor
+    const GeoZoneAuthorisation *find(const GeoZone *zone) const;
     /// @return Notification recorded for the zone, null without
     const GeoZoneAuthorisation *findNotification(const GeoZone *zone) const { return _find(zone, true); }
 
@@ -133,7 +144,8 @@ public:
     Q_INVOKABLE void acceptPending();
     Q_INVOKABLE void dismissPending();
 
-    /// Authorises the zone from local dates, like 2026-12-31, both included
+    /// Authorises the zone from local dates, like 2026-12-31, both included. A prohibited zone needs the permit and
+    /// the last day.
     /// @param validFrom First day, empty to start now
     /// @param validTo Last day, empty without end
     /// @param scope Optional limits, all texts empty without: ceiling in the vertical distance units above the
@@ -149,7 +161,8 @@ public:
     Q_INVOKABLE void revoke(const QString &zoneKey, bool notification = false);
     /// @return Map with zoneKey, permit, validFrom and validTo (local dates, empty when open), the scope (ceiling in
     ///         the vertical distance units, dailyFrom, dailyTo, aircraft and limitToMission when it has an area) and
-    ///         statusText of the authorisation of a GeoZoneInfo, empty without
+    ///         statusText of the authorisation of a GeoZoneInfo, empty without. One which can't stand for the zone,
+    ///         see find, is returned to be completed, its statusText telling what it misses.
     Q_INVOKABLE QVariantMap authorisationOf(const QVariant &zone) const;
     /// @return Map with zoneKey, permit (the reference), validFrom, validTo and statusText of the notification
     ///         recorded for a GeoZoneInfo, empty without
@@ -189,7 +202,12 @@ signals:
 private:
     /// @return Validity of the authorisation at the time without its scope
     static QString validityText(const GeoZoneAuthorisation &authorisation, const QDateTime &now);
+    /// @return The entry of the zone, whether it can stand for it or not
     const GeoZoneAuthorisation *_find(const GeoZone *zone, bool notification) const;
+    /// Reads the authorisation, or the notification, of the zone from what the user entered, see authorise
+    /// @return Error message, empty on success
+    QString _readInput(const QVariant &zone, const QString &permit, const QString &validFrom, const QString &validTo, const QVariantMap &scope,
+                  bool notification, GeoZoneAuthorisation &authorisation) const;
 
     void _load();
     void _save();

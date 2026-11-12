@@ -590,7 +590,7 @@ void GeoZoneFlightTest::_testPreflightChecklist()
     // Authorised, with the local QNH and the operator ID set
     const GeoZone *const prohibited = findZone(manager, QStringLiteral("P"));
     QVERIFY(prohibited);
-    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(prohibited)), QStringLiteral("P-1"), QString(), QString()).isEmpty());
+    QVERIFY(manager.planning()->authorisations()->authorise(QVariant::fromValue(GeoZoneInfo(prohibited)), QStringLiteral("P-1"), QString(), QStringLiteral("2026-12-31")).isEmpty());
     qnh->setRawValue(1002.5);
     operatorId->setRawValue(QStringLiteral("FIN87astrdge12k8"));
     QTRY_COMPARE(check.mission().state, Check::Passed);
