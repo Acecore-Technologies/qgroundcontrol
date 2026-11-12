@@ -70,7 +70,8 @@ GeoZoneRouteSearch::Route GeoZoneRouteVertical::route(GeoZoneRouteSearch::Kind k
         return route;
     }
 
-    const GeoZonePathEvaluator::Path path = GeoZonePathEvaluator::Path::fromPositions({ samples.constFirst(), samples.constLast() });
+    // The leg is the same for all zones and rounds, its terrain is looked up once
+    const GeoZonePathEvaluator::PreparedPaths path = _evaluator.prepare({ GeoZonePathEvaluator::Path::fromPositions({ samples.constFirst(), samples.constLast() }) });
     const qsizetype last = samples.count() - 1;
     QList<const GeoZone*> avoided;
     QList<const GeoZone*> blocking = crossed;
@@ -85,7 +86,7 @@ GeoZoneRouteSearch::Route GeoZoneRouteVertical::route(GeoZoneRouteSearch::Kind k
         // ground follow the terrain, which is linear between the samples.
         for (const GeoZone *zone : std::as_const(blocking)) {
             avoided.append(zone);
-            for (const GeoZonePathEvaluator::Stretch &stretch : _evaluator.evaluateZone(zone, { path }).stretches) {
+            for (const GeoZonePathEvaluator::Stretch &stretch : _evaluator.evaluateZone(zone, path).stretches) {
                 const GeoZone::Volume &volume = zone->data().volumes[stretch.volume];
                 // The samples between the entry and the exit, along the same line
                 QList<GeoZone::Position> positions = { stretch.entry.position, stretch.exit.position };

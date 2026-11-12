@@ -850,6 +850,61 @@ void GeoZoneEvaluatorTest::_testAuthorisationList()
     QCOMPARE(model.find(restricted), model.list().find(restricted));
 }
 
+void GeoZoneEvaluatorTest::_testPreparedPaths()
+{
+    // Two zones on a path, one above the ground and one requiring an authorisation the operator has up to 120 m AMSL
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    ZoneCatalog zones(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(zones.loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _withLimits(_circleFeature(QStringLiteral("AGL"), QStringLiteral("PROHIBITED"), center, 300), 50, QStringLiteral("AGL"), 150, QStringLiteral("AGL")),
+        _circleFeature(QStringLiteral("CTR"), QStringLiteral("REQ_AUTHORISATION"), center.atDistanceAndAzimuth(2000, 90), 300),
+    }), errorString), qPrintable(errorString));
+    QCOMPARE(zones.zoneList().count(), 2);
+    const GeoZone *const controlZone = zones.zoneList().constLast();
+    GeoZoneAuthorisation authorisation;
+    authorisation.zoneKey = GeoZoneAuthorisations::zoneKey(controlZone);
+    authorisation.ceiling = 120;
+    int lookups = 0;
+    GeoZonePathEvaluator evaluator(zones.catalog(), GeoZonePolicy({ GeoZone::Prohibited, GeoZone::ReqAuthorisation }));
+    evaluator.setTerrainLookup([&lookups](const QGeoCoordinate &) { lookups++; return 400.0; });
+    const QList<GeoZonePathEvaluator::Path> paths = { _evaluatorPath({ center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(3000, 90) }, { 500, 500 }) };
+
+    // The terrain is looked up when the paths are prepared, not again by each evaluation of them
+    const GeoZonePathEvaluator::PreparedPaths prepared = evaluator.prepare(paths);
+    const int prepareLookups = lookups;
+    QVERIFY(prepareLookups > 2);
+    const GeoZonePathEvaluator::Result result = evaluator.evaluate(prepared);
+    QCOMPARE(result.zones.count(), 2);
+    QStringList issues;
+    for (const GeoZone *zone : zones.zoneList()) {
+        const GeoZonePathEvaluator::ZoneResult zoneResult = evaluator.evaluateZone(zone, prepared);
+        QCOMPARE(zoneResult.zone, zone);
+        QCOMPARE(zoneResult.crossings.count(), 1);
+        issues.append(evaluator.scopeIssue(zoneResult, authorisation, prepared));
+    }
+    QCOMPARE(lookups, prepareLookups);
+
+    // With the results of the evaluations which prepare the paths themselves, each time
+    const GeoZonePathEvaluator::Result unprepared = evaluator.evaluate(paths);
+    QCOMPARE(lookups, 2 * prepareLookups);
+    QCOMPARE(unprepared.zones.count(), result.zones.count());
+    for (qsizetype i = 0; i < result.zones.count(); i++) {
+        QCOMPARE(unprepared.zones[i].zone, result.zones[i].zone);
+        QCOMPARE(unprepared.zones[i].crossings.count(), result.zones[i].crossings.count());
+        QCOMPARE(unprepared.zones[i].crossings.constFirst().entry.distance, result.zones[i].crossings.constFirst().entry.distance);
+        QCOMPARE(unprepared.zones[i].crossings.constFirst().entry.position.terrainAMSL, 400.0);
+        QCOMPARE(evaluator.scopeIssue(evaluator.evaluateZone(result.zones[i].zone, paths), authorisation, paths), issues[i]);
+    }
+    QCOMPARE(issues.constLast(), QStringLiteral("authorised up to 120 m AMSL, the flight reaches 500 m AMSL"));
+
+    // Without paths nothing is entered
+    QVERIFY(evaluator.evaluate(evaluator.prepare({})).zones.isEmpty());
+    QVERIFY(!evaluator.evaluateZone(controlZone, evaluator.prepare({})).zone);
+}
+
 void GeoZoneEvaluatorTest::_testUnknownTerrain()
 {
     // From 50 to 150 m above the ground, which is at 400 m except in a gap without terrain data around the zone center

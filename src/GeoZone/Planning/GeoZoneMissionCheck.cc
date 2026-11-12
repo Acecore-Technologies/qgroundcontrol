@@ -561,7 +561,8 @@ GeoZoneMissionCheck::Evaluation GeoZoneMissionCheck::evaluate(const GeoZoneCatal
     evaluation.start = start;
     evaluation.end = flightEnd;
     evaluation.area = path.box();
-    const QList<GeoZonePathEvaluator::Path> paths = path.evaluatorPaths(start, end);
+    // Prepared once for the evaluation and the scopes of the authorisations
+    const GeoZonePathEvaluator::PreparedPaths paths = evaluator.prepare(path.evaluatorPaths(start, end));
     for (const GeoZonePathEvaluator::ZoneResult &result : evaluator.evaluate(paths, path.areas()).zones) {
         if (!result.entered()) {
             continue;

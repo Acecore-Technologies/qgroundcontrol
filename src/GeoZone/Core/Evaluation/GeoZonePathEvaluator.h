@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 
 #include "GeoZone.h"
 #include "GeoZoneCatalog.h"
@@ -161,6 +162,21 @@ public:
         const Crossing *firstCrossing() const;
     };
 
+private:
+    struct Prepared;
+
+public:
+    /// Paths made ready for the evaluations of an evaluator by its prepare(): with the terrain from its lookup, their
+    /// great circles followed and their altitudes above mean sea level. What evaluates the same paths more than once,
+    /// like for each of several zones, prepares them once.
+    class PreparedPaths
+    {
+        friend class GeoZonePathEvaluator;
+        // Only made by prepare(): without a default constructor, so that braces still mean a list of paths
+        explicit PreparedPaths(const std::shared_ptr<const QList<Prepared>> &paths) : _paths(paths) {}
+        std::shared_ptr<const QList<Prepared>> _paths;
+    };
+
     struct Result {
         /// Zones a path or an area interacts with, ordered by their first crossing, then the zones only entered by
         /// areas, then the zones only passed above or below
@@ -189,12 +205,18 @@ public:
     void setScheduleTolerance(int seconds) { _scheduleToleranceSecs = (std::max)(seconds, 0); }
     int scheduleTolerance() const { return _scheduleToleranceSecs; }
 
+    /// @return The paths ready for the evaluations of this evaluator, with the terrain of its lookup, which is looked
+    ///         up now
+    PreparedPaths prepare(const QList<Path> &paths) const;
+
     /// @return How the paths and the areas, like mission patterns, interact with the zones accepted by the policy
     Result evaluate(const QList<Path> &paths, const QList<GeoZone::Area> &areas = {}) const;
+    Result evaluate(const PreparedPaths &paths, const QList<GeoZone::Area> &areas = {}) const;
 
     /// @return How the paths interact with the zone, whatever the policy's restrictions and authorisations. The zone
     ///         is null when they don't.
     ZoneResult evaluateZone(const GeoZone *zone, const QList<Path> &paths) const;
+    ZoneResult evaluateZone(const GeoZone *zone, const PreparedPaths &paths) const;
 
     /// @return Why the active crossings of the result of evaluate with the paths and areas, or its areas, leave the
     ///         area of the authorisation's scope or rise above its ceiling, like "authorised up to 120 m AGL, the
@@ -202,6 +224,9 @@ public:
     ///         Zones with such an authorisation of the policy are left out of the results of evaluate when the paths
     ///         stay within its scope.
     QString scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Path> &paths,
+                       const QList<GeoZone::Area> &areas = {}) const;
+    /// @param paths Those the result was evaluated with
+    QString scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const PreparedPaths &paths,
                        const QList<GeoZone::Area> &areas = {}) const;
 
     /// @return The path with the terrain elevation at the positions without one, and with positions added every
@@ -221,9 +246,8 @@ public:
     static QString zoneNames(const QList<const GeoZone*> &zones, int maxListed, bool withRestriction);
 
 private:
-    struct Prepared;
-
     QList<Prepared> _prepare(const QList<Path> &paths) const;
+
     ZoneResult _evaluateZone(const GeoZone *zone, const QList<Prepared> &paths, const QList<std::pair<int, qsizetype>> &segments) const;
     bool _activeDuring(const GeoZone *zone, const QDateTime &start, const QDateTime &end) const;
     /// @return ScheduleAssumed when the zone is active by a schedule which the policy considers and which can't be

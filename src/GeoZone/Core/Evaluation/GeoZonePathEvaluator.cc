@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <tuple>
 
 namespace {
@@ -581,12 +582,22 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::_evaluateZone(const GeoZo
     return result;
 }
 
+GeoZonePathEvaluator::PreparedPaths GeoZonePathEvaluator::prepare(const QList<Path> &paths) const
+{
+    return PreparedPaths(std::make_shared<const QList<Prepared>>(_prepare(paths)));
+}
+
 GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::evaluateZone(const GeoZone *zone, const QList<Path> &paths) const
+{
+    return zone ? evaluateZone(zone, prepare(paths)) : ZoneResult();
+}
+
+GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::evaluateZone(const GeoZone *zone, const PreparedPaths &paths) const
 {
     if (!zone) {
         return ZoneResult();
     }
-    const QList<Prepared> prepared = _prepare(paths);
+    const QList<Prepared> &prepared = *paths._paths;
     QList<std::pair<int, qsizetype>> segments;
     for (int p = 0; p < prepared.count(); p++) {
         for (qsizetype i = 0; i < prepared[p].segmentCount(); i++) {
@@ -603,7 +614,13 @@ GeoZonePathEvaluator::ZoneResult GeoZonePathEvaluator::evaluateZone(const GeoZon
 QString GeoZonePathEvaluator::scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Path> &paths,
                                          const QList<GeoZone::Area> &areas) const
 {
-    return result.zone ? _scopeIssue(result, authorisation, _prepare(paths), areas) : QString();
+    return result.zone ? scopeIssue(result, authorisation, prepare(paths), areas) : QString();
+}
+
+QString GeoZonePathEvaluator::scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const PreparedPaths &paths,
+                                         const QList<GeoZone::Area> &areas) const
+{
+    return result.zone ? _scopeIssue(result, authorisation, *paths._paths, areas) : QString();
 }
 
 QString GeoZonePathEvaluator::_scopeIssue(const ZoneResult &result, const GeoZoneAuthorisation &authorisation, const QList<Prepared> &paths,
@@ -686,7 +703,12 @@ QString GeoZonePathEvaluator::_scopeIssue(const ZoneResult &result, const GeoZon
 
 GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const QList<Path> &paths, const QList<GeoZone::Area> &areas) const
 {
-    const QList<Prepared> prepared = _prepare(paths);
+    return evaluate(prepare(paths), areas);
+}
+
+GeoZonePathEvaluator::Result GeoZonePathEvaluator::evaluate(const PreparedPaths &paths, const QList<GeoZone::Area> &areas) const
+{
+    const QList<Prepared> &prepared = *paths._paths;
 
     // Zones near each segment, in the order the paths come near them
     QList<const GeoZone*> candidates;
