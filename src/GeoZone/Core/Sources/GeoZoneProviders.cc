@@ -255,6 +255,11 @@ bool GeoZoneProviders::areaDownloaded(const QString &serviceId, const QStringLis
 
 bool GeoZoneProviders::_matches(const Service &service, const QUrl &url)
 {
+    // An entry without host, like the feed of a file, has no server whose addresses are its own: it would claim every
+    // address without host
+    if (service.host.isEmpty()) {
+        return false;
+    }
     const QString host = url.host();
     return ((host == service.host) || host.endsWith(QLatin1Char('.') + service.host)) &&
            (service.path.isEmpty() || url.path().startsWith(service.path, Qt::CaseInsensitive));
@@ -264,7 +269,7 @@ GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
 {
     const QUrl parsedUrl(url);
     for (const Service &service : _services()) {
-        if ((service.format != GeoZoneParser::Format::Unknown) && _matches(service, parsedUrl)) {
+        if ((service.format != GeoZoneParser::Format::Unknown) && ((!service.feedUrl.isEmpty() && (service.feedUrl == url)) || _matches(service, parsedUrl))) {
             return service.format;
         }
     }

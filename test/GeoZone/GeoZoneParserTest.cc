@@ -3372,4 +3372,34 @@ void GeoZoneParserTest::_testCatalogueMembers()
     QCOMPARE(unknown, QStringList());
 }
 
+void GeoZoneParserTest::_testCatalogueFileFeed()
+{
+    // A catalogue offers a file on the controller, in a format which isn't recognized from the content alone
+    GeoZoneFeedCatalogue::Catalogue catalogue = GeoZoneFeedCatalogue::builtIn();
+    GeoZoneFeedCatalogue::Catalogue overlay;
+    QString errorString;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(R"json({ "feeds": [ { "id": "local", "name": "Local zones", "url": "file:///data/zones.json", "format": "faa-airspace", "live": true } ] })json",
+                                         QStringLiteral("feeds.json"), overlay, errorString), qPrintable(errorString));
+    QCOMPARE(overlay.feeds.count(), 1);
+    QCOMPARE(overlay.feeds[0].host, QString());
+    GeoZoneFeedCatalogue::apply(catalogue, overlay);
+    GeoZoneProviders::setCatalogue(catalogue.feeds, catalogue.templates);
+    const auto restore = qScopeGuard([]() { GeoZoneProviders::resetCatalogue(); });
+
+    // The entry is the feed of its file
+    const QString localUrl = QStringLiteral("file:///data/zones.json");
+    QCOMPARE(GeoZoneProviders::serviceId(localUrl), QStringLiteral("local"));
+    QCOMPARE(GeoZoneProviders::serviceName(localUrl), QStringLiteral("Local zones"));
+    QCOMPARE(GeoZoneProviders::formatHint(localUrl), GeoZoneParser::Format::FaaAirspace);
+    QVERIFY(GeoZoneProviders::isLiveUrl(localUrl));
+    // but not of every other address without a host: other files, and addresses which aren't URLs
+    for (const QString &other : { QStringLiteral("file:///home/pilot/other.json"), QStringLiteral("file:///data/zones.json.bak"), QStringLiteral("/data/zones.json"),
+                                  QStringLiteral("zones.json"), QString() }) {
+        QVERIFY2(GeoZoneProviders::serviceId(other).isEmpty(), qPrintable(other));
+        QCOMPARE(GeoZoneProviders::formatHint(other), GeoZoneParser::Format::Unknown);
+        QVERIFY(GeoZoneProviders::serviceName(other).isEmpty());
+        QVERIFY(!GeoZoneProviders::isLiveUrl(other));
+    }
+}
+
 GEOZONE_TEST(GeoZoneParserTest)
