@@ -1315,6 +1315,101 @@ void GeoZoneGeometryTest::_testZoneKeys()
 #endif
 }
 
+void GeoZoneGeometryTest::_testSourceTexts()
+{
+    // A national file and an extract of it publish the same zone, which the catalog keeps once, from the first
+    GeoZone::Volume volume;
+    volume.isCircle = true;
+    volume.center = QGeoCoordinate(47, 8);
+    volume.radius = 500;
+    GeoZone::Data data;
+    data.identifier = QStringLiteral("SAME");
+    data.country = QStringLiteral("CHE");
+    data.restriction = GeoZone::Prohibited;
+    data.contentHash = QByteArrayLiteral("zone");
+    data.volumes.append(volume);
+    GeoZoneParser::Result nationalResult;
+    nationalResult.format = GeoZoneParser::Format::ED269;
+    nationalResult.title = QStringLiteral("National");
+    nationalResult.issued = _utc(QDate(2026, 8, 13), QTime(0, 0));
+    nationalResult.contentHash = QByteArrayLiteral("content");
+    nationalResult.zones = { data };
+    GeoZoneParser::Result extractResult = nationalResult;
+    extractResult.title = QStringLiteral("Extract");
+
+    const QDateTime loaded = _utc(QDate(2026, 8, 14), QTime(9, 0));
+    GeoZoneSource national(QStringLiteral("national.json"), QString());
+    GeoZoneSource extract(QStringLiteral("extract.json"), QString());
+    national.setResult(nationalResult, loaded, loaded);
+    extract.setResult(extractResult, loaded, loaded);
+    GeoZoneCatalog catalog;
+    catalog.rebuild({ &national, &extract });
+    QCOMPARE(catalog.zones().count(), 1);
+    const GeoZone *const zone = catalog.zones().constFirst();
+    const GeoZoneDetails details = GeoZoneInfo(zone).details();
+    QCOMPARE(zone->sourceText(), QStringLiteral("National (issued 2026-08-13)"));
+    QCOMPARE(details.sourcesText(), QStringLiteral("National (issued 2026-08-13)\nExtract (issued 2026-08-13)"));
+
+    // A download confirms the zones of the extract with a newer issue date: the zone kept for them names it too,
+    // although the catalog isn't rebuilt for unchanged zones
+    extractResult.issued = _utc(QDate(2026, 8, 20), QTime(0, 0));
+    extract.markCurrent(extractResult, loaded.addDays(7), loaded.addDays(7));
+    QCOMPARE(extract.zoneCount(), 1);
+    QCOMPARE(extract.zones().constFirst()->sourceText(), QStringLiteral("Extract (issued 2026-08-20)"));
+    const QList<GeoZone::OtherSource> others = zone->otherSources();
+    QCOMPARE(others.count(), 1);
+    QCOMPARE(others.constFirst().key, QStringLiteral("extract.json"));
+    QCOMPARE(others.constFirst().text(), QStringLiteral("Extract (issued 2026-08-20)"));
+    QCOMPARE(details.sourcesText(), QStringLiteral("National (issued 2026-08-13)\nExtract (issued 2026-08-20)"));
+    nationalResult.issued = _utc(QDate(2026, 8, 21), QTime(0, 0));
+    national.markCurrent(nationalResult, loaded.addDays(7), loaded.addDays(7));
+    QCOMPARE(details.sourceText(), QStringLiteral("National (issued 2026-08-21) \u00b7 2 source(s)"));
+    QCOMPARE(details.sourcesText(), QStringLiteral("National (issued 2026-08-21)\nExtract (issued 2026-08-20)"));
+
+    // The zones of an earlier load, which values in QML may still share, keep the text of their data
+    const QSharedPointer<GeoZone> earlier = extract.sharedZones().value(0);
+    QVERIFY(earlier);
+    extractResult.issued = _utc(QDate(2026, 9, 1), QTime(0, 0));
+    extractResult.contentHash = QByteArrayLiteral("changed content");
+    extractResult.zones[0].restriction = GeoZone::Conditional;
+    extractResult.zones[0].contentHash = QByteArrayLiteral("changed zone");
+    extract.setResult(extractResult, loaded.addDays(20), loaded.addDays(20));
+    QCOMPARE(extract.zoneCount(), 1);
+    QCOMPARE(extract.zones().constFirst()->sourceText(), QStringLiteral("Extract (issued 2026-09-01)"));
+    QCOMPARE(earlier->sourceText(), QStringLiteral("Extract (issued 2026-08-20)"));
+    // A zone without a source has no text, or its own
+    GeoZone alone(data);
+    QVERIFY(alone.sourceText().isEmpty());
+    alone.setSourceText(QStringLiteral("Operator"));
+    QCOMPARE(alone.sourceText(), QStringLiteral("Operator"));
+
+    // Workers read the text of published zones while a download confirms their source current on this thread
+    std::atomic<bool> stop = false;
+    QList<QFuture<bool>> readers;
+    for (int thread = 0; thread < 4; thread++) {
+        readers.append(QtConcurrent::run([zone, &details, &stop]() {
+            bool ok = true;
+            while (!stop.load()) {
+                ok = ok && zone->sourceText().startsWith(QStringLiteral("National (issued 2026-08-2"));
+                ok = ok && details.sourcesText().startsWith(QStringLiteral("National (issued 2026-08-2"));
+            }
+            return ok;
+        }));
+    }
+    for (int i = 0; i < 2000; i++) {
+        nationalResult.issued = _utc(QDate(2026, 8, 21 + (i % 2)), QTime(0, 0));
+        national.markCurrent(nationalResult, loaded.addDays(7), loaded.addDays(7));
+    }
+    stop = true;
+    // All readers are done before the first assertion can return, since they use the zone of this test
+    QList<bool> results;
+    for (QFuture<bool> &reader : readers) {
+        results.append(reader.result());
+    }
+    QCOMPARE(results, QList<bool>(readers.count(), true));
+    QCOMPARE(zone->sourceText(), QStringLiteral("National (issued 2026-08-22)"));
+}
+
 void GeoZoneGeometryTest::_testRingContainment()
 {
     // A figure-8 whose edges cross at its center, and a pentagram whose boundary winds twice around its center

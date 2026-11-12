@@ -30,6 +30,7 @@ Q_DECLARE_LOGGING_CATEGORY(GeoZoneSourceLog)
 
 class GeoZone;
 class GeoZoneShape;
+class GeoZoneSourceLabel;
 
 /// Zones added, removed and changed by a reload of a source: zones are told apart by their identifier, or their name
 /// without, and compared by their content hashes (GeoZone::Data::contentHash)
@@ -273,6 +274,7 @@ private:
 
     QList<GeoZone*> _zones;
     QList<QSharedPointer<GeoZone>> _sharedZones;    ///< Owns _zones
+    QSharedPointer<GeoZoneSourceLabel> _sourceLabel;   ///< Of _zones, see GeoZone::sourceText
     QList<GeoZoneShape*> _shapes;
     GeoZoneBox _box;
 };

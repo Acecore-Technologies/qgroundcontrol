@@ -34,6 +34,7 @@ private slots:
     void _testContainsAndPaths();
     void _testInvalidCoordinates();
     void _testZoneKeys();
+    void _testSourceTexts();
     void _testRingContainment();
     void _testAltitudeLimits();
     void _testVerticalOverlap_data();

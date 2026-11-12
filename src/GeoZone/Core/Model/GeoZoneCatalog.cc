@@ -66,7 +66,8 @@ void GeoZoneCatalog::rebuild(const QList<const GeoZoneSource*> &sources)
                 if (same != kept.cend()) {
                     QList<GeoZone::OtherSource> &others = otherSources[*same];
                     if (!std::any_of(others.cbegin(), others.cend(), [zone](const GeoZone::OtherSource &other) { return other.key == zone->sourceKey(); })) {
-                        others.append(GeoZone::OtherSource{ zone->sourceKey(), zone->sourceText() });
+                        // The label rather than its text, which changes when a download confirms the source current
+                        others.append(GeoZone::OtherSource{ zone->sourceKey(), zone->sourceLabel() });
                     }
                     data->merged.emplace_back(zone, *same);
                     left.insert(zone);

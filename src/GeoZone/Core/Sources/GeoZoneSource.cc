@@ -261,9 +261,9 @@ void GeoZoneSource::_setMetadata(const GeoZoneParser::Result &result, const QDat
 void GeoZoneSource::markCurrent(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate)
 {
     _setMetadata(result, loadedAt, fileDate);
-    const QString sourceText = _sourceText();
-    for (GeoZone *zone : std::as_const(_zones)) {
-        zone->setSourceText(sourceText);
+    // The zones are published: workers may read their source text, which they share with the label
+    if (_sourceLabel) {
+        _sourceLabel->setText(_sourceText());
     }
     updateValidity(GeoZoneEnvironment::currentDateTimeUtc());
     emit changed();
@@ -325,13 +325,14 @@ void GeoZoneSource::setResult(const GeoZoneParser::Result &result, const QDateTi
     _clearZones();
     _setMetadata(result, loadedAt, fileDate);
 
-    const QString sourceText = _sourceText();
+    // A label for the zones of this load: those of the previous one, which values in QML may still share, keep theirs
+    _sourceLabel = QSharedPointer<GeoZoneSourceLabel>::create(_sourceText());
     for (const GeoZone::Data &zoneData : result.zones) {
         const QSharedPointer<GeoZone> sharedZone = QSharedPointer<GeoZone>::create(zoneData);
         GeoZone *const zone = sharedZone.data();
         _sharedZones.append(sharedZone);
         zone->setSourceKey(_key);
-        zone->setSourceText(sourceText);
+        zone->setSourceLabel(_sourceLabel);
         _zones.append(zone);
         _box = _box.united(zone->box());
 

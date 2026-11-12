@@ -33,6 +33,25 @@
 #include "GeoZoneGeometry.h"
 #include "GeoZoneSchedule.h"
 
+/// Text naming the source of zones with the date of its data, like "Name (issued 2026-08-13)". The zones of one load
+/// of a source share it, so that it follows the source when a download confirms them current, also for the zones
+/// listing the source among their GeoZone::otherSources. Written by the source on the GUI thread, read from any
+/// thread.
+class GeoZoneSourceLabel
+{
+    Q_DISABLE_COPY_MOVE(GeoZoneSourceLabel)
+
+public:
+    explicit GeoZoneSourceLabel(const QString &text = QString()) : _text(text) {}
+
+    QString text() const;
+    void setText(const QString &text);
+
+private:
+    mutable QMutex _mutex;
+    QString _text;  ///< Guarded by _mutex
+};
+
 /// A UAS geographical zone loaded from a geozone source. Zones are plain objects owned by their source through
 /// shared pointers, QML gets GeoZoneInfo values describing them. The class is a gadget for its enums.
 class GeoZone : public QEnableSharedFromThis<GeoZone>
@@ -158,15 +177,22 @@ public:
     QGeoRectangle boundingBox() const { return _box.toRectangle(); }
     bool active() const { return _active.load(std::memory_order_relaxed); }
     QString sourceKey() const { return _sourceKey; }
-    QString sourceText() const { return _sourceText; }
-    /// Set by the source before the zone is published
+    /// @return Names the source with the date of its data, as it is now, see GeoZoneSourceLabel. From any thread.
+    QString sourceText() const { return _sourceLabel ? _sourceLabel->text() : QString(); }
+    const QSharedPointer<const GeoZoneSourceLabel> &sourceLabel() const { return _sourceLabel; }
+    /// Set by the source before the zone is published, and not changed after: the source changes the text of the
+    /// label it shares with its zones instead
     void setSourceKey(const QString &sourceKey);
+    void setSourceLabel(const QSharedPointer<const GeoZoneSourceLabel> &label);
+    /// Sets a label of the zone's own with the text, for zones without a source keeping it current
     void setSourceText(const QString &sourceText);
 
     /// Another source publishing the same zone, see otherSources
     struct OtherSource {
         QString key;
-        QString text;   ///< See sourceText
+        QSharedPointer<const GeoZoneSourceLabel> label;    ///< Of the zone of that source which was left out
+        /// @return See sourceText, as it is now
+        QString text() const { return label ? label->text() : QString(); }
         bool operator==(const OtherSource &other) const = default;
     };
     /// Other sources publishing the same zone with the same content, which GeoZoneCatalog keeps once from this zone's
@@ -295,7 +321,7 @@ private:
     std::atomic<bool> _active = true;   ///< Updated on the GUI thread, read by checks on worker threads
     bool _scheduleAssumed = false;
     QString _sourceKey;
-    QString _sourceText;
+    QSharedPointer<const GeoZoneSourceLabel> _sourceLabel;
     QString _key;
     mutable QMutex _otherSourcesMutex;
     QList<OtherSource> _otherSources;               ///< Guarded by _otherSourcesMutex

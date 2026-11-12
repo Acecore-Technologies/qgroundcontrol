@@ -33,7 +33,7 @@ QString GeoZoneDetails::sourcesText() const
     }
     QStringList texts{ _zone->sourceText() };
     for (const GeoZone::OtherSource &other : _zone->otherSources()) {
-        texts.append(other.text);
+        texts.append(other.text());
     }
     return texts.join(QStringLiteral("\n"));
 }

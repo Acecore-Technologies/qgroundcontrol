@@ -60,6 +60,18 @@ GeoZone::Data continuousData(const GeoZone::Data &data)
 
 } // namespace
 
+QString GeoZoneSourceLabel::text() const
+{
+    const QMutexLocker locker(&_mutex);
+    return _text;
+}
+
+void GeoZoneSourceLabel::setText(const QString &text)
+{
+    const QMutexLocker locker(&_mutex);
+    _text = text;
+}
+
 GeoZoneBox GeoZone::Volume::boundingBox() const
 {
     if (isCircle) {
@@ -137,9 +149,14 @@ void GeoZone::disambiguateKeys(const QList<GeoZone*> &zones)
     }
 }
 
+void GeoZone::setSourceLabel(const QSharedPointer<const GeoZoneSourceLabel> &label)
+{
+    _sourceLabel = label;
+}
+
 void GeoZone::setSourceText(const QString &sourceText)
 {
-    _sourceText = sourceText;
+    _sourceLabel = QSharedPointer<GeoZoneSourceLabel>::create(sourceText);
 }
 
 QList<GeoZone::OtherSource> GeoZone::otherSources() const
