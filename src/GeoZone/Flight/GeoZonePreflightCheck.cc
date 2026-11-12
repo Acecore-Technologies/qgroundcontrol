@@ -417,12 +417,12 @@ GeoZonePreflightCheck::Item GeoZonePreflightCheck::takeoffItem(const GeoZoneVehi
     if (warning.isEmpty()) {
         return { Passed, tr("The vehicle isn't inside a restricted geozone.") };
     }
-    switch (monitor->groundLevel()) {
+    switch (static_cast<GeoZoneAlertLevel::Level>(monitor->groundLevel())) {
     case GeoZoneAlertLevel::Warning:
         return { Failed, warning + QLatin1Char('.') };
     case GeoZoneAlertLevel::Caution:
         return { Warning, warning + QLatin1Char('.') };
-    default:
+    case GeoZoneAlertLevel::Advisory:
         break;
     }
     return { Passed, warning + QLatin1Char('.') };
