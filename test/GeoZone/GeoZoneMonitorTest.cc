@@ -986,14 +986,16 @@ void GeoZoneMonitorTest::_testFenceWarning()
         QVERIFY(!warning->active());
         QCOMPARE(monitor.alertModel()->alerts().count(), 0);
 
-        // Back towards the fence, then its breach, which the vehicle reports: the warning ends with it
+        // Back towards the fence, then its breach: the warning ends with it. The breach is raised once, from the
+        // position past the fence, and not again when the vehicle reports it too.
         fly(420, 1000);
         QVERIFY(warning->active());
         QCOMPARE(warningSpy.count(), 2);
-        fly(460, 1000);
-        QVERIFY(!warning->active());
         const qsizetype spokenCount = sink->spoken.count();
         QSignalSpy breachSpy(&monitor, &GeoZoneMonitor::fenceBreach);
+        fly(460, 1000);
+        QVERIFY(!warning->active());
+        QCOMPARE(breachSpy.count(), 1);
         mavlink_message_t fenceStatus{};
         (void) mavlink_msg_fence_status_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &fenceStatus, 1, 1, FENCE_BREACH_BOUNDARY, 0, FENCE_MITIGATE_NONE);
         emit vehicle.mavlinkMessageReceived(fenceStatus);
@@ -1042,6 +1044,132 @@ void GeoZoneMonitorTest::_testFenceWarning()
     px4.firmware = Warning::Firmware::PX4;
     px4.action = 4;
     QVERIFY(Warning::overrideText(px4).contains(QStringLiteral("can't be overridden")));
+}
+
+void GeoZoneMonitorTest::_testFenceBreachWithoutStatus()
+{
+    // A PX4 vehicle, which sends no FENCE_STATUS, flying east at 10 m/s into an exclusion polygon from 450 m to 550 m
+    // east with GF_ACTION Hold, and below a ceiling 100 m above home
+    const ScopedMetricUnits metricUnits;
+    const QGeoCoordinate origin(47, 8);
+    const auto local = [&origin](double east, double north) {
+        return origin.atDistanceAndAzimuth(north, 0).atDistanceAndAzimuth(east, 90);
+    };
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    monitor.setSettings(GeoZoneMonitor::Settings());
+    Vehicle vehicle(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(&vehicle);
+    monitor.setActiveVehicle(&vehicle);
+    GeoZoneFenceWarning *const warning = vehicleMonitor->fenceWarning();
+    QVERIFY(warning);
+    GeoZoneFenceWarning::Config config;
+    config.enabled = true;
+    config.firmware = GeoZoneFenceWarning::Firmware::PX4;
+    config.action = 2;
+    config.fence.polygons.append({ { local(450, 100), local(550, 100), local(550, -100), local(450, -100) }, false });
+    config.fence.inclusionUnion = true;
+    config.fence.maxAltitude = 100;
+    warning->setConfig(config);
+
+    QSignalSpy breachSpy(&monitor, &GeoZoneMonitor::fenceBreach);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    QSignalSpy statusSpy(vehicleMonitor, &GeoZoneVehicleMonitor::fenceStatusChanged);
+    const auto fly = [&](double east, int16_t vy, double relativeAltitude = 30, int msecs = 1000) {
+        now += msecs;
+        const QGeoCoordinate position = local(east, 0);
+        mavlink_message_t message{};
+        (void) mavlink_msg_global_position_int_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &message, 0, std::lround(position.latitude() * 1e7),
+                                                    std::lround(position.longitude() * 1e7), 500000, std::lround(relativeAltitude * 1000), 0, vy, 0, UINT16_MAX);
+        emit vehicle.mavlinkMessageReceived(message);
+    };
+    const auto breachEvents = [&eventSpy]() {
+        int count = 0;
+        for (const QList<QVariant> &arguments : std::as_const(eventSpy)) {
+            count += (arguments.first().value<GeoZoneMonitor::AlertEvent>().kind == GeoZoneMonitor::AlertEvent::FenceBreach) ? 1 : 0;
+        }
+        return count;
+    };
+
+    // Warned before the fence, without a breach
+    fly(390, 1000);
+    QVERIFY(warning->active());
+    QVERIFY(!warning->outside());
+    QVERIFY(!vehicleMonitor->fenceBreached());
+    QCOMPARE(breachSpy.count(), 0);
+
+    // Past the fence the prediction ends, and the breach is raised and logged once from the position
+    fly(455, 1000);
+    QVERIFY(!warning->active());
+    QVERIFY(warning->outside());
+    QVERIFY(!vehicleMonitor->fenceStatusKnown());
+    QVERIFY(vehicleMonitor->fenceBreached());
+    QCOMPARE(vehicleMonitor->fenceBreachText(), QStringLiteral("Boundary fence breached"));
+    QCOMPARE(breachSpy.count(), 1);
+    QCOMPARE(breachSpy.first().first().toString(), QStringLiteral("Boundary fence breached"));
+    QCOMPARE(breachEvents(), 1);
+    QCOMPARE(statusSpy.count(), 1);
+    QVERIFY(!monitor.alertModel()->alerts().isEmpty());
+    QCOMPARE(monitor.alertModel()->alerts().first().message, QStringLiteral("Boundary fence breached"));
+
+    // It lasts while the vehicle holds outside its fence, which keeps the override shown, without another alert
+    for (int i = 0; i < 5; i++) {
+        fly(460, 0);
+    }
+    QVERIFY(vehicleMonitor->fenceBreached());
+    QCOMPARE(breachSpy.count(), 1);
+    QCOMPARE(breachEvents(), 1);
+
+    // Back inside the fence it ends, after a moment, so that a position at the boundary doesn't breach repeatedly
+    fly(440, -1000);
+    QVERIFY(vehicleMonitor->fenceBreached());
+    fly(452, 1000, 30, 500);
+    fly(440, -1000, 30, 500);
+    QVERIFY(vehicleMonitor->fenceBreached());
+    QCOMPARE(breachSpy.count(), 1);
+    fly(430, -1000);
+    fly(420, -1000);
+    QVERIFY(!warning->outside());
+    QVERIFY(!vehicleMonitor->fenceBreached());
+    QVERIFY(vehicleMonitor->fenceBreachText().isEmpty());
+
+    // Above the ceiling is another breach, of the altitude
+    fly(300, 0, 101);
+    QVERIFY(vehicleMonitor->fenceBreached());
+    QCOMPARE(vehicleMonitor->fenceBreachText(), QStringLiteral("Maximum altitude fence breached"));
+    QCOMPARE(breachSpy.count(), 2);
+    QCOMPARE(breachEvents(), 2);
+
+    // With the fence disabled the vehicle is outside of nothing
+    config.enabled = false;
+    warning->setConfig(config);
+    QVERIFY(!vehicleMonitor->fenceBreached());
+    fly(300, 0, 101);
+    QVERIFY(!vehicleMonitor->fenceBreached());
+    config.enabled = true;
+    warning->setConfig(config);
+    fly(300, 0, 101);
+    QCOMPARE(breachSpy.count(), 3);
+
+    // A vehicle reporting its fence status is taken at its word, until it stops reporting it
+    mavlink_message_t fenceStatus{};
+    (void) mavlink_msg_fence_status_pack(vehicle.id(), MAV_COMP_ID_AUTOPILOT1, &fenceStatus, 0, 0, FENCE_BREACH_NONE, 0, FENCE_MITIGATE_NONE);
+    emit vehicle.mavlinkMessageReceived(fenceStatus);
+    QVERIFY(vehicleMonitor->fenceStatusKnown());
+    QVERIFY(!vehicleMonitor->fenceBreached());
+    fly(300, 0, 101);
+    QVERIFY(!vehicleMonitor->fenceBreached());
+    fly(300, 0, 101, GeoZoneVehicleMonitor::fenceStatusTimeoutMSecs);
+    QVERIFY(!vehicleMonitor->fenceStatusKnown());
+    QVERIFY(vehicleMonitor->fenceBreached());
+    QCOMPARE(breachSpy.count(), 4);
+
+    monitor.closeAlerts();
+    monitor.removeVehicle(&vehicle);
 }
 
 void GeoZoneMonitorTest::_testFenceAlertSequence()

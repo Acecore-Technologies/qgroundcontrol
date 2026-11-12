@@ -65,7 +65,9 @@ class GeoZoneVehicleMonitor : public QObject
     Q_PROPERTY(QGeoCoordinate   predictedEntry      READ predictedEntry     NOTIFY predictionChanged FINAL)
     Q_PROPERTY(int              predictedEntryTime  READ predictedEntryTime NOTIFY predictionChanged FINAL)
     Q_PROPERTY(QVariant         predictedEntryZone  READ predictedEntryZone NOTIFY predictionChanged FINAL)
-    /// The vehicle reports a breach of its own fence (FENCE_STATUS), with the kind of breach and their count
+    /// The vehicle breaches its own fence, with the kind of breach and their count: as it reports it (FENCE_STATUS), or,
+    /// for autopilots which don't like PX4, while its position is outside the fence QGroundControl holds for it, see
+    /// GeoZoneFenceWarning::outside
     Q_PROPERTY(bool             fenceBreached       READ fenceBreached      NOTIFY fenceStatusChanged FINAL)
     Q_PROPERTY(QString          fenceBreachText     READ fenceBreachText    NOTIFY fenceStatusChanged FINAL)
     Q_PROPERTY(bool             fenceStatusKnown    READ fenceStatusKnown   NOTIFY fenceStatusChanged FINAL)     ///< The vehicle sends FENCE_STATUS
@@ -88,6 +90,8 @@ public:
 
     static constexpr int positionTimeoutMSecs = 5000;           ///< Positions are stale after this, or three times their usual interval
     static constexpr int reportedVelocityMaxAgeMSecs = 2000;    ///< Velocities reported by the vehicle are used up to this age
+    /// The fence status the vehicle reported is used up to this age. ArduPilot stops sending it while its fence is disabled.
+    static constexpr int fenceStatusTimeoutMSecs = 10000;
 
     /// Where the terrain elevation below the vehicle, and so its height above ground, comes from
     enum class TerrainSource {
@@ -239,6 +243,11 @@ signals:
 
 private:
     void _positionReceived(qint64 msecs);
+    /// Starts, changes or ends the fence breach
+    /// @param known The vehicle reports it
+    void _setFenceStatus(bool known, bool breached, int breachType, int breachCount);
+    /// Takes the fence breach from the vehicle's position, for a vehicle which doesn't report its fence status
+    void _deriveFenceStatus();
 
     QPointer<Vehicle> _vehicle;
     const bool _followsVehicle = false;
@@ -266,6 +275,7 @@ private:
 
     GeoZoneFenceWarning *_fenceWarning = nullptr;
     bool _fenceStatusKnown = false;
+    qint64 _fenceStatusMSecs = -1;          ///< Last FENCE_STATUS, -1 without
     bool _fenceBreached = false;
     int _fenceBreachType = FENCE_BREACH_NONE;
     int _fenceBreachCount = 0;

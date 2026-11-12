@@ -33,6 +33,9 @@ class Vehicle;
 /// FENCE_ACTION), the time and the distance to the fence along the velocity and where the vehicle reaches it.
 /// GeoZoneMonitor shows, speaks and logs it. One per vehicle, see GeoZoneVehicleMonitor::fenceWarning.
 ///
+/// Once the vehicle is past the fence nothing is predicted any more: outside() then tells that its position is outside
+/// the fence, which GeoZoneVehicleMonitor takes as the breach of autopilots which don't report theirs, like PX4.
+///
 /// The pilot overrides the fence action by changing the flight mode, which takeControl() does with the mode the pilot
 /// flies in for the vehicle type, or on ArduPilot by disabling the fence (MAV_CMD_DO_FENCE_ENABLE).
 class GeoZoneFenceWarning : public QObject
@@ -46,6 +49,7 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(QGeoCoordinate   intersection    READ intersection       NOTIFY warningChanged FINAL)    ///< Where the vehicle reaches the fence, invalid when inactive
     Q_PROPERTY(QString          intersectionText READ intersectionText  NOTIFY warningChanged FINAL)    ///< Its coordinate and altitude
     Q_PROPERTY(QVariantList     path            READ path               NOTIFY warningChanged FINAL)    ///< From the vehicle to the intersection, empty when inactive
+    Q_PROPERTY(bool             outside         READ outside            NOTIFY outsideChanged FINAL)    ///< The vehicle is outside its fence
     Q_PROPERTY(bool             enabled         READ enabled            NOTIFY configChanged FINAL)     ///< The vehicle's fence is enabled and has boundaries
     Q_PROPERTY(QString          actionText      READ actionText         NOTIFY configChanged FINAL)     ///< Manoeuvre of the vehicle at a breach, like "RTL or land"
     Q_PROPERTY(QString          overrideText    READ overrideText       NOTIFY configChanged FINAL)     ///< How the pilot overrides it
@@ -62,6 +66,9 @@ public:
     static constexpr double defaultWarningTime = 8; ///< Seconds, the default profile's pilot reaction time and fence warning margin
     static constexpr double endDelay = 2;           ///< Seconds after warningTime() an active warning ends, so it doesn't flicker
     static constexpr int minEvaluateIntervalMSecs = 250;    ///< Between the positions evaluated
+    /// The vehicle counts as outside its fence until it has been back inside for this long, so that a position at the
+    /// boundary isn't a new breach with every message
+    static constexpr int outsideEndDelayMSecs = 2000;
 
     enum class Firmware {
         Other,
@@ -109,12 +116,16 @@ public:
     /// Evaluates the position of GLOBAL_POSITION_INT messages, at most every minEvaluateIntervalMSecs, with the
     /// velocity the vehicle reports or, when it reports none, estimated from its positions
     void handleMessage(const mavlink_message_t &message, qint64 msecs);
-    /// Evaluates a position with its velocity
+    /// Evaluates a position with its velocity, at the time of the clock
     /// @param altitude Meters above home, NaN when unknown
     void evaluate(const QGeoCoordinate &coordinate, double altitude, const Velocity &velocity);
 
     bool active() const { return _breach.has_value(); }
     const std::optional<GeoZoneFencePrediction::Breach> &breach() const { return _breach; }
+    /// The position evaluated last is outside the enabled fence, or was within outsideEndDelayMSecs
+    bool outside() const { return _outside.has_value(); }
+    /// The boundary the vehicle is beyond, nothing while it is inside its fence
+    const std::optional<GeoZoneFencePrediction::Boundary> &outsideBoundary() const { return _outside; }
     QString text() const;
     int timeToFence() const;
     double distanceToFence() const { return _breach ? _breach->distance : qQNaN(); }
@@ -154,13 +165,17 @@ signals:
     /// A breach became predicted within warningTime()
     void warningStarted(const QString &text);
     void warningEnded();
+    void outsideChanged();
     void configChanged();
     void commandTextChanged();
 
 private:
     void _connectVehicle();
     void _updateConfig();
+    void _evaluate(const QGeoCoordinate &coordinate, double altitude, const Velocity &velocity, qint64 msecs);
     void _setBreach(const std::optional<GeoZoneFencePrediction::Breach> &breach);
+    /// @param msecs Time of the position, negative to end it without delay
+    void _setOutside(const std::optional<GeoZoneFencePrediction::Boundary> &boundary, qint64 msecs);
     void _setCommandText(const QString &text);
     void _sendFenceEnable(bool enable);
 
@@ -171,6 +186,8 @@ private:
     bool _fixedConfig = false;
     QObject *_parameterConnections = nullptr;   ///< Receiver of the fence parameters' changes, replaced to disconnect them
     std::optional<GeoZoneFencePrediction::Breach> _breach;
+    std::optional<GeoZoneFencePrediction::Boundary> _outside;
+    qint64 _insideMSecs = -1;                   ///< Since when the vehicle is back inside while _outside lasts, -1 otherwise
     QGeoCoordinate _position;
     qint64 _evaluatedMSecs = -1;
     GeoZoneVelocityEstimator _estimator;

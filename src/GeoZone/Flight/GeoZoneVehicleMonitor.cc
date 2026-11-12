@@ -37,6 +37,12 @@ GeoZoneVehicleMonitor::GeoZoneVehicleMonitor(Vehicle *vehicle, int vehicleId, in
     (void) connect(this, &GeoZoneVehicleMonitor::predictionChanged, this, &GeoZoneVehicleMonitor::keptZonesChanged);
     if (vehicle) {
         _fenceWarning = new GeoZoneFenceWarning(vehicle, clock, this);
+        // The breach of a vehicle which doesn't report its own, like PX4
+        (void) connect(_fenceWarning, &GeoZoneFenceWarning::outsideChanged, this, [this]() {
+            if (!_fenceStatusKnown) {
+                _deriveFenceStatus();
+            }
+        });
         (void) connect(vehicle, &Vehicle::mavlinkMessageReceived, this, [this](const mavlink_message_t &message) {
             handleMessage(message, _clock());
         });
@@ -57,10 +63,52 @@ void GeoZoneVehicleMonitor::_positionReceived(qint64 msecs)
     _positionMSecs = msecs;
 }
 
+void GeoZoneVehicleMonitor::_setFenceStatus(bool known, bool breached, int breachType, int breachCount)
+{
+    const bool changed = (known != _fenceStatusKnown) || (breached != _fenceBreached) || (breachType != _fenceBreachType) || (breachCount != _fenceBreachCount);
+    const bool started = breached && !_fenceBreached;
+    _fenceStatusKnown = known;
+    _fenceBreached = breached;
+    _fenceBreachType = breachType;
+    _fenceBreachCount = breachCount;
+    if (started) {
+        emit fenceBreachStarted(fenceBreachText());
+    }
+    if (changed) {
+        emit fenceStatusChanged();
+    }
+}
+
+void GeoZoneVehicleMonitor::_deriveFenceStatus()
+{
+    int breachType = FENCE_BREACH_NONE;
+    const std::optional<GeoZoneFencePrediction::Boundary> boundary = _fenceWarning ? _fenceWarning->outsideBoundary() : std::nullopt;
+    if (boundary) {
+        switch (*boundary) {
+        case GeoZoneFencePrediction::Boundary::MaxAltitude:
+            breachType = FENCE_BREACH_MAXALT;
+            break;
+        case GeoZoneFencePrediction::Boundary::MinAltitude:
+            breachType = FENCE_BREACH_MINALT;
+            break;
+        case GeoZoneFencePrediction::Boundary::Polygon:
+        case GeoZoneFencePrediction::Boundary::Circle:
+        case GeoZoneFencePrediction::Boundary::MaxDistance:
+            breachType = FENCE_BREACH_BOUNDARY;
+            break;
+        }
+    }
+    _setFenceStatus(false, boundary.has_value(), breachType, 0);
+}
+
 void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint64 msecs)
 {
     if (_fenceWarning) {
         _fenceWarning->handleMessage(message, msecs);
+    }
+    if (_fenceStatusKnown && (message.msgid != MAVLINK_MSG_ID_FENCE_STATUS) && ((msecs - _fenceStatusMSecs) > fenceStatusTimeoutMSecs)) {
+        // The vehicle no longer reports its fence, like ArduPilot with its fence disabled
+        _deriveFenceStatus();
     }
     _thresholds.handleMessage(message, msecs);
     switch (message.msgid) {
@@ -103,20 +151,9 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
     case MAVLINK_MSG_ID_FENCE_STATUS: {
         mavlink_fence_status_t fenceStatus{};
         mavlink_msg_fence_status_decode(&message, &fenceStatus);
-        const bool breached = (fenceStatus.breach_status != 0);
-        const bool changed = !_fenceStatusKnown || (breached != _fenceBreached) ||
-                             (fenceStatus.breach_type != _fenceBreachType) || (fenceStatus.breach_count != _fenceBreachCount);
-        const bool started = breached && !_fenceBreached;
-        _fenceStatusKnown = true;
-        _fenceBreached = breached;
-        _fenceBreachType = fenceStatus.breach_type;
-        _fenceBreachCount = fenceStatus.breach_count;
-        if (started) {
-            emit fenceBreachStarted(fenceBreachText());
-        }
-        if (changed) {
-            emit fenceStatusChanged();
-        }
+        // What the vehicle reports replaces what its position tells
+        _fenceStatusMSecs = msecs;
+        _setFenceStatus(true, fenceStatus.breach_status != 0, fenceStatus.breach_type, fenceStatus.breach_count);
         break;
     }
     default:

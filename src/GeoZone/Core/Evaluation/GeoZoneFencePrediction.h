@@ -71,9 +71,13 @@ struct Breach {
     double altitude = qQNaN();      ///< Meters above home there, NaN when unknown
 };
 
-/// @return true if the position is outside the fence: inside an exclusion polygon or circle, outside the inclusion
-///         ones, beyond the maximum distance from home or outside the altitude limits. Margins don't count.
+/// @return The boundary the position is beyond, nothing while it is inside the fence: above or below the altitude
+///         limits, beyond the maximum distance from home, inside an exclusion polygon or circle or outside the
+///         inclusion ones. Margins don't count.
 /// @param altitude Meters above home, NaN when unknown, which is within the altitude limits
+std::optional<Boundary> breachedBoundary(const Fence &fence, const QGeoCoordinate &coordinate, double altitude);
+
+/// @return true if the position is outside the fence, see breachedBoundary
 bool breached(const Fence &fence, const QGeoCoordinate &coordinate, double altitude);
 
 /// @return The first breach of the fence, margins included, along the straight path at the velocity within the horizon

@@ -197,6 +197,7 @@ void GeoZoneFenceWarning::setConfig(const Config &config)
     emit configChanged();
     if (!enabled()) {
         _setBreach(std::nullopt);
+        _setOutside(std::nullopt, -1);
     }
 }
 
@@ -222,6 +223,7 @@ void GeoZoneFenceWarning::_updateConfig()
     emit configChanged();
     if (!enabled()) {
         _setBreach(std::nullopt);
+        _setOutside(std::nullopt, -1);
     }
 }
 
@@ -243,16 +245,20 @@ void GeoZoneFenceWarning::handleMessage(const mavlink_message_t &message, qint64
     }
     _evaluatedMSecs = msecs;
     const bool reported = (globalPosition.vx != 0) || (globalPosition.vy != 0) || (globalPosition.vz != 0);
-    evaluate(coordinate, altitude, reported ? Velocity{ globalPosition.vx / 100.0, globalPosition.vy / 100.0, -globalPosition.vz / 100.0, true } : estimated);
+    _evaluate(coordinate, altitude, reported ? Velocity{ globalPosition.vx / 100.0, globalPosition.vy / 100.0, -globalPosition.vz / 100.0, true } : estimated, msecs);
 }
 
 void GeoZoneFenceWarning::evaluate(const QGeoCoordinate &coordinate, double altitude, const Velocity &velocity)
 {
+    _evaluate(coordinate, altitude, velocity, _clock());
+}
+
+void GeoZoneFenceWarning::_evaluate(const QGeoCoordinate &coordinate, double altitude, const Velocity &velocity, qint64 msecs)
+{
     _position = coordinate;
-    const bool moving = velocity.valid && ((velocity.groundSpeed() >= GeoZoneAlertTracker::minPredictionSpeed) ||
-                                           (std::abs(velocity.up) >= GeoZoneAlertTracker::minPredictionSpeed));
-    if (!enabled() || !moving || !coordinate.isValid()) {
+    if (!enabled() || !coordinate.isValid()) {
         _setBreach(std::nullopt);
+        _setOutside(std::nullopt, -1);
         return;
     }
     GeoZoneFencePrediction::Fence fence = _config.fence;
@@ -260,8 +266,39 @@ void GeoZoneFenceWarning::evaluate(const QGeoCoordinate &coordinate, double alti
     if (!std::isnan(altitude) && (altitude < fence.minAltitude)) {
         fence.minAltitude = qQNaN();
     }
+    // Past the fence the vehicle holds, returns or lands, so this doesn't wait for a velocity
+    _setOutside(GeoZoneFencePrediction::breachedBoundary(fence, coordinate, altitude), msecs);
+    const bool moving = velocity.valid && ((velocity.groundSpeed() >= GeoZoneAlertTracker::minPredictionSpeed) ||
+                                           (std::abs(velocity.up) >= GeoZoneAlertTracker::minPredictionSpeed));
+    if (!moving) {
+        _setBreach(std::nullopt);
+        return;
+    }
     // Ends a little after it would start, so that it doesn't flicker
     _setBreach(GeoZoneFencePrediction::predict(fence, coordinate, altitude, velocity, active() ? (_warningTime + endDelay) : _warningTime));
+}
+
+void GeoZoneFenceWarning::_setOutside(const std::optional<GeoZoneFencePrediction::Boundary> &boundary, qint64 msecs)
+{
+    if (boundary) {
+        _insideMSecs = -1;
+        if (boundary != _outside) {
+            _outside = boundary;
+            emit outsideChanged();
+        }
+        return;
+    }
+    if (!_outside) {
+        return;
+    }
+    if ((msecs >= 0) && (_insideMSecs < 0)) {
+        _insideMSecs = msecs;
+    }
+    if ((msecs < 0) || ((msecs - _insideMSecs) >= outsideEndDelayMSecs)) {
+        _outside.reset();
+        _insideMSecs = -1;
+        emit outsideChanged();
+    }
 }
 
 void GeoZoneFenceWarning::_setBreach(const std::optional<GeoZoneFencePrediction::Breach> &breach)

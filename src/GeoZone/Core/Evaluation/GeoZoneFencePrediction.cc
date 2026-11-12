@@ -150,40 +150,54 @@ bool Fence::isEmpty() const
     return polygons.isEmpty() && circles.isEmpty() && std::isnan(maxDistance) && std::isnan(maxAltitude) && std::isnan(minAltitude);
 }
 
-bool breached(const Fence &fence, const QGeoCoordinate &coordinate, double altitude)
+std::optional<Boundary> breachedBoundary(const Fence &fence, const QGeoCoordinate &coordinate, double altitude)
 {
     if (!coordinate.isValid()) {
-        return false;
+        return std::nullopt;
     }
-    if (!std::isnan(altitude) && ((altitude > fence.maxAltitude) || (altitude < fence.minAltitude))) {
-        return true;
+    if (!std::isnan(altitude) && (altitude > fence.maxAltitude)) {
+        return Boundary::MaxAltitude;
+    }
+    if (!std::isnan(altitude) && (altitude < fence.minAltitude)) {
+        return Boundary::MinAltitude;
     }
     if (!std::isnan(fence.maxDistance) && fence.home.isValid() && (fence.home.distanceTo(coordinate) > fence.maxDistance)) {
-        return true;
+        return Boundary::MaxDistance;
     }
     const GeoZoneGeometry::LocalProjection projection(coordinate);
-    bool inclusions = false;
     bool insideAny = false;
-    bool outsideAny = false;
-    const auto check = [&](bool inclusion, bool inside) {
-        if (inclusion) {
-            inclusions = true;
+    std::optional<Boundary> inclusion;  // The first inclusion area
+    std::optional<Boundary> left;       // The first inclusion area the position is outside of
+    const auto check = [&](Boundary boundary, bool isInclusion, bool inside) {
+        if (isInclusion) {
+            inclusion = inclusion.value_or(boundary);
             insideAny = insideAny || inside;
-            outsideAny = outsideAny || !inside;
+            if (!inside) {
+                left = left.value_or(boundary);
+            }
         }
-        return !inclusion && inside;
+        return !isInclusion && inside;
     };
     for (const Fence::Polygon &polygon : fence.polygons) {
-        if ((polygon.vertices.count() >= 3) && check(polygon.inclusion, GeoZoneGeometry::ringContains(projection.toLocal(polygon.vertices), QPointF(), Qt::OddEvenFill))) {
-            return true;
+        if ((polygon.vertices.count() >= 3) &&
+            check(Boundary::Polygon, polygon.inclusion, GeoZoneGeometry::ringContains(projection.toLocal(polygon.vertices), QPointF(), Qt::OddEvenFill))) {
+            return Boundary::Polygon;
         }
     }
     for (const Fence::Circle &circle : fence.circles) {
-        if (check(circle.inclusion, circle.circle.center().distanceTo(coordinate) <= circle.circle.radius())) {
-            return true;
+        if (check(Boundary::Circle, circle.inclusion, circle.circle.center().distanceTo(coordinate) <= circle.circle.radius())) {
+            return Boundary::Circle;
         }
     }
-    return inclusions && (fence.inclusionUnion ? !insideAny : outsideAny);
+    if (fence.inclusionUnion) {
+        return insideAny ? std::nullopt : inclusion;
+    }
+    return left;
+}
+
+bool breached(const Fence &fence, const QGeoCoordinate &coordinate, double altitude)
+{
+    return breachedBoundary(fence, coordinate, altitude).has_value();
 }
 
 std::optional<Breach> predict(const Fence &fence, const QGeoCoordinate &coordinate, double altitude, const Velocity &velocity, double horizon)
