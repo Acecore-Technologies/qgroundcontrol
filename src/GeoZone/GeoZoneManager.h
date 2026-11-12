@@ -63,6 +63,7 @@ class GeoZoneManager : public QObject
     Q_PROPERTY(QString              packPublicKey       READ packPublicKey      NOTIFY packSigningChanged FINAL)   ///< Base64 public key of the pack signing key, empty without
     Q_PROPERTY(QString              packKeyId           READ packKeyId          NOTIFY packSigningChanged FINAL)   ///< See GeoZonePackSignature::keyId
     Q_PROPERTY(QVariantList         trustedPublishers   READ trustedPublishers  NOTIFY trustedPublishersChanged FINAL) ///< Maps with name, publicKey (base64) and keyId
+    Q_PROPERTY(QString              trustedPublishersWarning READ trustedPublishersWarning NOTIFY trustedPublishersChanged FINAL) ///< The trusted publishers kept in the settings can't all be read, empty otherwise, see discardUnreadablePublishers
     Q_PROPERTY(int                  mergedZoneCount     READ mergedZoneCount    NOTIFY zoneCountChanged FINAL)        ///< Zones left out of zoneCount since an earlier source publishes them alike, see GeoZoneCatalog
     Q_PROPERTY(QString              sourceNote          READ sourceNote         NOTIFY sourceNoteChanged FINAL)       ///< About the source the user added last, like most of its zones being loaded from another source already, empty without
 
@@ -130,6 +131,9 @@ public:
     Q_INVOKABLE bool trustPublisher(const QString &name, const QString &publicKey);
     /// No longer trusts the publisher with the base64 public key
     Q_INVOKABLE void distrustPublisher(const QString &publicKey);
+    /// Keeps only the trusted publishers which can be read in the settings. While trustedPublishersWarning tells that
+    /// some can't, trustPublisher and distrustPublisher leave the setting as it is and fileOperationFinished tells why.
+    Q_INVOKABLE void discardUnreadablePublishers();
     /// Trusts the publisher of the pack a source was imported from, with the name the pack gives
     /// @return false unless the source has an untrusted pack signature, see GeoZoneSource::untrustedPack
     Q_INVOKABLE bool trustSourcePublisher(const QString &sourceKey);
@@ -181,6 +185,7 @@ public:
     QString packPublicKey() const;
     QString packKeyId() const;
     QVariantList trustedPublishers() const;
+    QString trustedPublishersWarning() const { return _trustedPublishersWarning; }
     /// Adds a feed downloading the zones of the provider in the area, like the area of a map, which is then kept for
     /// offline use and refreshed like other feeds. loadFailed is emitted when the area is too large.
     Q_INVOKABLE bool addArea(const QString &provider, const QGeoRectangle &area);
@@ -226,6 +231,9 @@ private:
     /// @param complete Set to false when sources were left out or the pack can't be read
     bool _importPack(const QString &fileName, QString &message, bool &complete);
     void _updateTrustedPublishers();
+    /// @return false, with fileOperationFinished telling why, when the trusted publishers of the settings couldn't all
+    ///         be read, so that writing those read would drop the others
+    bool _trustedPublishersWritable();
     /// @return The public key of the pack signing key, empty without
     QByteArray _packPublicKey() const;
     void _activeVehicleChanged(Vehicle *vehicle);
@@ -242,6 +250,7 @@ private:
     QMetaObject::Connection _vehicleConnection;
     QString _sourceNote;
     QString _sourceNoteKey;     ///< Of the source sourceNote is about
+    QString _trustedPublishersWarning;
 
     static constexpr int _activeUpdateIntervalMSecs = 60 * 1000;
 };

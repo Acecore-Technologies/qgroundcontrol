@@ -58,18 +58,56 @@ QString toLocalFileName(const QString &fileName)
     return fileName.startsWith(QStringLiteral("file:")) ? QUrl(fileName).toLocalFile() : fileName;
 }
 
-/// @return The publishers of the trustedPackPublishers setting, a JSON array of objects with name and publicKey
-QList<GeoZonePackSignature::Publisher> parsePublishers(const QString &json)
+/// @return The publishers of the trustedPackPublishers setting, a JSON array of objects with name and publicKey:
+///         those which can be read
+/// @param unreadable Set to the number of entries which aren't a publisher with a public key, -1 when the text
+///                   isn't a JSON array at all. The setting must not be written from the publishers returned then,
+///                   which would drop what couldn't be read.
+QList<GeoZonePackSignature::Publisher> parsePublishers(const QString &json, int &unreadable)
 {
     QList<GeoZonePackSignature::Publisher> publishers;
-    for (const QJsonValue &value : QJsonDocument::fromJson(json.toUtf8()).array()) {
+    unreadable = 0;
+    if (json.trimmed().isEmpty()) {
+        return publishers;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(json.toUtf8(), &parseError);
+    if ((parseError.error != QJsonParseError::NoError) || !document.isArray()) {
+        unreadable = -1;
+        return publishers;
+    }
+    for (const QJsonValue &value : document.array()) {
         const QJsonObject object = value.toObject();
         const QByteArray publicKey = GeoZonePackSignature::parsePublicKey(object.value(QStringLiteral("publicKey")).toString());
-        if (!publicKey.isEmpty()) {
+        if (publicKey.isEmpty()) {
+            unreadable++;
+        } else {
             publishers.append(GeoZonePackSignature::Publisher{ object.value(QStringLiteral("name")).toString(), publicKey });
         }
     }
     return publishers;
+}
+
+/// Writes a file only its owner can read, like a private key: the permissions are set before the content is written
+/// and the file gets its name, so the content is never readable by others
+/// @return false with errorString set when the file can't be written or its permissions can't be set
+bool writePrivateFile(const QString &fileName, const QByteArray &content, QString &errorString)
+{
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly)) {
+        errorString = file.errorString();
+        return false;
+    }
+    if (!file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        errorString = GeoZoneManager::tr("the file can't be made readable by its owner only (%1)").arg(file.errorString());
+        file.cancelWriting();
+        return false;
+    }
+    if ((file.write(content) != content.size()) || !file.commit()) {
+        errorString = file.errorString();
+        return false;
+    }
+    return true;
 }
 
 QString publishersJson(const QList<GeoZonePackSignature::Publisher> &publishers)
@@ -304,8 +342,35 @@ void GeoZoneManager::_updatePackSigning()
 
 void GeoZoneManager::_updateTrustedPublishers()
 {
-    _repository->setTrustedPublishers(parsePublishers(GeoZoneSettings::instance()->trustedPackPublishers()->rawValue().toString()));
+    // Publishers which can't be read aren't trusted
+    int unreadable = 0;
+    const QList<GeoZonePackSignature::Publisher> publishers = parsePublishers(GeoZoneSettings::instance()->trustedPackPublishers()->rawValue().toString(), unreadable);
+    if (unreadable == 0) {
+        _trustedPublishersWarning.clear();
+    } else {
+        _trustedPublishersWarning = (unreadable < 0) ? tr("The trusted publishers kept in the settings can't be read. None is trusted, and the setting is left as it is.")
+                                                     : tr("%n trusted publisher(s) kept in the settings can't be read and aren't trusted. The setting is left as it is.", nullptr, unreadable);
+        qCWarning(GeoZoneManagerLog) << "Trusted pack publishers setting can't be read, unreadable entries:" << unreadable;
+    }
+    _repository->setTrustedPublishers(publishers);
     emit trustedPublishersChanged();
+}
+
+bool GeoZoneManager::_trustedPublishersWritable()
+{
+    if (_trustedPublishersWarning.isEmpty()) {
+        return true;
+    }
+    emit fileOperationFinished(false, tr("%1 Discard the unreadable publishers in the pack signatures of the Geozones settings before changing the trusted publishers.")
+                                          .arg(_trustedPublishersWarning));
+    return false;
+}
+
+void GeoZoneManager::discardUnreadablePublishers()
+{
+    if (!_trustedPublishersWarning.isEmpty()) {
+        GeoZoneSettings::instance()->trustedPackPublishers()->setRawValue(publishersJson(_repository->trustedPublishers()));
+    }
 }
 
 QByteArray GeoZoneManager::_packPublicKey() const
@@ -349,6 +414,10 @@ bool GeoZoneManager::trustPublisher(const QString &name, const QString &publicKe
         emit fileOperationFinished(false, tr("The public key is not an Ed25519 public key in base64 or PEM."));
         return false;
     }
+    // The setting is never written from publishers read in part, which would drop the others
+    if (!_trustedPublishersWritable()) {
+        return false;
+    }
     QList<GeoZonePackSignature::Publisher> publishers = _repository->trustedPublishers();
     (void) publishers.removeIf([&key](const GeoZonePackSignature::Publisher &publisher) { return publisher.publicKey == key; });
     publishers.append(GeoZonePackSignature::Publisher{ name.trimmed().isEmpty() ? GeoZonePackSignature::keyId(key) : name.trimmed(), key });
@@ -360,6 +429,9 @@ void GeoZoneManager::distrustPublisher(const QString &publicKey)
 {
     const QByteArray key = GeoZonePackSignature::parsePublicKey(publicKey);
     QList<GeoZonePackSignature::Publisher> publishers = _repository->trustedPublishers();
+    if (!GeoZonePackSignature::find(publishers, key) || !_trustedPublishersWritable()) {
+        return;
+    }
     if (publishers.removeIf([&key](const GeoZonePackSignature::Publisher &publisher) { return publisher.publicKey == key; }) > 0) {
         GeoZoneSettings::instance()->trustedPackPublishers()->setRawValue(publishersJson(publishers));
     }
@@ -379,13 +451,15 @@ bool GeoZoneManager::createSigningKey(const QString &fileName)
 {
     const QString localName = toLocalFileName(fileName);
     const QByteArray privateKey = GeoZonePackSignature::generatePrivateKey();
-    QSaveFile file(localName);
-    if (privateKey.isEmpty() || !file.open(QIODevice::WriteOnly) || (file.write(privateKey) != privateKey.size()) || !file.commit()) {
-        emit fileOperationFinished(false, tr("The pack signing key could not be saved to %1: %2").arg(localName, privateKey.isEmpty() ? tr("signing isn't available") : file.errorString()));
+    QString errorString = tr("signing isn't available");
+    if (privateKey.isEmpty() || !writePrivateFile(localName, privateKey, errorString)) {
+        qCWarning(GeoZoneManagerLog) << "Pack signing key not saved" << localName << errorString;
+        emit fileOperationFinished(false, tr("The pack signing key could not be saved to %1: %2").arg(localName, errorString));
         return false;
     }
-    (void) QFile::setPermissions(localName, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     GeoZoneSettings::instance()->packSigningKeyFile()->setRawValue(localName);
+    // A new key in the file selected already leaves the setting as it is: the key shown is read again
+    _updatePackSigning();
     emit fileOperationFinished(true, tr("A new pack signing key was saved to %1. Keep it private; the public key shown below lets others trust your packs.").arg(localName));
     return true;
 }

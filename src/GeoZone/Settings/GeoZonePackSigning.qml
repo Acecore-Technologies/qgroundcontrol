@@ -110,6 +110,26 @@ ColumnLayout {
             }
         }
 
+        // Trusted publishers of the settings which can't be read are left there until discarded
+        RowLayout {
+            Layout.fillWidth:   true
+            spacing:            _margin
+            visible:            _geoZoneManager.trustedPublishersWarning !== ""
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WordWrap
+                font.pointSize:     ScreenTools.smallFontPointSize
+                color:              qgcPal.warningText
+                text:               _geoZoneManager.trustedPublishersWarning
+            }
+
+            QGCButton {
+                text:       qsTr("Discard Unreadable")
+                onClicked:  _geoZoneManager.discardUnreadablePublishers()
+            }
+        }
+
         QGCLabel {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap

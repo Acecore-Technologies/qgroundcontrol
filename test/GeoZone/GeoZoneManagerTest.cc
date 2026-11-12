@@ -498,4 +498,113 @@ void GeoZoneManagerTest::_testServiceOriginsConfirmed()
     QCOMPARE(tokenServer.requestCount, 2);
 }
 
+void GeoZoneManagerTest::_testSigningKeyFile()
+{
+    if (!GeoZonePackSignature::available()) {
+        QSKIP("Pack signing needs OpenSSL");
+    }
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restoreSettings = qScopeGuard([settings]() { settings->packSigningKeyFile()->setRawValue(settings->packSigningKeyFile()->rawDefaultValue()); });
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QSignalSpy finishedSpy(&manager, &GeoZoneManager::fileOperationFinished);
+    QSignalSpy signingSpy(&manager, &GeoZoneManager::packSigningChanged);
+
+    // The private key is only readable by its owner, also where a file others can read is replaced
+    const QString keyFile = dir.filePath(QStringLiteral("signing.pem"));
+    QFile existing(keyFile);
+    QVERIFY(existing.open(QIODevice::WriteOnly) && (existing.write("old") == 3));
+    existing.close();
+    QVERIFY(existing.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther));
+    QVERIFY(manager.createSigningKey(keyFile));
+    QCOMPARE(finishedSpy.count(), 1);
+    QVERIFY(finishedSpy.last()[0].toBool());
+#ifdef Q_OS_UNIX
+    const QFileDevice::Permissions others = QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup |
+                                            QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther;
+    QCOMPARE(QFileInfo(keyFile).permissions() & others, QFileDevice::Permissions());
+    QVERIFY(QFileInfo(keyFile).permissions().testFlag(QFileDevice::ReadOwner));
+#endif
+    QCOMPARE(settings->packSigningKeyFile()->rawValue().toString(), keyFile);
+    const QString publicKey = manager.packPublicKey();
+    QVERIFY(!publicKey.isEmpty());
+
+    // A new key written to the file selected already is the key shown: the setting doesn't change, the key does
+    signingSpy.clear();
+    QVERIFY(manager.createSigningKey(keyFile));
+    QVERIFY(signingSpy.count() >= 1);
+    QVERIFY(!manager.packPublicKey().isEmpty());
+    QVERIFY(manager.packPublicKey() != publicKey);
+
+    // A key which can't be written is reported and leaves the key selected
+    finishedSpy.clear();
+    QVERIFY(!manager.createSigningKey(dir.filePath(QStringLiteral("missing/signing.pem"))));
+    QCOMPARE(finishedSpy.count(), 1);
+    QVERIFY(!finishedSpy.last()[0].toBool());
+    QCOMPARE(settings->packSigningKeyFile()->rawValue().toString(), keyFile);
+}
+
+void GeoZoneManagerTest::_testTrustedPublishersSetting()
+{
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    Fact *const setting = settings->trustedPackPublishers();
+    const auto restoreSettings = qScopeGuard([setting]() { setting->setRawValue(setting->rawDefaultValue()); });
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QSignalSpy finishedSpy(&manager, &GeoZoneManager::fileOperationFinished);
+    const QString firstKey = QString::fromLatin1(QByteArray(GeoZonePackSignature::publicKeySize, '\x01').toBase64());
+    const QString secondKey = QString::fromLatin1(QByteArray(GeoZonePackSignature::publicKeySize, '\x02').toBase64());
+    const auto trustedNames = [&manager]() {
+        QStringList names;
+        for (const QVariant &publisher : manager.trustedPublishers()) {
+            names.append(publisher.toMap().value(QStringLiteral("name")).toString());
+        }
+        return names;
+    };
+
+    QVERIFY(manager.trustPublisher(QStringLiteral("First"), firstKey));
+    QCOMPARE(trustedNames(), QStringList{ QStringLiteral("First") });
+    QVERIFY(manager.trustedPublishersWarning().isEmpty());
+    const QString valid = setting->rawValue().toString();
+
+    // A setting which can't be read trusts nobody and is never written from what was read of it: trusting or
+    // distrusting a publisher then would drop the others for good
+    QString damaged = valid;
+    damaged.chop(1);
+    setting->setRawValue(damaged);
+    QVERIFY(manager.trustedPublishers().isEmpty());
+    QVERIFY(!manager.trustedPublishersWarning().isEmpty());
+    finishedSpy.clear();
+    QVERIFY(!manager.trustPublisher(QStringLiteral("Second"), secondKey));
+    QCOMPARE(finishedSpy.count(), 1);
+    QVERIFY(!finishedSpy.last()[0].toBool());
+    manager.distrustPublisher(firstKey);
+    QCOMPARE(setting->rawValue().toString(), damaged);
+
+    // An entry without a valid key isn't trusted, the others are, and the setting is left alone as well
+    const QString partial = QStringLiteral(R"([{"name":"First","publicKey":"%1"},{"name":"Broken","publicKey":"AAAA"},"text"])").arg(firstKey);
+    setting->setRawValue(partial);
+    QCOMPARE(trustedNames(), QStringList{ QStringLiteral("First") });
+    QVERIFY2(manager.trustedPublishersWarning().startsWith(QStringLiteral("2 trusted publisher(s)")), qPrintable(manager.trustedPublishersWarning()));
+    QVERIFY(!manager.trustPublisher(QStringLiteral("Second"), secondKey));
+    manager.distrustPublisher(firstKey);
+    QCOMPARE(setting->rawValue().toString(), partial);
+    QCOMPARE(trustedNames(), QStringList{ QStringLiteral("First") });
+
+    // Until the user discards what can't be read
+    manager.discardUnreadablePublishers();
+    QVERIFY(manager.trustedPublishersWarning().isEmpty());
+    QCOMPARE(setting->rawValue().toString(), valid);
+    QVERIFY(manager.trustPublisher(QStringLiteral("Second"), secondKey));
+    QCOMPARE(trustedNames(), QStringList({ QStringLiteral("First"), QStringLiteral("Second") }));
+    manager.distrustPublisher(firstKey);
+    QCOMPARE(trustedNames(), QStringList{ QStringLiteral("Second") });
+    // An empty setting is no publishers
+    setting->setRawValue(QString());
+    QVERIFY(manager.trustedPublishers().isEmpty());
+    QVERIFY(manager.trustedPublishersWarning().isEmpty());
+}
+
 GEOZONE_TEST(GeoZoneManagerTest)

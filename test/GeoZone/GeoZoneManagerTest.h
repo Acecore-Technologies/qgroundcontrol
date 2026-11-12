@@ -25,4 +25,6 @@ private slots:
     void _testCatalogSnapshot();
     void _testMergedSources();
     void _testServiceOriginsConfirmed();
+    void _testSigningKeyFile();
+    void _testTrustedPublishersSetting();
 };
