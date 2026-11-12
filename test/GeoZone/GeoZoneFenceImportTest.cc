@@ -29,9 +29,88 @@
 
 using namespace GeoZoneTestHelpers;
 
+namespace {
+
+constexpr int kVehicleTimeoutMSecs = 30000;     ///< For a MockLink vehicle to connect and send its plan and parameters
+constexpr int kTransferTimeoutMSecs = 15000;    ///< For a fence transfer, or a selection prepared on the thread pool
+
+/// A plan of the Plan View, started like the Plan View starts it
+class TestPlan : public PlanMasterController
+{
+public:
+    TestPlan()
+    {
+        setFlyView(false);
+        start();
+    }
+};
+
+/// A fence importer for the fence of a plan
+class TestImporter : public GeoZoneFenceImporter
+{
+public:
+    explicit TestImporter(PlanMasterController &plan) { setGeoFenceController(plan.geoFenceController()); }
+};
+
+/// @return Prohibited zones named Z0, Z1 and so on, each a round polygon of the vertex count with a radius of 500 m,
+///         a tenth of a degree of longitude apart from 47 N 8 E
+QList<const GeoZone*> _roundZones(ZoneOwner &owner, int count, int vertexCount)
+{
+    QList<const GeoZone*> zones;
+    for (int i = 0; i < count; i++) {
+        GeoZone::Volume volume;
+        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, vertexCount)));
+        GeoZone::Data data;
+        data.identifier = QStringLiteral("Z%1").arg(i);
+        data.restriction = GeoZone::Prohibited;
+        data.volumes.append(volume);
+        zones.append(owner.add(data));
+    }
+    return zones;
+}
+
+/// @return Name of the tag of the fence, a text no zone has for a missing fence or tag, so that comparing it fails
+///         instead of reading through a null pointer
+QString _tagName(const QObject *fence)
+{
+    const GeoZoneFenceTag *const tag = GeoZoneFenceTag::find(fence);
+    return tag ? tag->name() : QStringLiteral("<no fence tag>");
+}
+
+/// @return Vertex count of the polygon fence at the index, -1 without it
+int _polygonVertexCount(GeoFenceController *geoFenceController, int index)
+{
+    const QGCFencePolygon *const polygon = (index < geoFenceController->polygons()->count()) ? geoFenceController->polygons()->value<QGCFencePolygon*>(index) : nullptr;
+    return polygon ? polygon->count() : -1;
+}
+
+/// @return The first of the rows of the importer's choices, a row without key or name when it has none
+GeoZoneFenceChoiceModel::Row _firstChoice(const GeoZoneFenceImporter &importer)
+{
+    return importer.choices()->rows().value(0);
+}
+
+} // namespace
+
 GeoZoneFenceImportTest::GeoZoneFenceImportTest() = default;
 
 GeoZoneFenceImportTest::~GeoZoneFenceImportTest() = default;
+
+Vehicle *GeoZoneFenceImportTest::_readyVehicle()
+{
+    if (!QTest::qWaitFor([]() { return MultiVehicleManager::instance()->activeVehicle() != nullptr; }, kVehicleTimeoutMSecs)) {
+        return nullptr;
+    }
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    const bool ready = QTest::qWaitFor([vehicle]() { return vehicle->initialPlanRequestComplete() && vehicle->parameterManager()->parametersReady(); }, kVehicleTimeoutMSecs);
+    return ready ? vehicle : nullptr;
+}
+
+Vehicle *GeoZoneFenceImportTest::_connectVehicle(MAV_AUTOPILOT autopilot)
+{
+    _connectMockLink(autopilot);
+    return _readyVehicle();
+}
 
 void GeoZoneFenceImportTest::initTestCase()
 {
@@ -77,20 +156,18 @@ void GeoZoneFenceImportTest::_testFenceExcludes()
     circleData.volumes = { circleVolume };
     const GeoZone *const circle = owner.add(circleData);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
 
     // Zones imported with or without simplification are excluded, the fences are those the importer makes
     for (const double tolerance : { 0.0, 25.0 }) {
         QVERIFY(!GeoZoneMissionCheck::fenceExcludes(geoFenceController, round));
         QCOMPARE(importer.addExclusions({ round, circle }, tolerance), 2);
+        QCOMPARE(geoFenceController->polygons()->count(), 1);
         const QList<QGeoCoordinate> fence = geoFenceController->polygons()->value<QGCFencePolygon*>(0)->coordinateList();
-        QCOMPARE(fence, GeoZoneFences::zoneFences(round, tolerance).polygons.constFirst());
-        QVERIFY((tolerance > 0) == (fence.count() < 40));
+        QCOMPARE(GeoZoneFences::zoneFences(round, tolerance).polygons, QList<QList<QGeoCoordinate>>{ fence });
+        QCOMPARE(fence.count() < 40, tolerance > 0);
         QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, round));
         QVERIFY(GeoZoneMissionCheck::fenceExcludes(geoFenceController, circle));
         GeoZoneFenceTags::deleteFences(geoFenceController, false);
@@ -135,13 +212,10 @@ void GeoZoneFenceImportTest::_testGeoFenceImport()
         zoneParent.add(ed318.zones[1]),   // Two polygons
     };
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
     geoFenceController->setDirty(false);
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
 
     QCOMPARE(importer.addExclusions(zones), 4);
     QCOMPARE(geoFenceController->polygons()->count(), 3);
@@ -149,19 +223,21 @@ void GeoZoneFenceImportTest::_testGeoFenceImport()
     QVERIFY(geoFenceController->dirty());
 
     const QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(0);
+    QVERIFY(polygon);
     QVERIFY(!polygon->inclusion());
     QCOMPARE(polygon->count(), 4);
 
     QGCFenceCircle *const circle = geoFenceController->circles()->value<QGCFenceCircle*>(0);
+    QVERIFY(circle);
     QVERIFY(!circle->inclusion());
     QCOMPARE(circle->center(), QGeoCoordinate(47.5, 8.5));
     QCOMPARE(circle->radius()->rawValue().toDouble(), 1000 * 0.3048);
 
     // Fences are named after their zones and marked as added from geozones
     const auto zoneName = [](const GeoZone *zone) { return zone->name().isEmpty() ? zone->identifier() : zone->name(); };
-    QCOMPARE(GeoZoneFenceTag::find(polygon)->name(), zoneName(zones[0]));
+    QCOMPARE(_tagName(polygon), zoneName(zones[0]));
     QVERIFY(GeoZoneFenceTag::isGeoZone(polygon));
-    QCOMPARE(GeoZoneFenceTag::find(circle)->name(), zoneName(zones[1]));
+    QCOMPARE(_tagName(circle), zoneName(zones[1]));
     QVERIFY(GeoZoneFenceTag::isGeoZone(circle));
 
     // Which the plan file keeps in the entries of the fences, while drawn fences have no tags there
@@ -180,16 +256,15 @@ void GeoZoneFenceImportTest::_testGeoFenceImport()
     geoFenceController->deleteCircle(1);
 
     // Loading the plan restores the tags and leaves the fence clean, while fences without them load untagged
-    PlanMasterController loadedController;
-    loadedController.setFlyView(false);
-    loadedController.start();
+    TestPlan loadedController;
     GeoFenceController *const loadedFence = loadedController.geoFenceController();
     QString errorString;
     QVERIFY2(loadedFence->load(fenceJson, errorString), qPrintable(errorString));
     loadedFence->setDirty(false);
     GeoZonePlanData::load(&loadedController, planJson);
     QCOMPARE(loadedFence->polygons()->count(), 3);
-    QCOMPARE(GeoZoneFenceTag::find(loadedFence->polygons()->get(0))->name(), zoneName(zones[0]));
+    QCOMPARE(loadedFence->circles()->count(), 2);
+    QCOMPARE(_tagName(loadedFence->polygons()->get(0)), zoneName(zones[0]));
     QVERIFY(GeoZoneFenceTag::isGeoZone(loadedFence->circles()->get(0)));
     QVERIFY(!GeoZoneFenceTag::find(loadedFence->circles()->get(1)));
     QVERIFY(!loadedFence->dirty());
@@ -231,16 +306,7 @@ void GeoZoneFenceImportTest::_testGeoFenceSelection()
 {
     // Two circular zones published as 13 vertex polygons, and a circle
     ZoneOwner zoneParent;
-    QList<const GeoZone*> zones;
-    for (int i = 0; i < 2; i++) {
-        GeoZone::Volume volume;
-        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 13)));
-        GeoZone::Data data;
-        data.identifier = QStringLiteral("Z%1").arg(i);
-        data.restriction = GeoZone::Prohibited;
-        data.volumes.append(volume);
-        zones.append(zoneParent.add(data));
-    }
+    QList<const GeoZone*> zones = _roundZones(zoneParent, 2, 13);
     GeoZone::Volume circleVolume;
     circleVolume.isCircle = true;
     circleVolume.center = QGeoCoordinate(47, 8.2);
@@ -251,12 +317,9 @@ void GeoZoneFenceImportTest::_testGeoFenceSelection()
     circleData.volumes.append(circleVolume);
     zones.append(zoneParent.add(circleData));
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
     QVERIFY(!importer.upload()->canUpload());
 
     // Without a vehicle the fence fits PX4 of any version and ArduPilot copters with little storage, with the circle as
@@ -298,7 +361,7 @@ void GeoZoneFenceImportTest::_testGeoFenceSelection()
     int points = 2;
     for (int i = 0; i < geoFenceController->polygons()->count(); i++) {
         QVERIFY(GeoZoneFenceTag::isGeoZone(geoFenceController->polygons()->get(i)));
-        points += geoFenceController->polygons()->value<QGCFencePolygon*>(i)->count();
+        points += _polygonVertexCount(geoFenceController, i);
     }
     QCOMPARE(points, importer.selection().usage.items);
     // The mission check finds the zones excluded by the fences of the selection
@@ -339,11 +402,12 @@ void GeoZoneFenceImportTest::_testGeoFenceSelection()
     QCOMPARE(importer.leftOutCount(), 0);
     QSignalSpy resetSpy(importer.choices(), &QAbstractItemModel::modelReset);
     QSignalSpy changedSpy(importer.choices(), &QAbstractItemModel::dataChanged);
-    const QString first = importer.choices()->rows().constFirst().key;
+    const QString first = _firstChoice(importer).key;
+    QVERIFY(!first.isEmpty());
     importer.setZoneIncluded(first, false);
     QCOMPARE(importer.selectedCount(), 1);
-    QCOMPARE(importer.choices()->rows().constFirst().key, first);
-    QVERIFY(!importer.choices()->rows().constFirst().selected);
+    QCOMPARE(_firstChoice(importer).key, first);
+    QVERIFY(!_firstChoice(importer).selected);
     QCOMPARE(changedSpy.count(), 1);
     QCOMPARE(resetSpy.count(), 0);
     // Applying while the zones are prepared applies the selection of the new zones, leaving out those left out before
@@ -357,31 +421,19 @@ void GeoZoneFenceImportTest::_testGeoFenceSelection()
     importer.updateSelection({ GeoZone::Unknown }, QGeoRectangle(), GeoZoneFenceImporter::AnyTime, 25);
     QCOMPARE(importer.applySelection(), 1);
     QCOMPARE(importer.choices()->count(), 1);
-    QCOMPARE(importer.choices()->rows().constFirst().name, QStringLiteral("U"));
-    QCOMPARE(importer.choices()->rows().constFirst().restriction, static_cast<int>(GeoZone::Unknown));
+    QCOMPARE(_firstChoice(importer).name, QStringLiteral("U"));
+    QCOMPARE(_firstChoice(importer).restriction, static_cast<int>(GeoZone::Unknown));
 }
 
 void GeoZoneFenceImportTest::_testGeoFenceNotFenced()
 {
     // Three zones of 30 points, of which one fits without simplification
     ZoneOwner zoneParent;
-    QList<const GeoZone*> zones;
-    for (int i = 0; i < 3; i++) {
-        GeoZone::Volume volume;
-        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 30)));
-        GeoZone::Data data;
-        data.identifier = QStringLiteral("Z%1").arg(i);
-        data.restriction = GeoZone::Prohibited;
-        data.volumes.append(volume);
-        zones.append(zoneParent.add(data));
-    }
+    const QList<const GeoZone*> zones = _roundZones(zoneParent, 3, 30);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
 
     // The selection names the zones it doesn't fence and why
     importer.select(zones);
@@ -445,6 +497,7 @@ void GeoZoneFenceImportTest::_testGeoFenceNotFenced()
 
     // Editing the fences from geozones ends the note, as does deleting them
     QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(0);
+    QVERIFY(polygon);
     polygon->adjustVertex(0, polygon->vertexCoordinate(0).atDistanceAndAzimuth(50, 0));
     QTRY_VERIFY(importer.fenceNote().isEmpty());
     QCOMPARE(importer.fenceNoteCount(), 0);
@@ -509,16 +562,7 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
 {
     // Three zones of 40 points, of which one fits without simplification
     ZoneOwner zoneParent;
-    QList<const GeoZone*> zones;
-    for (int i = 0; i < 3; i++) {
-        GeoZone::Volume volume;
-        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
-        GeoZone::Data data;
-        data.identifier = QStringLiteral("Z%1").arg(i);
-        data.restriction = GeoZone::Prohibited;
-        data.volumes.append(volume);
-        zones.append(zoneParent.add(data));
-    }
+    const QList<const GeoZone*> zones = _roundZones(zoneParent, 3, 40);
     const QString recordsFile = _recordsDir->filePath(QStringLiteral("vehicle-fences.json"));
     const QString wasntVerified = QStringLiteral("The vehicle's fence wasn't verified. Upload it from the fence import of the Plan View, which reads it back.");
     const QString notFenced = QStringLiteral("2 geozone(s) are not fenced: Z1 (No room left in the vehicle fence), Z2 (No room left in the vehicle fence).");
@@ -535,12 +579,7 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
             return nullptr;
         }
         _mockLink = qobject_cast<MockLink*>(config->link());
-        if (!QTest::qWaitFor([]() { return MultiVehicleManager::instance()->activeVehicle() != nullptr; }, 10000)) {
-            return nullptr;
-        }
-        Vehicle *const connected = MultiVehicleManager::instance()->activeVehicle();
-        const bool ready = QTest::qWaitFor([connected]() { return connected->initialPlanRequestComplete() && connected->parameterManager()->parametersReady(); }, 30000);
-        return ready ? connected : nullptr;
+        return _readyVehicle();
     };
     Vehicle *vehicle = connectVehicle();
     QVERIFY(vehicle);
@@ -557,12 +596,9 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
     QCOMPARE(fenceItem(vehicle).state, GeoZonePreflightCheck::NotApplicable);
 
     {
-        PlanMasterController masterController;
-        masterController.setFlyView(false);
-        masterController.start();
+        TestPlan masterController;
         GeoFenceController *const geoFenceController = masterController.geoFenceController();
-        GeoZoneFenceImporter importer;
-        importer.setGeoFenceController(geoFenceController);
+        TestImporter importer(masterController);
         importer.select(zones);
         QCOMPARE(importer.applySelection(), 1);
         QCOMPARE(importer.fenceNote(), notFenced);
@@ -570,8 +606,8 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
 
         // A plan upload, which doesn't read the fence back, records the fence sent with the zones it leaves out
         masterController.sendToVehicle();
-        QTRY_VERIFY_WITH_TIMEOUT(GeoZoneFenceUpload::verification(vehicle).has_value(), 15000);
-        QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), 15000);
+        QTRY_VERIFY_WITH_TIMEOUT(GeoZoneFenceUpload::verification(vehicle).has_value(), kTransferTimeoutMSecs);
+        QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), kTransferTimeoutMSecs);
         std::optional<GeoZoneFenceUpload::Verification> record = GeoZoneFenceUpload::verification(vehicle);
         QVERIFY(record);
         QVERIFY(!record->verified);
@@ -595,7 +631,7 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
 
         // The upload of the fence import reads the fence back: verified, the zones are still named
         importer.uploadToVehicle();
-        QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Verified, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
         record = GeoZoneFenceUpload::verification(vehicle);
         QVERIFY(record);
         QVERIFY(record->verified);
@@ -625,14 +661,11 @@ void GeoZoneFenceImportTest::_testGeoFenceRecords()
 
     // Removing the fence from the vehicle forgets the record
     {
-        PlanMasterController masterController;
-        masterController.setFlyView(false);
-        masterController.start();
-        GeoZoneFenceImporter importer;
-        importer.setGeoFenceController(masterController.geoFenceController());
+        TestPlan masterController;
+        TestImporter importer(masterController);
         masterController.geoFenceController()->removeAllFromVehicle();
-        QTRY_VERIFY_WITH_TIMEOUT(!GeoZoneFenceUpload::verification(vehicle).has_value(), 15000);
-        QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), 15000);
+        QTRY_VERIFY_WITH_TIMEOUT(!GeoZoneFenceUpload::verification(vehicle).has_value(), kTransferTimeoutMSecs);
+        QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), kTransferTimeoutMSecs);
         QCOMPARE(fenceItem(vehicle).state, GeoZonePreflightCheck::NotApplicable);
     }
     _disconnectMockLink();
@@ -672,12 +705,9 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadConfirmation()
     QVERIFY2(manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString), qPrintable(errorString));
     QTRY_COMPARE(manager->zoneCount(), 3);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
     GeoZoneFenceUpload *const upload = importer.upload();
     QSignalSpy confirmationSpy(&importer, &GeoZoneFenceImporter::uploadConfirmationRequired);
     QSignalSpy stateSpy(upload, &GeoZoneFenceUpload::stateChanged);
@@ -698,10 +728,12 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadConfirmation()
 
     // A selection which changed before the answer leaves other zones out: it is asked about again
     const QString first = confirmationSpy.constLast().at(0).toString();
-    importer.setZoneIncluded(importer.choices()->rows().constFirst().key, false);
+    const QString firstZone = _firstChoice(importer).key;
+    QVERIFY(!firstZone.isEmpty());
+    importer.setZoneIncluded(firstZone, false);
     importer.confirmUpload(first);
     QCOMPARE(confirmationSpy.count(), 2);
-    QVERIFY(confirmationSpy.constLast().at(0).toString() != first);
+    QCOMPARE_NE(confirmationSpy.constLast().at(0).toString(), first);
     QVERIFY(confirmationSpy.constLast().at(2).toStringList().contains(QStringLiteral("Z0: Left out by you")));
     QCOMPARE(stateSpy.count(), 0);
 
@@ -712,7 +744,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadConfirmation()
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Failed);
 
     // A selection fencing all its zones is uploaded without asking
-    importer.setZoneIncluded(importer.choices()->rows().constFirst().key, true);
+    importer.setZoneIncluded(firstZone, true);
     importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), GeoZoneFenceImporter::AnyTime, 50);
     QVERIFY(importer.busy());
     QCOMPARE(importer.notFencedCount(), 2);
@@ -750,17 +782,14 @@ void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
     }), errorString), qPrintable(errorString));
     QTRY_COMPARE(manager->zoneCount(), 4);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(masterController.geoFenceController());
+    TestPlan masterController;
+    TestImporter importer(masterController);
     GeoZonePlanning *const planning = manager->planning();
     const auto clearPlannedStart = qScopeGuard([planning]() { planning->clearPlannedStart(); });
     // The selected zones, then those left out with why, which can't be included
     const auto select = [&importer](int activeWithinHours) {
         importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), activeWithinHours, 25);
-        if (!QTest::qWaitFor([&importer]() { return !importer.busy(); }, 5000)) {
+        if (!QTest::qWaitFor([&importer]() { return !importer.busy(); }, kTransferTimeoutMSecs)) {
             return QStringList{ QStringLiteral("still selecting") };
         }
         QStringList selected;
@@ -830,17 +859,18 @@ void GeoZoneFenceImportTest::_testGeoFenceStale()
     QVERIFY(load({ _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 300), temporary }));
     QTRY_COMPARE(manager->zoneCount(), 2);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
     importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), -1, 25);
     QCOMPARE(importer.applySelection(), 2);
-    const int temporaryIndex = (GeoZoneFenceTag::find(geoFenceController->polygons()->get(0))->name() == QStringLiteral("TMP")) ? 0 : 1;
+    QCOMPARE(geoFenceController->polygons()->count(), 2);
+    const int temporaryIndex = (_tagName(geoFenceController->polygons()->get(0)) == QStringLiteral("TMP")) ? 0 : 1;
     const GeoZoneFenceTag *const tag = GeoZoneFenceTag::find(geoFenceController->polygons()->get(temporaryIndex));
-    const GeoZone *const temporaryZone = manager->zoneList()[(manager->zoneList()[0]->identifier() == QStringLiteral("TMP")) ? 0 : 1];
+    QVERIFY(tag);
+    const QList<GeoZone*> loadedZones = manager->zoneList();
+    QCOMPARE(loadedZones.count(), 2);
+    const GeoZone *const temporaryZone = loadedZones[(loadedZones[0]->identifier() == QStringLiteral("TMP")) ? 0 : 1];
     QCOMPARE(tag->name(), QStringLiteral("TMP"));
     QCOMPARE(tag->zoneKey(), temporaryZone->key());
     QCOMPARE(tag->contentHash(), temporaryZone->data().contentHash);
@@ -927,12 +957,9 @@ void GeoZoneFenceImportTest::_testGeoFenceRebuildSettings()
     QVERIFY(found != loaded.cend());
     const GeoZone *const prohibited = *found;
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
     const auto fenceNames = [geoFenceController]() {
         QStringList names;
         for (QmlObjectListModel *const fences : { geoFenceController->polygons(), geoFenceController->circles() }) {
@@ -948,7 +975,7 @@ void GeoZoneFenceImportTest::_testGeoFenceRebuildSettings()
     QCOMPARE(importer.applySelection(), 1);
     QCOMPARE(fenceNames(), QStringList({ QStringLiteral("A") }));
     // Simplified as far as allowed to see whether it fits, then as little as needed: not at all
-    QCOMPARE(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->count(), 16);
+    QCOMPARE(_polygonVertexCount(geoFenceController, 0), 16);
     QCOMPARE(importer.selection().choices.constFirst().simplifyTolerance, 0.0);
 
     // The import settings of a plan file may hold anything. A negative tolerance left no simplification step, which
@@ -958,7 +985,7 @@ void GeoZoneFenceImportTest::_testGeoFenceRebuildSettings()
     settings[QStringLiteral("maxSimplifyTolerance")] = -5;
     GeoZoneFenceTags::setImportSettings(geoFenceController, settings);
     QCOMPARE(importer.rebuild(), 1);
-    QCOMPARE(geoFenceController->polygons()->value<QGCFencePolygon*>(0)->count(), 16);
+    QCOMPARE(_polygonVertexCount(geoFenceController, 0), 16);
     QCOMPARE(GeoZoneFenceTags::importSettings(geoFenceController)[QStringLiteral("maxSimplifyTolerance")].toDouble(), 0.0);
     // ... and one beyond the largest is the largest
     settings[QStringLiteral("maxSimplifyTolerance")] = 1e300;
@@ -1017,31 +1044,16 @@ void GeoZoneFenceImportTest::_testGeoFenceSettingsReplaced()
 {
     // Three zones of 40 points, of which one fits into the 63 points of the MockLink PX4 without simplification
     ZoneOwner zoneParent;
-    QList<const GeoZone*> zones;
-    for (int i = 0; i < 3; i++) {
-        GeoZone::Volume volume;
-        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
-        GeoZone::Data data;
-        data.identifier = QStringLiteral("Z%1").arg(i);
-        data.restriction = GeoZone::Prohibited;
-        data.volumes.append(volume);
-        zones.append(zoneParent.add(data));
-    }
+    const QList<const GeoZone*> zones = _roundZones(zoneParent, 3, 40);
     const QString importKey = QStringLiteral("geoZoneImport");
     const auto fenceJson = [](PlanMasterController &controller) { return controller.saveToJson().object()[PlanMasterController::kJsonGeoFenceObjectKey].toObject(); };
 
-    _connectMockLink(MAV_AUTOPILOT_PX4);
-    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    Vehicle *const vehicle = _connectVehicle(MAV_AUTOPILOT_PX4);
     QVERIFY(vehicle);
-    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
-    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
     const auto applied = [&]() {
         importer.select(zones);
         return (importer.applySelection() == 1) && (importer.fenceNoteCount() == 2) && fenceJson(masterController).contains(importKey);
@@ -1074,7 +1086,7 @@ void GeoZoneFenceImportTest::_testGeoFenceSettingsReplaced()
     // The fence loaded from the vehicle replaces the plan's: it wasn't selected with these settings
     QVERIFY(applied());
     masterController.loadFromVehicle();
-    QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(!masterController.syncInProgress(), kTransferTimeoutMSecs);
     QTRY_VERIFY(GeoZoneFenceTags::importSettings(geoFenceController).isEmpty());
     QTRY_COMPARE(importer.fenceNoteCount(), 0);
     QVERIFY(!fenceJson(masterController).contains(importKey));
@@ -1123,19 +1135,13 @@ void GeoZoneFenceImportTest::_testGeoFenceUpload()
     const QList<const GeoZone*> zones = { zoneParent.add(polygonData), zoneParent.add(circleData) };
 
     for (const MAV_AUTOPILOT autopilot : { MAV_AUTOPILOT_PX4, MAV_AUTOPILOT_ARDUPILOTMEGA }) {
-        _connectMockLink(autopilot);
-        Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+        Vehicle *const vehicle = _connectVehicle(autopilot);
         QVERIFY(vehicle);
-        QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
-        QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
 
-        PlanMasterController masterController;
-        masterController.setFlyView(false);
-        masterController.start();
+        TestPlan masterController;
         QCOMPARE(masterController.managerVehicle(), vehicle);
         GeoFenceController *const geoFenceController = masterController.geoFenceController();
-        GeoZoneFenceImporter importer;
-        importer.setGeoFenceController(geoFenceController);
+        TestImporter importer(masterController);
         GeoZoneFenceUpload *const upload = importer.upload();
         QVERIFY(upload->canUpload());
 
@@ -1164,13 +1170,15 @@ void GeoZoneFenceImportTest::_testGeoFenceUpload()
         // The fence is sent and read back
         importer.uploadToVehicle();
         QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
-        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
         QVERIFY2(upload->message().startsWith(QStringLiteral("Verified")), qPrintable(upload->message()));
         GeoFenceManager *const manager = vehicle->geoFenceManager();
         QCOMPARE(manager->polygons().count(), 1);
         QCOMPARE(manager->circles().count(), 1);
         QVERIFY(!manager->polygons().first().inclusion());
-        QCOMPARE(manager->polygons().first().count(), importer.selection().choices.first().fences.polygons.first().count());
+        const QList<GeoZoneFences::Choice> &selected = importer.selection().choices;
+        QVERIFY(!selected.isEmpty() && !selected.constFirst().fences.polygons.isEmpty());
+        QCOMPARE(manager->polygons().first().count(), selected.constFirst().fences.polygons.constFirst().count());
         // The plan keeps its fences from geozones
         QCOMPARE(geoFenceController->polygons()->count(), 1);
         QVERIFY(GeoZoneFenceTag::isGeoZone(geoFenceController->polygons()->get(0)));
@@ -1185,19 +1193,23 @@ void GeoZoneFenceImportTest::_testGeoFenceUpload()
         // The zones left out are named once the upload is verified, and kept for the pre-flight checklist
         importer.setZoneIncluded(zones[1]->key(), false);
         importer.uploadToVehicle();
-        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
         QVERIFY2(upload->message().endsWith(QStringLiteral(" 1 geozone(s) are not fenced: C (Left out by you).")), qPrintable(upload->message()));
-        QCOMPARE(GeoZoneFenceUpload::verification(vehicle)->notFencedCount, 1);
+        const std::optional<GeoZoneFenceUpload::Verification> leftOutRecord = GeoZoneFenceUpload::verification(vehicle);
+        QVERIFY(leftOutRecord);
+        QCOMPARE(leftOutRecord->notFencedCount, 1);
         importer.setZoneIncluded(zones[1]->key(), true);
         importer.uploadToVehicle();
-        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
-        QCOMPARE(GeoZoneFenceUpload::verification(vehicle)->notFencedCount, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
+        const std::optional<GeoZoneFenceUpload::Verification> includedRecord = GeoZoneFenceUpload::verification(vehicle);
+        QVERIFY(includedRecord);
+        QCOMPARE(includedRecord->notFencedCount, 0);
 
         // A vehicle without room for the fence rejects it
         QVERIFY(!upload->rejectedForRoom());
         _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailWriteRequest0ErrorAck, MAV_MISSION_NO_SPACE);
         importer.uploadToVehicle();
-        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Failed, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Failed, kTransferTimeoutMSecs);
         QVERIFY2(upload->message().contains(QStringLiteral("no room")), qPrintable(upload->message()));
         _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailNone, MAV_MISSION_ACCEPTED);
 
@@ -1212,7 +1224,11 @@ void GeoZoneFenceImportTest::_testGeoFenceUpload()
         QVERIFY(reduced.reduced);
         QVERIFY(reduced.estimated);
         QVERIFY(!reduced.fits(rejected));
-        QVERIFY((autopilot == MAV_AUTOPILOT_PX4) ? (reduced.maxItems < capacity.maxItems) : (reduced.storageBytes < capacity.storageBytes));
+        if (autopilot == MAV_AUTOPILOT_PX4) {
+            QCOMPARE_LT(reduced.maxItems, capacity.maxItems);
+        } else {
+            QCOMPARE_LT(reduced.storageBytes, capacity.storageBytes);
+        }
         QVERIFY(importer.capacityInfo()[QStringLiteral("text")].toString().endsWith(QStringLiteral("(estimated)")));
         QVERIFY(importer.capacityInfo()[QStringLiteral("note")].toString().startsWith(QStringLiteral("The vehicle rejected a larger fence for lack of room")));
         // The 160 bytes of the next smaller ArduPilot storage still hold both zones, which are uploaded without a
@@ -1230,7 +1246,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUpload()
             QCOMPARE(confirmationSpy.count(), 2);
             importer.confirmUpload(confirmationSpy.constLast().at(0).toString());
         }
-        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
         QVERIFY(!upload->rejectedForRoom());
         QVERIFY(reduced.fits(upload->sentUsage()));
         // ... for the vehicle while it is connected, also in another dialog
@@ -1286,18 +1302,12 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     data.volumes.append(volume);
     const QList<const GeoZone*> zones = { zoneParent.add(data) };
 
-    _connectMockLink(MAV_AUTOPILOT_PX4);
-    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    Vehicle *const vehicle = _connectVehicle(MAV_AUTOPILOT_PX4);
     QVERIFY(vehicle);
-    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
-    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
-    GeoZoneFenceImporter importer;
-    importer.setGeoFenceController(geoFenceController);
+    TestImporter importer(masterController);
     GeoZoneFenceUpload *const upload = importer.upload();
     importer.select(zones, 25);
     QCOMPARE(importer.selectedCount(), 1);
@@ -1306,9 +1316,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     // not left to a deferred delete after a disconnect without sender, which Qt refuses with this warning
     QTest::failOnWarning(QRegularExpression(QStringLiteral("QObject::disconnect: Unexpected")));
     {
-        PlanMasterController otherController;
-        otherController.setFlyView(false);
-        otherController.start();
+        TestPlan otherController;
         importer.setGeoFenceController(otherController.geoFenceController());
         // So a signal of the vehicle reaches the importer once, for the plan it has now
         QSignalSpy selectionSpy(&importer, &GeoZoneFenceImporter::selectionChanged);
@@ -1317,9 +1325,11 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
         importer.setGeoFenceController(geoFenceController);
     }
     QCOMPARE(importer.selectedCount(), 1);
+    // Without the fence nothing moves, and the uploads below aren't aborted, which fails them
     const auto moveVertex = [geoFenceController]() {
-        QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(0);
-        polygon->adjustVertex(0, polygon->vertexCoordinate(0).atDistanceAndAzimuth(50, 0));
+        if (QGCFencePolygon *const polygon = geoFenceController->polygons()->value<QGCFencePolygon*>(0)) {
+            polygon->adjustVertex(0, polygon->vertexCoordinate(0).atDistanceAndAzimuth(50, 0));
+        }
     };
 
     // An edit while sending isn't on the vehicle, so the fence stays dirty once the transfer is done
@@ -1327,7 +1337,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
     moveVertex();
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
-    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), kTransferTimeoutMSecs);
     QVERIFY(geoFenceController->dirty());
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
 
@@ -1340,11 +1350,11 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
             }
         });
         upload->start();
-        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Aborted, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Aborted, kTransferTimeoutMSecs);
     }
     QVERIFY2(upload->message().contains(QStringLiteral("changed")), qPrintable(upload->message()));
     QVERIFY(geoFenceController->dirty());
-    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), kTransferTimeoutMSecs);
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
 
     // The upload is followed from the moment it tells that it is sending: an edit made right then, or aborting it,
@@ -1372,17 +1382,17 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
     masterController.removeAll();
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
-    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), kTransferTimeoutMSecs);
 
     // Unchanged, the upload is verified and the fence clean
     importer.uploadToVehicle();
-    QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, 15000);
+    QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
     QVERIFY(!geoFenceController->dirty());
 
     // The vehicle disconnecting while the fence is read back fails the upload
     _mockLink->setMissionItemFailureMode(MockLinkMissionItemHandler::FailReadRequestListNoResponse, MAV_MISSION_ACCEPTED);
     upload->start();
-    QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verifying, 15000);
+    QTRY_COMPARE_WITH_TIMEOUT(upload->state(), GeoZoneFenceUpload::Verifying, kTransferTimeoutMSecs);
     _disconnectMockLink();
     QTRY_COMPARE(upload->state(), GeoZoneFenceUpload::Failed);
     QVERIFY2(upload->message().contains(QStringLiteral("disconnected")), qPrintable(upload->message()));
@@ -1392,27 +1402,13 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadDetached()
 {
     // Two zones of 40 points, of which one fits into the 63 points of the MockLink PX4 without simplification
     ZoneOwner zoneParent;
-    QList<const GeoZone*> zones;
-    for (int i = 0; i < 2; i++) {
-        GeoZone::Volume volume;
-        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
-        GeoZone::Data data;
-        data.identifier = QStringLiteral("Z%1").arg(i);
-        data.restriction = GeoZone::Prohibited;
-        data.volumes.append(volume);
-        zones.append(zoneParent.add(data));
-    }
+    const QList<const GeoZone*> zones = _roundZones(zoneParent, 2, 40);
 
-    _connectMockLink(MAV_AUTOPILOT_PX4);
-    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    Vehicle *const vehicle = _connectVehicle(MAV_AUTOPILOT_PX4);
     QVERIFY(vehicle);
-    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
-    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
     GeoZoneFenceUpload::clearVerification(vehicle);
 
-    PlanMasterController masterController;
-    masterController.setFlyView(false);
-    masterController.start();
+    TestPlan masterController;
     GeoFenceController *const geoFenceController = masterController.geoFenceController();
 
     // The dialog is closed while its upload is sending or reading the fence back, which deletes its importer. The
@@ -1436,7 +1432,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadDetached()
         QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
         // As soon as it is in the state, which polling could miss
         while (upload->state() != closedIn) {
-            QVERIFY2(stateSpy.wait(15000), "the upload didn't go on");
+            QVERIFY2(stateSpy.wait(kTransferTimeoutMSecs), "the upload didn't go on");
         }
         delete importer;
         importer = nullptr;
@@ -1444,7 +1440,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadDetached()
         QCOMPARE(upload->parent(), geoFenceController);
         QVERIFY(upload->busy());
 
-        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, kTransferTimeoutMSecs);
         QCOMPARE(ended.constFirst(), GeoZoneFenceUpload::Verified);
         QVERIFY2(messages.constFirst().startsWith(QStringLiteral("Verified: the vehicle stores the fence of 1 polygon(s) with 40 point(s)")), qPrintable(messages.constFirst()));
         QVERIFY2(messages.constFirst().endsWith(QStringLiteral("1 geozone(s) are not fenced: Z1 (No room left in the vehicle fence).")), qPrintable(messages.constFirst()));
@@ -1454,7 +1450,7 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadDetached()
         QCOMPARE(record->notFencedCount, 1);
         // Done, it is gone
         QTRY_VERIFY(!upload);
-        QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+        QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), kTransferTimeoutMSecs);
     }
 
     // An importer whose upload isn't in progress takes it along
@@ -1482,13 +1478,10 @@ void GeoZoneFenceImportTest::_testFenceWarningVehicle()
 
     for (const MAV_AUTOPILOT autopilot : { MAV_AUTOPILOT_PX4, MAV_AUTOPILOT_ARDUPILOTMEGA }) {
         const bool px4 = autopilot == MAV_AUTOPILOT_PX4;
-        _connectMockLink(autopilot);
-        Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+        Vehicle *const vehicle = _connectVehicle(autopilot);
         QVERIFY(vehicle);
-        QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
-        QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
         // The circle fence of ArduPilot is around home
-        QTRY_VERIFY_WITH_TIMEOUT(vehicle->homePosition().isValid(), 15000);
+        QTRY_VERIFY_WITH_TIMEOUT(vehicle->homePosition().isValid(), kTransferTimeoutMSecs);
         GeoZoneMonitor monitor(GeoZoneManager::instance());
         GeoZoneVehicleMonitor *const vehicleMonitor = monitor.addVehicle(vehicle);
         GeoZoneFenceWarning *const warning = vehicleMonitor->fenceWarning();
@@ -1503,16 +1496,13 @@ void GeoZoneFenceImportTest::_testFenceWarningVehicle()
         QVERIFY(!warning->enabled());
 
         // The fence uploaded from geozones, and the altitude and circle fences of ArduPilot's FENCE_TYPE 7
-        PlanMasterController masterController;
-        masterController.setFlyView(false);
-        masterController.start();
-        GeoZoneFenceImporter importer;
-        importer.setGeoFenceController(masterController.geoFenceController());
+        TestPlan masterController;
+        TestImporter importer(masterController);
         importer.select(zones, 25);
         QCOMPARE(importer.selectedCount(), 1);
         QSignalSpy configSpy(warning, &GeoZoneFenceWarning::configChanged);
         importer.uploadToVehicle();
-        QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Verified, 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(importer.upload()->state(), GeoZoneFenceUpload::Verified, kTransferTimeoutMSecs);
         QTRY_VERIFY(configSpy.count() > 0);
         QCOMPARE(warning->config().fence.polygons.count(), 1);
         QVERIFY(!warning->config().fence.polygons.first().inclusion);
@@ -1541,6 +1531,7 @@ void GeoZoneFenceImportTest::_testFenceWarningVehicle()
         QVERIFY2(warning->active(), qPrintable(QStringLiteral("%1 home %2 vehicle %3 max %4").arg(px4).arg(vehicle->homePosition().toString(), vehicle->coordinate().toString())
                                                    .arg(warning->config().fence.maxDistance)));
         QCOMPARE(warning->config().fence.polygons.isEmpty(), false);
+        QVERIFY(warning->breach().has_value());
         const GeoZoneFencePrediction::Breach breach = *warning->breach();
         QCOMPARE(breach.boundary, px4 ? GeoZoneFencePrediction::Boundary::Polygon : GeoZoneFencePrediction::Boundary::MaxDistance);
         QCOMPARE(warningSpy.count(), 1);

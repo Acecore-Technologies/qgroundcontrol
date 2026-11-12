@@ -51,6 +51,11 @@ private slots:
     void _testFenceOverrideCommands();
 
 private:
+    /// Connects a MockLink vehicle of the autopilot, see _readyVehicle
+    Vehicle *_connectVehicle(MAV_AUTOPILOT autopilot);
+    /// @return The active vehicle once it sent its plan and parameters, null when it doesn't in time
+    Vehicle *_readyVehicle();
+
     /// The texts compared are in meters, whatever the locale
     std::unique_ptr<GeoZoneTestHelpers::ScopedMetricUnits> _metricUnits;
     /// Keeps the fences recorded for the vehicles of the tests, see GeoZoneFenceUpload::setRecordsFile
