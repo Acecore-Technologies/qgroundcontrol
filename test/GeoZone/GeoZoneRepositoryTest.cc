@@ -298,6 +298,66 @@ void GeoZoneRepositoryTest::_testManagerStoreFailures()
     QVERIFY(backupDir.exists(QStringLiteral("sources.json")));
 }
 
+void GeoZoneRepositoryTest::_testStoredCopyKeptUntilIndexSaved()
+{
+    const QTemporaryDir storageDir;
+    const QTemporaryDir sourceDir;
+    QVERIFY(storageDir.isValid() && sourceDir.isValid());
+    const QString ed318File = sourceDir.filePath(QStringLiteral("zones.json"));
+    QVERIFY(QFile::copy(QStringLiteral(":/unittest/ed318_test.json"), ed318File));
+    const QDir dir(storageDir.path());
+    const QString key = GeoZoneLoader::fileKey(ed318File);
+    const QString indexPath = dir.filePath(QStringLiteral("sources.json"));
+    QString errorString;
+    QString storedFile;
+    QString replacingFile;
+    QByteArray savedIndex;
+    {
+        GeoZoneManager manager(storageDir.path());
+        QVERIFY2(manager.repository()->loadFile(ed318File, errorString), qPrintable(errorString));
+        storedFile = manager.repository()->storedFileName(key);
+        QVERIFY(dir.exists(storedFile));
+        QFile indexFile(indexPath);
+        QVERIFY(indexFile.open(QIODevice::ReadOnly));
+        savedIndex = indexFile.readAll();
+        indexFile.close();
+
+        // The index can't be written while a folder is in its place, files of the store can still be removed. The
+        // copy which the index on disk names must then stay: it is the one the next start loads.
+        QVERIFY(indexFile.remove());
+        QVERIFY(dir.mkpath(QStringLiteral("sources.json/blocked")));
+        QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
+        QVERIFY2(manager.repository()->loadFile(ed318File, errorString), qPrintable(errorString));
+        QCOMPARE(storageSpy.count(), 1);
+        replacingFile = manager.repository()->storedFileName(key);
+        QVERIFY(replacingFile != storedFile);
+        QVERIFY(dir.exists(replacingFile));
+        QVERIFY(dir.exists(storedFile));
+    }
+
+    // As after a crash or a failed save: the index still names the previous copy, which is loaded
+    QVERIFY(QDir(indexPath).removeRecursively());
+    QFile indexFile(indexPath);
+    QVERIFY(indexFile.open(QIODevice::WriteOnly));
+    QCOMPARE(indexFile.write(savedIndex), savedIndex.size());
+    indexFile.close();
+    GeoZoneManager manager(storageDir.path());
+    manager.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+    QCOMPARE(manager.zoneCount(), 3);
+    QCOMPARE(manager.repository()->storedFileName(key), storedFile);
+    QVERIFY(!dir.exists(replacingFile));
+
+    // Once the index naming the new copy is saved, the one it replaces is removed, like the copy of a removed source
+    QVERIFY2(manager.repository()->loadFile(ed318File, errorString), qPrintable(errorString));
+    const QString newFile = manager.repository()->storedFileName(key);
+    QVERIFY(newFile != storedFile);
+    QVERIFY(dir.exists(newFile));
+    QVERIFY(!dir.exists(storedFile));
+    manager.repository()->clear();
+    QVERIFY(!dir.exists(newFile));
+    QVERIFY(!QFile::exists(indexPath));
+}
+
 void GeoZoneRepositoryTest::_testManagerBackgroundLoad()
 {
     const ScopedEnvironment environment;

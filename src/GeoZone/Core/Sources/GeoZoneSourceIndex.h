@@ -79,9 +79,10 @@ public:
     QString fileName(const QString &key) const { return _entries.value(key).fileName; }
     /// Records an entry read from the index, whose copy is kept
     void insert(const Entry &entry) { _entries.insert(entry.key, entry); }
-    /// Records a new stored copy of a source, removing the copy it replaces
+    /// Records a new stored copy of a source. The copy it replaces is removed once the index naming the new one is
+    /// saved, see save.
     void replace(const Entry &entry);
-    /// Forgets a source and removes its stored copy
+    /// Forgets a source. Its stored copy is removed once the index is saved without it, see save.
     void remove(const QString &key);
     /// @return true if the source has an entry, which was changed
     bool setEnabled(const QString &key, bool enabled);
@@ -94,8 +95,10 @@ public:
     bool confirm(const QString &key, const QString &etag, const QString &lastModified, const QDateTime &checkedAt, qint64 maxAgeSecs);
     /// Removes the files of the store which no entry refers to
     void removeUnreferencedFiles() const;
-    /// Writes the entries of the sources with the keys, in this order. Does nothing when read only.
-    bool save(const QStringList &keys, QString &errorString) const;
+    /// Writes the entries of the sources with the keys, in this order, then removes the stored copies which were
+    /// replaced or whose source was removed: while the index can't be written, the one on disk still names them,
+    /// so they are kept for the next start. Does nothing when read only.
+    bool save(const QStringList &keys, QString &errorString);
 
     static constexpr const char *indexFileName = "sources.json";
     static constexpr const char *legacyFileName = "geozones.json";
@@ -106,5 +109,6 @@ public:
 private:
     GeoZoneStore _store;
     QHash<QString, Entry> _entries;     ///< By source key
+    QStringList _obsoleteFileNames;     ///< Stored copies to remove once the index is saved
     bool _readOnly = false;
 };

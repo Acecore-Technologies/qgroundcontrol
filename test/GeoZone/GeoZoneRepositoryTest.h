@@ -20,6 +20,7 @@ class GeoZoneRepositoryTest : public UnitTest
 private slots:
     void _testManagerLoadPersistClear();
     void _testManagerStoreFailures();
+    void _testStoredCopyKeptUntilIndexSaved();
     void _testManagerBackgroundLoad();
     void _testFeedNotModified();
     void _testFeedDatasetLink();

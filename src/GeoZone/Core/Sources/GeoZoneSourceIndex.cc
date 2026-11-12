@@ -17,6 +17,8 @@
 #include <QtCore/QSet>
 #include <QtCore/QSettings>
 
+#include <utility>
+
 namespace {
 
 constexpr const char *keyKey = "key";
@@ -195,15 +197,18 @@ void GeoZoneSourceIndex::replace(const Entry &entry)
 {
     const QString previousFileName = _entries.value(entry.key).fileName;
     _entries.insert(entry.key, entry);
-    if (previousFileName != entry.fileName) {
-        _store.removeFile(previousFileName);
+    if (!previousFileName.isEmpty() && (previousFileName != entry.fileName)) {
+        _obsoleteFileNames.append(previousFileName);
     }
 }
 
 void GeoZoneSourceIndex::remove(const QString &key)
 {
-    if (!_readOnly) {
-        _store.removeFile(_entries.take(key).fileName);
+    if (_readOnly) {
+        return;
+    }
+    if (const QString fileName = _entries.take(key).fileName; !fileName.isEmpty()) {
+        _obsoleteFileNames.append(fileName);
     }
 }
 
@@ -258,7 +263,7 @@ void GeoZoneSourceIndex::removeUnreferencedFiles() const
     _store.removeOrphanFiles(referenced);
 }
 
-bool GeoZoneSourceIndex::save(const QStringList &keys, QString &errorString) const
+bool GeoZoneSourceIndex::save(const QStringList &keys, QString &errorString)
 {
     errorString.clear();
     if (_readOnly) {
@@ -266,11 +271,22 @@ bool GeoZoneSourceIndex::save(const QStringList &keys, QString &errorString) con
     }
 
     QList<Entry> entries;
+    QSet<QString> referenced;
     for (const QString &key : keys) {
         const auto it = _entries.constFind(key);
         if (it != _entries.cend()) {
             entries.append(it.value());
+            referenced.insert(it->fileName);
         }
     }
-    return write(entries, errorString);
+    if (!write(entries, errorString)) {
+        return false;
+    }
+    // Only now does nothing on disk name them
+    for (const QString &fileName : std::exchange(_obsoleteFileNames, QStringList())) {
+        if (!referenced.contains(fileName)) {
+            _store.removeFile(fileName);
+        }
+    }
+    return true;
 }
