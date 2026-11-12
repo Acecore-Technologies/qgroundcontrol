@@ -188,6 +188,8 @@ private:
     static QString _queryItemValue(const QString &url, const QString &name);
     /// @return The services of the catalogue, with their names and notes as published, for lookups
     static QList<Service> _services();
+    /// @return The service templates of the catalogue as published, without the area services offered as templates
+    static QList<ServiceTemplate> _templates();
     /// @return The service whose feed URL this is, or whose area URL it is, nullptr for others
     static const Service *_serviceOf(const QList<Service> &services, const QString &url);
     /// @return true when the URL is one of the service's, see Service::host and Service::path

@@ -69,6 +69,13 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::_services()
     return catalogue.services;
 }
 
+QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::_templates()
+{
+    ActiveCatalogue &catalogue = activeCatalogue();
+    const QReadLocker locker(&catalogue.lock);
+    return catalogue.templates;
+}
+
 QList<GeoZoneProviders::Service> GeoZoneProviders::services()
 {
     QList<Service> services = _services();
@@ -84,12 +91,7 @@ QList<GeoZoneProviders::Service> GeoZoneProviders::services()
 
 QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
 {
-    ActiveCatalogue &catalogue = activeCatalogue();
-    QList<ServiceTemplate> templates;
-    {
-        const QReadLocker locker(&catalogue.lock);
-        templates = catalogue.templates;
-    }
+    QList<ServiceTemplate> templates = _templates();
     for (ServiceTemplate &serviceTemplate : templates) {
         if (serviceTemplate.translatable) {
             serviceTemplate.service.name = translated(serviceTemplate.service.name, true);
@@ -99,17 +101,17 @@ QList<GeoZoneProviders::ServiceTemplate> GeoZoneProviders::serviceTemplates()
     }
 
     // Area services also follow the area of interest, like the FAA's public layers
-    for (const Service &service : services()) {
+    for (const Service &service : _services()) {
         if (!service.serviceTemplate || !service.servesAreas()) {
             continue;
         }
         ServiceTemplate serviceTemplate;
         serviceTemplate.url = service.areaUrlTemplate;
         serviceTemplate.service.id = service.id;
-        serviceTemplate.service.name = service.name;
+        serviceTemplate.service.name = translated(service.name, service.translatable);
         serviceTemplate.service.areaOfInterest = true;
         serviceTemplate.service.maxAreaKm2 = service.templateMaxAreaKm2;
-        serviceTemplate.note = service.templateNote;
+        serviceTemplate.note = translated(service.templateNote, service.translatable);
         // The format comes from the service, whose path tells it apart from others on the same server
         serviceTemplate.origin = service.origin;
         templates.append(serviceTemplate);
@@ -273,7 +275,8 @@ GeoZoneParser::Format GeoZoneProviders::formatHint(const QString &url)
             return service.format;
         }
     }
-    for (const ServiceTemplate &serviceTemplate : serviceTemplates()) {
+    // On the catalogue as published: a lookup needs no translation, least of all of the whole catalogue
+    for (const ServiceTemplate &serviceTemplate : _templates()) {
         if ((serviceTemplate.format != GeoZoneParser::Format::Unknown) && (QUrl(serviceTemplate.url).host() == parsedUrl.host())) {
             return serviceTemplate.format;
         }
@@ -305,9 +308,10 @@ QString GeoZoneProviders::serviceId(const QString &url)
 
 QString GeoZoneProviders::serviceName(const QString &url)
 {
-    const QList<Service> all = services();
+    // Only the name asked for is translated: sources ask for theirs whenever they are shown
+    const QList<Service> all = _services();
     const Service *const service = _serviceOf(all, url);
-    return service ? service->name : QString();
+    return service ? translated(service->name, service->translatable) : QString();
 }
 
 const GeoZoneProviders::Service *GeoZoneProviders::_serviceOf(const QList<Service> &services, const QString &url)

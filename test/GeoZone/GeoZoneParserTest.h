@@ -77,4 +77,5 @@ private slots:
     void _testCatalogueVersionAndAreaUrl();
     void _testPageUrls();
     void _testSourceNames();
+    void _testProviderLookups();
 };

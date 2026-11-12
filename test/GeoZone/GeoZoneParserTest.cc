@@ -23,6 +23,8 @@
 #include <optional>
 #include <type_traits>
 
+#include <QtCore/QTranslator>
+
 #include <zlib.h>
 
 using namespace GeoZoneTestHelpers;
@@ -3528,6 +3530,66 @@ void GeoZoneParserTest::_testSourceNames()
     other.setResult(result, now, now);
     QCOMPARE(other.name(), QStringLiteral("Company zones"));
     QVERIFY2(other.detailsText().contains(QStringLiteral("title: Zones of Example")), qPrintable(other.detailsText()));
+}
+
+namespace {
+
+/// Counts the texts of the feed catalogue which are translated, and translates none
+class CatalogueTranslationCounter : public QTranslator
+{
+public:
+    bool isEmpty() const final { return false; }
+    QString translate(const char *context, const char *, const char *, int) const final
+    {
+        if (qstrcmp(context, GeoZoneFeedCatalogue::translationContext) == 0) {
+            count++;
+        }
+        return QString();
+    }
+
+    mutable std::atomic<int> count = 0;
+};
+
+} // namespace
+
+void GeoZoneParserTest::_testProviderLookups()
+{
+    CatalogueTranslationCounter counter;
+    QVERIFY(QCoreApplication::installTranslator(&counter));
+    const auto remove = qScopeGuard([&counter]() { (void) QCoreApplication::removeTranslator(&counter); });
+    const QString dutchUrl = QStringLiteral("https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart");
+
+    // The name of one feed is looked up without translating the names and notes of the whole catalogue: sources ask
+    // for theirs whenever they are shown
+    counter.count = 0;
+    QCOMPARE(GeoZoneProviders::serviceName(dutchUrl), QStringLiteral("Netherlands (IenW)"));
+    QCOMPARE(counter.count.load(), 1);
+    GeoZoneSource source(dutchUrl, dutchUrl);
+    counter.count = 0;
+    QCOMPARE(source.name(), QStringLiteral("Netherlands (IenW)"));
+    QCOMPARE(counter.count.load(), 1);
+    counter.count = 0;
+    QCOMPARE(GeoZoneProviders::serviceName(QStringLiteral("https://zones.example.com/other.json")), QString());
+    QCOMPARE(counter.count.load(), 0);
+
+    // The other lookups translate nothing, also the format of the responses of a service template
+    counter.count = 0;
+    QCOMPARE(GeoZoneProviders::formatHint(dutchUrl), GeoZoneParser::Format::ED269);
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://api.core.openaip.net/api/airspaces?bbox=8,47,9,48&limit=1000&page=1")), GeoZoneParser::Format::OpenAip);
+    QCOMPARE(GeoZoneProviders::formatHint(QStringLiteral("https://zones.example.com/other.json")), GeoZoneParser::Format::Unknown);
+    QCOMPARE(GeoZoneProviders::serviceId(dutchUrl), QStringLiteral("ienw"));
+    QVERIFY(!GeoZoneProviders::isLiveUrl(dutchUrl));
+    QCOMPARE(GeoZoneProviders::refreshHours(QStringLiteral("https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen")), 6.0);
+    QCOMPARE(counter.count.load(), 0);
+
+    // The lists shown are translated: each name, and the notes there are
+    counter.count = 0;
+    const int presets = static_cast<int>(GeoZoneProviders::feedPresets().count());
+    QVERIFY(presets >= 12);
+    QVERIFY2(counter.count.load() >= presets, qPrintable(QString::number(counter.count.load())));
+    counter.count = 0;
+    QVERIFY(GeoZoneProviders::serviceTemplates().count() >= 6);
+    QVERIFY(counter.count.load() >= 6);
 }
 
 GEOZONE_TEST(GeoZoneParserTest)
