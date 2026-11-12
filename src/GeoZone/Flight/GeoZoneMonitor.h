@@ -73,6 +73,7 @@ class Vehicle;
 /// flying vehicles are alerted, see AlertEvent::Awareness.
 /// What the pilot changes about the zones the alerts come from is logged too: a source turned off or on, and an
 /// authorisation recorded, changed or removed, see AlertEvent::SourceOff and AlertEvent::Authorised.
+/// The approvals and permits are in GeoZoneMonitorPermits.cc.
 /// Zones requiring an authorisation or a notification take a permit for the flight instead of an approval, see
 /// permits(): acknowledged before the flight or by answering the question, it stops their alerts for its vehicle until
 /// the flight ends.
@@ -416,6 +417,8 @@ private:
     /// Publishes the geo-awareness of the active vehicle and alerts the changes of state of the flying vehicles
     void _updateAwareness();
     void _raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change);
+    /// The flight of the vehicle ended: ends its permits and its approvals, which were for that flight
+    void _endFlightPermissions(GeoZoneVehicleMonitor *monitor);
     /// Logs a permit acknowledged or ended
     /// @param detail Where it was acknowledged, or why it ended, as logged
     void _logPermit(const GeoZonePermits::Permit &permit, AlertEvent::Kind kind, const QString &detail);
