@@ -222,6 +222,9 @@ GeoZoneAlertHistory::GeoZoneAlertHistory(GeoZoneManager *manager, QObject *paren
 
 GeoZoneAlertHistory::~GeoZoneAlertHistory()
 {
+    // At exit the settings of the application may be destroyed before the monitor which owns this: the lines not
+    // written yet go to the folder read last, and the old logs are left to the next start
+    _closing = true;
     if (!flushLog()) {
         qCWarning(GeoZoneMonitorLog) << "Geozone alert log lines not written:" << _logLines.count() << _logError;
     }
@@ -357,7 +360,10 @@ void GeoZoneAlertHistory::startLog(const QString &directory)
 
 QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
 {
-    const QString directory = _logDirectory.isEmpty() ? SettingsManager::instance()->appSettings()->telemetrySavePath() : _logDirectory;
+    if (_logDirectory.isEmpty() && !_closing) {
+        _settingsDirectory = SettingsManager::instance()->appSettings()->telemetrySavePath();
+    }
+    const QString directory = _logDirectory.isEmpty() ? _settingsDirectory : _logDirectory;
     if (directory.isEmpty()) {
         return QString();
     }
@@ -479,7 +485,9 @@ QString GeoZoneAlertHistory::_openLog(const QString &path, const QDate &date)
     _logLineTorn = false;
 
     // A file is started each day, a good time to delete those past the retention
-    (void) removeOldLogs(date, GeoZoneSettings::instance()->recordRetention()->rawValue().toInt());
+    if (!_closing) {
+        (void) removeOldLogs(date, GeoZoneSettings::instance()->recordRetention()->rawValue().toInt());
+    }
     return QString();
 }
 

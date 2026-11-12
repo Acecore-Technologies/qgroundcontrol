@@ -188,6 +188,8 @@ private:
 
     bool _logging = false;          ///< Set by startLog()
     QString _logDirectory;
+    mutable QString _settingsDirectory; ///< The telemetry folder of the settings as read last, used without _logDirectory
+    bool _closing = false;          ///< Being destroyed: the settings of the application may be gone already
     /// A line not written yet
     struct LogLine {
         QDate date;                 ///< UTC, of its file
