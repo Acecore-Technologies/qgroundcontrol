@@ -21,6 +21,7 @@
 #include <QtCore/QSaveFile>
 #include <QtCore/QUrl>
 #include <QtCore/QUuid>
+#include <QtNetwork/QHostAddress>
 
 #include <algorithm>
 
@@ -83,6 +84,7 @@ void GeoZoneFeedCatalogueLoader::setUrl(const QString &url)
     _retryAt = QDateTime();
     _downloadError.clear();
     _urlError.clear();
+    _urlRefused.clear();
     // The catalogue of another URL is dropped
     if (_cache.url != _url) {
         const bool hadCatalogue = (_urlCatalogue.entryCount() > 0) || !_urlCatalogue.warnings.isEmpty();
@@ -108,6 +110,10 @@ void GeoZoneFeedCatalogueLoader::check(bool force)
     if (_url.isEmpty() || _downloading) {
         return;
     }
+    if (const QString problem = _urlProblem(); !problem.isEmpty()) {
+        _refuseUrl(problem);
+        return;
+    }
     if (QUrl(_url).isLocalFile()) {
         _readUrlFile();
         return;
@@ -129,6 +135,49 @@ void GeoZoneFeedCatalogueLoader::retryUnreachable()
 {
     if (_unreachable) {
         check(true);
+    }
+}
+
+QString GeoZoneFeedCatalogueLoader::_urlProblem() const
+{
+    const QUrl url(_url);
+    if (_url.isEmpty() || url.isLocalFile()) {
+        return QString();
+    }
+    const QString scheme = url.scheme().toLower();
+    if (!url.isValid() || url.host().isEmpty() || ((scheme != QStringLiteral("https")) && (scheme != QStringLiteral("http")))) {
+        return tr("It is not an https address.");
+    }
+    // A catalogue changes the feeds offered: over http, anyone on the way could change it. A server on this computer,
+    // like one of a test, is reached without a network.
+    const bool loopback = (url.host().compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0) || QHostAddress(url.host()).isLoopback();
+    if ((scheme == QStringLiteral("http")) && !loopback) {
+        return tr("Its address must start with https://, a catalogue read over http could be changed on its way.");
+    }
+    return QString();
+}
+
+void GeoZoneFeedCatalogueLoader::_refuseUrl(const QString &problem)
+{
+    const bool hadCatalogue = (_urlCatalogue.entryCount() > 0) || !_urlCatalogue.warnings.isEmpty();
+    const bool differs = hadCatalogue || (problem != _urlRefused);
+    // Also the copy init() left aside
+    if (differs) {
+        (void) QFile::remove(QDir(_directory).filePath(QString::fromLatin1(cacheFileName)));
+    }
+    _cache = Cache();
+    _urlCatalogue = GeoZoneFeedCatalogue::Catalogue();
+    _urlRefused = problem;
+    _urlError.clear();
+    _downloadError.clear();
+    _unreachable = false;
+    if (differs) {
+        qCWarning(GeoZoneSourceLog) << "Feed catalogue not downloaded" << _url << problem;
+    }
+    if (hadCatalogue) {
+        _apply();
+    } else if (differs) {
+        emit changed();
     }
 }
 
@@ -270,8 +319,8 @@ void GeoZoneFeedCatalogueLoader::_readCache()
     }
     const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
     _cache.url = object.value(QStringLiteral("url")).toString();
-    // Only the catalogue of the URL of the settings is used
-    if (_cache.url != _url) {
+    // Only the catalogue of the URL of the settings is used, and no copy of a URL which isn't downloaded any more
+    if ((_cache.url != _url) || !_urlProblem().isEmpty()) {
         _cache = Cache();
         return;
     }
@@ -297,6 +346,21 @@ void GeoZoneFeedCatalogueLoader::_writeCache()
 void GeoZoneFeedCatalogueLoader::_apply()
 {
     GeoZoneFeedCatalogue::Catalogue catalogue = GeoZoneFeedCatalogue::builtIn();
+    // A downloaded catalogue may add and replace feeds, the built-in ones it turns off are told
+    _disabledBuiltIns.clear();
+    for (const QString &id : std::as_const(_urlCatalogue.disabled)) {
+        for (const GeoZoneProviders::Service &service : std::as_const(catalogue.feeds)) {
+            if (service.id == id) {
+                _disabledBuiltIns.append(QCoreApplication::translate(GeoZoneFeedCatalogue::translationContext, service.name.toUtf8().constData()));
+            }
+        }
+        for (const GeoZoneProviders::ServiceTemplate &serviceTemplate : std::as_const(catalogue.templates)) {
+            if (serviceTemplate.service.id == id) {
+                const QString name = serviceTemplate.service.name.isEmpty() ? serviceTemplate.name : serviceTemplate.service.name;
+                _disabledBuiltIns.append(QCoreApplication::translate(GeoZoneFeedCatalogue::translationContext, name.toUtf8().constData()));
+            }
+        }
+    }
     GeoZoneFeedCatalogue::apply(catalogue, _urlCatalogue);
     GeoZoneFeedCatalogue::apply(catalogue, _fileCatalogue);
     GeoZoneProviders::setCatalogue(catalogue.feeds, catalogue.templates);
@@ -315,6 +379,13 @@ QString GeoZoneFeedCatalogueLoader::warning() const
         lines.append(QStringLiteral("%1: %2").arg(fileName, warning));
     }
     if (!_url.isEmpty()) {
+        if (!_urlRefused.isEmpty()) {
+            lines.append(tr("The feed catalogue %1 is not downloaded: %2").arg(_url, _urlRefused));
+        }
+        if (!_disabledBuiltIns.isEmpty()) {
+            lines.append(tr("The feed catalogue of %1 turns off %n built-in feed(s): %2", nullptr, static_cast<int>(_disabledBuiltIns.count()))
+                             .arg(_url, _disabledBuiltIns.join(QStringLiteral(", "))));
+        }
         if (!_downloadError.isEmpty()) {
             lines.append((_urlCatalogue.entryCount() > 0) ? tr("The feed catalogue couldn't be downloaded from %1, its copy of %2 is used: %3")
                                                                  .arg(_url, QLocale().toString(_cache.checkedAt.toLocalTime(), QLocale::ShortFormat), _downloadError)

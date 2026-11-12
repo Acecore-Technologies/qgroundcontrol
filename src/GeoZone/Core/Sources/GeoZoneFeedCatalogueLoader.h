@@ -21,6 +21,10 @@
 /// The file is read again when it changes, the URL is downloaded again after the feed refresh interval like a feed,
 /// with conditional requests, and its last valid copy is kept for offline starts. Catalogues which can't be read are
 /// ignored with a warning, the built-in catalogue is always used.
+///
+/// A catalogue changes the feeds offered, so the URL is only downloaded over https, or over http from this computer
+/// (a loopback address), or read from a file. It may add and replace feeds; the built-in feeds it turns off are
+/// named in the warning.
 class GeoZoneFeedCatalogueLoader : public QObject
 {
     Q_OBJECT
@@ -72,6 +76,10 @@ private:
     /// Reads the catalogue of a file URL, which is checked like the catalogue file
     void _readUrlFile();
     void _apply();
+    /// @return Why the catalogue URL isn't downloaded, empty when it may be
+    QString _urlProblem() const;
+    /// Drops the catalogue of a URL which isn't downloaded, with its copy
+    void _refuseUrl(const QString &problem);
 
     QString _directory;
     QPointer<GeoZoneDownloader> _downloader;
@@ -93,6 +101,8 @@ private:
     Cache _cache;
     GeoZoneFeedCatalogue::Catalogue _urlCatalogue;
     QString _urlError;          ///< Why the downloaded catalogue is ignored
+    QString _urlRefused;        ///< Why the catalogue URL isn't downloaded, see _urlProblem
+    QStringList _disabledBuiltIns;  ///< Names of the built-in feeds and services the catalogue of the URL turns off
     QString _downloadError;     ///< Why the last download failed
     bool _downloading = false;
     bool _unreachable = false;  ///< The last download failed because no server answered

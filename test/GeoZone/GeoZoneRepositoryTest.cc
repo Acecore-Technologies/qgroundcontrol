@@ -1026,7 +1026,8 @@ void GeoZoneRepositoryTest::_testFeedCatalogueOverlays()
         // The catalogue of the URL is downloaded and applied below the file
         QTRY_VERIFY(presetNames().contains(QStringLiteral("Maker zones")));
         QVERIFY(!presetNames().contains(QStringLiteral("Latvia (LGS)")));
-        QVERIFY2(catalogue->warning().isEmpty(), qPrintable(catalogue->warning()));
+        // which is told, since a downloaded catalogue takes a built-in feed away
+        QCOMPARE(catalogue->warning(), QStringLiteral("The feed catalogue of %1 turns off 1 built-in feed(s): Latvia (LGS)").arg(catalogueUrl));
         QVERIFY(catalogue->statusText().contains(QStringLiteral("feeds.json")));
         QCOMPARE(server.requestCount, 1);
         // Downloaded again after the refresh interval, confirmed with its validators
@@ -1073,6 +1074,75 @@ void GeoZoneRepositoryTest::_testFeedCatalogueOverlays()
         QVERIFY(!presetNames().contains(QStringLiteral("Maker zones")));
         QVERIFY(catalogue->warning().isEmpty());
     }
+}
+
+void GeoZoneRepositoryTest::_testFeedCatalogueUrlRules()
+{
+    const auto presetNames = []() {
+        QStringList names;
+        for (const QVariant &preset : GeoZoneProviders::feedPresets()) {
+            names.append(preset.toMap().value(QStringLiteral("name")).toString());
+        }
+        return names;
+    };
+    const QByteArray makerCatalogue = R"({ "feeds": [ { "id": "maker", "name": "Maker zones", "url": "https://maker.example.com/zones.json" } ] })";
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString cachePath = QDir(storageDir.path()).filePath(QString::fromLatin1(GeoZoneFeedCatalogueLoader::cacheFileName));
+    GeoZoneDownloader downloader;
+    downloader.setDirectory(QDir(storageDir.path()).filePath(QStringLiteral("downloads")));
+
+    // A catalogue changes the feeds offered: it isn't downloaded over http from another computer, where anyone on the
+    // way could change it, and a copy downloaded that way before isn't used
+    const QString plainUrl = QStringLiteral("http://catalogue.invalid/feeds.json");
+    {
+        QFile cache(cachePath);
+        QVERIFY(cache.open(QIODevice::WriteOnly));
+        QVERIFY(cache.write(QJsonDocument(QJsonObject{ { QStringLiteral("url"), plainUrl }, { QStringLiteral("checkedAt"), QStringLiteral("2026-11-01T00:00:00Z") },
+                                                       { QStringLiteral("catalogue"), QString::fromUtf8(makerCatalogue) } }).toJson()) > 0);
+    }
+    {
+        GeoZoneFeedCatalogueLoader loader(storageDir.path(), &downloader);
+        loader.setUrl(plainUrl);
+        loader.init();
+        QCOMPARE(downloader.count(), 0);
+        QVERIFY2(loader.warning().startsWith(QStringLiteral("The feed catalogue %1 is not downloaded: Its address must start with https://").arg(plainUrl)), qPrintable(loader.warning()));
+        QVERIFY(!presetNames().contains(QStringLiteral("Maker zones")));
+        QVERIFY(!QFile::exists(cachePath));
+        // nor from addresses which aren't web addresses
+        loader.setUrl(QStringLiteral("ftp://catalogue.invalid/feeds.json"));
+        QCOMPARE(downloader.count(), 0);
+        QVERIFY2(loader.warning().contains(QStringLiteral("It is not an https address.")), qPrintable(loader.warning()));
+        // An https address is downloaded, and so is an http address of this computer, reached without a network
+        for (const QString &url : { QStringLiteral("https://127.0.0.1:1/feeds.json"), QStringLiteral("http://localhost:1/feeds.json"), QStringLiteral("http://[::1]:1/feeds.json") }) {
+            loader.setUrl(url);
+            QCOMPARE(downloader.count(), 1);
+            QVERIFY2(!loader.warning().contains(QStringLiteral("is not downloaded")), qPrintable(loader.warning()));
+            loader.setUrl(QString());
+            QCOMPARE(downloader.count(), 0);
+            QCOMPARE(loader.warning(), QString());
+        }
+    }
+
+    // A server on this computer is reached without a network, over http too. The built-in feeds and services a
+    // downloaded catalogue turns off are named, those it adds or replaces aren't
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/catalogue", R"json({ "feeds": [ { "id": "maker", "name": "Maker zones", "url": "https://maker.example.com/zones.json" },
+                                                          { "id": "foca", "name": "Switzerland (maker mirror)", "url": "https://maker.example.com/ch.json" },
+                                                          { "id": "lgs", "enabled": false }, { "id": "faa-tfr", "enabled": false }, { "id": "unknown", "enabled": false } ],
+                                              "services": [ { "id": "openaip", "enabled": false } ] })json");
+    {
+        const QString url = server.url(QStringLiteral("/catalogue"));
+        GeoZoneFeedCatalogueLoader loader(storageDir.path(), &downloader);
+        loader.setUrl(url);
+        loader.init();
+        QTRY_VERIFY_WITH_TIMEOUT(presetNames().contains(QStringLiteral("Maker zones")), stepTimeoutMSecs);
+        QVERIFY(presetNames().contains(QStringLiteral("Switzerland (maker mirror)")));
+        QVERIFY(!presetNames().contains(QStringLiteral("Latvia (LGS)")));
+        QCOMPARE(loader.warning(), QStringLiteral("The feed catalogue of %1 turns off 3 built-in feed(s): Latvia (LGS), United States TFRs (FAA), Airspaces (OpenAIP, unofficial)").arg(url));
+    }
+    QVERIFY(presetNames().contains(QStringLiteral("Latvia (LGS)")));
 }
 
 void GeoZoneRepositoryTest::_testRefreshAfterOffline()

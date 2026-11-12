@@ -37,6 +37,7 @@ private slots:
     void _testFeedCancellation();
     void _testRefreshScheduler();
     void _testFeedCatalogueOverlays();
+    void _testFeedCatalogueUrlRules();
     void _testRefreshAfterOffline();
     void _testRetryWhenOnline();
     void _testReloadChanges();
