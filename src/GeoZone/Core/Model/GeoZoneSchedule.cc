@@ -550,6 +550,11 @@ QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &perio
     for (qsizetype i = 0; i < count; i++) {
         qint32 day = 0;
         stream >> day;
+        // A period of other days would never apply
+        if ((stream.status() != QDataStream::Ok) || (day < Qt::Monday) || (day > Qt::Sunday)) {
+            stream.setStatus(QDataStream::ReadCorruptData);
+            return stream;
+        }
         period.days.append(day);
     }
     qint32 utcOffsetSecs = 0;
@@ -558,6 +563,10 @@ QDataStream &operator>>(QDataStream &stream, GeoZoneSchedule::DailyPeriod &perio
     period.utcOffsetSecs = utcOffsetSecs;
     if (!timeZone.isEmpty()) {
         period.timeZone = QTimeZone(timeZone);
+        // Without the time zone, like one this system doesn't know, the local times would be read as UTC
+        if (!period.timeZone.isValid()) {
+            stream.setStatus(QDataStream::ReadCorruptData);
+        }
     }
     return stream;
 }

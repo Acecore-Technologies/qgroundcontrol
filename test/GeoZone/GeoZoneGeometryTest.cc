@@ -418,6 +418,80 @@ void GeoZoneGeometryTest::_testDailyWindowEnds()
     QCOMPARE(zone.isActiveThroughout(time, time), active);
 }
 
+void GeoZoneGeometryTest::_testScheduleCacheValidation_data()
+{
+    QTest::addColumn<QList<int>>("days");
+    QTest::addColumn<QByteArray>("timeZone");
+    QTest::addColumn<bool>("valid");
+
+    QTest::newRow("any day") << QList<int>{} << QByteArray() << true;
+    QTest::newRow("week") << QList<int>{ Qt::Monday, Qt::Sunday } << QByteArray() << true;
+    QTest::newRow("time zone") << QList<int>{ Qt::Friday } << QByteArray("Europe/Zurich") << true;
+    // A day which no date has would make the period never apply
+    QTest::newRow("day 0") << QList<int>{ 0 } << QByteArray() << false;
+    QTest::newRow("day 8") << QList<int>{ Qt::Monday, 8 } << QByteArray() << false;
+    QTest::newRow("negative day") << QList<int>{ -3 } << QByteArray() << false;
+    // Without its time zone the local times of a period would be read as UTC
+    QTest::newRow("unknown time zone") << QList<int>{ Qt::Monday } << QByteArray("Nowhere/Atlantis") << false;
+    QTest::newRow("damaged time zone") << QList<int>{} << QByteArray("\x01\xff") << false;
+}
+
+void GeoZoneGeometryTest::_testScheduleCacheValidation()
+{
+    QFETCH(QList<int>, days);
+    QFETCH(QByteArray, timeZone);
+    QFETCH(bool, valid);
+
+    // As GeoZoneSchedule writes a daily period
+    QByteArray bytes;
+    {
+        QDataStream stream(&bytes, QIODevice::WriteOnly);
+        stream << static_cast<quint32>(days.count());
+        for (const int day : std::as_const(days)) {
+            stream << static_cast<qint32>(day);
+        }
+        stream << QTime(8, 0) << QTime(18, 0) << qint32{ 0 } << QString() << QString() << timeZone << false;
+    }
+    {
+        QDataStream stream(bytes);
+        GeoZone::DailyPeriod period;
+        stream >> period;
+        QCOMPARE(stream.status(), valid ? QDataStream::Ok : QDataStream::ReadCorruptData);
+        if (valid) {
+            QCOMPARE(period.days, days);
+            QCOMPARE(period.timeZone.isValid() ? period.timeZone.id() : QByteArray(), timeZone);
+            QCOMPARE(period.endTime, QTime(18, 0));
+        }
+    }
+
+    // The zone with the period fails too, so that the parse cache is discarded and the file parsed again
+    GeoZone::DailyPeriod written;
+    written.days = { Qt::Monday };
+    written.startTime = QTime(8, 0);
+    written.endTime = QTime(18, 0);
+    GeoZone::Data data;
+    data.identifier = QStringLiteral("Z");
+    data.applicability.append(GeoZone::TimePeriod{ false, QDateTime(), QDateTime(), { written } });
+    QByteArray zoneBytes;
+    {
+        QDataStream stream(&zoneBytes, QIODevice::WriteOnly);
+        stream << data;
+    }
+    QByteArray periodBytes;
+    {
+        QDataStream stream(&periodBytes, QIODevice::WriteOnly);
+        stream << written;
+    }
+    const qsizetype offset = zoneBytes.indexOf(periodBytes);
+    QVERIFY(offset > 0);
+    zoneBytes.replace(offset, periodBytes.size(), bytes);
+    QDataStream stream(zoneBytes);
+    GeoZone::Data restored;
+    stream >> restored;
+    QCOMPARE(stream.status(), valid ? QDataStream::Ok : QDataStream::ReadCorruptData);
+    QCOMPARE(restored.applicability.count(), valid ? 1 : 0);
+}
+
 void GeoZoneGeometryTest::_testOutwardSimplification()
 {
     const auto verifyEncloses = [](const QList<QGeoCoordinate> &original, const QList<QGeoCoordinate> &simplified, double tolerance) {
