@@ -117,7 +117,15 @@ void GeoZoneFenceWarning::_connectVehicle()
         _commandResult(command, ackResult, failureCode);
     });
     (void) connect(vehicle, &Vehicle::homePositionChanged, this, update);
-    (void) connect(vehicle, &Vehicle::armedChanged, this, update);
+    (void) connect(vehicle, &Vehicle::armedChanged, this, [this](bool armed) {
+        // ArduPilot enables the fence again when it arms with FENCE_AUTOENABLE
+        Vehicle *const vehicle = _vehicle;
+        if (armed && _fenceDisabled && vehicle && (_parameter(vehicle, QStringLiteral("FENCE_AUTOENABLE")).toInt() > 0)) {
+            _setFenceDisabled(false);
+            _setCommandText(QString());
+        }
+        _updateConfig();
+    });
     (void) connect(vehicle, &Vehicle::flightModesChanged, this, update);
     (void) connect(vehicle, &Vehicle::vtolInFwdFlightChanged, this, update);
     if (ParameterManager *const parameters = vehicle->parameterManager()) {
@@ -271,6 +279,11 @@ void GeoZoneFenceWarning::setConfig(const Config &config)
 {
     _fixedConfig = true;
     _config = config;
+    _enabledChanged();
+}
+
+void GeoZoneFenceWarning::_enabledChanged()
+{
     emit configChanged();
     if (!enabled()) {
         _setBreach(std::nullopt);
@@ -301,15 +314,18 @@ void GeoZoneFenceWarning::_updateConfig()
         _storedFence = storedFence(vehicle);
     }
     _config = vehicleConfig(vehicle, _storedFence);
-    emit configChanged();
-    if (!enabled()) {
-        _setBreach(std::nullopt);
-        _setOutside(std::nullopt, -1);
-    }
+    _enabledChanged();
 }
 
 void GeoZoneFenceWarning::handleMessage(const mavlink_message_t &message, qint64 msecs)
 {
+    if ((message.msgid == MAVLINK_MSG_ID_SYS_STATUS) && (message.compid == MAV_COMP_ID_AUTOPILOT1) && (_config.firmware == Firmware::ArduPilot)) {
+        // ArduPilot reports the fence it enforces, however it was enabled. Not one which only reports its breaches.
+        mavlink_sys_status_t sysStatus{};
+        mavlink_msg_sys_status_decode(&message, &sysStatus);
+        _setReportedEnabled((sysStatus.onboard_control_sensors_present & sysStatus.onboard_control_sensors_enabled & MAV_SYS_STATUS_GEOFENCE) != 0);
+        return;
+    }
     if (message.msgid != MAVLINK_MSG_ID_GLOBAL_POSITION_INT) {
         return;
     }
@@ -705,6 +721,13 @@ void GeoZoneFenceWarning::_commandResult(int command, int ackResult, int failure
     if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ackResult == MAV_RESULT_ACCEPTED)) {
         text = enable ? tr("Fence enabled.") : tr("Fence disabled: the vehicle no longer acts on breaches until it is enabled again.");
         _setFenceDisabled(!enable);
+        // Firmware versions which keep the state in FENCE_ENABLE don't announce its change
+        if (Vehicle *const vehicle = _vehicle) {
+            ParameterManager *const parameters = vehicle->parameterManager();
+            if (parameters && parameters->parametersReady() && parameters->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("FENCE_ENABLE"))) {
+                parameters->refreshParameter(ParameterManager::defaultComponentId, QStringLiteral("FENCE_ENABLE"));
+            }
+        }
     } else if ((failureCode == Vehicle::MavCmdResultCommandResultOnly) && (ackResult == MAV_RESULT_UNSUPPORTED)) {
         text = tr("The vehicle doesn't support enabling or disabling its fence.");
     } else if (failureCode == Vehicle::MavCmdResultCommandResultOnly) {
@@ -717,9 +740,29 @@ void GeoZoneFenceWarning::_commandResult(int command, int ackResult, int failure
 
 void GeoZoneFenceWarning::_setFenceDisabled(bool disabled)
 {
+    _disableReported = false;
     if (disabled != _fenceDisabled) {
         _fenceDisabled = disabled;
         emit fenceDisabledChanged();
+        _enabledChanged();
+    }
+}
+
+void GeoZoneFenceWarning::_setReportedEnabled(bool enabled)
+{
+    if (_fenceDisabled) {
+        if (!enabled) {
+            _disableReported = true;
+        } else if (_disableReported) {
+            // Enabled again otherwise, like with its RC switch. A report from before the vehicle disabled it isn't that.
+            qCInfo(GeoZoneMonitorLog) << "The vehicle reports the fence the pilot disabled as enabled";
+            _setFenceDisabled(false);
+            _setCommandText(QString());
+        }
+    }
+    if (enabled != _reportedEnabled) {
+        _reportedEnabled = enabled;
+        _enabledChanged();
     }
 }
 

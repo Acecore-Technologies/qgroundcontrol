@@ -42,7 +42,8 @@ class Vehicle;
 /// the fence back from the vehicle once no plan transfer is in progress.
 ///
 /// The pilot overrides the fence action by changing the flight mode, which takeControl() does with the mode the pilot
-/// flies in for the vehicle type, or on ArduPilot by disabling the fence (MAV_CMD_DO_FENCE_ENABLE).
+/// flies in for the vehicle type, or on ArduPilot by disabling the fence (MAV_CMD_DO_FENCE_ENABLE). A fence the vehicle
+/// accepted to disable isn't warned about until it is enabled again, see fenceDisabled.
 class GeoZoneFenceWarning : public QObject
 {
     Q_OBJECT
@@ -55,14 +56,16 @@ class GeoZoneFenceWarning : public QObject
     Q_PROPERTY(QString          intersectionText READ intersectionText  NOTIFY warningChanged FINAL)    ///< Its coordinate and altitude
     Q_PROPERTY(QVariantList     path            READ path               NOTIFY warningChanged FINAL)    ///< From the vehicle to the intersection, empty when inactive
     Q_PROPERTY(bool             outside         READ outside            NOTIFY outsideChanged FINAL)    ///< The vehicle is outside its fence
-    Q_PROPERTY(bool             enabled         READ enabled            NOTIFY configChanged FINAL)     ///< The vehicle's fence is enabled and has boundaries
+    Q_PROPERTY(bool             enabled         READ enabled            NOTIFY configChanged FINAL)     ///< The vehicle enforces its fence, which has boundaries
     Q_PROPERTY(bool             fenceUnknown    READ fenceUnknown       NOTIFY fenceUnknownChanged FINAL)   ///< The fence the vehicle stores couldn't be read
     Q_PROPERTY(QString          actionText      READ actionText         NOTIFY configChanged FINAL)     ///< Manoeuvre of the vehicle at a breach, like "RTL or land"
     Q_PROPERTY(QString          overrideText    READ overrideText       NOTIFY configChanged FINAL)     ///< How the pilot overrides it
     Q_PROPERTY(QString          takeControlMode READ takeControlMode    NOTIFY configChanged FINAL)     ///< Flight mode takeControl() switches to, empty when there is none
     Q_PROPERTY(bool             canDisableFence READ canDisableFence    NOTIFY configChanged FINAL)     ///< The autopilot accepts disableFence()
     Q_PROPERTY(QString          commandText     READ commandText        NOTIFY commandTextChanged FINAL)    ///< Result of the last override
-    Q_PROPERTY(bool             fenceDisabled   READ fenceDisabled      NOTIFY fenceDisabledChanged FINAL)  ///< The vehicle accepted disableFence(), until it accepts enableFence()
+    /// The vehicle accepted disableFence(): until it accepts enableFence(), reports its fence enabled again or is
+    /// armed with FENCE_AUTOENABLE
+    Q_PROPERTY(bool             fenceDisabled   READ fenceDisabled      NOTIFY fenceDisabledChanged FINAL)
 
 public:
     using Velocity = GeoZoneAlertTracker::Velocity;
@@ -104,7 +107,7 @@ public:
 
     /// What the vehicle's fence is and does
     struct Config {
-        bool enabled = false;       ///< The vehicle enforces the fence
+        bool enabled = false;       ///< The parameters of the vehicle enable the fence
         GeoZoneFencePrediction::Fence fence;
         Firmware firmware = Firmware::Other;
         VehicleClass vehicleClass = VehicleClass::Copter;
@@ -119,8 +122,8 @@ public:
 
     /// @return The fence of the vehicle: its polygons and circles, the circle around home and the altitude limits
     ///         its parameters enable (ArduPilot FENCE_TYPE, FENCE_RADIUS, FENCE_ALT_MAX, FENCE_ALT_MIN, FENCE_MARGIN,
-    ///         FENCE_OPTIONS; PX4 GF_MAX_HOR_DIST, GF_MAX_VER_DIST) and whether it is enabled (ArduPilot FENCE_ENABLE,
-    ///         or FENCE_AUTOENABLE while armed; PX4 unless GF_ACTION is None)
+    ///         FENCE_OPTIONS; PX4 GF_MAX_HOR_DIST, GF_MAX_VER_DIST) and whether its parameters enable it (ArduPilot
+    ///         FENCE_ENABLE, or FENCE_AUTOENABLE while armed; PX4 unless GF_ACTION is None)
     static Config vehicleConfig(Vehicle *vehicle);
     /// @param stored Instead of the polygons and circles of the vehicle's GeoFenceManager
     static Config vehicleConfig(Vehicle *vehicle, const StoredFence &stored);
@@ -136,7 +139,8 @@ public:
     void setWarningTime(double seconds) { _warningTime = seconds; }
 
     /// Evaluates the position of GLOBAL_POSITION_INT messages, at most every minEvaluateIntervalMSecs, with the
-    /// velocity the vehicle reports or, when it reports none, estimated from its positions
+    /// velocity the vehicle reports or, when it reports none, estimated from its positions. Follows whether an
+    /// ArduPilot vehicle reports its fence enabled (SYS_STATUS).
     void handleMessage(const mavlink_message_t &message, qint64 msecs);
     /// Evaluates a position with its velocity, at the time of the clock
     /// @param altitude Meters above home, NaN when unknown
@@ -154,7 +158,9 @@ public:
     QGeoCoordinate intersection() const { return _breach ? _breach->coordinate : QGeoCoordinate(); }
     QString intersectionText() const;
     QVariantList path() const;
-    bool enabled() const { return _config.enabled && !_config.fence.isEmpty(); }
+    /// The fence has boundaries and is enabled by the parameters of the vehicle or reported enabled by it, like one
+    /// enabled with an RC switch, unless the vehicle accepted disableFence()
+    bool enabled() const { return (_config.enabled || _reportedEnabled) && !_fenceDisabled && !_config.fence.isEmpty(); }
     /// The last transfer of the fence failed, so the vehicle may store another fence than its GeoFenceManager has: the
     /// one it had before a rejected upload, or one which couldn't be read. Until a transfer succeeds.
     bool fenceUnknown() const { return _fenceUnknown; }
@@ -215,6 +221,9 @@ private:
     void _commandResult(int command, int ackResult, int failureCode);
     void _fenceCommandTimedOut();
     void _setFenceDisabled(bool disabled);
+    void _setReportedEnabled(bool enabled);
+    /// Ends the warning and the breach of a fence which is no longer enabled
+    void _enabledChanged();
 
     QPointer<Vehicle> _vehicle;
     Clock _clock;
@@ -234,6 +243,8 @@ private:
     GeoZoneVelocityEstimator _estimator;
     QString _commandText;
     bool _fenceDisabled = false;
+    bool _reportedEnabled = false;              ///< The ArduPilot vehicle reports its fence enabled (SYS_STATUS)
+    bool _disableReported = false;              ///< The vehicle reported its fence disabled since it accepted to disable it
     QString _pendingMode;                       ///< Flight mode takeControl() asked for which the vehicle hasn't reported yet
     QTimer _modeTimer;
     std::optional<bool> _pendingFenceEnable;    ///< Fence enable or disable command the vehicle hasn't answered yet

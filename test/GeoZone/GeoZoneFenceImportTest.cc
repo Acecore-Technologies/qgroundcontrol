@@ -1037,6 +1037,65 @@ void GeoZoneFenceImportTest::_testFenceOverrideCommands()
         QVERIFY(!warning.fenceDisabled());
         QCOMPARE(warning.commandText(), QStringLiteral("Fence enabled."));
         QTRY_VERIFY(answered());
+
+        // The MockLink ArduCopter has FENCE_ENABLE 0 with altitude and circle fences. A fence enabled otherwise, like
+        // with an RC switch, is the one the vehicle reports enabled.
+        const auto sysStatus = [vehicle](bool fenceEnabled) {
+            mavlink_message_t message{};
+            const uint32_t sensors = MAV_SYS_STATUS_SENSOR_GPS | MAV_SYS_STATUS_GEOFENCE;
+            (void) mavlink_msg_sys_status_pack(vehicle->id(), MAV_COMP_ID_AUTOPILOT1, &message, sensors, fenceEnabled ? sensors : MAV_SYS_STATUS_SENSOR_GPS, sensors,
+                                               0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return message;
+        };
+        QVERIFY(!warning.config().enabled);
+        QVERIFY(!warning.config().fence.isEmpty());
+        QVERIFY(!warning.enabled());
+        QSignalSpy configSpy(&warning, &GeoZoneFenceWarning::configChanged);
+        warning.handleMessage(sysStatus(true), 0);
+        QVERIFY(warning.enabled());
+        QCOMPARE(configSpy.count(), 1);
+        // Climbing at 3 m/s to the ceiling 100 m above home is warned about
+        const QGeoCoordinate position = vehicle->homePosition().isValid() ? vehicle->homePosition() : QGeoCoordinate(47.397, 8.5455);
+        const GeoZoneFenceWarning::Velocity climbing{ 0, 0, 3, true };
+        warning.evaluate(position, 90, climbing);
+        QVERIFY(warning.active());
+
+        // A fence the vehicle accepted to disable isn't warned about, whatever was reported before
+        warning.disableFence();
+        answer(MAV_RESULT_ACCEPTED);
+        QVERIFY(warning.fenceDisabled());
+        QVERIFY(!warning.enabled());
+        QVERIFY(!warning.active());
+        warning.evaluate(position, 90, climbing);
+        QVERIFY(!warning.active());
+        warning.evaluate(position, 101, climbing);
+        QVERIFY(!warning.outside());
+        warning.handleMessage(sysStatus(true), 0);
+        QVERIFY(warning.fenceDisabled());
+        // ... until the vehicle reports it enabled again after reporting it disabled
+        warning.handleMessage(sysStatus(false), 0);
+        QVERIFY(warning.fenceDisabled());
+        warning.handleMessage(sysStatus(true), 0);
+        QVERIFY(!warning.fenceDisabled());
+        QVERIFY(warning.enabled());
+        warning.evaluate(position, 90, climbing);
+        QVERIFY(warning.active());
+        QTRY_VERIFY(answered());
+
+        // ... or accepts to enable it
+        warning.disableFence();
+        answer(MAV_RESULT_ACCEPTED);
+        QVERIFY(!warning.enabled());
+        QTRY_VERIFY(answered());
+        warning.enableFence();
+        answer(MAV_RESULT_ACCEPTED);
+        QVERIFY(warning.enabled());
+        QTRY_VERIFY(answered());
+
+        // Disabled with the RC switch, the vehicle reports it too
+        warning.handleMessage(sysStatus(false), 0);
+        QVERIFY(!warning.enabled());
+        QVERIFY(!warning.active());
     }
     _disconnectMockLink();
 }
