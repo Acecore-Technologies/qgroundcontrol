@@ -456,14 +456,27 @@ void GeoZoneFlightTest::_testTerrainQueryRetry()
     const QList<QTimer*> timers = TerrainAtCoordinateBatchManager::instance()->findChildren<QTimer*>(Qt::FindDirectChildrenOnly);
     QCOMPARE(timers.count(), 1);
     const QTimer *const batchTimer = timers.constFirst();
-    QTRY_VERIFY_WITH_TIMEOUT(!batchTimer->isActive(), 10000);
+    const auto heightKnown = [vehicle]() { return !std::isnan(vehicle->altitudeAboveTerr()->rawValue().toDouble()); };
 
-    // A query fails, like when the terrain tile can't be downloaded: the height is unknown. The vehicle stays where
-    // it is, so no query follows for a new position: the same position is queried again after a while.
-    QVERIFY(QMetaObject::invokeMethod(vehicle, "_altitudeAboveTerrainReceived", Q_ARG(bool, false), Q_ARG(QList<double>, QList<double>())));
-    QVERIFY(std::isnan(vehicle->altitudeAboveTerr()->rawValue().toDouble()));
-    QVERIFY(!batchTimer->isActive());
-    QTRY_VERIFY_WITH_TIMEOUT(batchTimer->isActive(), 15000);
+    // The first query of the vehicle is answered with the terrain tile of its position, which is downloaded unless an
+    // earlier test got it. Until then its answer is on its way and would replace a failure reported meanwhile.
+    const bool terrainAvailable = QTest::qWaitFor(heightKnown, 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(!batchTimer->isActive(), 15000);
+
+    // A query fails, like when the terrain tile can't be downloaded: the height is unknown. Without a terrain server
+    // the queries of the vehicle fail by themselves.
+    if (terrainAvailable) {
+        QVERIFY(QMetaObject::invokeMethod(vehicle, "_altitudeAboveTerrainReceived", Q_ARG(bool, false), Q_ARG(QList<double>, QList<double>())));
+        QVERIFY(!batchTimer->isActive());
+    }
+    QVERIFY(!heightKnown());
+
+    // The vehicle stays where it is, so no query follows for a new position: the same position is queried again after
+    // a while, and answered from the tile when there is one
+    QTRY_VERIFY_WITH_TIMEOUT(batchTimer->isActive(), 30000);
+    if (terrainAvailable) {
+        QTRY_VERIFY_WITH_TIMEOUT(heightKnown(), 15000);
+    }
     _disconnectMockLink();
 }
 
@@ -1717,11 +1730,12 @@ void GeoZoneFlightTest::_testChecksFollowSchedules()
     QVERIFY(zone->active());
     QVERIFY2(guided->pathWarning(path).isEmpty(), qPrintable(guided->pathWarning(path)));
     QVERIFY2(guided->startWarning(missionController).isEmpty(), qPrintable(guided->startWarning(missionController)));
+    // The items wait for a mission check which is still on its way, like the one the zones becoming active started
     check.update();
-    QCOMPARE(check.qnh().state, Check::NotApplicable);
+    QTRY_COMPARE(check.qnh().state, Check::NotApplicable);
 
     // With a planned start the mission is checked for the time of the flight, whatever the zones are now
-    QCOMPARE(check.mission().state, Check::Failed);
+    QTRY_COMPARE(check.mission().state, Check::Failed);
     manager.planning()->setPlannedStart(_utc(day, QTime(15, 0)));
     QTRY_COMPARE(check.mission().state, Check::Passed);
     QVERIFY(!uploadAsksAboutZone());
