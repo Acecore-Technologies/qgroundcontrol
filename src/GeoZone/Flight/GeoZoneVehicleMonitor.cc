@@ -403,7 +403,7 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::_evaluate(const GeoZone
     }
 
     const QList<GeoZoneVerticalBand> bands = GeoZoneVerticalBand::at(*context.catalog, context.policy, position);
-    const auto moved = [](double a, double b) { return (std::isnan(a) != std::isnan(b)) || (std::abs(a - b) >= 0.5); };
+    const auto moved = [](double a, double b) { return (std::isnan(a) != std::isnan(b)) || (std::abs(a - b) >= bandsMoveMeters); };
     if ((bands != _bands) || moved(position.altitudeAMSL, _bandsPosition.altitudeAMSL) || moved(position.terrainAMSL, _bandsPosition.terrainAMSL)) {
         _bands = bands;
         _bandsPosition = position;

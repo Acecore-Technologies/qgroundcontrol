@@ -14,6 +14,7 @@
 #include "GeoZoneMissionCheck.h"
 #include "GeoZoneMissionReader.h"
 #include "GeoZonePlanning.h"
+#include "GeoZoneProjection.h"
 #include "GeoZoneVehicleMonitor.h"
 #include "MissionController.h"
 #include "MultiVehicleManager.h"
@@ -33,7 +34,6 @@ Q_APPLICATION_STATIC(GeoZoneConformance, _geoZoneConformance);
 namespace {
 
 constexpr int volumesDelayMSecs = 1000;
-constexpr double earthRadius = 6371000;
 
 GeoZoneConformance *applicationInstance = nullptr;
 
@@ -298,7 +298,7 @@ double GeoZoneConformance::horizontalDistance(const Volume &volume, const QGeoCo
     const auto project = [&coordinate, cosLatitude](const QGeoCoordinate &vertex) {
         double longitude = vertex.longitude() - coordinate.longitude();
         longitude -= 360 * std::round(longitude / 360);
-        return QPointF(qDegreesToRadians(longitude) * earthRadius * cosLatitude, qDegreesToRadians(vertex.latitude() - coordinate.latitude()) * earthRadius);
+        return QPointF(qDegreesToRadians(longitude) * GeoZoneGeometry::kEarthRadiusMeters * cosLatitude, qDegreesToRadians(vertex.latitude() - coordinate.latitude()) * GeoZoneGeometry::kEarthRadiusMeters);
     };
     double nearest = std::numeric_limits<double>::infinity();
     for (qsizetype i = 0; i < volume.outline.count(); i++) {

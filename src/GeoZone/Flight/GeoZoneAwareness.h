@@ -62,6 +62,7 @@ public:
     /// class, see GeoZoneAlertThresholds::Profile
     struct GnssLimits {
         static constexpr int minFixType = 3;    ///< GPS_FIX_TYPE_3D_FIX
+        static constexpr int positionFixType = 2;   ///< GPS_FIX_TYPE_2D_FIX: below it the receiver has no position
         double minSatellites = 6;
         double maxHdop = 5;                     ///< Worse than "moderate"
         double maxHorizontalAccuracy = 5;       ///< Meters, as reported by the receiver

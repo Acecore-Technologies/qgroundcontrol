@@ -111,7 +111,7 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::approvalsChanged);
     (void) connect(this, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZoneMonitor::_updateAlertActions);
     // Fences stop or return the vehicle, shown above the geozone alerts
-    (void) connect(this, &GeoZoneMonitor::fenceBreach, this, [this](const QString &message) { _show(_nextAlertId++, message, -1, GeoZoneAlertLevel::Warning); });
+    (void) connect(this, &GeoZoneMonitor::fenceBreach, this, [this](const QString &message) { _show(_nextAlertId++, message, fenceSeverity, GeoZoneAlertLevel::Warning); });
     (void) connect(this, &GeoZoneMonitor::approvalsChanged, this, &GeoZoneMonitor::_updateActiveLevel);
 
     (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZoneMonitor::_forgetZones);
@@ -708,12 +708,12 @@ void GeoZoneMonitor::_updateFenceWarning(GeoZoneVehicleMonitor *monitor)
         _fenceWarningAlerts.insert(monitor->key(), id);
         _logFenceEvent(monitor, AlertEvent::FenceWarning, id, message);
         emit fenceWarning(message);
-        _show(id, message, -1, GeoZoneAlertLevel::Warning);
+        _show(id, message, fenceSeverity, GeoZoneAlertLevel::Warning);
         GeoZoneAlertArbiter::Alert announced;
         announced.id = id;
         announced.vehicleKey = monitor->key();
-        announced.zoneKey = QStringLiteral("fence");
-        announced.severity = -1;
+        announced.zoneKey = QString::fromLatin1(fenceAlertKey);
+        announced.severity = fenceSeverity;
         announced.level = GeoZoneAlertLevel::Warning;
         announced.inside = true;
         announced.message = message;
@@ -725,7 +725,7 @@ void GeoZoneMonitor::_updateFenceWarning(GeoZoneVehicleMonitor *monitor)
     const QList<GeoZoneAlertModel::Alert> &shown = _alertModel->alerts();
     const auto row = std::find_if(shown.cbegin(), shown.cend(), [alertId](const GeoZoneAlertModel::Alert &alert) { return alert.alertId == alertId; });
     if ((row != shown.cend()) && (row->message != message)) {
-        _show(alertId, message, -1, GeoZoneAlertLevel::Warning);
+        _show(alertId, message, fenceSeverity, GeoZoneAlertLevel::Warning);
     }
 }
 
@@ -738,7 +738,7 @@ void GeoZoneMonitor::_logFenceEvent(GeoZoneVehicleMonitor *monitor, AlertEvent::
     event.position = monitor->position();
     event.kind = kind;
     event.level = GeoZoneAlertLevel::Warning;
-    event.zoneIdentifier = QStringLiteral("FENCE");
+    event.zoneIdentifier = QString::fromLatin1(fenceIdentifier);
     event.message = message;
     _setThresholds(event, monitor);
     const GeoZoneFenceWarning *const warning = monitor->fenceWarning();
@@ -905,7 +905,7 @@ void GeoZoneMonitor::_raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const 
     GeoZoneAlertArbiter::Alert announced;
     announced.id = event.id;
     announced.vehicleKey = monitor->key();
-    announced.zoneKey = QStringLiteral("geo-awareness");
+    announced.zoneKey = QString::fromLatin1(awarenessAlertKey);
     announced.severity = severity;
     announced.level = level;
     announced.inside = (level != GeoZoneAlertLevel::Advisory);
@@ -1054,7 +1054,7 @@ void GeoZoneMonitor::muteAlerts(int seconds)
     }
     _arbiter.mute(msecs);
     // Notified after the arbiter's clock passed the end
-    _muteTimer.start(msecs + 100);
+    _muteTimer.start(msecs + muteEndMarginMSecs);
     _updateMuted();
 }
 

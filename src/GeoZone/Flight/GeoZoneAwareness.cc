@@ -94,7 +94,7 @@ GeoZoneAwareness::Status GeoZoneAwareness::evaluate(const Input &input)
             add(Reason::LinkLost, Unavailable, tr("telemetry link lost"));
         } else {
             const Gnss &gnss = input.gnss;
-            if (gnss.known && (gnss.fixType < 2)) {
+            if (gnss.known && (gnss.fixType < GnssLimits::positionFixType)) {
                 add(Reason::GnssLost, Unavailable, tr("GNSS lost (no fix)"));
             }
             if (input.positionUnavailable) {
@@ -106,7 +106,7 @@ GeoZoneAwareness::Status GeoZoneAwareness::evaluate(const Input &input)
         add(Reason::NoData, Unavailable, tr("no geozone data loaded"));
     }
 
-    if (input.vehicle && !input.linkLost && input.gnss.known && (input.gnss.fixType >= 2)) {
+    if (input.vehicle && !input.linkLost && input.gnss.known && (input.gnss.fixType >= GnssLimits::positionFixType)) {
         const Gnss &gnss = input.gnss;
         const GnssLimits &limits = input.gnssLimits;
         QStringList poor;

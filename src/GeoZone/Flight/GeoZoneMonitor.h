@@ -120,6 +120,11 @@ public:
     static constexpr int maxActionAlerts = 200;             ///< Latest alert ids whose alerts keep their actions
     static constexpr int maxMuteSecs = 24 * 60 * 60;        ///< Longest mute, see muteAlerts()
     static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
+    static constexpr int fenceSeverity = -1;                ///< Of the fence warnings and breaches, above and more urgent than any zone alert
+    static constexpr int muteEndMarginMSecs = 100;          ///< After the end of a mute its end is notified, once the arbiter's clock passed it
+    static constexpr const char *fenceIdentifier = "FENCE"; ///< Zone identifier of the fence alerts in the log
+    static constexpr const char *fenceAlertKey = "fence";   ///< Stands for the zone of the fence alerts of a vehicle, see GeoZoneAlertArbiter::Alert::zoneKey
+    static constexpr const char *awarenessAlertKey = "geo-awareness";   ///< ... and of its geo-awareness alerts
     static constexpr const char *permissionQuestion = "Do you have legal permission to fly here?";    ///< As logged, see approveAlert()
     static constexpr int maxTrafficAircraft = 100;          ///< Checked at a time, the closest to the active vehicle
     static constexpr int armingAlertIntervalMSecs = 10000;  ///< Arming attempts within this are alerted once, see OnGround

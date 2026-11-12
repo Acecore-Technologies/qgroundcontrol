@@ -183,7 +183,7 @@ std::optional<GeoZoneAlertTracker::Entry> GeoZoneAlertTracker::predictedEntry(co
         total += length;
     }
     // Climbing or descending in place
-    const double time = (total < 0.01) ? (entry->fraction * horizon) : ((toEntry / total) * horizon);
+    const double time = (total < minPathLength) ? (entry->fraction * horizon) : ((toEntry / total) * horizon);
     return Entry{ zone, time, entry->position };
 }
 

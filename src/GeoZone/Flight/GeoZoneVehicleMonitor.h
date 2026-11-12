@@ -93,6 +93,7 @@ public:
     static constexpr int maxPositionTimeoutMSecs = 60000;       ///< ... and after this at most, however slow the link
     static constexpr int positionTimeoutIntervals = 3;          ///< Usual intervals without a position after which it is stale
     static constexpr int positionIntervalCount = 5;             ///< Last intervals the usual one is the median of
+    static constexpr double bandsMoveMeters = 0.5;              ///< Change of altitude or terrain the vertical bands are notified for
     /// Velocities reported by the vehicle are used up to this age, or one and a half usual intervals of its positions
     static constexpr int reportedVelocityMaxAgeMSecs = 2000;
     /// The fence status the vehicle reported is used up to this age. ArduPilot stops sending it while its fence is disabled.

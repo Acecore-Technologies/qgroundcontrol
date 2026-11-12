@@ -38,6 +38,7 @@ public:
     /// Seconds of flight at the current speed within which a zone is always near: 5 s of warning for the pilot and
     /// the evaluation interval of 1 s
     static constexpr double minWarningTime = 6;
+    static constexpr double minPathLength = 0.01;           ///< Meters below which a predicted path is a climb or descent in place
 
     /// Velocity over ground and vertical speed
     struct Velocity {
