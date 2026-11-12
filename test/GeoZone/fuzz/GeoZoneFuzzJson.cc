@@ -22,15 +22,16 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv)
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     const QByteArray input = GeoZoneFuzz::bytes(data, size);
-    static const GeoZoneParser::Format hints[] = {
-        GeoZoneParser::Format::Unknown,
-        GeoZoneParser::Format::ED269,
-        GeoZoneParser::Format::ED318,
-        GeoZoneParser::Format::FaaTfr,
-        GeoZoneParser::Format::Dipul,
-        GeoZoneParser::Format::FranceUas,
-        GeoZoneParser::Format::FaaAirspace,
-    };
+    // No hint and that of every JSON format registered, so that a new format is fuzzed too
+    static const QList<GeoZoneParser::Format> hints = []() {
+        QList<GeoZoneParser::Format> formats = { GeoZoneParser::Format::Unknown };
+        for (const GeoZoneFormat *format : GeoZoneFormat::formats()) {
+            if (!format->isXml()) {
+                formats.append(format->format());
+            }
+        }
+        return formats;
+    }();
     for (const GeoZoneParser::Format hint : hints) {
         GeoZoneParser::Result result;
         QString errorString;

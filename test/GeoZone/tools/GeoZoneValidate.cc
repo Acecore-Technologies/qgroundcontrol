@@ -9,6 +9,7 @@
 
 #include "GeoZone.h"
 #include "GeoZoneDownloader.h"
+#include "GeoZoneFeedCatalogue.h"
 #include "GeoZoneInputFiles.h"
 #include "GeoZoneLoader.h"
 #include "GeoZoneParser.h"
@@ -316,7 +317,9 @@ int main(int argc, char *argv[])
         "Checks geozone files and zip packages like QGroundControl loads them, and prints their format, zones, problems,\n"
         "altitude limits and schedules. Exits with 1 when a file can't be loaded, or with --strict has warnings."));
     parser.addHelpOption();
-    const QCommandLineOption formatOption(QStringLiteral("format"), QStringLiteral("Format expected, like for the URL of a feed: ed269, ed318, faa-tfr, dipul, france-uas or aixm."),
+    const QCommandLineOption formatOption(QStringLiteral("format"),
+                                          QStringLiteral("Format expected, like for the URL of a feed: a format name of the feed catalogue, like ed269, ed318, aixm, "
+                                                         "dipul, france-uas, faa-tfr, faa-airspace or openaip."),
                                           QStringLiteral("format"));
     const QCommandLineOption languageOption(QStringLiteral("language"), QStringLiteral("Preferred language of localized texts, like de."), QStringLiteral("code"));
     const QCommandLineOption zonesOption(QStringLiteral("zones"), QStringLiteral("List the zones with their limits, schedules and problems."));
@@ -334,20 +337,13 @@ int main(int argc, char *argv[])
     options.language = parser.value(languageOption);
     options.listZones = parser.isSet(zonesOption);
     if (parser.isSet(formatOption)) {
-        static const QMap<QString, GeoZoneParser::Format> formats = {
-            { QStringLiteral("ed269"), GeoZoneParser::Format::ED269 },
-            { QStringLiteral("ed318"), GeoZoneParser::Format::ED318 },
-            { QStringLiteral("faa-tfr"), GeoZoneParser::Format::FaaTfr },
-            { QStringLiteral("dipul"), GeoZoneParser::Format::Dipul },
-            { QStringLiteral("france-uas"), GeoZoneParser::Format::FranceUas },
-            { QStringLiteral("aixm"), GeoZoneParser::Format::Aixm },
-        };
-        const QString format = parser.value(formatOption).toLower();
-        if (!formats.contains(format)) {
-            out() << "Unknown format " << format << ", the formats are " << formats.keys().join(QStringLiteral(", ")) << Qt::endl;
+        // The names feeds and services have in the feed catalogue, so that a format is never missing here
+        bool known = false;
+        options.formatHint = GeoZoneFeedCatalogue::formatFromName(parser.value(formatOption), known);
+        if (!known) {
+            out() << "Unknown format " << parser.value(formatOption) << ": the formats are those of the feed catalogue, see --help" << Qt::endl;
             return 2;
         }
-        options.formatHint = formats.value(format);
     }
 
     const QStringList files = GeoZoneInputFiles::collect(parser.positionalArguments());

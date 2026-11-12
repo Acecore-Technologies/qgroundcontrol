@@ -2509,6 +2509,18 @@ void GeoZoneParserTest::_testFeedCatalogue()
     QCOMPARE(builtIn.templates.count(), 6);
     QVERIFY(builtIn.disabled.isEmpty());
 
+    // Every format registered has a name in catalogues, which geozone-validate takes as well
+    QSet<GeoZoneParser::Format> named;
+    for (const char *name : { "ed269", "ed318", "aixm", "dipul", "france-uas", "faa-tfr", "faa-airspace", "openaip" }) {
+        bool known = false;
+        const GeoZoneParser::Format format = GeoZoneFeedCatalogue::formatFromName(QString::fromLatin1(name), known);
+        QVERIFY2(known && (format != GeoZoneParser::Format::Unknown), name);
+        named.insert(format);
+    }
+    for (const GeoZoneFormat *format : GeoZoneFormat::formats()) {
+        QVERIFY2(named.contains(format->format()), qPrintable(format->name()));
+    }
+
     // A catalogue replaces, adds and turns off entries, entries which can't be used are left out with a warning
     const QByteArray overlay = R"json({
         "fileType": "GeoZoneFeeds", "version": 1,

@@ -22,16 +22,18 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv)
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     const QByteArray input = GeoZoneFuzz::bytes(data, size);
-    for (const GeoZoneParser::Format hint : { GeoZoneParser::Format::Unknown, GeoZoneParser::Format::Aixm }) {
+    {
         GeoZoneParser::Result result;
         QString errorString;
-        (void) GeoZoneParser::parse(input, result, errorString, hint);
+        (void) GeoZoneParser::parse(input, result, errorString);
     }
 
+    // With the hint of every XML format registered, and with the format directly
     for (const GeoZoneFormat *format : GeoZoneFormat::formats()) {
         if (format->isXml()) {
             GeoZoneParser::Result result;
             QString errorString;
+            (void) GeoZoneParser::parse(input, result, errorString, format->format());
             (void) format->parseXml(input, result, errorString);
         }
     }
