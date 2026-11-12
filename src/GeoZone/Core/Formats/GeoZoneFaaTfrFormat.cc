@@ -229,7 +229,8 @@ TfrDetail _tfrDetail(const QByteArray &xml)
     }
 
     // The shapes of a NOTAM don't say which area they belong to, so the zone spans the altitudes of all areas.
-    // Limits given in different references can't be combined and stay unknown.
+    // Limits given in different references can't be combined and stay unknown, and so does a limit which one of the
+    // areas doesn't give or gives in an unknown unit: the zone then has no floor or no ceiling.
     const auto reference = [](const Limit &limit) {
         if (limit.code == QLatin1String("HEI")) {
             return QStringLiteral("AGL");
@@ -257,8 +258,11 @@ TfrDetail _tfrDetail(const QByteArray &xml)
             lowerReference.clear();
             upperReference.clear();
         }
-        lower = (std::min)(lower, feet(area.lower));
-        upper = (std::max)(upper, feet(area.upper));
+        // std::min and std::max would leave out an unknown limit, and keep the narrower band of the other areas
+        const double areaLower = feet(area.lower);
+        const double areaUpper = feet(area.upper);
+        lower = (std::isnan(lower) || std::isnan(areaLower)) ? qQNaN() : (std::min)(lower, areaLower);
+        upper = (std::isnan(upper) || std::isnan(areaUpper)) ? qQNaN() : (std::max)(upper, areaUpper);
     }
     GeoZone::Volume &limits = detail.limits;
     limits.feet = true;

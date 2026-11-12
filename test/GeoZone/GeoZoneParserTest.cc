@@ -183,7 +183,7 @@ constexpr int _fieldCount()
 }
 
 /// GeoZoneParser::version the hashes of the fixtures' results in _testParseFixtures_data were recorded for
-constexpr quint16 kResultHashVersion = 12;
+constexpr quint16 kResultHashVersion = 13;
 
 /// @return Hash of a serialized result, with the vertices rounded to 1e-7 degrees, which the differences of the math
 ///         libraries computing arcs and geodesics don't change
@@ -1563,6 +1563,73 @@ void GeoZoneParserTest::_testTfrCircles()
         QCOMPARE(polygon.rings.first().count(), 36);
         QVERIFY(!GeoZone(polygonal.zones.first()).contains(inside));
     }
+}
+
+void GeoZoneParserTest::_testTfrAreaLimits_data()
+{
+    QTest::addColumn<QByteArray>("areas");
+    QTest::addColumn<double>("lowerLimit");     ///< Feet, NaN when the zone has no floor
+    QTest::addColumn<double>("upperLimit");     ///< Feet, NaN when the zone has no ceiling
+
+    const auto limit = [](const char *side, const char *code, const char *value, const char *unit) {
+        return QStringLiteral("<codeDistVer%1>%2</codeDistVer%1><valDistVer%1>%3</valDistVer%1><uomDistVer%1>%4</uomDistVer%1>")
+            .arg(QLatin1String(side), QLatin1String(code), QLatin1String(value), QLatin1String(unit)).toUtf8();
+    };
+    const auto area = [](const QByteArray &lower, const QByteArray &upper) {
+        return QByteArray("<TFRAreaGroup><aseTFRArea><txtName>Area</txtName>") + upper + lower + QByteArray("</aseTFRArea></TFRAreaGroup>");
+    };
+    const QByteArray ground = limit("Lower", "HEI", "0", "FT");
+    const QByteArray low = area(ground, limit("Upper", "ALT", "3000", "FT"));
+    const double unknown = qQNaN();
+
+    // The zone of a NOTAM spans the altitudes of all its areas
+    QTest::newRow("two areas") << low + area(limit("Lower", "HEI", "500", "FT"), limit("Upper", "ALT", "5000", "FT")) << 0.0 << 5000.0;
+    // A limit one of the areas doesn't tell is unknown for the zone, whose other areas don't narrow it
+    QTest::newRow("ceiling without value") << low + area(ground, limit("Upper", "ALT", "", "FT")) << 0.0 << unknown;
+    QTest::newRow("ceiling without value first") << area(ground, limit("Upper", "ALT", "", "FT")) + low << 0.0 << unknown;
+    QTest::newRow("ceiling in an unknown unit") << low + area(ground, limit("Upper", "ALT", "900", "M")) << 0.0 << unknown;
+    QTest::newRow("ceiling not a number") << low + area(ground, limit("Upper", "ALT", "UNL", "FT")) << 0.0 << unknown;
+    QTest::newRow("floor without value") << area(limit("Lower", "HEI", "500", "FT"), limit("Upper", "ALT", "3000", "FT")) + area(limit("Lower", "HEI", "", "FT"), limit("Upper", "ALT", "5000", "FT"))
+                                         << unknown << 5000.0;
+    QTest::newRow("floor without value first") << area(limit("Lower", "HEI", "", "FT"), limit("Upper", "ALT", "5000", "FT")) + area(limit("Lower", "HEI", "500", "FT"), limit("Upper", "ALT", "3000", "FT"))
+                                               << unknown << 5000.0;
+    // Limits in different references, or missing, can't be combined
+    QTest::newRow("other reference") << low + area(ground, limit("Upper", "HEI", "5000", "FT")) << unknown << unknown;
+    QTest::newRow("ceiling missing") << low + area(ground, QByteArray()) << unknown << unknown;
+}
+
+void GeoZoneParserTest::_testTfrAreaLimits()
+{
+    QFETCH(QByteArray, areas);
+    QFETCH(double, lowerLimit);
+    QFETCH(double, upperLimit);
+
+    const QList<QGeoCoordinate> ring = { QGeoCoordinate(30, -97), QGeoCoordinate(30, -96.9), QGeoCoordinate(30.1, -96.9), QGeoCoordinate(30.1, -97) };
+    QJsonArray positions;
+    for (const QGeoCoordinate &vertex : ring + QList<QGeoCoordinate>{ ring.first() }) {
+        positions.append(QJsonArray{ vertex.longitude(), vertex.latitude() });
+    }
+    const QJsonObject tfrRoot{ { "type", "FeatureCollection" }, { "totalFeatures", 1 }, { "timeStamp", "2026-10-31T12:00:00Z" }, { "features", QJsonArray{ QJsonObject{
+        { "type", "Feature" }, { "geometry", QJsonObject{ { "type", "Polygon" }, { "coordinates", QJsonArray{ positions } } } },
+        { "properties", QJsonObject{ { "NOTAM_KEY", "6/0003-1-FDC-F" }, { "TITLE", "AREAS" }, { "LAST_MODIFICATION_DATETIME", "202610311200" } } } } } } };
+    const QByteArray detail = "<XNOTAM-Update><Group><Add><Not><TfrNot>" + areas + "</TfrNot></Not></Add></Group></XNOTAM-Update>";
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(GeoZoneParser::composite(tfrRoot, { { QStringLiteral("6/0003"), { QStringLiteral("202610311200"), detail } } }), result, errorString),
+             qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 1);
+    QCOMPARE(result.zones.first().volumes.count(), 1);
+    const GeoZone::Volume &volume = result.zones.first().volumes.first();
+    QVERIFY(volume.feet);
+    QCOMPARE(volume.lowerLimit, lowerLimit);
+    QCOMPARE(volume.upperLimit, upperLimit);
+
+    // Without a ceiling the restriction applies above the ceilings its other areas give, and without a floor below theirs
+    const GeoZone zone(result.zones.first());
+    const QGeoCoordinate inside(30.05, -96.95);
+    constexpr double terrain = 100;
+    QCOMPARE(zone.contains(GeoZone::Position{ inside, 6000 * 0.3048, terrain }), qIsNaN(upperLimit));
+    QCOMPARE(zone.contains(GeoZone::Position{ inside, terrain + (300 * 0.3048), terrain }), qIsNaN(lowerLimit) || (lowerLimit < 300));
 }
 
 void GeoZoneParserTest::_testAixmArcs()

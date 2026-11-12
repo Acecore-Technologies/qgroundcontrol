@@ -42,6 +42,8 @@ private slots:
     void _testEdgeInterpolation_data();
     void _testEdgeInterpolation();
     void _testTfrCircles();
+    void _testTfrAreaLimits_data();
+    void _testTfrAreaLimits();
     void _testAixmArcs();
     void _testRejectedAixmGeometry();
     void _testParserFuzz();
