@@ -161,6 +161,8 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 }
                 inTitle = false;
                 titleRead = true;
+                // Reading the text moved the reader on, the name is no longer that of this element
+                continue;
             }
             if (name == QLatin1String("Airspace")) {
                 if (cancelled()) {

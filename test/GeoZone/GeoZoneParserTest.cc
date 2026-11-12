@@ -1781,6 +1781,30 @@ void GeoZoneParserTest::_testRejectedAixmGeometry()
     QCOMPARE(result.issues, (QMap<QString, int>{ { QStringLiteral("Circle without a valid radius ignored"), 1 } }));
 }
 
+void GeoZoneParserTest::_testAixmTitle()
+{
+    // The title of the message metadata names the dataset, and the airspaces after it are read
+    const QString circle = QStringLiteral(R"(<gml:CircleByCenterPoint numArc="1"><gml:pos>52 0</gml:pos><gml:radius uom="[nmi_i]">2</gml:radius></gml:CircleByCenterPoint>)");
+    const QByteArray untitled = _aixmMessage(circle);
+    const QByteArray metadata = R"(<message:messageMetadata><gmd:MD_Metadata xmlns:gmd="http://www.isotc211.org/2005/gmd" xmlns:gco="http://www.isotc211.org/2005/gco">
+        <gmd:identificationInfo><gmd:MD_DataIdentification><gmd:citation><gmd:CI_Citation><gmd:title><gco:CharacterString> UK flight restriction zones
+        </gco:CharacterString></gmd:title></gmd:CI_Citation></gmd:citation></gmd:MD_DataIdentification></gmd:identificationInfo></gmd:MD_Metadata>
+        </message:messageMetadata>)";
+    const qsizetype firstMember = untitled.indexOf("<message:hasMember>");
+    QVERIFY(firstMember > 0);
+    QByteArray titled = untitled;
+    titled.insert(firstMember, metadata);
+
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(titled, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.title, QStringLiteral("UK flight restriction zones"));
+    QCOMPARE(result.zones.count(), 2);
+    QVERIFY2(GeoZoneParser::parse(untitled, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.title, QStringLiteral("AIXM airspaces"));
+    QCOMPARE(result.zones.count(), 2);
+}
+
 void GeoZoneParserTest::_testAixmInvalidBoundary_data()
 {
     QTest::addColumn<QString>("segments");
