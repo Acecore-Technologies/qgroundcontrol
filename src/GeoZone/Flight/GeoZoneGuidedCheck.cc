@@ -283,7 +283,11 @@ QList<GeoZonePathEvaluator::Path> GeoZoneGuidedCheck::returnPaths(const GeoZoneR
             paths.append(landingPath(start.position, groundAMSL));
         }
         return paths;
-    default:
+    case Destination::Home:
+    case Destination::RallyPoint:
+    case Destination::MissionLanding:
+    case Destination::ReturnPath:
+    case Destination::BreachReturnPoint:
         if (!path.isValid()) {
             return paths;
         }
