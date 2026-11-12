@@ -107,8 +107,10 @@ public:
     /// @return Settings of the searches, see GeoZoneRouteSearch
     GeoZoneRouteSearch::Settings settings() const;
 
-    /// Computes the suggestions for the current mission on the calling thread, cancelling a computation in progress
-    Q_INVOKABLE void update();
+    /// Computes the suggestions for the current mission on the calling thread, which it blocks until the routes are
+    /// searched, cancelling a computation in progress. For tests and callers which aren't on the GUI thread: the dialog
+    /// searches with startUpdate().
+    void update();
     /// Starts computing the suggestions for the current mission on a worker thread, cancelling one in progress
     Q_INVOKABLE void startUpdate();
     /// Stops the computation in progress, leaving no suggestions
