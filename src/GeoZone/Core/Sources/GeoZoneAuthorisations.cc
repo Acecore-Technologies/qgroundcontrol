@@ -755,32 +755,99 @@ void GeoZoneAuthorisations::_reset(const QList<GeoZoneAuthorisation> &authorisat
     emit changed();
 }
 
-void GeoZoneAuthorisations::_load()
+QString GeoZoneAuthorisations::_readFile(QList<GeoZoneAuthorisation> &authorisations, int &unread, bool &newer) const
 {
-    if (_filePath.isEmpty()) {
-        return;
-    }
     QFile file(_filePath);
-    if (!file.exists()) {
-        return;
-    }
     if (!file.open(QIODevice::ReadOnly)) {
-        qCWarning(GeoZoneAuthorisationsLog) << "Unable to read" << _filePath << file.errorString();
-        return;
+        return file.errorString();
     }
-    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
-    QList<GeoZoneAuthorisation> authorisations;
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        return parseError.errorString();
+    }
+    const QJsonObject root = document.object();
+    const QJsonValue version = root.value(versionKey);
+    if (!document.isObject() || !version.isDouble() || (version.toInt() < 1) || !root.value(authorisationsKey).isArray()) {
+        return tr("unexpected content");
+    }
+    if (version.toInt() > fileVersion) {
+        // Its entries may limit authorisations in ways this version doesn't know
+        newer = true;
+        return QString();
+    }
     for (const QJsonValue &value : root.value(authorisationsKey).toArray()) {
         if (const auto authorisation = GeoZoneAuthorisation::fromJson(value.toObject())) {
             authorisations.append(*authorisation);
+        } else {
+            unread++;
         }
     }
+    return QString();
+}
+
+QString GeoZoneAuthorisations::_backUp(bool move) const
+{
+    const QString name = QStringLiteral("%1.%2").arg(_filePath, GeoZoneEnvironment::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    for (int attempt = 1; attempt <= 10; attempt++) {
+        const QString backup = (attempt == 1) ? QStringLiteral("%1.bak").arg(name) : QStringLiteral("%1-%2.bak").arg(name).arg(attempt);
+        if (QFile::exists(backup)) {
+            continue;
+        }
+        return (move ? QFile::rename(_filePath, backup) : QFile::copy(_filePath, backup)) ? backup : QString();
+    }
+    return QString();
+}
+
+void GeoZoneAuthorisations::_load()
+{
+    if (_filePath.isEmpty() || !QFile::exists(_filePath)) {
+        return;
+    }
+    QList<GeoZoneAuthorisation> authorisations;
+    int unread = 0;
+    bool newer = false;
+    const QString error = _readFile(authorisations, unread, newer);
+    if (newer) {
+        _keepFile = true;
+        _loadError = tr("The geozone authorisations were saved by a newer version of QGroundControl and are not loaded: no zone is authorised. "
+                        "Authorisations added now will not be kept.");
+    } else if (!error.isEmpty()) {
+        // Nothing of it is known, so it is kept for the user instead of being replaced at the next change
+        const QString backup = _backUp(true);
+        _keepFile = backup.isEmpty();
+        _loadError = _keepFile ?
+            tr("The geozone authorisations could not be read (%1): no zone is authorised. The file %2 is left as it is, authorisations added now will not be kept.").arg(error, _filePath) :
+            tr("The geozone authorisations could not be read (%1): no zone is authorised. The file was moved to %2. Add the authorisations again.").arg(error, backup);
+    } else if (unread > 0) {
+        // The next change writes the entries which were read only
+        const QString backup = _backUp(false);
+        _keepFile = backup.isEmpty();
+        _loadError = _keepFile ?
+            tr("%n geozone authorisation(s) could not be read and are left out, their zones are checked and alerted. "
+               "The file %1 is left as it is, authorisations added now will not be kept.", nullptr, unread).arg(_filePath) :
+            tr("%n geozone authorisation(s) could not be read and are left out, their zones are checked and alerted. "
+               "The file as it was is kept in %1.", nullptr, unread).arg(backup);
+    }
     _authorisations = authorisations;
+    if (!_loadError.isEmpty()) {
+        qCWarning(GeoZoneAuthorisationsLog) << _loadError;
+        // Nothing is connected yet
+        (void) QMetaObject::invokeMethod(this, [this]() { emit loadFailed(_loadError); }, Qt::QueuedConnection);
+    }
 }
 
 void GeoZoneAuthorisations::_save()
 {
     if (_filePath.isEmpty()) {
+        return;
+    }
+    if (_keepFile) {
+        // What the file holds isn't known here, or only in part
+        if (!_keepFileReported) {
+            _keepFileReported = true;
+            emit saveFailed(tr("The geozone authorisations are not saved, they will be lost at the next start. %1").arg(_loadError));
+        }
         return;
     }
     (void) QDir().mkpath(QFileInfo(_filePath).absolutePath());

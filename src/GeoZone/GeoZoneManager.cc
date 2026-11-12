@@ -125,6 +125,7 @@ GeoZoneManager::GeoZoneManager(const QString &storageDir, QObject *parent)
     (void) connect(_repository, &GeoZoneSourceRepository::filesAdded, this, &GeoZoneManager::_filesAdded);
     (void) connect(_repository, &GeoZoneSourceRepository::storageFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_planning->authorisations(), &GeoZoneAuthorisations::saveFailed, this, &GeoZoneManager::storageFailed);
+    (void) connect(_planning->authorisations(), &GeoZoneAuthorisations::loadFailed, this, &GeoZoneManager::storageFailed);
     (void) connect(_repository, &GeoZoneSourceRepository::outdatedDataFound, this, &GeoZoneManager::outdatedDataFound);
 }
 

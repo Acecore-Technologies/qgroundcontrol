@@ -486,6 +486,129 @@ void GeoZoneEvaluatorTest::_testProhibitedAuthorisations()
     QVERIFY(!policy.accepts(restricted));
 }
 
+void GeoZoneEvaluatorTest::_testAuthorisationFile()
+{
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(12, 0)));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString filePath = dir.filePath(QString::fromLatin1(GeoZoneAuthorisations::fileName));
+    const auto fileBytes = [](const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const auto writeFile = [&filePath](const QByteArray &bytes) {
+        QFile file(filePath);
+        return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && (file.write(bytes) == bytes.size());
+    };
+    const auto backups = [&dir]() { return QDir(dir.path()).entryList({ QStringLiteral("*.bak") }, QDir::Files); };
+    const auto entryCount = [&fileBytes, &filePath]() {
+        return QJsonDocument::fromJson(fileBytes(filePath)).object().value(QStringLiteral("authorisations")).toArray().count();
+    };
+    const GeoZoneAuthorisation first{ QStringLiteral("CHE/A"), QStringLiteral("A"), QStringLiteral("P-1"), QDateTime(), _utc(QDate(2026, 12, 31), QTime(0, 0)) };
+    const GeoZoneAuthorisation second{ QStringLiteral("CHE/B"), QStringLiteral("B"), QStringLiteral("P-2"), QDateTime(), QDateTime() };
+
+    // Written with its version and read again
+    {
+        GeoZoneAuthorisations authorisations(filePath);
+        QVERIFY(authorisations.loadError().isEmpty());
+        authorisations.set(first);
+    }
+    QCOMPARE(QJsonDocument::fromJson(fileBytes(filePath)).object().value(QStringLiteral("version")).toInt(), 1);
+    {
+        const GeoZoneAuthorisations authorisations(filePath);
+        QVERIFY(authorisations.loadError().isEmpty());
+        QCOMPARE(authorisations.authorisations(), QList<GeoZoneAuthorisation>{ first });
+    }
+    QVERIFY(backups().isEmpty());
+    const QByteArray valid = fileBytes(filePath);
+
+    // A file which can't be read isn't replaced by the next change: it is moved to a backup, and the failure is told
+    for (const QByteArray &unreadable : { valid.left(valid.size() / 2), QByteArray("[]"), QByteArray(R"({ "authorisations": [] })"),
+                                          QByteArray(R"({ "version": 1, "authorisations": {} })"), QByteArray(R"({ "version": "1", "authorisations": [] })") }) {
+        QVERIFY(writeFile(unreadable));
+        {
+            GeoZoneAuthorisations authorisations(filePath);
+            QSignalSpy loadSpy(&authorisations, &GeoZoneAuthorisations::loadFailed);
+            QSignalSpy saveSpy(&authorisations, &GeoZoneAuthorisations::saveFailed);
+            QCOMPARE(authorisations.count(), 0);
+            QVERIFY(!authorisations.loadError().isEmpty());
+            QTRY_COMPARE(loadSpy.count(), 1);
+            QCOMPARE(loadSpy.constFirst().constFirst().toString(), authorisations.loadError());
+            const QStringList kept = backups();
+            QCOMPARE(kept.count(), 1);
+            QVERIFY2(authorisations.loadError().contains(kept.constFirst()), qPrintable(authorisations.loadError()));
+            QCOMPARE(fileBytes(dir.filePath(kept.constFirst())), unreadable);
+            QVERIFY(!QFile::exists(filePath));
+            // Authorisations added then are kept
+            authorisations.set(second);
+            QCOMPARE(saveSpy.count(), 0);
+            QCOMPARE(entryCount(), 1);
+            QCOMPARE(fileBytes(dir.filePath(kept.constFirst())), unreadable);
+            QVERIFY(QFile::remove(dir.filePath(kept.constFirst())));
+        }
+        QCOMPARE(GeoZoneAuthorisations(filePath).authorisations(), QList<GeoZoneAuthorisation>{ second });
+    }
+
+    // Entries which can't be read are left out, the file with them is copied to a backup before the others are saved
+    QJsonObject root = QJsonDocument::fromJson(valid).object();
+    QJsonObject damaged = second.toJson();
+    damaged.insert(QStringLiteral("validTo"), QStringLiteral("never"));
+    root.insert(QStringLiteral("authorisations"), QJsonArray{ first.toJson(), damaged, 7 });
+    const QByteArray partial = QJsonDocument(root).toJson();
+    QVERIFY(writeFile(partial));
+    {
+        GeoZoneAuthorisations authorisations(filePath);
+        QSignalSpy loadSpy(&authorisations, &GeoZoneAuthorisations::loadFailed);
+        QCOMPARE(authorisations.authorisations(), QList<GeoZoneAuthorisation>{ first });
+        QVERIFY2(authorisations.loadError().startsWith(QStringLiteral("2 geozone authorisation(s) could not be read")), qPrintable(authorisations.loadError()));
+        QTRY_COMPARE(loadSpy.count(), 1);
+        const QStringList kept = backups();
+        QCOMPARE(kept.count(), 1);
+        QCOMPARE(fileBytes(dir.filePath(kept.constFirst())), partial);
+        QCOMPARE(fileBytes(filePath), partial);
+        authorisations.revoke(first.zoneKey);
+        QCOMPARE(entryCount(), 0);
+        QCOMPARE(fileBytes(dir.filePath(kept.constFirst())), partial);
+        QVERIFY(QFile::remove(dir.filePath(kept.constFirst())));
+    }
+
+    // A file of a newer version is neither read nor written, what is added is kept for the session
+    root.insert(QStringLiteral("version"), 2);
+    root.insert(QStringLiteral("authorisations"), QJsonArray{ first.toJson() });
+    const QByteArray newer = QJsonDocument(root).toJson();
+    QVERIFY(writeFile(newer));
+    {
+        GeoZoneAuthorisations authorisations(filePath);
+        QSignalSpy loadSpy(&authorisations, &GeoZoneAuthorisations::loadFailed);
+        QSignalSpy saveSpy(&authorisations, &GeoZoneAuthorisations::saveFailed);
+        QCOMPARE(authorisations.count(), 0);
+        QVERIFY2(authorisations.loadError().contains(QStringLiteral("newer version")), qPrintable(authorisations.loadError()));
+        QTRY_COMPARE(loadSpy.count(), 1);
+        authorisations.set(second);
+        authorisations.set(first);
+        QCOMPARE(authorisations.count(), 2);
+        QCOMPARE(saveSpy.count(), 1);
+    }
+    QCOMPARE(fileBytes(filePath), newer);
+    QVERIFY(backups().isEmpty());
+
+    // A file which can neither be read nor moved away is left as it is
+    QVERIFY(writeFile("{"));
+    const QFile::Permissions permissions = QFile::permissions(dir.path());
+    const auto restore = qScopeGuard([&dir, permissions]() { (void) QFile::setPermissions(dir.path(), permissions); });
+    QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::ExeOwner));
+    if (!QFileInfo(dir.path()).isWritable()) {
+        GeoZoneAuthorisations authorisations(filePath);
+        QSignalSpy saveSpy(&authorisations, &GeoZoneAuthorisations::saveFailed);
+        QVERIFY2(authorisations.loadError().contains(QStringLiteral("left as it is")), qPrintable(authorisations.loadError()));
+        authorisations.set(second);
+        QCOMPARE(authorisations.count(), 1);
+        QCOMPARE(saveSpy.count(), 1);
+        QCOMPARE(fileBytes(filePath), QByteArray("{"));
+    }
+}
+
 void GeoZoneEvaluatorTest::_testUnknownTerrain()
 {
     // From 50 to 150 m above the ground, which is at 400 m except in a gap without terrain data around the zone center
