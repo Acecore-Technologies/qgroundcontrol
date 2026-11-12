@@ -25,6 +25,18 @@ class GeoZoneSchedule
     Q_DECLARE_TR_FUNCTIONS(GeoZoneSchedule)
 
 public:
+    /// Daylight event a daily period starts or ends at instead of a time of day, as its published code tells
+    enum class DaylightEvent : quint8 {
+        None,               ///< No code
+        Unknown,            ///< A code which isn't known: the period is taken from the start or to the end of the day
+        MorningTwilight,    ///< BMCT, begin of morning civil twilight
+        Sunrise,            ///< SR
+        Sunset,             ///< SS
+        EveningTwilight,    ///< EECT, end of evening civil twilight
+    };
+    /// @return The event of a published code, whatever its case and the spaces around it
+    static DaylightEvent daylightEvent(const QString &code);
+
     struct DailyPeriod {
         QList<int> days;        ///< Qt::DayOfWeek values, empty for any day
         QTime startTime;        ///< Invalid when not given or given as a daylight event
@@ -39,7 +51,9 @@ public:
         /// The time zone was assumed, for times published without offset which may be UTC as well: the period then
         /// applies when it does in the time zone or in UTC
         bool timeZoneAssumed = false;
-        QString startEvent;     ///< Daylight event code (BMCT, SR, SS, EECT), used instead of the time when given
+        /// Daylight event code as published (BMCT, SR, SS, EECT), used instead of the time when given and kept for
+        /// display. What it stands for is decoded by daylightEvent, the only place reading the codes.
+        QString startEvent;
         QString endEvent;
     };
 
@@ -65,11 +79,15 @@ public:
     /// @return Human readable periods, one per line
     static QString text(const QList<TimePeriod> &applicability);
 
-    /// Time of a daylight event used by schedules: BMCT (begin of morning civil twilight), SR (sunrise),
-    /// SS (sunset) or EECT (end of evening civil twilight)
+    /// Time of a daylight event used by schedules
     /// @return UTC time of the event on the date at the location. Invalid for unknown events and when the
     ///         sun doesn't cross the event altitude that day.
-    static QDateTime daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location);
+    static QDateTime daylightEventTime(DaylightEvent event, const QDate &date, const QGeoCoordinate &location);
+    /// Same, for the published code of the event, see daylightEvent
+    static QDateTime daylightEventTime(const QString &code, const QDate &date, const QGeoCoordinate &location)
+    {
+        return daylightEventTime(daylightEvent(code), date, location);
+    }
 
     /// Time zone of the local time in a country, for schedules published in local time without time zone: that of its
     /// mainland, or of its islands at the location (the Canary Islands, Madeira and the Azores). Only European

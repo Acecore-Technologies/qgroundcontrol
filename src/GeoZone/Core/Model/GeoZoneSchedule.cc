@@ -19,6 +19,12 @@
 
 namespace {
 
+/// Altitudes in degrees of the center of the sun above the horizon at the daylight events: at sunrise and sunset its
+/// upper limb is on the horizon, with the refraction of the atmosphere, and civil twilight lasts while it is less
+/// than 6 degrees below the horizon
+constexpr double kSunriseSunAltitude = -0.833;
+constexpr double kCivilTwilightSunAltitude = -6;
+
 QString _formatDateTime(const QDateTime &dateTime)
 {
     return dateTime.toUTC().toString(QStringLiteral("yyyy-MM-dd HH:mm 'UTC'"));
@@ -42,16 +48,31 @@ QString _utcOffsetToString(int utcOffsetSecs)
                                        .arg((absSecs % 3600) / 60, 2, 10, QLatin1Char('0'));
 }
 
-QString _eventToString(const QString &event)
+using DaylightEvent = GeoZoneSchedule::DaylightEvent;
+
+/// @return Name of the event of the code, the code as published when it isn't known
+QString _eventToString(const QString &code)
 {
-    static const QHash<QString, const char*> eventNames = {
-        { QStringLiteral("BMCT"),   QT_TRANSLATE_NOOP("GeoZoneSchedule", "morning twilight") },
-        { QStringLiteral("SR"),     QT_TRANSLATE_NOOP("GeoZoneSchedule", "sunrise") },
-        { QStringLiteral("SS"),     QT_TRANSLATE_NOOP("GeoZoneSchedule", "sunset") },
-        { QStringLiteral("EECT"),   QT_TRANSLATE_NOOP("GeoZoneSchedule", "evening twilight") },
-    };
-    const auto it = eventNames.constFind(event.trimmed().toUpper());
-    return (it != eventNames.constEnd()) ? GeoZoneSchedule::tr(it.value()) : event;
+    switch (GeoZoneSchedule::daylightEvent(code)) {
+    case DaylightEvent::MorningTwilight:
+        return GeoZoneSchedule::tr("morning twilight");
+    case DaylightEvent::Sunrise:
+        return GeoZoneSchedule::tr("sunrise");
+    case DaylightEvent::Sunset:
+        return GeoZoneSchedule::tr("sunset");
+    case DaylightEvent::EveningTwilight:
+        return GeoZoneSchedule::tr("evening twilight");
+    case DaylightEvent::None:
+    case DaylightEvent::Unknown:
+        break;
+    }
+    return code;
+}
+
+/// @return true for the events of the morning, when the sun rises through their altitude
+bool _risingEvent(DaylightEvent event)
+{
+    return (event == DaylightEvent::MorningTwilight) || (event == DaylightEvent::Sunrise);
 }
 
 QString _dailyPeriodToString(const GeoZoneSchedule::DailyPeriod &period)
@@ -108,31 +129,30 @@ QDate _publishedDate(const GeoZoneSchedule::DailyPeriod &period, const QDateTime
 }
 
 struct SunEvent {
-    bool known = false;     ///< Event code is supported and the location valid
+    bool known = false;     ///< Event is known and the location valid
     bool alwaysUp = false;  ///< The sun stays above the event altitude all day
     QDateTime time;         ///< Invalid when the event doesn't occur that day
 };
 
 /// Sunrise equation, accurate to about a minute outside polar regions
-SunEvent _sunEvent(const QString &event, const QDate &date, const QGeoCoordinate &location)
+SunEvent _sunEvent(DaylightEvent event, const QDate &date, const QGeoCoordinate &location)
 {
     SunEvent result;
-    const QString code = event.trimmed().toUpper();
     double sunAltitude = 0;
-    bool rising = true;
-    if (code == QStringLiteral("BMCT")) {
-        sunAltitude = -6;
-    } else if (code == QStringLiteral("SR")) {
-        sunAltitude = -0.833;
-    } else if (code == QStringLiteral("SS")) {
-        sunAltitude = -0.833;
-        rising = false;
-    } else if (code == QStringLiteral("EECT")) {
-        sunAltitude = -6;
-        rising = false;
-    } else {
+    switch (event) {
+    case DaylightEvent::MorningTwilight:
+    case DaylightEvent::EveningTwilight:
+        sunAltitude = kCivilTwilightSunAltitude;
+        break;
+    case DaylightEvent::Sunrise:
+    case DaylightEvent::Sunset:
+        sunAltitude = kSunriseSunAltitude;
+        break;
+    case DaylightEvent::None:
+    case DaylightEvent::Unknown:
         return result;
     }
+    const bool rising = _risingEvent(event);
     if (!location.isValid() || !date.isValid()) {
         return result;
     }
@@ -196,16 +216,15 @@ std::optional<std::pair<QDateTime, QDateTime>> _dailyWindow(const GeoZoneSchedul
     // at the start of the day and setting events at its end, or the other way around, so that daylight periods
     // cover the whole day during polar day and none of it during polar night. Unknown events are ignored.
     const auto eventTime = [&date, &location, &dayStart, &dayEnd](const QString &code, bool isStart) {
-        const SunEvent event = _sunEvent(code, date, location);
+        const DaylightEvent daylightEvent = GeoZoneSchedule::daylightEvent(code);
+        const SunEvent event = _sunEvent(daylightEvent, date, location);
         if (event.time.isValid()) {
             return event.time;
         }
         if (!event.known) {
             return isStart ? dayStart : dayEnd;
         }
-        const QString upperCode = code.trimmed().toUpper();
-        const bool risingEvent = (upperCode == QStringLiteral("BMCT")) || (upperCode == QStringLiteral("SR"));
-        return (risingEvent == event.alwaysUp) ? dayStart : dayEnd;
+        return (_risingEvent(daylightEvent) == event.alwaysUp) ? dayStart : dayEnd;
     };
 
     QDateTime start = dayStart;
@@ -387,7 +406,21 @@ QTimeZone GeoZoneSchedule::countryTimeZone(const QString &country, const QGeoCoo
     return QTimeZone();
 }
 
-QDateTime GeoZoneSchedule::daylightEventTime(const QString &event, const QDate &date, const QGeoCoordinate &location)
+GeoZoneSchedule::DaylightEvent GeoZoneSchedule::daylightEvent(const QString &code)
+{
+    if (code.isEmpty()) {
+        return DaylightEvent::None;
+    }
+    static const QHash<QString, DaylightEvent> events = {
+        { QStringLiteral("BMCT"),   DaylightEvent::MorningTwilight },
+        { QStringLiteral("SR"),     DaylightEvent::Sunrise },
+        { QStringLiteral("SS"),     DaylightEvent::Sunset },
+        { QStringLiteral("EECT"),   DaylightEvent::EveningTwilight },
+    };
+    return events.value(code.trimmed().toUpper(), DaylightEvent::Unknown);
+}
+
+QDateTime GeoZoneSchedule::daylightEventTime(DaylightEvent event, const QDate &date, const QGeoCoordinate &location)
 {
     return _sunEvent(event, date, location).time;
 }

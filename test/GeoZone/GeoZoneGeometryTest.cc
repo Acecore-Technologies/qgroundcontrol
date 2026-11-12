@@ -98,6 +98,18 @@ void GeoZoneGeometryTest::_testDaylightEvents()
     QVERIFY(minutesFrom(GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midwinter, london), _utc(midwinter, QTime(15, 54))) < 3);
     QVERIFY(!GeoZoneSchedule::daylightEventTime(QStringLiteral("XX"), midwinter, london).isValid());
 
+    // The published codes are decoded in one place, whatever their case and the spaces around them
+    using DaylightEvent = GeoZoneSchedule::DaylightEvent;
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QStringLiteral("BMCT")), DaylightEvent::MorningTwilight);
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QStringLiteral(" sr ")), DaylightEvent::Sunrise);
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QStringLiteral("Ss")), DaylightEvent::Sunset);
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QStringLiteral("EECT")), DaylightEvent::EveningTwilight);
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QStringLiteral("MOONRISE")), DaylightEvent::Unknown);
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QStringLiteral(" ")), DaylightEvent::Unknown);
+    QCOMPARE(GeoZoneSchedule::daylightEvent(QString()), DaylightEvent::None);
+    QCOMPARE(GeoZoneSchedule::daylightEventTime(DaylightEvent::Sunset, midwinter, london), GeoZoneSchedule::daylightEventTime(QStringLiteral("SS"), midwinter, london));
+    QVERIFY(!GeoZoneSchedule::daylightEventTime(DaylightEvent::None, midwinter, london).isValid());
+
     // North of the arctic circle the sun doesn't set at midsummer and doesn't rise at midwinter
     const QGeoCoordinate tromso(69.65, 18.96);
     QVERIFY(!GeoZoneSchedule::daylightEventTime(QStringLiteral("SR"), midsummer, tromso).isValid());
