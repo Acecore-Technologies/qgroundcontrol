@@ -9,6 +9,7 @@
 
 #include "GeoZonePackTest.h"
 #include "GeoZoneCredentials.h"
+#include "GeoZonePackExchange.h"
 #include "GeoZonePackSignature.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
@@ -161,6 +162,30 @@ void GeoZonePackTest::_testPackExtraction()
     QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), "{}" } }));
     QCOMPARE(GeoZonePack::read(packPath, extractDir).errorString, notAPack);
     QCOMPARE(extractedFiles(), QStringList());
+
+    // A pack whose signature file isn't one is refused, also by builds which take signed packs as unsigned
+    const QByteArray manifest = _manifest({ _manifestSource(QStringLiteral("/zones/a.json"), file, data) });
+    const auto isKnown = [](const QString &) { return false; };
+    for (const QByteArray &signature : { QByteArray("{ \"algorithm\": \"Ed25519\", "), QByteArray("[]"), QByteArray("signed") }) {
+        QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), manifest }, { QStringLiteral("signature.json"), signature } }));
+        for (const bool available : { true, false }) {
+            std::optional<GeoZonePackSignature::ScopedUnavailable> unavailable;
+            if (!available) {
+                unavailable.emplace();
+            }
+            const GeoZonePackExchange::Import import = GeoZonePackExchange::read(packPath, extractDir, isKnown, QDateTime::currentDateTimeUtc());
+            QVERIFY(import.sources.isEmpty());
+            QVERIFY2(import.errorString.contains(QStringLiteral("Its signature file is damaged")), qPrintable(import.errorString));
+            QCOMPARE(extractedFiles(), QStringList());
+        }
+    }
+    // One without signature file is read
+    QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), manifest } }));
+    const GeoZonePackExchange::Import import = GeoZonePackExchange::read(packPath, extractDir, isKnown, QDateTime::currentDateTimeUtc());
+    QVERIFY2(import.errorString.isEmpty(), qPrintable(import.errorString));
+    QCOMPARE(import.sources.count(), 1);
+    QCOMPARE(import.signature, GeoZoneProvenance::PackSignature::Unsigned);
+    QVERIFY(QFile::remove(import.sources.constFirst().job.sourcePath));
 }
 
 void GeoZonePackTest::_testOfflinePack()

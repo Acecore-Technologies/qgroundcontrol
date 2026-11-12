@@ -133,8 +133,21 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
         return import;
     }
 
+    const auto removeCopies = [&contents]() {
+        for (const GeoZonePack::Source &packSource : contents.sources) {
+            (void) QFile::remove(packSource.filePath);
+        }
+    };
     if (!contents.signatureData.isEmpty()) {
-        const QJsonObject signature = QJsonDocument::fromJson(contents.signatureData).object();
+        // A signature file which isn't one is neither a valid signature nor none: the pack is refused in every build
+        QJsonParseError parseError;
+        const QJsonDocument signatureDocument = QJsonDocument::fromJson(contents.signatureData, &parseError);
+        if ((parseError.error != QJsonParseError::NoError) || !signatureDocument.isObject()) {
+            removeCopies();
+            import.errorString = tr("The geozone pack could not be read. Its signature file is damaged.");
+            return import;
+        }
+        const QJsonObject signature = signatureDocument.object();
         import.publicKey = QByteArray::fromBase64(signature.value(QStringLiteral("publicKey")).toString().toLatin1());
         import.signer = signature.value(QStringLiteral("publisher")).toString().trimmed();
         if (!GeoZonePackSignature::available()) {
@@ -146,9 +159,7 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
                    !GeoZonePackSignature::verify(import.publicKey, contents.manifestData,
                                                  QByteArray::fromBase64(signature.value(QStringLiteral("signature")).toString().toLatin1()))) {
             // The pack was changed after it was signed
-            for (const GeoZonePack::Source &packSource : contents.sources) {
-                (void) QFile::remove(packSource.filePath);
-            }
+            removeCopies();
             import.errorString = tr("The geozone pack could not be read. Its signature doesn't match its content, it was changed after it was signed.");
             return import;
         } else if (const GeoZonePackSignature::Publisher *const publisher = GeoZonePackSignature::find(publishers, import.publicKey)) {

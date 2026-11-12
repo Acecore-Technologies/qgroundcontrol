@@ -118,7 +118,11 @@ Contents read(const QString &packPath, const QString &directory)
         const QByteArray expectedHash = QByteArray::fromHex(source.value(QStringLiteral("provenance")).toObject().value(QStringLiteral("blake2b256")).toString().toLatin1());
         const QByteArray expectedSha256 = QByteArray::fromHex(source.value(QStringLiteral("fileSha256")).toString().toLatin1());
         QFile file(filePath);
-        const QByteArray data = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        if (!file.open(QIODevice::ReadOnly)) {
+            contents.errors.append(tr("%1: its data could not be read after it was extracted: %2").arg(name, file.errorString()));
+            continue;
+        }
+        const QByteArray data = file.readAll();
         file.close();
         if ((!expectedHash.isEmpty() && (GeoZoneHash::contentHash(data) != expectedHash)) ||
             (!expectedSha256.isEmpty() && (GeoZoneHash::sha256(data) != expectedSha256))) {

@@ -53,8 +53,13 @@ QString GeoZoneStore::newFileName(const QString &sourcePath)
 
 QString GeoZoneStore::fileSuffix(const QString &filePath)
 {
+    // A file which can't be read is named like the copies of earlier versions: the content of a copy decides how it
+    // is read, and the load of this one fails with the reason
     QFile file(filePath);
-    QByteArray head = (!filePath.isEmpty() && file.open(QIODevice::ReadOnly)) ? file.read(1024) : QByteArray();
+    if (filePath.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+        return QStringLiteral("json");
+    }
+    QByteArray head = file.read(1024);
     if (head.startsWith("PK\x03\x04")) {
         return QStringLiteral("zip");
     }
