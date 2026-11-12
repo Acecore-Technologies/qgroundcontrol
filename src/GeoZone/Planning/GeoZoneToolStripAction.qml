@@ -10,14 +10,13 @@
 import QtQuick
 
 import QGroundControl.Controls
-import QGroundControl.GeoZone
 
-/// Geozones action of the Plan view's tool strip, which opens the Geozones panel of GeoZonePlanViewOverlay
+/// Geozones action of the Plan view's tool strip, which opens the Geozones panel of GeoZonePlanViewOverlay. Also shown
+/// without zones: the panel is where the zones of the map area are downloaded, zones are drawn and the sources managed.
 ToolStripAction {
     required property var overlay   ///< GeoZonePlanViewOverlay
 
     text:               qsTr("Geozones")
     iconSource:         "qrc:/qml/QGroundControl/GeoZone/GeoZone.svg"
-    visible:            GeoZoneManager.zoneCount > 0
     dropPanelComponent: overlay.dropPanelComponent
 }

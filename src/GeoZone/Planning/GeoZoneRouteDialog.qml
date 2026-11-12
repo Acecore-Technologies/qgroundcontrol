@@ -66,10 +66,11 @@ QGCPopupDialog {
             QGCTextField {
                 id:                     maxAltitudeField
                 Layout.preferredWidth:  ScreenTools.defaultFontPixelWidth * 8
-                text:                   Math.round(QGroundControl.unitsConversion.metersToAppSettingsVerticalDistanceUnits(planner.maxAltitude))
+                text:                   planner.maxAltitudeText
                 inputMethodHints:       Qt.ImhDigitsOnly
                 validator:              IntValidator { bottom: 1; top: 100000 }
-                onEditingFinished:      planner.maxAltitude = QGroundControl.unitsConversion.appSettingsVerticalDistanceUnitsToMeters(parseInt(text))
+                // Also when the field loses the focus unchanged: the rounded text shown isn't written back
+                onEditingFinished:      planner.setMaxAltitudeText(text)
             }
 
             QGCLabel {

@@ -33,6 +33,7 @@ private slots:
     void _testRoutePlanner();
     void _testMissionChanges();
     void _testDetourAltitudes();
+    void _testMaxAltitudeText();
     void _testRoutePlannerWorker();
 
 private:

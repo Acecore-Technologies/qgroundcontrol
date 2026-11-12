@@ -57,6 +57,8 @@ class GeoZoneRoutePlanner : public QObject
     Q_PROPERTY(double               verticalMargin      READ verticalMargin                                 CONSTANT FINAL)       ///< Meters, see floorMargin
     /// Meters above the terrain that climbs over zones may reach
     Q_PROPERTY(double               maxAltitude         READ maxAltitude        WRITE setMaxAltitude        NOTIFY maxAltitudeChanged FINAL)
+    /// maxAltitude in whole vertical distance units of the application, for the field which edits it with setMaxAltitudeText
+    Q_PROPERTY(QString              maxAltitudeText     READ maxAltitudeText                                NOTIFY maxAltitudeChanged FINAL)
     /// The suggestions are being computed, or will be once the changes of the mission or the zones settle
     Q_PROPERTY(bool                 busy                READ busy                                           NOTIFY busyChanged FINAL)
     Q_PROPERTY(double               progress            READ progress                                       NOTIFY progressChanged FINAL)    ///< From 0 to 1 while busy
@@ -84,6 +86,11 @@ public:
     double verticalMargin() const { return floorMargin; }
     double maxAltitude() const { return _maxAltitude; }
     void setMaxAltitude(double maxAltitude);
+    QString maxAltitudeText() const;
+    /// Sets maxAltitude from the text of the field, in the vertical distance units of the application, when it is a
+    /// number of at least 1 and not the text shown: that text is rounded, so that a field giving it back when it
+    /// loses the focus would change the limit, like to just below what a climb needs
+    Q_INVOKABLE void setMaxAltitudeText(const QString &text);
     bool busy() const { return _busy; }
     double progress() const { return _progress; }
     QString statusText() const { return _statusText; }

@@ -11,6 +11,10 @@
 #include "GeoZoneMissionReader.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
+#include "SettingsManager.h"
+#include "UnitsSettings.h"
+
+#include <QtCore/QScopeGuard>
 
 #include <algorithm>
 
@@ -434,6 +438,43 @@ void GeoZoneRoutePlannerTest::_testDetourAltitudes()
         QVERIFY2((altitudeAMSL > previous) && (altitudeAMSL < 490), qPrintable(QString::number(altitudeAMSL)));
         previous = altitudeAMSL;
     }
+}
+
+void GeoZoneRoutePlannerTest::_testMaxAltitudeText()
+{
+    // In feet, which meters aren't whole numbers of
+    Fact *const units = SettingsManager::instance()->unitsSettings()->verticalDistanceUnits();
+    const QVariant previousUnits = units->rawValue();
+    const auto restoreUnits = qScopeGuard([units, previousUnits]() { units->setRawValue(previousUnits); });
+    units->setRawValue(UnitsSettings::VerticalDistanceUnitsFeet);
+
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    GeoZoneRoutePlanner planner(&manager);
+
+    // The limit a climb needs, 410.1 ft
+    planner.setMaxAltitude(125);
+    QCOMPARE(planner.maxAltitudeText(), QStringLiteral("410"));
+    // The field gives its text back when it loses the focus: the rounded text doesn't replace the limit, which would
+    // then be below what the climb needs
+    QSignalSpy maxAltitudeSpy(&planner, &GeoZoneRoutePlanner::maxAltitudeChanged);
+    planner.setMaxAltitudeText(planner.maxAltitudeText());
+    planner.setMaxAltitudeText(QStringLiteral(" 410 "));
+    QCOMPARE(planner.maxAltitude(), 125.0);
+    QCOMPARE(maxAltitudeSpy.count(), 0);
+
+    // What the pilot types is the limit
+    planner.setMaxAltitudeText(QStringLiteral("400"));
+    QCOMPARE(maxAltitudeSpy.count(), 1);
+    QVERIFY(_near(planner.maxAltitude(), 400 * 0.3048, 1e-9));
+    QCOMPARE(planner.maxAltitudeText(), QStringLiteral("400"));
+    // Unless it isn't a number of at least 1
+    for (const QString &text : { QStringLiteral("abc"), QString(), QStringLiteral("0"), QStringLiteral("-20") }) {
+        planner.setMaxAltitudeText(text);
+    }
+    QCOMPARE(maxAltitudeSpy.count(), 1);
+    QCOMPARE(planner.maxAltitudeText(), QStringLiteral("400"));
 }
 
 void GeoZoneRoutePlannerTest::_testRoutePlannerWorker()

@@ -200,6 +200,21 @@ void GeoZoneRoutePlanner::setMaxAltitude(double maxAltitude)
     _invalidate();
 }
 
+QString GeoZoneRoutePlanner::maxAltitudeText() const
+{
+    return QString::number(qRound(FactMetaData::metersToAppSettingsVerticalDistanceUnits(_maxAltitude).toDouble()));
+}
+
+void GeoZoneRoutePlanner::setMaxAltitudeText(const QString &text)
+{
+    bool ok = false;
+    const int value = text.trimmed().toInt(&ok);
+    if (!ok || (value < 1) || (text.trimmed() == maxAltitudeText())) {
+        return;
+    }
+    setMaxAltitude(FactMetaData::appSettingsVerticalDistanceUnitsToMeters(value).toDouble());
+}
+
 MissionController *GeoZoneRoutePlanner::missionController() const
 {
     return _worker->missionController();
