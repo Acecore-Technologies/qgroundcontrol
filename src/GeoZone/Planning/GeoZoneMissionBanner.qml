@@ -565,7 +565,7 @@ Rectangle {
         onClicked: {
             GeoZoneManager.display.visible = true
             if (check.crossedZonesBoundingBox.isValid) {
-                map.fitViewportToGeoShape(check.crossedZonesBoundingBox, ScreenTools.defaultFontPixelHeight * 2)
+                control.map.fitViewportToGeoShape(check.crossedZonesBoundingBox, ScreenTools.defaultFontPixelHeight * 2)
             }
         }
     }
