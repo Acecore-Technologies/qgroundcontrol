@@ -89,8 +89,13 @@ public:
     /// Checks the position of the vehicle at the current time, alerting when it leaves the volumes while it flies
     void evaluate(const GeoZone::Position &position, bool flying, int vehicleId = GeoZoneMonitor::noVehicle);
 
-    /// @return How the position conforms at the time to the volumes, Off without them, see the class description
+    /// @return How the position conforms at the time to the volumes, Off without them, see the class description. A
+    ///         position whose altitude isn't known, or can't be compared with the volumes for lack of the height of the
+    ///         geoid, conforms vertically.
     static Result check(const QList<Volume> &volumes, const GeoZone::Position &position, const QDateTime &time);
+    /// @param geoidHeight Meters of the geoid above the ellipsoid at the position, NaN when unknown, see
+    ///                    GeoZoneGeometry::geoidHeight
+    static Result check(const QList<Volume> &volumes, const GeoZone::Position &position, const QDateTime &time, double geoidHeight);
     /// @return Meters from the coordinate to the outline of the volume, 0 inside
     static double horizontalDistance(const Volume &volume, const QGeoCoordinate &coordinate);
     /// @return Like "Outside planned volume: 40 m above it", or "Inside planned volume"

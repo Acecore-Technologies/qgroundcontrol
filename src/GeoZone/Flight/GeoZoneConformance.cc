@@ -233,6 +233,11 @@ void GeoZoneConformance::_setResult(const Result &result)
 
 GeoZoneConformance::Result GeoZoneConformance::check(const QList<Volume> &volumes, const GeoZone::Position &position, const QDateTime &time)
 {
+    return check(volumes, position, time, GeoZoneGeometry::geoidHeight(position.coordinate));
+}
+
+GeoZoneConformance::Result GeoZoneConformance::check(const QList<Volume> &volumes, const GeoZone::Position &position, const QDateTime &time, double geoidHeight)
+{
     if (volumes.isEmpty()) {
         return Result();
     }
@@ -259,12 +264,12 @@ GeoZoneConformance::Result GeoZoneConformance::check(const QList<Volume> &volume
     if (over.isEmpty()) {
         return Result{ OutsideHorizontally, beside };
     }
-    if (std::isnan(position.altitudeAMSL)) {
+    // The volumes are above the WGS84 ellipsoid. Without the altitude of the vehicle, or the height of the geoid to
+    // compare it with, the vehicle can't be told to be above or below them.
+    const double altitude = position.altitudeAMSL + geoidHeight;
+    if (!std::isfinite(altitude)) {
         return Result{ Conforming, 0 };
     }
-
-    // The volumes are above the WGS84 ellipsoid
-    const double altitude = position.altitudeAMSL + GeoZoneGeometry::geoidHeight(position.coordinate);
     double above = std::numeric_limits<double>::infinity();
     double below = std::numeric_limits<double>::infinity();
     for (const Volume *volume : std::as_const(over)) {

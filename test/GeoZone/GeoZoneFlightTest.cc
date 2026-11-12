@@ -987,6 +987,12 @@ void GeoZoneFlightTest::_testConformance()
     QCOMPARE(Conformance::check({ volume }, at(0, 500), start.addSecs(-1)).state, Conformance::OutsideTime);
     QCOMPARE(Conformance::check({ volume }, at(0, 500), during).state, Conformance::Conforming);
     QCOMPARE(Conformance::check({ volume }, at(0, qQNaN()), during).state, Conformance::Conforming);
+    // Without the height of the geoid there, the altitude can't be compared either: not "above" by an infinite distance
+    QCOMPARE(Conformance::check({ volume }, at(0, 500), during, qQNaN()).state, Conformance::Conforming);
+    QCOMPARE(Conformance::check({ volume }, at(0, 590), during, qQNaN()).state, Conformance::Conforming);
+    QCOMPARE(Conformance::check({ volume }, at(0, qInf()), during).state, Conformance::Conforming);
+    QCOMPARE(Conformance::check({ volume }, at(150, 500), during, qQNaN()).state, Conformance::OutsideHorizontally);
+    QCOMPARE(Conformance::check({ volume }, at(0, 590), during, geoid).state, Conformance::Above);
     Conformance::Result result = Conformance::check({ volume }, at(150, 500), during);
     QCOMPARE(result.state, Conformance::OutsideHorizontally);
     QVERIFY(_near(result.distance, 50));
