@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 
 import QGroundControl
@@ -112,19 +114,27 @@ Item {
     Component {
         id: geoZoneDropPanel
 
-        // Loaded by the drop panel of the tool strip, which provides dropPanel
+        // Loaded by the drop panel of the tool strip, whose loader has it as dropPanel. A component bound to this file
+        // doesn't see the properties of its loader by name, so the panel reaches it as its parent.
         GeoZoneMapPanel {
+            id:                 mapPanel
             map:                control.map
             hiddenZoneCount:    mapVisuals.hiddenZoneCount
             showCrossedZones:   banner.crossedZones.length > 0
 
+            function _hide() {
+                if (parent && parent.dropPanel) {
+                    parent.dropPanel.hide()
+                }
+            }
+
             onManageRequested: {
-                dropPanel.hide()
+                mapPanel._hide()
                 mainWindow.showSettingsTool(qsTr("Geozones"))
             }
-            onZoneSelected: dropPanel.hide()
+            onZoneSelected: mapPanel._hide()
             drawingEnabled: true
-            onDrawingStarted: dropPanel.hide()
+            onDrawingStarted: mapPanel._hide()
         }
     }
 }
