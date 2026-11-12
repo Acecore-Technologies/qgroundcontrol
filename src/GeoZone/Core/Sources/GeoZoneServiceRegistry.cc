@@ -12,8 +12,12 @@
 void GeoZoneServiceRegistry::setService(const QString &key, const GeoZoneService &service)
 {
     // A secret only goes where it was entered for
-    if (const auto previous = _services.constFind(key); (previous == _services.cend()) || !previous->sameAuthTarget(service)) {
+    const auto previous = _services.constFind(key);
+    if ((previous == _services.cend()) || !previous->sameAuthTarget(service)) {
         (void) _credentials.remove(key);
+        forgetToken(key);
+    } else if ((previous->user != service.user) || (previous->scope != service.scope)) {
+        // The token was issued to that client for that scope, the secret still goes to the same server
         forgetToken(key);
     }
     if (service.isEmpty()) {

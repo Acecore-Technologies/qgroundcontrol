@@ -9,6 +9,7 @@
 
 #include "GeoZoneServiceTest.h"
 #include "GeoZoneCredentials.h"
+#include "GeoZoneServiceRegistry.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 
@@ -361,6 +362,59 @@ void GeoZoneServiceTest::_testServiceOAuth2()
     QVERIFY(!log.text().contains(QStringLiteral("client-s3cret")));
     QVERIFY(!log.text().contains(QStringLiteral("token-")));
     manager.repository()->clear();
+}
+
+void GeoZoneServiceTest::_testTokenFollowsService()
+{
+    // A token obtained for a client, a scope and a token endpoint
+    const QString key = QStringLiteral("https://example.org/token-test/zones");
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    service.tokenUrl = QStringLiteral("https://example.org/token");
+    service.user = QStringLiteral("client");
+    service.scope = QStringLiteral("zones.read");
+    GeoZoneServiceRegistry registry;
+    const auto forget = qScopeGuard([&registry, &key]() { registry.forget(key); });
+    const auto issue = [&registry, &key, &service, &now]() {
+        registry.setService(key, service);
+        (void) registry.setSecret(key, QStringLiteral("client-s3cret"));
+        registry.setToken(key, QStringLiteral("token-1"), now.addSecs(3600));
+    };
+
+    // is kept while the service stays the same, whatever else of it changes
+    issue();
+    QCOMPARE(registry.token(key, now), QStringLiteral("token-1"));
+    GeoZoneService changed = service;
+    changed.name = QStringLiteral("Renamed");
+    changed.timeWindowHours = 48;
+    registry.setService(key, changed);
+    QCOMPARE(registry.token(key, now), QStringLiteral("token-1"));
+    QCOMPARE(registry.secret(key), QStringLiteral("client-s3cret"));
+
+    // and forgotten with another client or scope, whose secret still goes to the same server
+    for (const bool otherClient : { true, false }) {
+        issue();
+        changed = service;
+        (otherClient ? changed.user : changed.scope) = QStringLiteral("other");
+        registry.setService(key, changed);
+        QVERIFY2(registry.token(key, now).isEmpty(), otherClient ? "client" : "scope");
+        QCOMPARE(registry.secret(key), QStringLiteral("client-s3cret"));
+    }
+
+    // With another token endpoint or authentication the secret goes too
+    issue();
+    changed = service;
+    changed.tokenUrl = QStringLiteral("https://example.org/token2");
+    registry.setService(key, changed);
+    QVERIFY(registry.token(key, now).isEmpty());
+    QVERIFY(registry.secret(key).isEmpty());
+    issue();
+    changed = service;
+    changed.auth = GeoZoneService::Auth::Bearer;
+    registry.setService(key, changed);
+    QVERIFY(registry.token(key, now).isEmpty());
+    QVERIFY(registry.secret(key).isEmpty());
 }
 
 void GeoZoneServiceTest::_testEd318Service()

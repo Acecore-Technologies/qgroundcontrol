@@ -18,7 +18,8 @@
 
 /// The services of the feeds requested from one, by source key, with their secrets (GeoZoneCredentials) and the OAuth2
 /// tokens obtained for them during the session. A secret is kept for the authentication target of its service, see
-/// GeoZoneService::sameAuthTarget: setting a service which sends it elsewhere forgets it.
+/// GeoZoneService::sameAuthTarget: setting a service which sends it elsewhere forgets it. A token is kept for what it
+/// was issued for: it is also forgotten when the client id or the scope of the service change.
 class GeoZoneServiceRegistry
 {
 public:
@@ -26,7 +27,7 @@ public:
     /// @return The service of the source, empty for plain feeds and files
     GeoZoneService service(const QString &key) const { return _services.value(key); }
     /// Sets the service of a source, removes it when empty. The secret and the token are forgotten unless the
-    /// source had a service with the same authentication target.
+    /// source had a service with the same authentication target, the token also when its user or scope differ.
     void setService(const QString &key, const GeoZoneService &service);
     /// Restores a service kept by a previous session, keeping its secret
     void restoreService(const QString &key, const GeoZoneService &service);

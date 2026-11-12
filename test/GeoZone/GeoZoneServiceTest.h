@@ -23,6 +23,7 @@ private slots:
     void _testClearForgetsPendingServices();
     void _testSecretsOnlyOfServices();
     void _testServiceOAuth2();
+    void _testTokenFollowsService();
     void _testEd318Service();
     void _testServiceAreaOfInterest();
     void _testMapViewAreaOfInterest();
