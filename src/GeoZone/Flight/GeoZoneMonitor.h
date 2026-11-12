@@ -202,8 +202,12 @@ public:
     class AudioSink
     {
     public:
+        AudioSink() = default;
         virtual ~AudioSink() = default;
         virtual void say(const QString &text) = 0;
+
+    private:
+        Q_DISABLE_COPY_MOVE(AudioSink)
     };
 
     /// What the monitor uses of GeoZoneSettings. The alerts and their log are always on, after EN 4709-003.

@@ -90,11 +90,11 @@ GeoZoneMonitor::GeoZoneMonitor(QObject *parent)
 GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
     : QObject(parent)
     , _manager(manager ? manager : GeoZoneManager::instance())
+    , _awareness(new GeoZoneAwareness(this))
+    , _permits(new GeoZonePermits(this))
     , _guidedCheck(new GeoZoneGuidedCheck(this))
     , _alertHistory(new GeoZoneAlertHistory(_manager, this))
     , _alertModel(new GeoZoneAlertModel(this))
-    , _awareness(new GeoZoneAwareness(this))
-    , _permits(new GeoZonePermits(this))
 {
     _elapsed.start();
     _arbiter.setClock([this]() { return _now(); });
