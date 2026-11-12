@@ -51,6 +51,8 @@ const QList<Field> &fields()
         { "minDistance", &Profile::minDistance, 0, false },
         { "minVerticalDistance", &Profile::minVerticalDistance, 0, false },
         { "fenceWarningMargin", &Profile::fenceWarningMargin, 0, false },
+        { "assumedSpeed", &Profile::assumedSpeed, 0, true },
+        { "assumedVerticalSpeed", &Profile::assumedVerticalSpeed, 0, true },
         { "minSatellites", &Profile::minSatellites, 0, false },
         { "maxHdop", &Profile::maxHdop, 0, true },
         { "maxHorizontalAccuracy", &Profile::maxHorizontalAccuracy, 0, true },
@@ -121,10 +123,28 @@ GeoZoneAlertThresholds::Result GeoZoneAlertThresholds::compute(const Profile &pr
     Result result;
     result.vehicleClass = profile.vehicleClass;
     result.profileName = profile.name;
-    const double groundSpeed = input.velocity.valid ? input.velocity.groundSpeed() : 0;
-    const double climb = input.velocity.valid ? std::abs(input.velocity.up) : 0;
+    // Without a velocity, the speeds the vehicle reports or those assumed for its class
+    double groundSpeed = 0;
+    double climb = 0;
+    result.speedSource = input.velocity.valid ? SpeedSource::Velocity : input.speedSource;
+    switch (result.speedSource) {
+    case SpeedSource::Velocity:
+        groundSpeed = input.velocity.groundSpeed();
+        climb = std::abs(input.velocity.up);
+        break;
+    case SpeedSource::Reported:
+        groundSpeed = std::isfinite(input.groundSpeed) ? std::abs(input.groundSpeed) : profile.assumedSpeed;
+        climb = std::isfinite(input.verticalSpeed) ? std::abs(input.verticalSpeed) : profile.assumedVerticalSpeed;
+        break;
+    case SpeedSource::Assumed:
+        groundSpeed = profile.assumedSpeed;
+        climb = profile.assumedVerticalSpeed;
+        break;
+    case SpeedSource::Rest:
+        break;
+    }
     result.groundSpeed = groundSpeed;
-    result.verticalSpeed = input.velocity.valid ? input.velocity.up : 0;
+    result.verticalSpeed = input.velocity.valid ? input.velocity.up : climb;
 
     // Position uncertainty: the accuracy the vehicle reports, or its dilution of precision times the range error
     double sigma = profile.defaultPositionError;

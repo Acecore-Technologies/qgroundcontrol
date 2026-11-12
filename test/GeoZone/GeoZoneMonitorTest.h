@@ -22,6 +22,7 @@ private slots:
     void _testMinimumWarningTime();
     void _testTerrainAhead();
     void _testVehicleTelemetry();
+    void _testUnknownVelocity();
     void _testMonitorMultipleVehicles();
     void _testAlertLog();
     void _testAlertLogFailure();

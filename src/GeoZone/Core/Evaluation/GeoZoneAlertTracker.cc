@@ -195,22 +195,40 @@ std::optional<GeoZoneAlertTracker::Entry> GeoZoneAlertTracker::predictedEntry(co
 
 GeoZoneAlertTracker::Velocity GeoZoneVelocityEstimator::add(qint64 msecs, const GeoZone::Position &position)
 {
-    _samples.removeIf([msecs](const Sample &sample) { return (msecs - sample.msecs) > windowMSecs; });
-    _samples.append(Sample{ msecs, position });
-
     GeoZoneAlertTracker::Velocity velocity;
-    const Sample &oldest = _samples.constFirst();
-    const double seconds = static_cast<double>(msecs - oldest.msecs) / 1000.0;
-    if ((seconds < 0.5) || !oldest.position.coordinate.isValid()) {
+    if (!position.coordinate.isValid()) {
         return velocity;
     }
-    const double distance = oldest.position.coordinate.distanceTo(position.coordinate);
-    const double azimuth = qDegreesToRadians(oldest.position.coordinate.azimuthTo(position.coordinate));
-    velocity.north = distance * std::cos(azimuth) / seconds;
-    velocity.east = distance * std::sin(azimuth) / seconds;
-    if (!std::isnan(oldest.position.altitudeAMSL) && !std::isnan(position.altitudeAMSL)) {
-        velocity.up = (position.altitudeAMSL - oldest.position.altitudeAMSL) / seconds;
+    _samples.removeIf([msecs](const Sample &sample) { return (msecs - sample.msecs) > windowMSecs; });
+
+    // Meters per second over the ground and up from a sample to the position
+    const auto speeds = [msecs, &position](const Sample &from) {
+        const double seconds = static_cast<double>(msecs - from.msecs) / 1000.0;
+        const bool altitudes = !std::isnan(from.position.altitudeAMSL) && !std::isnan(position.altitudeAMSL);
+        return std::pair<double, double>{ from.position.coordinate.distanceTo(position.coordinate) / seconds,
+                                          altitudes ? ((position.altitudeAMSL - from.position.altitudeAMSL) / seconds) : 0 };
+    };
+    const auto plausible = [](const std::pair<double, double> &speed) {
+        return (speed.first <= maxPlausibleSpeed) && (std::abs(speed.second) <= maxPlausibleVerticalSpeed);
+    };
+    // A jump from the last position, or over the window, starts the estimate again
+    const bool jumped = !_samples.isEmpty() &&
+                        ((((msecs - _samples.constLast().msecs) >= minStepMSecs) && !plausible(speeds(_samples.constLast()))) ||
+                         (((msecs - _samples.constFirst().msecs) >= minSpanMSecs) && !plausible(speeds(_samples.constFirst()))));
+    if (jumped) {
+        _samples.clear();
     }
+    _samples.append(Sample{ msecs, position });
+
+    const Sample &oldest = _samples.constFirst();
+    if ((msecs - oldest.msecs) < minSpanMSecs) {
+        return velocity;
+    }
+    const auto [groundSpeed, climb] = speeds(oldest);
+    const double azimuth = qDegreesToRadians(oldest.position.coordinate.azimuthTo(position.coordinate));
+    velocity.north = groundSpeed * std::cos(azimuth);
+    velocity.east = groundSpeed * std::sin(azimuth);
+    velocity.up = climb;
     velocity.valid = true;
     return velocity;
 }

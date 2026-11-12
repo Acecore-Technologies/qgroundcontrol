@@ -62,6 +62,14 @@ ToolIndicatorPage {
                 .arg(thresholds.profileName).arg(thresholds.reactionTime)
         }
         const speed = Math.round(units.metersSecondToAppSettingsSpeedUnits(thresholds.groundSpeed)) + " " + units.appSettingsSpeedUnitsString
+        // Without a velocity there is no direction to predict entries along: the distances are those at the speed the
+        // vehicle reports, or the one assumed for its class
+        if (thresholds.speedSource === "assumed" || thresholds.speedSource === "reported") {
+            return (thresholds.speedSource === "assumed" ? qsTr("Warning %1 around, %2 above or below: velocity unknown, %3 assumed (%4, %5 s reaction).")
+                                                         : qsTr("Warning %1 around, %2 above or below at the reported %3 (%4, %5 s reaction)."))
+                .arg(GeoZoneStyle.horizontalText(thresholds.distance)).arg(GeoZoneStyle.verticalText(thresholds.verticalDistance)).arg(speed)
+                .arg(thresholds.profileName).arg(thresholds.reactionTime)
+        }
         return qsTr("Warning %1 / %2 s ahead at %3, %4 above or below (%5, %6 s reaction).")
             .arg(GeoZoneStyle.horizontalText(thresholds.distance)).arg(Math.round(thresholds.time)).arg(speed)
             .arg(GeoZoneStyle.verticalText(thresholds.verticalDistance)).arg(thresholds.profileName).arg(thresholds.reactionTime)

@@ -107,17 +107,21 @@ void GeoZoneVehicleMonitor::_deriveFenceStatus()
     _setFenceStatus(false, boundary.has_value(), breachType, 0);
 }
 
-qint64 GeoZoneVehicleMonitor::positionTimeout() const
+qint64 GeoZoneVehicleMonitor::_usualPositionInterval() const
 {
     if (_positionIntervals.isEmpty()) {
-        return positionTimeoutMSecs;
+        return 0;
     }
-    // The usual interval is the median of the last ones, the lower of the two in the middle: neither one message after
-    // an outage nor two messages arriving together change it
+    // The median of the last ones, the lower of the two in the middle: neither one message after an outage nor two
+    // messages arriving together change it
     QList<qint64> sorted = _positionIntervals;
     std::sort(sorted.begin(), sorted.end());
-    const qint64 usual = sorted[(sorted.count() - 1) / 2];
-    return std::clamp(positionTimeoutIntervals * usual, qint64{ positionTimeoutMSecs }, qint64{ maxPositionTimeoutMSecs });
+    return sorted[(sorted.count() - 1) / 2];
+}
+
+qint64 GeoZoneVehicleMonitor::positionTimeout() const
+{
+    return std::clamp(positionTimeoutIntervals * _usualPositionInterval(), qint64{ positionTimeoutMSecs }, qint64{ maxPositionTimeoutMSecs });
 }
 
 void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint64 msecs)
@@ -267,13 +271,37 @@ bool GeoZoneVehicleMonitor::positionStale(qint64 msecs) const
 
 GeoZoneVehicleMonitor::Velocity GeoZoneVehicleMonitor::velocity(qint64 msecs, const GeoZone::Position &position)
 {
-    const Velocity estimated = _estimator.add(msecs, position);
-    const bool fresh = (_velocityMSecs >= 0) && ((msecs - _velocityMSecs) <= reportedVelocityMaxAgeMSecs);
-    // Some vehicles and simulators report no velocity as zero while moving, which their positions show
+    // A position is a sample of the estimate once. Evaluated again before the next message, the same position would
+    // read as a vehicle standing still, on a slow link at most evaluations.
+    if ((_positionMSecs < 0) || (_positionMSecs != _sampledMSecs)) {
+        _sampledMSecs = _positionMSecs;
+        _estimated = _estimator.add((_positionMSecs < 0) ? msecs : _positionMSecs, position);
+        _estimatedMSecs = msecs;
+    } else if ((msecs - _estimatedMSecs) > GeoZoneVelocityEstimator::windowMSecs) {
+        _estimated = Velocity();
+    }
+    // The velocity sent with a position is as current as the position, so for longer on a slow link
+    const qint64 maxAge = (std::max)(qint64{ reportedVelocityMaxAgeMSecs }, (_usualPositionInterval() * 3) / 2);
+    const bool fresh = (_velocityMSecs >= 0) && ((msecs - _velocityMSecs) <= maxAge);
+    if (!fresh) {
+        return _estimated;
+    }
+    // Some vehicles and simulators report no velocity as zero while moving, which their positions show, or the ground
+    // speed they report while there are too few positions: then the velocity isn't known
     const bool reportedZero = (_reported.north == 0) && (_reported.east == 0) && (_reported.up == 0);
-    const bool estimatedMoving = estimated.valid && ((estimated.groundSpeed() >= GeoZoneAlertTracker::minPredictionSpeed) ||
-                                                     (std::abs(estimated.up) >= GeoZoneAlertTracker::minPredictionSpeed));
-    return (fresh && !(reportedZero && estimatedMoving)) ? _reported : estimated;
+    if (reportedZero) {
+        const auto moving = [](double groundSpeed, double climb) {
+            return (groundSpeed >= GeoZoneAlertTracker::minPredictionSpeed) || (std::abs(climb) >= GeoZoneAlertTracker::minPredictionSpeed);
+        };
+        if (_estimated.valid) {
+            return moving(_estimated.groundSpeed(), _estimated.up) ? _estimated : _reported;
+        }
+        const GeoZoneVehicleThresholds::Speeds speeds = _thresholds.speedsWithoutVelocity(msecs, false, positionTimeout());
+        if ((speeds.source == GeoZoneAlertThresholds::SpeedSource::Reported) && moving(speeds.ground, speeds.vertical)) {
+            return Velocity();
+        }
+    }
+    return _reported;
 }
 
 void GeoZoneVehicleMonitor::setPositionUnavailable(bool unavailable)
@@ -285,6 +313,7 @@ void GeoZoneVehicleMonitor::setPositionUnavailable(bool unavailable)
     if (unavailable) {
         // Positions from before the gap would distort the estimated velocity
         _estimator = GeoZoneVelocityEstimator();
+        _estimated = Velocity();
         qCDebug(GeoZoneMonitorLog) << "Alerts paused, no current position of vehicle" << _vehicleId;
     }
     emit positionUnavailableChanged();
@@ -318,10 +347,24 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::update(const Context &c
         _terrainSource = terrainSource;
         emit terrainSourceChanged();
     }
-    return evaluate(position, velocity(msecs, position), context);
+    return evaluateAt(msecs, position, context);
+}
+
+QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::evaluateAt(qint64 msecs, const GeoZone::Position &position, const Context &context)
+{
+    // A flying vehicle whose velocity isn't known yet, or can't be estimated on a slow link, is not taken to hover
+    const Velocity current = velocity(msecs, position);
+    return _evaluate(position, current, context,
+                     current.valid ? GeoZoneVehicleThresholds::Speeds() : _thresholds.speedsWithoutVelocity(msecs, onGround(), positionTimeout()));
 }
 
 QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::evaluate(const GeoZone::Position &position, const Velocity &velocity, const Context &context)
+{
+    return _evaluate(position, velocity, context, GeoZoneVehicleThresholds::Speeds());
+}
+
+QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::_evaluate(const GeoZone::Position &position, const Velocity &velocity, const Context &context,
+                                                                   const GeoZoneVehicleThresholds::Speeds &speeds)
 {
     if (!position.coordinate.isValid() || !context.catalog) {
         return {};
@@ -330,7 +373,7 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::evaluate(const GeoZone:
 
     // The thresholds at the current velocity, unless fixed
     const QVariantMap previousThresholds = alertThresholds();
-    const GeoZoneAlertTracker::Limits limits = context.limits.value_or(_thresholds.update(_clock(), velocity, context.extras).limits());
+    const GeoZoneAlertTracker::Limits limits = context.limits.value_or(_thresholds.update(_clock(), velocity, context.extras, speeds).limits());
     _fixedLimits = context.limits.has_value();
     if (alertThresholds() != previousThresholds) {
         emit alertThresholdsChanged();

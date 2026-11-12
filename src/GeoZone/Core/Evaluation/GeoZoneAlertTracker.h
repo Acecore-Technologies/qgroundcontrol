@@ -140,13 +140,22 @@ private:
     GeoZone::Position _previousPosition;    ///< Of the previous update, invalid before
 };
 
-/// Velocity of a vehicle estimated from its recent positions
+/// Velocity of a vehicle estimated from its recent positions. A position the vehicle can't have flown to, like the
+/// first fix after positions at 0/0 or a glitch of the receiver, isn't taken for a velocity: the estimate starts again
+/// from it, since a huge velocity would put every zone in range near the vehicle.
 class GeoZoneVelocityEstimator
 {
 public:
     static constexpr int windowMSecs = 3000;    ///< Positions over which the velocity is estimated
+    static constexpr int minSpanMSecs = 500;    ///< Positions closer in time give no velocity
+    static constexpr int minStepMSecs = 100;    ///< Positions closer in time aren't compared one to the next
+    /// Meters per second beyond which a move between two positions is a jump, not a flight: over the ground, and up
+    /// or down
+    static constexpr double maxPlausibleSpeed = 100;
+    static constexpr double maxPlausibleVerticalSpeed = 50;
 
-    /// @return Velocity from the positions of the last windowMSecs, after adding the position
+    /// @return Velocity from the positions of the last windowMSecs, after adding the position: not valid before they
+    ///         span minSpanMSecs, for an invalid position, which is left out, and after a jump
     GeoZoneAlertTracker::Velocity add(qint64 msecs, const GeoZone::Position &position);
 
 private:

@@ -93,7 +93,8 @@ public:
     static constexpr int maxPositionTimeoutMSecs = 60000;       ///< ... and after this at most, however slow the link
     static constexpr int positionTimeoutIntervals = 3;          ///< Usual intervals without a position after which it is stale
     static constexpr int positionIntervalCount = 5;             ///< Last intervals the usual one is the median of
-    static constexpr int reportedVelocityMaxAgeMSecs = 2000;    ///< Velocities reported by the vehicle are used up to this age
+    /// Velocities reported by the vehicle are used up to this age, or one and a half usual intervals of its positions
+    static constexpr int reportedVelocityMaxAgeMSecs = 2000;
     /// The fence status the vehicle reported is used up to this age. ArduPilot stops sending it while its fence is disabled.
     static constexpr int fenceStatusTimeoutMSecs = 10000;
 
@@ -134,7 +135,8 @@ public:
     void handleMessage(const mavlink_message_t &message, qint64 msecs);
 
     /// @return Velocity the vehicle reported with its position when recent, otherwise estimated from its positions,
-    ///         after adding the position to the estimate
+    ///         after adding the position to the estimate when a position message arrived since the last one added.
+    ///         Not valid when neither is known, like on a link whose positions are too far apart to estimate from.
     Velocity velocity(qint64 msecs, const GeoZone::Position &position);
 
     /// @return true if the vehicle sent no position for longer than positionTimeout(). Only the messages the Vehicle
@@ -149,13 +151,21 @@ public:
     qint64 positionTimeout() const;
 
     /// Evaluates the current position of the vehicle, unless it has none: its coordinate is invalid, its link is lost
-    /// or its position stale. Then its alerts pause and positionUnavailable() is true.
+    /// or its position stale. Then its alerts pause and positionUnavailable() is true. While its velocity isn't known,
+    /// its thresholds are those at the speeds it reports or its class is assumed to fly at, see
+    /// GeoZoneVehicleThresholds::speedsWithoutVelocity.
     /// @return Zones newly approached or entered, see GeoZoneAlertTracker::Update
     QList<GeoZoneAlertTracker::Alert> update(const Context &context);
 
+    /// Evaluates a position the vehicle sent, at the time of the clock, with its velocity() then, like update() does
+    /// with the coordinate of its Vehicle. Without a valid velocity, the thresholds are those of
+    /// GeoZoneVehicleThresholds::speedsWithoutVelocity.
+    QList<GeoZoneAlertTracker::Alert> evaluateAt(qint64 msecs, const GeoZone::Position &position, const Context &context);
+
     /// Evaluates a position of the vehicle. Unknown altitudes are inside all vertical limits. With a valid velocity,
     /// zones the vehicle would enter within the approach time are near too. The approach distances and time are the
-    /// alert thresholds of the vehicle at its velocity, see thresholds().
+    /// alert thresholds of the vehicle at its velocity, see thresholds(), and those at rest without a valid velocity:
+    /// update() is what knows the speeds of a vehicle without one.
     QList<GeoZoneAlertTracker::Alert> evaluate(const GeoZone::Position &position, const Velocity &velocity, const Context &context);
 
     /// Alert thresholds of the vehicle, of its last evaluation
@@ -263,6 +273,10 @@ private:
     void _setFenceStatus(bool known, bool breached, int breachType, int breachCount);
     /// Takes the fence breach from the vehicle's position, for a vehicle which doesn't report its fence status
     void _deriveFenceStatus();
+    /// @return Milliseconds usually between two position messages, 0 before the second
+    qint64 _usualPositionInterval() const;
+    QList<GeoZoneAlertTracker::Alert> _evaluate(const GeoZone::Position &position, const Velocity &velocity, const Context &context,
+                                                const GeoZoneVehicleThresholds::Speeds &speeds);
 
     QPointer<Vehicle> _vehicle;
     const bool _followsVehicle = false;
@@ -286,6 +300,9 @@ private:
     qint64 _velocityMSecs = -1;
     Velocity _reported;
     GeoZoneVelocityEstimator _estimator;
+    Velocity _estimated;                    ///< Of the estimator when a position was last added
+    qint64 _estimatedMSecs = 0;             ///< When that was
+    qint64 _sampledMSecs = -1;              ///< Position message last added to the estimator
     bool _unavailable = false;              ///< Alerts are paused for lack of a current position
     TerrainSource _terrainSource = TerrainSource::Unknown;
 

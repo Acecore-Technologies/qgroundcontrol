@@ -30,6 +30,9 @@
 /// s_v and t_v of stopping a climb or descent (w²/2a_v, w/a_v), W the wind, and m the horizontal and vertical margins
 /// (K·σ + wind drift + safety margin) along the direction of travel at the speed s (at least 1 m/s).
 /// The pilot can only make the alerts earlier, with the extra time and distance.
+/// While the velocity of a flying vehicle isn't known, like at its first position or on links too slow to estimate it,
+/// v and w are the ground speed and climb rate it reports, or else those assumed for its class
+/// (Profile::assumedSpeed), rather than none: the thresholds never fall to their minimum for lack of a velocity.
 class GeoZoneAlertThresholds
 {
 public:
@@ -74,10 +77,22 @@ public:
         double minDistance = 100;               ///< Meters, the smallest horizontal distance threshold
         double minVerticalDistance = 30;        ///< Meters, the smallest vertical distance threshold
         double fenceWarningMargin = 3;          ///< Seconds the geofence warning comes before the pilot reaction time
+        /// Meters per second a vehicle of the class is taken to fly at, and to climb or descend at, while its velocity
+        /// isn't known: its typical maximum, so that it is warned in time whatever it does
+        double assumedSpeed = 20;
+        double assumedVerticalSpeed = 5;
         // GNSS quality below which geo-awareness is degraded, see GeoZoneAwareness
         double minSatellites = 6;
         double maxHdop = 5;
         double maxHorizontalAccuracy = 5;       ///< Meters, as reported by the receiver
+    };
+
+    /// Where the speeds of the thresholds come from
+    enum class SpeedSource {
+        Velocity,       ///< The velocity of the vehicle
+        Reported,       ///< The ground speed and climb rate the vehicle reports, while its velocity isn't known
+        Assumed,        ///< Those assumed for its class, see Profile::assumedSpeed, while it reports none either
+        Rest,           ///< None: the vehicle is on the ground, or a position evaluated without a velocity
     };
 
     /// What the vehicle reports
@@ -86,6 +101,12 @@ public:
         double horizontalAccuracy = qQNaN();    ///< Meters, 1σ, NaN when unknown
         double verticalAccuracy = qQNaN();      ///< Meters, 1σ, NaN when unknown
         double hdop = qQNaN();                  ///< NaN when unknown
+        /// While the velocity isn't valid: where the speeds come from instead, with the ground speed and the climb or
+        /// descent rate the vehicle reports for SpeedSource::Reported. The monitor of a flying vehicle sets them, so
+        /// that a vehicle whose velocity isn't known is not taken to hover.
+        SpeedSource speedSource = SpeedSource::Rest;
+        double groundSpeed = 0;                 ///< Meters per second
+        double verticalSpeed = 0;               ///< Meters per second, up or down
     };
 
     /// What the pilot adds to the manufacturer's thresholds, never less than 0
@@ -98,8 +119,9 @@ public:
         double distance = 0;                ///< D_h, meters horizontally from a zone
         double verticalDistance = 0;        ///< D_v, meters below the floor or above the ceiling of a zone
         double time = 0;                    ///< T, seconds before the predicted entry into a zone
-        double groundSpeed = 0;             ///< Meters per second, 0 when unknown
-        double verticalSpeed = 0;           ///< Meters per second, up positive, 0 when unknown
+        double groundSpeed = 0;             ///< Meters per second the thresholds are for, see speedSource
+        double verticalSpeed = 0;           ///< Meters per second, up positive with a velocity, otherwise the rate either way
+        SpeedSource speedSource = SpeedSource::Rest;    ///< Where the speeds come from
         double positionError = 0;           ///< K·σ_h, meters
         double verticalPositionError = 0;   ///< K·σ_v, meters
         double reactionTime = 0;            ///< t_r, seconds

@@ -1,7 +1,7 @@
 {
     "fileType": "GeoZoneAlertProfiles",
     "version": 1,
-    "description": "Manufacturer alert thresholds per vehicle class after EN 4709-003 Annex A, see GeoZoneAlertThresholds. Classes: default, multirotor, fixedwing, vtol; missing values come from the default class. Units: meters, seconds, meters per second, meters per second squared, degrees. Custom builds replace this file with :/Custom/GeoZone/GeoZoneAlertProfiles.json.",
+    "description": "Manufacturer alert thresholds per vehicle class after EN 4709-003 Annex A, see GeoZoneAlertThresholds. Classes: default, multirotor, fixedwing, vtol; missing values come from the default class. Units: meters, seconds, meters per second, meters per second squared, degrees. assumedSpeed and assumedVerticalSpeed are what a vehicle whose velocity isn't known is taken to fly and climb at, its typical maximum. Custom builds replace this file with :/Custom/GeoZone/GeoZoneAlertProfiles.json.",
     "profiles": {
         "default": {
             "name": "Generic vehicle",
@@ -22,6 +22,8 @@
             "minDistance": 100,
             "minVerticalDistance": 30,
             "fenceWarningMargin": 3,
+            "assumedSpeed": 20,
+            "assumedVerticalSpeed": 5,
             "minSatellites": 6,
             "maxHdop": 5,
             "maxHorizontalAccuracy": 5
@@ -40,12 +42,15 @@
             "bankAngle": 30,
             "maxWind": 12,
             "maxVerticalWind": 2,
-            "minDistance": 150
+            "minDistance": 150,
+            "assumedSpeed": 30,
+            "assumedVerticalSpeed": 8
         },
         "vtol": {
             "name": "VTOL",
             "manoeuvre": "brake",
-            "deceleration": 1.5
+            "deceleration": 1.5,
+            "assumedSpeed": 30
         }
     }
 }

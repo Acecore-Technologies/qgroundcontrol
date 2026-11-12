@@ -454,10 +454,10 @@ void GeoZoneMonitorTest::_testVehicleTelemetry()
     QCOMPARE(velocity.east, -5.0);
     QCOMPARE(velocity.up, -3.0);
 
-    // Old velocities give way to the positions, which haven't moved
+    // Old velocities give way to the estimate from the positions. Without a newer position there is none: the
+    // velocity isn't known, which isn't a vehicle standing still.
     velocity = monitor.velocity(1000 + GeoZoneVehicleMonitor::reportedVelocityMaxAgeMSecs + 1500, { start, 500 });
-    QVERIFY(velocity.valid);
-    QCOMPARE(velocity.groundSpeed(), 0.0);
+    QVERIFY(!velocity.valid);
 
     // Vehicles sending zero velocities while their positions move are estimated
     GeoZoneVehicleMonitor estimating(nullptr, vehicleId, 2, clock);
@@ -584,6 +584,175 @@ void GeoZoneMonitorTest::_testVehicleTelemetry()
     QCOMPARE(thresholds.result().verticalPositionError, 18.0);
     QCOMPARE(thresholds.update(2000 + GeoZoneVehicleThresholds::accuracyMaxAgeMSecs + 1, hover, {}).positionError, 20.0);
     QCOMPARE(thresholds.toVariantMap()[QStringLiteral("distance")].toDouble(), 100.0);
+}
+
+void GeoZoneMonitorTest::_testUnknownVelocity()
+{
+    using Thresholds = GeoZoneAlertThresholds;
+    using Source = GeoZoneAlertThresholds::SpeedSource;
+    const int vehicleId = 1;
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate start = center.atDistanceAndAzimuth(600, 0);
+
+    // A position the vehicle can't have flown to gives no velocity, the estimate starts again from it: the first fix
+    // after positions at 0/0, a glitch of the receiver and its way back, and a jump in altitude
+    GeoZoneVelocityEstimator estimator;
+    QVERIFY(!estimator.add(0, { QGeoCoordinate(0, 0), 0 }).valid);
+    GeoZoneAlertTracker::Velocity velocity = estimator.add(1000, { QGeoCoordinate(0, 0), 0 });
+    QVERIFY(velocity.valid);
+    QCOMPARE(velocity.groundSpeed(), 0.0);
+    QVERIFY(!estimator.add(2000, { start, 500 }).valid);
+    velocity = estimator.add(3000, { start.atDistanceAndAzimuth(15, 90), 500 });
+    QVERIFY(velocity.valid);
+    QVERIFY2(qAbs(velocity.east - 15) < 0.1, qPrintable(QString::number(velocity.east)));
+    QVERIFY(!estimator.add(4000, { start.atDistanceAndAzimuth(415, 90), 500 }).valid);
+    QVERIFY(!estimator.add(5000, { start.atDistanceAndAzimuth(45, 90), 500 }).valid);
+    velocity = estimator.add(6000, { start.atDistanceAndAzimuth(60, 90), 500 });
+    QVERIFY(velocity.valid);
+    QVERIFY(qAbs(velocity.east - 15) < 0.1);
+    QVERIFY(!estimator.add(7000, { start.atDistanceAndAzimuth(75, 90), 600 }).valid);
+    // An invalid position is left out
+    QVERIFY(!estimator.add(8000, { QGeoCoordinate(), 600 }).valid);
+    velocity = estimator.add(8000, { start.atDistanceAndAzimuth(90, 90), 602 });
+    QVERIFY(velocity.valid);
+    QVERIFY(qAbs(velocity.east - 15) < 0.1);
+    QVERIFY(qAbs(velocity.up - 2) < 0.01);
+    // Several positions which together are too far for the time are a jump too
+    GeoZoneVelocityEstimator stepping;
+    (void) stepping.add(0, { start, 500 });
+    (void) stepping.add(50, { start.atDistanceAndAzimuth(40, 90), 500 });
+    (void) stepping.add(90, { start.atDistanceAndAzimuth(80, 90), 500 });
+    QVERIFY(!stepping.add(600, { start.atDistanceAndAzimuth(120, 90), 500 }).valid);
+
+    // Without a velocity the thresholds are those at the speeds the vehicle reports, or at those its class is assumed
+    // to fly at, its typical maximum: as wide as with that velocity, not the minimum of a hovering vehicle
+    const Thresholds::Profile multirotor = Thresholds::profile(QStringLiteral("multirotor"));
+    QCOMPARE(multirotor.assumedSpeed, 20.0);
+    QCOMPARE(multirotor.assumedVerticalSpeed, 5.0);
+    QCOMPARE(Thresholds::profile(QStringLiteral("fixedwing")).assumedSpeed, 30.0);
+    Thresholds::Input unknown;
+    QCOMPARE(Thresholds::compute(multirotor, unknown).distance, multirotor.minDistance);
+    QCOMPARE(Thresholds::compute(multirotor, unknown).speedSource, Source::Rest);
+    unknown.speedSource = Source::Assumed;
+    const Thresholds::Result assumed = Thresholds::compute(multirotor, unknown);
+    const Thresholds::Result fastest = Thresholds::compute(multirotor, Thresholds::Input{ GeoZoneAlertTracker::Velocity{ 0, 20, 5, true } });
+    QCOMPARE(assumed.speedSource, Source::Assumed);
+    QCOMPARE(assumed.groundSpeed, 20.0);
+    QCOMPARE(assumed.verticalSpeed, 5.0);
+    QCOMPARE(assumed.distance, fastest.distance);
+    QCOMPARE(assumed.verticalDistance, fastest.verticalDistance);
+    QVERIFY2(assumed.distance > 300, qPrintable(QString::number(assumed.distance)));
+    unknown.speedSource = Source::Reported;
+    unknown.groundSpeed = 10;
+    unknown.verticalSpeed = -2;
+    const Thresholds::Result reported = Thresholds::compute(multirotor, unknown);
+    QCOMPARE(reported.speedSource, Source::Reported);
+    QCOMPARE(reported.distance, Thresholds::compute(multirotor, Thresholds::Input{ GeoZoneAlertTracker::Velocity{ 10, 0, 2, true } }).distance);
+    QVERIFY(reported.distance < assumed.distance);
+    // A valid velocity is what counts
+    unknown.velocity = GeoZoneAlertTracker::Velocity{ 3, 0, 0, true };
+    QCOMPARE(Thresholds::compute(multirotor, unknown).speedSource, Source::Velocity);
+    QCOMPARE(Thresholds::compute(multirotor, unknown).groundSpeed, 3.0);
+    // The manufacturer sets the assumed speeds per class, above zero
+    QString errorString;
+    const QHash<QString, Thresholds::Profile> custom = Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "version": 1, "profiles": {
+        "default": { "assumedSpeed": 12 }, "fixedwing": { "assumedSpeed": 40, "assumedVerticalSpeed": 10 } } })", &errorString);
+    QVERIFY2(errorString.isEmpty(), qPrintable(errorString));
+    QCOMPARE(custom.value(QStringLiteral("default")).assumedSpeed, 12.0);
+    QCOMPARE(custom.value(QStringLiteral("fixedwing")).assumedSpeed, 40.0);
+    QCOMPARE(custom.value(QStringLiteral("fixedwing")).assumedVerticalSpeed, 10.0);
+    QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "version": 1, "profiles": { "default": { "assumedSpeed": 0 } } })").isEmpty());
+
+    // A flying vehicle 300 m from a prohibited zone, beyond the 100 m a hovering multirotor is warned at
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+    }), errorString), qPrintable(errorString));
+    const GeoZoneVehicleMonitor::Context context{ &manager.catalog(), GeoZonePolicy::alerts(), {}, std::nullopt, {} };
+    const GeoZoneVehicleMonitor::Clock clock = []() { return qint64{ 0 }; };
+    const GeoZone::Position position{ start, 450, 400 };
+    const mavlink_message_t gps = gpsMessage(vehicleId, GPS_FIX_TYPE_3D_FIX, 10, 1, 0);
+
+    // Its first position gives no velocity, and it reports none: it is warned as if it flew as fast as its class does
+    GeoZoneVehicleMonitor flying(nullptr, vehicleId, 1, clock);
+    flying.setVehicleClass(QStringLiteral("multirotor"));
+    flying.setArmed(true);
+    flying.handleMessage(gps, 1000);
+    QList<GeoZoneAlertTracker::Alert> alerts = flying.evaluateAt(1000, position, context);
+    QCOMPARE(alerts.count(), 1);
+    QVERIFY(!alerts.constFirst().inside);
+    QCOMPARE(flying.thresholds().result().speedSource, Source::Assumed);
+    // Less the position error of its good fix
+    QCOMPARE(flying.thresholds().result().distance, assumed.distance - 10);
+    QCOMPARE(flying.alertThresholds().value(QStringLiteral("speedSource")).toString(), QStringLiteral("assumed"));
+    QCOMPARE(flying.alertThresholds().value(QStringLiteral("groundSpeed")).toDouble(), 20.0);
+    // The ground speed and climb rate it reports are used once it sends them, while they are fresh
+    mavlink_message_t hud{};
+    (void) mavlink_msg_vfr_hud_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &hud, 6, 5, 0, 50, 450, -1);
+    flying.handleMessage(hud, 1200);
+    (void) flying.evaluateAt(1500, position, context);
+    QCOMPARE(flying.thresholds().result().speedSource, Source::Reported);
+    QCOMPARE(flying.thresholds().result().groundSpeed, 5.0);
+    QCOMPARE(flying.thresholds().result().verticalSpeed, 1.0);
+    (void) flying.evaluateAt(1200 + GeoZoneVehicleMonitor::positionTimeoutMSecs + 1, position, context);
+    QCOMPARE(flying.thresholds().result().speedSource, Source::Assumed);
+    // ... and its velocity once its positions give one
+    flying.handleMessage(gps, 7000);
+    (void) flying.evaluateAt(7000, position, context);
+    flying.handleMessage(gps, 8000);
+    (void) flying.evaluateAt(8000, { start.atDistanceAndAzimuth(8, 90), 450, 400 }, context);
+    QCOMPARE(flying.thresholds().result().speedSource, Source::Velocity);
+    QVERIFY(qAbs(flying.thresholds().result().groundSpeed - 8) < 0.1);
+
+    // A vehicle on the ground doesn't fly: the same place raises nothing
+    GeoZoneVehicleMonitor grounded(nullptr, vehicleId, 2, clock);
+    grounded.setVehicleClass(QStringLiteral("multirotor"));
+    grounded.setArmed(false);
+    grounded.handleMessage(gps, 1000);
+    QVERIFY(grounded.evaluateAt(1000, position, context).isEmpty());
+    QCOMPARE(grounded.thresholds().result().speedSource, Source::Rest);
+    QCOMPARE(grounded.thresholds().result().distance, multirotor.minDistance);
+    // ... nor does a position evaluated without a velocity, like those of tools
+    GeoZoneVehicleMonitor tool(nullptr, vehicleId, 3, clock);
+    QVERIFY(tool.evaluate(position, GeoZoneVehicleMonitor::Velocity(), context).isEmpty());
+    QCOMPARE(tool.thresholds().result().speedSource, Source::Rest);
+
+    // On a link too slow to estimate a velocity, with a position every 10 s, the evaluations between two positions
+    // see the same one: the vehicle isn't taken to stand still
+    GeoZoneVehicleMonitor slow(nullptr, vehicleId, 4, clock);
+    slow.setVehicleClass(QStringLiteral("multirotor"));
+    slow.setArmed(true);
+    const GeoZone::Position far{ center.atDistanceAndAzimuth(5000, 0), 450, 400 };
+    for (qint64 msecs = 0; msecs <= 30000; msecs += 1000) {
+        if ((msecs % 10000) == 0) {
+            slow.handleMessage(gps, msecs);
+        }
+        (void) slow.evaluateAt(msecs, far, context);
+        QVERIFY2(slow.thresholds().result().speedSource == Source::Assumed, qPrintable(QString::number(msecs)));
+    }
+    // The velocity sent with such positions is as current as they are
+    GeoZoneVehicleMonitor reporting(nullptr, vehicleId, 5, clock);
+    reporting.setArmed(true);
+    for (qint64 msecs = 0; msecs <= 30000; msecs += 1000) {
+        if ((msecs % 10000) == 0) {
+            reporting.handleMessage(globalPositionMessage(vehicleId, 1200, 0, 0), msecs);
+        }
+        (void) reporting.evaluateAt(msecs, far, context);
+        if (msecs >= 10000) {
+            QVERIFY2(reporting.thresholds().result().speedSource == Source::Velocity, qPrintable(QString::number(msecs)));
+            QCOMPARE(reporting.thresholds().result().groundSpeed, 12.0);
+        }
+    }
+    // A vehicle reporting a zero velocity with its positions while its ground speed says it moves has no known velocity
+    GeoZoneVehicleMonitor inconsistent(nullptr, vehicleId, 6, clock);
+    inconsistent.setArmed(true);
+    inconsistent.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), 1000);
+    inconsistent.handleMessage(hud, 1000);
+    (void) inconsistent.evaluateAt(1000, far, context);
+    QCOMPARE(inconsistent.thresholds().result().speedSource, Source::Reported);
+    QCOMPARE(inconsistent.thresholds().result().groundSpeed, 5.0);
 }
 
 void GeoZoneMonitorTest::_testMonitorMultipleVehicles()

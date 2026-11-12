@@ -9,6 +9,7 @@
 
 #include "GeoZoneVehicleThresholds.h"
 
+#include <cmath>
 #include <limits>
 
 QString GeoZoneVehicleThresholds::vehicleClass(int mavType)
@@ -50,6 +51,26 @@ void GeoZoneVehicleThresholds::handleMessage(const mavlink_message_t &message, q
         _verticalAccuracy = (highLatency.epv > 0) ? (highLatency.epv / 10.0) : qQNaN();
         _hdop = qQNaN();
         _accuracyMSecs = msecs;
+        // Fifths of a meter per second, and decimeters per second
+        _groundSpeed = highLatency.groundspeed / 5.0;
+        _climbRate = highLatency.climb_rate / 10.0;
+        _speedMSecs = msecs;
+        break;
+    }
+    case MAVLINK_MSG_ID_HIGH_LATENCY: {
+        mavlink_high_latency_t highLatency{};
+        mavlink_msg_high_latency_decode(&message, &highLatency);
+        _groundSpeed = highLatency.groundspeed;
+        _climbRate = highLatency.climb_rate;
+        _speedMSecs = msecs;
+        break;
+    }
+    case MAVLINK_MSG_ID_VFR_HUD: {
+        mavlink_vfr_hud_t hud{};
+        mavlink_msg_vfr_hud_decode(&message, &hud);
+        _groundSpeed = hud.groundspeed;
+        _climbRate = hud.climb;
+        _speedMSecs = msecs;
         break;
     }
     default:
@@ -57,10 +78,25 @@ void GeoZoneVehicleThresholds::handleMessage(const mavlink_message_t &message, q
     }
 }
 
-const GeoZoneAlertThresholds::Result &GeoZoneVehicleThresholds::update(qint64 msecs, const GeoZoneAlertTracker::Velocity &velocity, const GeoZoneAlertThresholds::Extras &extras)
+GeoZoneVehicleThresholds::Speeds GeoZoneVehicleThresholds::speedsWithoutVelocity(qint64 msecs, bool onGround, qint64 maxAgeMSecs) const
+{
+    using Source = GeoZoneAlertThresholds::SpeedSource;
+    if (onGround) {
+        return Speeds{ Source::Rest };
+    }
+    const bool reported = (_speedMSecs >= 0) && ((msecs - _speedMSecs) <= maxAgeMSecs) && std::isfinite(_groundSpeed) && std::isfinite(_climbRate);
+    // Unknown, the vehicle may fly as fast as its class does
+    return reported ? Speeds{ Source::Reported, std::abs(_groundSpeed), std::abs(_climbRate) } : Speeds{ Source::Assumed };
+}
+
+const GeoZoneAlertThresholds::Result &GeoZoneVehicleThresholds::update(qint64 msecs, const GeoZoneAlertTracker::Velocity &velocity, const GeoZoneAlertThresholds::Extras &extras,
+                                                                        const Speeds &speeds)
 {
     GeoZoneAlertThresholds::Input input;
     input.velocity = velocity;
+    input.speedSource = speeds.source;
+    input.groundSpeed = speeds.ground;
+    input.verticalSpeed = speeds.vertical;
     if ((_accuracyMSecs >= 0) && ((msecs - _accuracyMSecs) <= accuracyMaxAgeMSecs)) {
         input.horizontalAccuracy = _horizontalAccuracy;
         input.verticalAccuracy = _verticalAccuracy;
@@ -69,6 +105,21 @@ const GeoZoneAlertThresholds::Result &GeoZoneVehicleThresholds::update(qint64 ms
     _result = GeoZoneAlertThresholds::compute(GeoZoneAlertThresholds::profile(_vehicleClass), input, extras);
     _updated = true;
     return _result;
+}
+
+QString GeoZoneVehicleThresholds::speedSourceCode(GeoZoneAlertThresholds::SpeedSource source)
+{
+    switch (source) {
+    case GeoZoneAlertThresholds::SpeedSource::Velocity:
+        return QStringLiteral("velocity");
+    case GeoZoneAlertThresholds::SpeedSource::Reported:
+        return QStringLiteral("reported");
+    case GeoZoneAlertThresholds::SpeedSource::Assumed:
+        return QStringLiteral("assumed");
+    case GeoZoneAlertThresholds::SpeedSource::Rest:
+        break;
+    }
+    return QStringLiteral("rest");
 }
 
 QVariantMap GeoZoneVehicleThresholds::toVariantMap() const
@@ -82,6 +133,7 @@ QVariantMap GeoZoneVehicleThresholds::toVariantMap() const
         { QStringLiteral("time"), _result.time },
         { QStringLiteral("groundSpeed"), _result.groundSpeed },
         { QStringLiteral("verticalSpeed"), _result.verticalSpeed },
+        { QStringLiteral("speedSource"), speedSourceCode(_result.speedSource) },
         { QStringLiteral("positionError"), _result.positionError },
         { QStringLiteral("reactionTime"), _result.reactionTime },
         { QStringLiteral("extraTime"), _result.extraTime },
