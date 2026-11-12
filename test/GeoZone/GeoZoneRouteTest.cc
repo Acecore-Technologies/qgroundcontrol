@@ -11,7 +11,6 @@
 #include "GeoZoneRouteSearch.h"
 #include "GeoZoneTestHelpers.h"
 
-#include <QtCore/QElapsedTimer>
 #include <QtCore/QHashFunctions>
 #include <QtCore/QScopeGuard>
 
@@ -501,13 +500,9 @@ void GeoZoneRouteTest::_testMaze()
     GeoZoneRouteSearch search(zones.catalog(), policy);
     search.setTerrainLookup([](const QGeoCoordinate &) { return 0.0; });
 
-    QElapsedTimer timer;
-    timer.start();
+    // The work is bounded by its counters, not by the clock, which depends on the build and on the load of the machine
     const GeoZoneRouteSearch::Route detour = search.detour(leg);
-    const qint64 elapsed = timer.elapsed();
     QVERIFY2(detour.isValid(), qPrintable(QString::number(int(detour.failure))));
-    // Generous for debug builds with sanitizers on a busy machine
-    QVERIFY2(elapsed < 30000, qPrintable(QString::number(elapsed)));
     QVERIFY2(detour.statistics.visibilityTests < 1000000, qPrintable(QString::number(detour.statistics.visibilityTests)));
     QVERIFY2(detour.statistics.work < search.settings().maxSearchWork, qPrintable(QString::number(detour.statistics.work)));
     // Through the maze, within 2% of the shortest detour, 24672 m, which a search of all edges finds

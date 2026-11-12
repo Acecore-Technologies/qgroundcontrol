@@ -212,7 +212,9 @@ void GeoZonePlanningTest::_testApproximationReports()
     (void) missionController->insertSimpleMissionItem(start.atDistanceAndAzimuth(500, 270), 1);
     (void) missionController->insertSimpleMissionItem(start.atDistanceAndAzimuth(1500, 90), 2);
     QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Crossed).contains(zoneNamed(QStringLiteral("LEVEL"))));
-    QVERIFY(check.entry(zoneNamed(QStringLiteral("LEVEL")))->approximations.testFlag(GeoZonePathEvaluator::FlightLevel));
+    const GeoZoneMissionCheck::Entry *const levelEntry = check.entry(zoneNamed(QStringLiteral("LEVEL")));
+    QVERIFY(levelEntry);
+    QVERIFY(levelEntry->approximations.testFlag(GeoZonePathEvaluator::FlightLevel));
     QVERIFY2(check.warningText().contains(QStringLiteral("Approximate: ")), qPrintable(check.warningText()));
     QVERIFY(check.warningText().contains(QStringLiteral("Flight level limits converted with the QNH setting")));
 }
@@ -357,6 +359,9 @@ void GeoZonePlanningTest::_testMissionCheck()
     const GeoZoneMonitor monitor(&manager);
     const QString startWarning = monitor.guidedCheck()->startWarning(missionController);
     QVERIFY2(startWarning.contains(QStringLiteral("P (Prohibited)")) && !startWarning.contains(QStringLiteral("T (Prohibited)")), qPrintable(startWarning));
+    // Without a planned start the restriction counts again, whenever it applies
+    manager.planning()->setPlannedStart(_utc(QDate(2027, 1, 1), QTime(8, 0)));
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Inactive).count(), 1);
     manager.planning()->clearPlannedStart();
     QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Inactive).count(), 0);
     QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
@@ -523,7 +528,9 @@ void GeoZonePlanningTest::_testAuthorisations()
     // An authorisation from tomorrow covers a flight planned then, not one now
     QVERIFY(authorisations->authorise(zoneInfo, QStringLiteral("P-124"), today.addDays(1).toString(Qt::ISODate), today.addDays(3).toString(Qt::ISODate)).isEmpty());
     manager.planning()->setPlannedStart(QDateTime(today, QTime(12, 0)));
-    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
+    QVERIFY(!check.settled());
+    QTRY_VERIFY(check.settled());
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 1);
     manager.planning()->setPlannedStart(QDateTime(today.addDays(2), QTime(12, 0)));
     QTRY_VERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
 
@@ -1188,7 +1195,7 @@ void GeoZonePlanningTest::_testPlannedStartPerPlan()
     masterController.removeAll();
     QVERIFY(!planning->plannedStart().isValid());
     QVERIFY(!planning->planAudit().has_value());
-    // Nor is the start of a new plan kept when items are added and removed
+    // Adding and removing items doesn't make a new plan: the start set for it is kept
     planning->setPlannedStart(start);
     (void) masterController.missionController()->insertSimpleMissionItem(QGeoCoordinate(47, 8), 1);
     masterController.missionController()->removeVisualItem(1);

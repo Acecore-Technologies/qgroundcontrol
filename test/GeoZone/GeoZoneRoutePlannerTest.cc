@@ -72,7 +72,9 @@ void GeoZoneRoutePlannerTest::_testRoutePlanner()
         }
     }
     // Not needed, or impossible from inside
-    QVERIFY(GeoZoneRoutePlanner::detourAround(west, center.atDistanceAndAzimuth(2000, 0), { prohibited })->isEmpty());
+    const std::optional<QList<QGeoCoordinate>> notNeeded = GeoZoneRoutePlanner::detourAround(west, center.atDistanceAndAzimuth(2000, 0), { prohibited });
+    QVERIFY(notNeeded);
+    QVERIFY(notNeeded->isEmpty());
     QVERIFY(!GeoZoneRoutePlanner::detourAround(center.atDistanceAndAzimuth(250, 0), east, { prohibited }));
     // From within the margin, leaving the zone no closer than the start
     const QGeoCoordinate near = center.atDistanceAndAzimuth(350, 0);

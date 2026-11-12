@@ -367,6 +367,18 @@ QStringList zoneIdentifiers(const QList<const GeoZone*> &zones)
     return identifiers;
 }
 
+/// @return What enters the zone with the identifier among those of the kind, nothing without the zone
+QStringList entryLabels(const GeoZoneMissionCheck &check, GeoZoneMissionCheck::Kind kind, const QString &identifier)
+{
+    for (const GeoZone *zone : check.zones(kind)) {
+        if (zone->identifier() == identifier) {
+            const GeoZoneMissionCheck::Entry *const entry = check.entry(zone);
+            return entry ? entry->labels : QStringList();
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 void GeoZoneMissionPathTest::_testMissionCoverage()
@@ -419,19 +431,15 @@ void GeoZoneMissionPathTest::_testMissionCoverage()
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
     QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 3);
-    const auto zone = [&check](const QString &identifier) -> const GeoZone* {
-        const QList<const GeoZone*> crossed = check.zones(GeoZoneMissionCheck::Crossed);
-        const auto it = std::find_if(crossed.cbegin(), crossed.cend(), [&identifier](const GeoZone *zone) { return zone->identifier() == identifier; });
-        return (it != crossed.cend()) ? *it : nullptr;
-    };
-    QCOMPARE(check.entry(zone(QStringLiteral("L")))->labels, QStringList({ QStringLiteral("the loiter at item 1") }));
-    QCOMPARE(check.entry(zone(QStringLiteral("V")))->labels, QStringList({ QStringLiteral("the VTOL transition at item 3") }));
-    QCOMPARE(check.entry(zone(QStringLiteral("R")))->labels, QStringList({ QStringLiteral("the return to launch assuming the PX4 default return altitude of 30 m") }));
+    QCOMPARE(entryLabels(check, GeoZoneMissionCheck::Crossed, QStringLiteral("L")), QStringList({ QStringLiteral("the loiter at item 1") }));
+    QCOMPARE(entryLabels(check, GeoZoneMissionCheck::Crossed, QStringLiteral("V")), QStringList({ QStringLiteral("the VTOL transition at item 3") }));
+    QCOMPARE(entryLabels(check, GeoZoneMissionCheck::Crossed, QStringLiteral("R")),
+             QStringList({ QStringLiteral("the return to launch assuming the PX4 default return altitude of 30 m") }));
     QVERIFY2(check.warningText().contains(QStringLiteral("Only the loiter at item 1 enters L.")), qPrintable(check.warningText()));
 
     // A smaller loiter stays clear of L
     loiterItem->setRadius(100);
-    QTRY_VERIFY(!zone(QStringLiteral("L")));
+    QTRY_VERIFY(!zoneIdentifiers(check.zones(GeoZoneMissionCheck::Crossed)).contains(QStringLiteral("L")));
     QCOMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 2);
 }
 
@@ -498,7 +506,7 @@ void GeoZoneMissionPathTest::_testMissionJumps()
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
     QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Crossed)), QStringList{ QStringLiteral("J") });
-    QCOMPARE(check.entry(check.zones(GeoZoneMissionCheck::Crossed).first())->labels, QStringList{ QStringLiteral("the jump at item 4") });
+    QCOMPARE(entryLabels(check, GeoZoneMissionCheck::Crossed, QStringLiteral("J")), QStringList{ QStringLiteral("the jump at item 4") });
     // Without repeats the jump isn't flown
     for (int i = 0; i < jumpItem->textFieldFacts()->count(); i++) {
         Fact *const fact = jumpItem->textFieldFacts()->value<Fact*>(i);
@@ -564,7 +572,7 @@ void GeoZoneMissionPathTest::_testMissionJumps()
     skippingCheck.setUpdateDelay(0);
     skippingCheck.setMissionController(skipping);
     QTRY_COMPARE(zoneIdentifiers(skippingCheck.zones(GeoZoneMissionCheck::Crossed)), QStringList{ QStringLiteral("S") });
-    QCOMPARE(skippingCheck.entry(skippingCheck.zones(GeoZoneMissionCheck::Crossed).first())->labels, QStringList{ QStringLiteral("the jump at item 2") });
+    QCOMPARE(entryLabels(skippingCheck, GeoZoneMissionCheck::Crossed, QStringLiteral("S")), QStringList{ QStringLiteral("the jump at item 2") });
 }
 
 void GeoZoneMissionPathTest::_testMissionContingencies()
@@ -599,8 +607,8 @@ void GeoZoneMissionPathTest::_testMissionContingencies()
     QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("X") });
     QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
     QVERIFY(check.warningText().isEmpty());
-    const GeoZone *const x = check.zones(GeoZoneMissionCheck::Contingency).first();
-    QCOMPARE(check.entry(x)->labels, QStringList{ QStringLiteral(u"a return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133") });
+    QCOMPARE(entryLabels(check, GeoZoneMissionCheck::Contingency, QStringLiteral("X")),
+             QStringList{ QStringLiteral(u"a return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133") });
     QCOMPARE(check.contingencyText(), QStringLiteral(u"A return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133 would enter X (Prohibited)."));
 
     // The starts are grouped into ranges of items
@@ -625,7 +633,10 @@ void GeoZoneMissionPathTest::_testMissionContingencies()
     RallyPointController *const rallyPointController = masterController.rallyPointController();
     rallyPointController->addPoint(_offsetFrom(home, 2000, 3000));
     QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("R") });
-    QVERIFY(check.entry(check.zones(GeoZoneMissionCheck::Contingency).first())->labels.first().startsWith(QStringLiteral("a return to rally point 1 assuming the PX4 default return altitude of 30 m from items")));
+    const QStringList rallyLabels = entryLabels(check, GeoZoneMissionCheck::Contingency, QStringLiteral("R"));
+    QCOMPARE(rallyLabels.count(), 1);
+    QVERIFY2(rallyLabels.constFirst().startsWith(QStringLiteral("a return to rally point 1 assuming the PX4 default return altitude of 30 m from items")),
+             qPrintable(rallyLabels.constFirst()));
     // Moved away it isn't closer anymore
     rallyPointController->points()->value<RallyPoint*>(0)->setCoordinate(_offsetFrom(home, 6000, 6000));
     QTRY_COMPARE(zoneIdentifiers(check.zones(GeoZoneMissionCheck::Contingency)), QStringList{ QStringLiteral("X") });

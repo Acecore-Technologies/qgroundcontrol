@@ -183,11 +183,14 @@ void GeoZoneEvaluatorTest::_testAltitudes()
         QCOMPARE(result.zones[0].stretches[0].parts[0].position, position);
         QVERIFY(_near(result.zones[0].stretches[0].entry.distance, 700));
     }
-    QCOMPARE(levelResult(150).zones[0].crossings.count(), 1);
+    const GeoZonePathEvaluator::Result inside = levelResult(150);
+    QCOMPARE(inside.zones.count(), 1);
+    QCOMPARE(inside.zones[0].crossings.count(), 1);
 
     // Climbing from below the floor through the band to above the ceiling: -400 m at the west end to 600 m at the east end
     const GeoZonePathEvaluator::Result climb = evaluator.evaluate({ _evaluatorPath({ west, east }, { -400, 600 }) });
     QCOMPARE(climb.zones.count(), 1);
+    QCOMPARE(climb.zones[0].stretches.count(), 1);
     const GeoZonePathEvaluator::Stretch &stretch = climb.zones[0].stretches.constFirst();
     QCOMPARE(stretch.parts.count(), 3);
     QCOMPARE(stretch.parts[0].position, GeoZone::VerticalPosition::Below);
@@ -206,7 +209,9 @@ void GeoZoneEvaluatorTest::_testAltitudes()
     GeoZonePathEvaluator::Path relative = _evaluatorPath({ west, east }, { 120, 120 });
     relative.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Relative;
     relative.referenceAltitudeAMSL = 100;
-    QCOMPARE(evaluator.evaluate({ relative }).zones[0].stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
+    const GeoZonePathEvaluator::Result over = evaluator.evaluate({ relative });
+    QVERIFY(!over.zones.isEmpty() && !over.zones[0].stretches.isEmpty() && !over.zones[0].stretches[0].parts.isEmpty());
+    QCOMPARE(over.zones[0].stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
     relative.referenceAltitudeAMSL = 0;
     QCOMPARE(evaluator.evaluate({ relative }).activeEnteredZones().count(), 1);
     relative.referenceAltitudeAMSL = qQNaN();
@@ -223,12 +228,14 @@ void GeoZoneEvaluatorTest::_testAltitudes()
     QVERIFY(lookups > 2);
     QCOMPARE(overGround.zones.count(), 1);
     QVERIFY(!overGround.zones[0].entered());
+    QVERIFY(!overGround.zones[0].stretches.isEmpty() && !overGround.zones[0].stretches[0].parts.isEmpty());
     QCOMPARE(overGround.zones[0].stretches[0].parts[0].position, GeoZone::VerticalPosition::Above);
     // Above the terrain, with vertexes of the input path despite the added positions
     GeoZonePathEvaluator::Path aboveGround = _evaluatorPath({ groundWest, groundEast }, { 100, 100 });
     aboveGround.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Terrain;
     const GeoZonePathEvaluator::Result following = evaluator.evaluate({ aboveGround });
     QCOMPARE(following.activeEnteredZones().count(), 1);
+    QVERIFY(!following.zones.isEmpty() && !following.zones[0].crossings.isEmpty());
     const GeoZonePathEvaluator::Crossing &crossing = following.zones[0].crossings[0];
     QCOMPARE(crossing.entry.segment, 0);
     QVERIFY(_near(crossing.entry.fraction, 0.35, 0.001));
@@ -283,8 +290,9 @@ void GeoZoneEvaluatorTest::_testAuthorisationScope()
     QCOMPARE(high.zones.count(), 1);
     QCOMPARE(evaluator.scopeIssue(high.zones[0], authorisation, climb), QStringLiteral("authorised up to 120 m AMSL, the flight reaches 165 m AMSL"));
     const QList<GeoZonePathEvaluator::Path> unknown = { _evaluatorPath({ west, east }) };
-    QCOMPARE(evaluator.evaluate(unknown).zones.count(), 1);
-    QCOMPARE(evaluator.scopeIssue(evaluator.evaluate(unknown).zones[0], authorisation, unknown),
+    const GeoZonePathEvaluator::Result unknownHeight = evaluator.evaluate(unknown);
+    QCOMPARE(unknownHeight.zones.count(), 1);
+    QCOMPARE(evaluator.scopeIssue(unknownHeight.zones[0], authorisation, unknown),
              QStringLiteral("authorised up to 120 m AMSL, the height flown is unknown"));
     QVERIFY(policy.authorisedAt(zone, GeoZone::Position{ center, 100 }));
     QVERIFY(!policy.authorisedAt(zone, GeoZone::Position{ center, 150 }));
@@ -925,6 +933,7 @@ void GeoZoneEvaluatorTest::_testUnknownTerrain()
     // ceiling is unknown from the last position with terrain before it to the first after it, which enter the zone.
     const GeoZonePathEvaluator::Result across = evaluator.evaluate({ _evaluatorPath({ west, east }, { 600, 600 }) });
     QCOMPARE(across.activeEnteredZones().count(), 1);
+    QCOMPARE(across.zones.count(), 1);
     const GeoZonePathEvaluator::ZoneResult &zone = across.zones[0];
     QCOMPARE(zone.crossings.count(), 1);
     QVERIFY(_near(zone.crossings[0].entry.distance, 800));
@@ -976,6 +985,7 @@ void GeoZoneEvaluatorTest::_testGreatCircles()
         entered.append(zone->identifier());
     }
     QCOMPARE(entered, QStringList({ QStringLiteral("AGL"), QStringLiteral("CIRCLE") }));
+    QVERIFY((result.zones.count() > 1) && !result.zones[1].crossings.isEmpty());
     const GeoZonePathEvaluator::Crossing &crossing = result.zones[1].crossings[0];
     QCOMPARE(crossing.entry.segment, 0);
     QVERIFY(_near(crossing.entry.fraction, 0.4995, 0.0005));
@@ -996,10 +1006,14 @@ void GeoZoneEvaluatorTest::_testGreatCircles()
     QCOMPARE(sampled.approximations, GeoZonePathEvaluator::Approximations());
     evaluator.setTerrainLookup([](const QGeoCoordinate &) { return 400.0; }, 100, 100);
     const GeoZonePathEvaluator::Result coarse = evaluator.evaluate({ _evaluatorPath({ start, end }, { 600, 600 }) });
-    QVERIFY(coarse.find(*groundZone)->approximations.testFlag(GeoZonePathEvaluator::TerrainCoarse));
+    const GeoZonePathEvaluator::ZoneResult *const coarseGround = coarse.find(*groundZone);
+    QVERIFY(coarseGround);
+    QVERIFY(coarseGround->approximations.testFlag(GeoZonePathEvaluator::TerrainCoarse));
     QVERIFY(coarse.approximations.testFlag(GeoZonePathEvaluator::TerrainCoarse));
     // Only zones with limits above ground are affected
-    QCOMPARE(coarse.find(result.zones[1].zone)->approximations, GeoZonePathEvaluator::Approximations());
+    const GeoZonePathEvaluator::ZoneResult *const coarseCircle = coarse.find(result.zones[1].zone);
+    QVERIFY(coarseCircle);
+    QCOMPARE(coarseCircle->approximations, GeoZonePathEvaluator::Approximations());
 }
 
 void GeoZoneEvaluatorTest::_testApproximations()
@@ -1023,8 +1037,12 @@ void GeoZoneEvaluatorTest::_testApproximations()
         const auto it = std::find_if(zones.zoneList().cbegin(), zones.zoneList().cend(), [&identifier](const GeoZone *zone) { return zone->identifier() == identifier; });
         return (it == zones.zoneList().cend()) ? nullptr : *it;
     };
-    QVERIFY(zoneNamed(QStringLiteral("SCHEDULED"))->scheduleAssumed());
-    QVERIFY(!zoneNamed(QStringLiteral("LEVEL"))->scheduleAssumed());
+    const GeoZone *const levelZone = zoneNamed(QStringLiteral("LEVEL"));
+    const GeoZone *const unknownZone = zoneNamed(QStringLiteral("UNKNOWN"));
+    const GeoZone *const scheduledZone = zoneNamed(QStringLiteral("SCHEDULED"));
+    QVERIFY(levelZone && unknownZone && scheduledZone);
+    QVERIFY(scheduledZone->scheduleAssumed());
+    QVERIFY(!levelZone->scheduleAssumed());
 
     const QDateTime flightStart = _utc(QDate(2027, 6, 1), QTime(10, 0));
     const QDateTime flightEnd = flightStart.addSecs(600);
@@ -1033,18 +1051,26 @@ void GeoZoneEvaluatorTest::_testApproximations()
     path.setTimes(flightStart, flightEnd);
     const GeoZonePathEvaluator::Result result = evaluator.evaluate({ path });
     QCOMPARE(result.activeEnteredZones().count(), 3);
-    QCOMPARE(result.find(zoneNamed(QStringLiteral("LEVEL")))->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
-    QCOMPARE(result.find(zoneNamed(QStringLiteral("UNKNOWN")))->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::AltitudeReferenceUnknown));
-    QCOMPARE(result.find(zoneNamed(QStringLiteral("SCHEDULED")))->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::ScheduleAssumed));
+    const GeoZonePathEvaluator::ZoneResult *const levelResult = result.find(levelZone);
+    const GeoZonePathEvaluator::ZoneResult *const unknownResult = result.find(unknownZone);
+    const GeoZonePathEvaluator::ZoneResult *const scheduledResult = result.find(scheduledZone);
+    QVERIFY(levelResult && unknownResult && scheduledResult);
+    QCOMPARE(levelResult->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::FlightLevel));
+    QCOMPARE(unknownResult->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::AltitudeReferenceUnknown));
+    QCOMPARE(scheduledResult->approximations, GeoZonePathEvaluator::Approximations(GeoZonePathEvaluator::ScheduleAssumed));
     QCOMPARE(result.approximations, GeoZonePathEvaluator::FlightLevel | GeoZonePathEvaluator::AltitudeReferenceUnknown | GeoZonePathEvaluator::ScheduleAssumed);
     // Whatever the schedule, it isn't assumed
-    QCOMPARE(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy({ GeoZone::Prohibited })).evaluate({ path }).find(zoneNamed(QStringLiteral("SCHEDULED")))->approximations,
-             GeoZonePathEvaluator::Approximations());
+    const GeoZonePathEvaluator::Result anyTime = GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy({ GeoZone::Prohibited })).evaluate({ path });
+    const GeoZonePathEvaluator::ZoneResult *const anyTimeResult = anyTime.find(scheduledZone);
+    QVERIFY(anyTimeResult);
+    QCOMPARE(anyTimeResult->approximations, GeoZonePathEvaluator::Approximations());
 
     // Relative altitudes without their reference are unknown
     GeoZonePathEvaluator::Path relative = _evaluatorPath({ start, start.atDistanceAndAzimuth(1500, 90) }, { 100, 100 });
     relative.altitudeReference = GeoZonePathEvaluator::AltitudeReference::Relative;
-    QVERIFY(evaluator.evaluate({ relative }).zones[0].approximations.testFlag(GeoZonePathEvaluator::AltitudeReferenceUnknown));
+    const GeoZonePathEvaluator::Result relativeResult = evaluator.evaluate({ relative });
+    QVERIFY(!relativeResult.zones.isEmpty());
+    QVERIFY(relativeResult.zones[0].approximations.testFlag(GeoZonePathEvaluator::AltitudeReferenceUnknown));
 
     // Keys for exports and texts for the pilot
     QCOMPARE(GeoZonePathEvaluator::approximationTexts(result.approximations, true),
@@ -1089,10 +1115,14 @@ void GeoZoneEvaluatorTest::_testSchedules()
         return GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(flightStart, flightEnd), flightStart).evaluate({ path });
     };
 
+    // The crossing of the zone, null unless the result has the zone alone, crossed once
+    const auto onlyCrossing = [](const GeoZonePathEvaluator::Result &result) -> const GeoZonePathEvaluator::Crossing* {
+        return ((result.zones.count() == 1) && (result.zones[0].crossings.count() == 1)) ? &result.zones[0].crossings[0] : nullptr;
+    };
+
     // Entering after the zone becomes active
     GeoZonePathEvaluator::Result result = evaluateFrom(QTime(10, 0));
-    QCOMPARE(result.zones.count(), 1);
-    const GeoZonePathEvaluator::Crossing *crossing = result.zones[0].firstCrossing();
+    const GeoZonePathEvaluator::Crossing *crossing = onlyCrossing(result);
     QVERIFY(crossing);
     QVERIFY(qAbs(crossing->entry.time.secsTo(_utc(day, QTime(10, 19)))) <= 2);
     QVERIFY(crossing->active);
@@ -1100,39 +1130,49 @@ void GeoZoneEvaluatorTest::_testSchedules()
 
     // Entering just before and leaving after it becomes active
     result = evaluateFrom(QTime(9, 40));
-    QVERIFY(qAbs(result.zones[0].crossings[0].entry.time.secsTo(_utc(day, QTime(9, 59)))) <= 2);
-    QVERIFY(result.zones[0].crossings[0].active);
+    crossing = onlyCrossing(result);
+    QVERIFY(crossing);
+    QVERIFY(qAbs(crossing->entry.time.secsTo(_utc(day, QTime(9, 59)))) <= 2);
+    QVERIFY(crossing->active);
 
     // Leaving 10 minutes before it becomes active counts, since the take-off or the pace may differ from the estimate
     QCOMPARE(GeoZonePathEvaluator::defaultScheduleToleranceSecs, 15 * 60);
     result = evaluateFrom(QTime(9, 29));
-    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 50)))) <= 2);
-    QVERIFY(result.zones[0].crossings[0].active);
+    crossing = onlyCrossing(result);
+    QVERIFY(crossing);
+    QVERIFY(qAbs(crossing->exit.time.secsTo(_utc(day, QTime(9, 50)))) <= 2);
+    QVERIFY(crossing->active);
     QCOMPARE(result.activeEnteredZones().count(), 1);
     // Like entering 10 minutes after it ends
     result = evaluateFrom(QTime(11, 51));
-    QVERIFY(qAbs(result.zones[0].crossings[0].entry.time.secsTo(_utc(day, QTime(12, 10)))) <= 2);
-    QVERIFY(result.zones[0].crossings[0].active);
+    crossing = onlyCrossing(result);
+    QVERIFY(crossing);
+    QVERIFY(qAbs(crossing->entry.time.secsTo(_utc(day, QTime(12, 10)))) <= 2);
+    QVERIFY(crossing->active);
 
     // Leaving 30 minutes before it becomes active doesn't, although it is active during the flight
     result = evaluateFrom(QTime(9, 9));
-    QCOMPARE(result.zones.count(), 1);
+    crossing = onlyCrossing(result);
+    QVERIFY(crossing);
     QVERIFY(result.zones[0].entered());
     QVERIFY(!result.zones[0].active());
-    QVERIFY(!result.zones[0].crossings[0].active);
-    QVERIFY(qAbs(result.zones[0].crossings[0].exit.time.secsTo(_utc(day, QTime(9, 30)))) <= 2);
+    QVERIFY(!crossing->active);
+    QVERIFY(qAbs(crossing->exit.time.secsTo(_utc(day, QTime(9, 30)))) <= 2);
     QVERIFY(result.activeEnteredZones().isEmpty());
 
     // Without times the zone applies when active at some time of the flight, or whatever its schedule without one
     path.setTimes(QDateTime(), QDateTime());
-    QVERIFY(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(_utc(day, QTime(9, 30)), _utc(day, QTime(10, 30))))
-                .evaluate({ path }).zones[0].active());
-    QVERIFY(!GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(_utc(day, QTime(8, 0)), _utc(day, QTime(9, 0))))
-                .evaluate({ path }).zones[0].active());
-    QVERIFY(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(QDateTime(), QDateTime())).evaluate({ path }).zones[0].active());
+    // 1 when the zone applies to the path, 0 when it doesn't, -1 unless the result has the zone alone
+    const auto zoneActive = [&](const GeoZonePathEvaluator &evaluator) {
+        const GeoZonePathEvaluator::Result timeless = evaluator.evaluate({ path });
+        return (timeless.zones.count() == 1) ? (timeless.zones[0].active() ? 1 : 0) : -1;
+    };
+    QCOMPARE(zoneActive(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(_utc(day, QTime(9, 30)), _utc(day, QTime(10, 30))))), 1);
+    QCOMPARE(zoneActive(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(_utc(day, QTime(8, 0)), _utc(day, QTime(9, 0))))), 0);
+    QCOMPARE(zoneActive(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::mission(QDateTime(), QDateTime()))), 1);
     // Zones active now are those active at the evaluation time
-    QVERIFY(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::alerts(), _utc(day, QTime(11, 0))).evaluate({ path }).zones[0].active());
-    QVERIFY(!GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::alerts(), _utc(day, QTime(13, 0))).evaluate({ path }).zones[0].active());
+    QCOMPARE(zoneActive(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::alerts(), _utc(day, QTime(11, 0)))), 1);
+    QCOMPARE(zoneActive(GeoZonePathEvaluator(zones.catalog(), GeoZonePolicy::alerts(), _utc(day, QTime(13, 0)))), 0);
 }
 
 void GeoZoneEvaluatorTest::_testAntimeridianQueries()
