@@ -48,6 +48,7 @@ private slots:
     void _testDownloadSizeLimit();
     void _testPagedSizeLimit();
     void _testDownloadWithoutFile();
+    void _testDownloadFilesRemoved();
     void _testDownloadFailures();
     void _testDownloadRedirects();
     void _testProvenance();

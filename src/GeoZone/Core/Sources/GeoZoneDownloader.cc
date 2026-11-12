@@ -25,10 +25,25 @@
 #include <QtNetwork/QSslError>
 #endif
 
+#include <utility>
+
 GeoZoneDownloader::GeoZoneDownloader(QObject *parent)
     : QObject(parent)
     , _directory(QDir::tempPath())
 {
+}
+
+GeoZoneDownloader::~GeoZoneDownloader()
+{
+    // The replies end here without finishing: their callbacks aren't called, and nobody else knows their files
+    const QHash<const QObject*, Download> downloads = std::exchange(_downloads, {});
+    for (auto it = downloads.cbegin(); it != downloads.cend(); ++it) {
+        QObject *const reply = const_cast<QObject*>(it.key());
+        (void) disconnect(reply, nullptr, this, nullptr);
+        delete reply;
+        it->file->close();
+        (void) it->file->remove();
+    }
 }
 
 void GeoZoneDownloader::abort(const QString &tag)

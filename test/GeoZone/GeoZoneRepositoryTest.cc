@@ -1800,6 +1800,36 @@ void GeoZoneRepositoryTest::_testDownloadWithoutFile()
     QCOMPARE(downloader.count(), 0);
 }
 
+void GeoZoneRepositoryTest::_testDownloadFilesRemoved()
+{
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto files = [&dir]() { return QDir(dir.path()).entryList(QDir::Files); };
+    {
+        GeoZoneDownloader downloader;
+        downloader.setDirectory(dir.path());
+        // A download which is canceled leaves no file
+        std::optional<GeoZoneDownloader::Result> canceled;
+        downloader.get(server.url(QStringLiteral("/hang")), QString(), QString(), [&canceled](const GeoZoneDownloader::Result &result) { canceled = result; },
+                       QStringLiteral("canceled"));
+        QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, 1, stepTimeoutMSecs);
+        QCOMPARE(files().count(), 1);
+        downloader.abort(QStringLiteral("canceled"));
+        QTRY_VERIFY_WITH_TIMEOUT(canceled.has_value(), stepTimeoutMSecs);
+        QCOMPARE(canceled->status, GeoZoneDownloader::Result::Status::Failed);
+        QCOMPARE(files(), QStringList());
+
+        // Nor does one still in progress when its downloader goes, like when the application quits
+        downloader.get(server.url(QStringLiteral("/hang")), QString(), QString(), [](const GeoZoneDownloader::Result &) {});
+        QTRY_COMPARE_WITH_TIMEOUT(server.requestCount, 2, stepTimeoutMSecs);
+        QCOMPARE(files().count(), 1);
+        QVERIFY(files().constFirst().endsWith(QStringLiteral(".part")));
+    }
+    QCOMPARE(files(), QStringList());
+}
+
 void GeoZoneRepositoryTest::_testDownloadFailures()
 {
     TestFeedServer server;

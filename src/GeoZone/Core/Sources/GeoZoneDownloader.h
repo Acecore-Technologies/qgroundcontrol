@@ -75,6 +75,8 @@ public:
     static constexpr int maxRedirects = 10;
 
     explicit GeoZoneDownloader(QObject *parent = nullptr);
+    /// Removes the files of the downloads still in progress, whose callbacks aren't called
+    ~GeoZoneDownloader() override;
 
     /// Starts a download. The callback is called once, after the call returned, unless the downloader is destroyed
     /// first. A download whose file can't be created in directory() fails without a request.
