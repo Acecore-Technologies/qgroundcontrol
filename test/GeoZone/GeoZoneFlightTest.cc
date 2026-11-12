@@ -1643,8 +1643,18 @@ void GeoZoneFlightTest::_testArduPilotTakeoff()
     QTRY_COMPARE(vehicle->flightMode(), QStringLiteral("Guided"));
     QTRY_VERIFY_WITH_TIMEOUT(vehicle->armed(), 10000);
     QTRY_COMPARE_WITH_TIMEOUT(vehicle->altitudeRelative()->rawValue().toInt(), 300, 30000);
-    QTRY_VERIFY_WITH_TIMEOUT(ACTIVE(monitor).inside(), 5000);
-    QTRY_COMPARE_WITH_TIMEOUT(spiedAlerts(alertSpy).filter(QStringLiteral("Entered geozone CTR")).count(), 2, 5000);
+    // The monitor evaluates every second: under load its timer and the position messages come late
+    if (!QTest::qWaitFor([&monitor]() { return monitor.activeMonitor() && monitor.activeMonitor()->inside(); }, 20000)) {
+        const GeoZoneVehicleMonitor &active = ACTIVE(monitor);
+        const GeoZone::Position &position = active.position();
+        QFAIL(qPrintable(QStringLiteral("Not inside: unavailable %1 position %2 amsl %3 terrain %4 source %5 nearby %6 zones %7 | vehicle %8 amsl %9 rel %10 armed %11 mode %12 | alerts %13")
+                             .arg(active.positionUnavailable()).arg(position.coordinate.toString(QGeoCoordinate::Degrees)).arg(position.altitudeAMSL).arg(position.terrainAMSL)
+                             .arg(static_cast<int>(active.terrainSource())).arg(active.nearby().count()).arg(manager->zoneCount())
+                             .arg(vehicle->coordinate().toString(QGeoCoordinate::Degrees)).arg(vehicle->altitudeAMSL()->rawValue().toDouble())
+                             .arg(vehicle->altitudeRelative()->rawValue().toDouble()).arg(vehicle->armed()).arg(vehicle->flightMode())
+                             .arg(spiedAlerts(alertSpy).join(QStringLiteral(" / ")))));
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(spiedAlerts(alertSpy).filter(QStringLiteral("Entered geozone CTR")).count(), 2, 20000);
 
     // The pilot changes modes like with the flight mode menu
     vehicle->setFlightMode(QStringLiteral("Loiter"));

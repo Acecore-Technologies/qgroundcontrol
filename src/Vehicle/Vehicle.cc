@@ -3732,6 +3732,16 @@ void Vehicle::_updateAltAboveTerrain()
     int altitudeAboveTerrQueryMinInterval = 500;
     if (_altitudeAboveTerrQueryTimer.elapsed() < altitudeAboveTerrQueryMinInterval) {
         // qCDebug(VehicleLog) << "_updateAltAboveTerrain: minimum 500ms interval between queries not reached, returning";
+        // Looked at again after the interval: a vehicle which stops right after this change sends no further one, and
+        // would keep the height above terrain of its previous position
+        if (!_altitudeAboveTerrQueryDeferred) {
+            _altitudeAboveTerrQueryDeferred = true;
+            const int remaining = qMax(1, altitudeAboveTerrQueryMinInterval - static_cast<int>(_altitudeAboveTerrQueryTimer.elapsed()));
+            QTimer::singleShot(remaining, this, [this]() {
+                _altitudeAboveTerrQueryDeferred = false;
+                _updateAltAboveTerrain();
+            });
+        }
         return;
     }
     // Sanity check, although it is very unlikely that vehicle coordinate is not valid

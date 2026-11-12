@@ -38,9 +38,10 @@
 ///
 /// Changes outside the module which don't depend on it and could go upstream on their own: those of QGCFileDialog.qml,
 /// ToolStripDropPanel.qml and FlyViewPreFlightChecklistPopup.qml, embedded and groupsReset of PreFlightCheckList.qml,
-/// the distance axis of TerrainStatus.qml, Vehicle clearing altitudeAboveTerr when the terrain query fails,
-/// QGCMapPolygon and QGCMapPolyline destroyed after the application, and the modes of the ArduPilot vehicles of
-/// MockLink. docs/en/qgc-dev-guide/geozones.md lists them all with their lines, see Upstream Footprint.
+/// the distance axis of TerrainStatus.qml, Vehicle clearing altitudeAboveTerr when the terrain query fails and
+/// querying the terrain for a position change which came too early after the previous query, QGCMapPolygon and
+/// QGCMapPolyline destroyed after the application, and the modes of the ArduPilot vehicles of MockLink.
+/// docs/en/qgc-dev-guide/geozones.md lists them all with their lines, see Upstream Footprint.
 ///
 /// Builds with -DQGC_DISABLE_GEOZONE=ON leave the module out: the C++ hooks are within #ifndef QGC_DISABLE_GEOZONE and
 /// the QML ones get the hidden no-op types of the stub module in src/GeoZone/Stub.
