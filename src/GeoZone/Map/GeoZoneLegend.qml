@@ -187,6 +187,10 @@ ColumnLayout {
             return names
         }
 
+        // A new list of sources selects the first choice, All sources, while the source of the filter is the same:
+        // the source shown is the one of the filter again
+        onModelChanged: sourceCombo.currentIndex = Qt.binding(() => root._sourceIndex)
+
         onActivated: (index) => {
             root._settings.mapSource.rawValue = index > 0 ? root._sources.get(index - 1).key : ""
             // Selecting in the combo box replaced the binding
