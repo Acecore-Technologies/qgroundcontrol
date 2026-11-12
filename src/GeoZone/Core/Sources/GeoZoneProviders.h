@@ -181,8 +181,11 @@ public:
 private:
     /// @return Value of the first number member with the name in the bytes, -1 without
     static qint64 _jsonCount(const QByteArray &head, const QByteArray &tail, const char *name);
-    /// @return The URL with the query item set, replacing an item with the same name in any case
+    /// @return The URL with the query item set, replacing an item with the same name in any case. The other items stay
+    ///         as they are encoded.
     static QString _withQueryItem(const QString &url, const QString &name, const QString &value);
+    /// @return Decoded value of the query item of the URL with the name in any case, empty without
+    static QString _queryItemValue(const QString &url, const QString &name);
     /// @return The services of the catalogue, with their names and notes as published, for lookups
     static QList<Service> _services();
     /// @return The service whose feed URL this is, or whose area URL it is, nullptr for others

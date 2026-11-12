@@ -3441,4 +3441,36 @@ void GeoZoneParserTest::_testCatalogueVersionAndAreaUrl()
     QCOMPARE(parsed.warnings, expected);
 }
 
+void GeoZoneParserTest::_testPageUrls()
+{
+    using Paging = GeoZoneProviders::Paging;
+    // The further pages of a response are asked with the query of the first: its items stay as they were encoded. A
+    // where clause comparing with 'A+B' and '50%%25' must not become one with a space, or with another escape.
+    const QString where = QStringLiteral("where=NAME%3D%27A%2BB%27%20AND%20PCT%20LIKE%20%2750%25%2525%27");
+    const QString arcGisBase = QStringLiteral("https://services.example.com/arcgis/rest/services/Layer/FeatureServer/0/query?") + where +
+                               QStringLiteral("&geometry=1,2,3,4&geometryType=esriGeometryEnvelope&f=geojson");
+    // The offset and the page size are read whatever the case of their names, and the offset continues from the first
+    const QString arcGisUrl = arcGisBase + QStringLiteral("&RESULTRECORDCOUNT=1000&ResultOffset=500");
+    const Paging arcGis = GeoZoneProviders::paging(arcGisUrl, R"({"type":"FeatureCollection","properties":{"exceededTransferLimit":true},"features":[)", QByteArray());
+    QCOMPARE(arcGis.scheme, Paging::Scheme::ArcGisOffset);
+    QCOMPARE(arcGis.pageSize, 1000);
+    QCOMPARE(GeoZoneProviders::pageUrl(arcGisUrl, arcGis, 2), arcGisBase + QStringLiteral("&RESULTRECORDCOUNT=1000&resultOffset=2500"));
+
+    // A WFS request with a filter, its request and start index in any case
+    const QString wfsBase = QStringLiteral("https://zones.example.com/wfs?SERVICE=WFS&request=getfeature&TYPENAMES=ns%3Alayer&CQL_FILTER=name%20LIKE%20%27a%2Bb%25%27");
+    const QString wfsUrl = wfsBase + QStringLiteral("&startindex=0&BBOX=1,2,3,4,EPSG:4326");
+    QCOMPARE(GeoZoneProviders::wfsPageUrl(wfsUrl, 200), wfsBase + QStringLiteral("&BBOX=1,2,3,4,EPSG:4326&STARTINDEX=200"));
+    const Paging wfs = GeoZoneProviders::paging(wfsUrl, R"({"type":"FeatureCollection","numberMatched":500,"numberReturned":100,"features":[)", QByteArray());
+    QCOMPARE(wfs.scheme, Paging::Scheme::WfsStartIndex);
+    QCOMPARE(GeoZoneProviders::pageUrl(wfsUrl, wfs, 3), wfsBase + QStringLiteral("&BBOX=1,2,3,4,EPSG:4326&STARTINDEX=300"));
+    QCOMPARE(GeoZoneProviders::wfsPageUrl(QStringLiteral("https://zones.example.com/wfs?request=GetCapabilities"), 200), QString());
+
+    // Numbered pages continue from the page asked first, whatever the case of its name
+    const QString numbered = QStringLiteral("https://api.example.com/airspaces?search=a%2Bb&limit=100&PAGE=2");
+    const Paging pages = GeoZoneProviders::paging(numbered, R"({"limit":100,"totalPages":5,"page":2,"items":[)", QByteArray());
+    QCOMPARE(pages.scheme, Paging::Scheme::PageNumber);
+    QCOMPARE(pages.pageCount, 3);
+    QCOMPARE(GeoZoneProviders::pageUrl(numbered, pages, 1), QStringLiteral("https://api.example.com/airspaces?search=a%2Bb&limit=100&page=3"));
+}
+
 GEOZONE_TEST(GeoZoneParserTest)

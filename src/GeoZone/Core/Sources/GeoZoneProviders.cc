@@ -497,18 +497,9 @@ GeoZoneProviders::Paging GeoZoneProviders::paging(const QString &url, const QByt
         return paging;
     }
 
-    const QUrlQuery query{QUrl(url)};
-    const auto queryValue = [&query](const QString &name) {
-        for (const auto &[key, value] : query.queryItems(QUrl::FullyDecoded)) {
-            if (key.compare(name, Qt::CaseInsensitive) == 0) {
-                return value;
-            }
-        }
-        return QString();
-    };
     // ArcGIS doesn't count the features, the page size is the one requested
     if (arcGisExceeded(head, tail)) {
-        const qint64 pageSize = queryValue(QStringLiteral("resultRecordCount")).toLongLong();
+        const qint64 pageSize = _queryItemValue(url, QStringLiteral("resultRecordCount")).toLongLong();
         if (pageSize > 0) {
             paging.scheme = Paging::Scheme::ArcGisOffset;
             paging.pageSize = pageSize;
@@ -529,16 +520,15 @@ GeoZoneProviders::Paging GeoZoneProviders::paging(const QString &url, const QByt
 
 QString GeoZoneProviders::pageUrl(const QString &url, const Paging &paging, int page)
 {
-    const QUrlQuery query{QUrl(url)};
     switch (paging.scheme) {
     case Paging::Scheme::WfsStartIndex:
         return wfsPageUrl(url, paging.pageSize * page);
     case Paging::Scheme::ArcGisOffset: {
-        const qint64 offset = query.queryItemValue(QStringLiteral("resultOffset")).toLongLong();
+        const qint64 offset = _queryItemValue(url, QStringLiteral("resultOffset")).toLongLong();
         return _withQueryItem(url, QStringLiteral("resultOffset"), QString::number(offset + (paging.pageSize * page)));
     }
     case Paging::Scheme::PageNumber: {
-        const qint64 first = (std::max)(qint64{ 1 }, query.queryItemValue(QStringLiteral("page")).toLongLong());
+        const qint64 first = (std::max)(qint64{ 1 }, _queryItemValue(url, QStringLiteral("page")).toLongLong());
         return _withQueryItem(url, QStringLiteral("page"), QString::number(first + page));
     }
     case Paging::Scheme::None:
@@ -547,41 +537,51 @@ QString GeoZoneProviders::pageUrl(const QString &url, const Paging &paging, int 
     return QString();
 }
 
+namespace {
+
+/// @return true when the percent-encoded name of a query item is the name, in any case
+bool isQueryItem(const QString &encodedName, const QString &name)
+{
+    return QUrl::fromPercentEncoding(encodedName.toUtf8()).compare(name, Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
+
+QString GeoZoneProviders::_queryItemValue(const QString &url, const QString &name)
+{
+    const QUrlQuery query{ QUrl(url) };
+    for (const auto &[key, value] : query.queryItems(QUrl::FullyEncoded)) {
+        if (isQueryItem(key, name)) {
+            return QUrl::fromPercentEncoding(value.toUtf8());
+        }
+    }
+    return QString();
+}
+
+// The page URLs keep the other query items as they are encoded: decoded and encoded again, %2B would become a plus
+// sign, which servers read as a space, and %25 a percent sign starting another escape
+
 QString GeoZoneProviders::_withQueryItem(const QString &url, const QString &name, const QString &value)
 {
     QUrl pageUrl(url);
-    QUrlQuery query(pageUrl);
+    const QUrlQuery query(pageUrl);
     QList<std::pair<QString, QString>> items;
-    for (const auto &[key, itemValue] : query.queryItems(QUrl::FullyDecoded)) {
-        if (key.compare(name, Qt::CaseInsensitive) != 0) {
+    for (const auto &[key, itemValue] : query.queryItems(QUrl::FullyEncoded)) {
+        if (!isQueryItem(key, name)) {
             items.append({ key, itemValue });
         }
     }
     items.append({ name, value });
-    query.setQueryItems(items);
-    pageUrl.setQuery(query);
-    return pageUrl.toString();
+    QUrlQuery pageQuery;
+    pageQuery.setQueryItems(items);
+    pageUrl.setQuery(pageQuery);
+    return pageUrl.toString(QUrl::FullyEncoded);
 }
 
 QString GeoZoneProviders::wfsPageUrl(const QString &url, qint64 startIndex)
 {
-    QUrl pageUrl(url);
-    QUrlQuery query(pageUrl);
-    bool getFeature = false;
-    QList<std::pair<QString, QString>> items;
-    for (const auto &[key, value] : query.queryItems(QUrl::FullyDecoded)) {
-        if (key.compare(QStringLiteral("request"), Qt::CaseInsensitive) == 0) {
-            getFeature = (value.compare(QStringLiteral("GetFeature"), Qt::CaseInsensitive) == 0);
-        }
-        if (key.compare(QStringLiteral("startIndex"), Qt::CaseInsensitive) != 0) {
-            items.append({ key, value });
-        }
-    }
-    if (!getFeature) {
+    if (_queryItemValue(url, QStringLiteral("request")).compare(QStringLiteral("GetFeature"), Qt::CaseInsensitive) != 0) {
         return QString();
     }
-    items.append({ QStringLiteral("STARTINDEX"), QString::number(startIndex) });
-    query.setQueryItems(items);
-    pageUrl.setQuery(query);
-    return pageUrl.toString();
+    return _withQueryItem(url, QStringLiteral("STARTINDEX"), QString::number(startIndex));
 }
