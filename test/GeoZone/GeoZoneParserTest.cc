@@ -3026,6 +3026,27 @@ void GeoZoneParserTest::_testParseCacheRoundTrip()
     QVERIFY(hugeResult.zones.isEmpty());
 }
 
+void GeoZoneParserTest::_testParseCacheChecksum()
+{
+    // The checksum of a cache takes its payload in chunks whose size every build can hold: on 32 bit builds, like
+    // armeabi-v7a, a size can't hold the largest length zlib takes, which made the length of the chunk wrap around
+    QVERIFY(GeoZoneParseCache::checksumChunkSize > 0);
+    QVERIFY(qint64{ GeoZoneParseCache::checksumChunkSize } <= qint64{ (std::numeric_limits<qint32>::max)() });
+
+    // The CRC-32 of the bytes, whatever the chunks
+    QCOMPARE(GeoZoneParseCache::checksum("123456789"), quint32{ 0xCBF43926 });
+    QCOMPARE(GeoZoneParseCache::checksum(QByteArrayView()), quint32{ 0 });
+    QByteArray bytes(1000, Qt::Uninitialized);
+    for (qsizetype i = 0; i < bytes.size(); i++) {
+        bytes[i] = static_cast<char>((i * 31) ^ (i >> 3));
+    }
+    const quint32 whole = GeoZoneParseCache::checksum(bytes);
+    for (const qsizetype chunkSize : { qsizetype{ 1 }, qsizetype{ 7 }, qsizetype{ 999 }, qsizetype{ 1000 }, qsizetype{ 1001 }, qsizetype{ 0 }, qsizetype{ -1 } }) {
+        QCOMPARE(GeoZoneParseCache::checksum(bytes, chunkSize), whole);
+    }
+    QVERIFY(GeoZoneParseCache::checksum(bytes.left(999)) != whole);
+}
+
 void GeoZoneParserTest::_testParseCacheValidation()
 {
     const QTemporaryDir dir;

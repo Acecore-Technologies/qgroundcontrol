@@ -33,6 +33,12 @@ public:
     /// Of the parse result, caches written by another version of Qt are parsed again
     static constexpr QDataStream::Version streamVersion = QDataStream::Qt_DefaultCompiledVersion;
 
+    /// Largest number of bytes the checksum takes at once. It fits the sizes of every build: a qsizetype of 32 bits
+    /// can't hold the largest length zlib takes.
+    static constexpr qsizetype checksumChunkSize = qsizetype{ 1 } << 30;
+    /// @return CRC-32 of the bytes, computed in chunks of at most chunkSize
+    static quint32 checksum(QByteArrayView bytes, qsizetype chunkSize = checksumChunkSize);
+
     /// What the parse result depends on besides the bytes of the file
     struct Key {
         QString language;

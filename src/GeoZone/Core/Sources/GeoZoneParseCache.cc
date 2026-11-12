@@ -31,16 +31,6 @@ constexpr quint32 kMagic = 0x475A5043;  // "GZPC"
 constexpr QDataStream::Version kHeaderStreamVersion = QDataStream::Qt_6_0;
 constexpr qint64 kModifiedOffset = 20;  ///< Of the modification time of the file, after the magic, versions and size
 
-quint32 checksum(QByteArrayView bytes)
-{
-    uLong crc = crc32(0L, Z_NULL, 0);
-    for (qsizetype offset = 0; offset < bytes.size(); offset += std::numeric_limits<uInt>::max()) {
-        const qsizetype length = (std::min)(bytes.size() - offset, static_cast<qsizetype>(std::numeric_limits<uInt>::max()));
-        crc = crc32(crc, reinterpret_cast<const Bytef*>(bytes.data() + offset), static_cast<uInt>(length));
-    }
-    return static_cast<quint32>(crc);
-}
-
 /// @return Hash of the bytes of the file, empty when it can't be read
 QByteArray hashFile(const QString &filePath)
 {
@@ -58,6 +48,20 @@ QByteArray hashFile(const QString &filePath)
 }
 
 } // namespace
+
+quint32 GeoZoneParseCache::checksum(QByteArrayView bytes, qsizetype chunkSize)
+{
+    static_assert(static_cast<quint64>(checksumChunkSize) <= quint64{ (std::numeric_limits<uInt>::max)() }, "A chunk is a length zlib takes");
+    chunkSize = std::clamp(chunkSize, qsizetype{ 1 }, checksumChunkSize);
+    uLong crc = crc32(0L, Z_NULL, 0);
+    // By what is left, so that no offset is computed past the end
+    while (!bytes.isEmpty()) {
+        const QByteArrayView chunk = bytes.first((std::min)(bytes.size(), chunkSize));
+        crc = crc32(crc, reinterpret_cast<const Bytef*>(chunk.data()), static_cast<uInt>(chunk.size()));
+        bytes = bytes.sliced(chunk.size());
+    }
+    return static_cast<quint32>(crc);
+}
 
 QString GeoZoneParseCache::path(const QString &filePath)
 {
