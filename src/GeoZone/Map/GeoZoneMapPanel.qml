@@ -207,6 +207,9 @@ ColumnLayout {
         visible:                root.map !== null && areaButton.checked
 
         readonly property var   _providers:     root._geoZoneManager.areaProviders
+        /// The provider chosen, null when the feed catalogue has none serving zones by area
+        readonly property var   _provider:      (areaProviderCombo.currentIndex >= 0 && areaProviderCombo.currentIndex < _providers.length) ?
+                                                    _providers[areaProviderCombo.currentIndex] : null
         readonly property var   _mapArea:       root.map ? root.map.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
         readonly property bool  _areaTooLarge:  _mapArea.isValid && (_mapArea.width > 1 || _mapArea.height > 1)
         // Providers whose download covers the map area already, which is extended by moving or zooming out the map
@@ -241,8 +244,12 @@ ColumnLayout {
 
             QGCButton {
                 text:       qsTr("Download")
-                enabled:    !areaColumn._areaTooLarge && !root._geoZoneManager.repository.busy && areaProviderCombo.currentEnabled
-                onClicked:  root._geoZoneManager.addArea(areaColumn._providers[areaProviderCombo.currentIndex].id, areaColumn._mapArea)
+                enabled:    areaColumn._provider !== null && !areaColumn._areaTooLarge && !root._geoZoneManager.repository.busy && areaProviderCombo.currentEnabled
+                onClicked: {
+                    if (areaColumn._provider) {
+                        root._geoZoneManager.addArea(areaColumn._provider.id, areaColumn._mapArea)
+                    }
+                }
             }
         }
 
@@ -250,8 +257,9 @@ ColumnLayout {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
-            color:              areaColumn._areaTooLarge ? qgcPal.warningText : qgcPal.text
-            text:               areaColumn._areaTooLarge ? qsTr("Zoom in to an area up to about 100 km wide.") :
+            color:              (areaColumn._provider === null || areaColumn._areaTooLarge) ? qgcPal.warningText : qgcPal.text
+            text:               areaColumn._provider === null ? qsTr("The feed catalogue has no service which serves zones by area.") :
+                                areaColumn._areaTooLarge ? qsTr("Zoom in to an area up to about 100 km wide.") :
                                     (!areaProviderCombo.currentEnabled ? qsTr("The zones of the map area are downloaded already. Move the map or zoom out to download more.") :
                                                                          qsTr("Downloaded areas are kept for offline use and refreshed like feeds."))
         }
