@@ -10,6 +10,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneParserUtils.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QRegularExpression>
 
@@ -50,8 +51,9 @@ QString _trimmed(const QJsonObject &properties, const char *name)
 
 /// Sets a limit of the volume, in feet, from the value, unit and code of the FAA airspace layers: SFC above ground,
 /// MSL (or no code) above mean sea level, STD flight levels, UNLTD without limit. Unknown limits stay unspecified.
-void _setFaaLimit(GeoZone::Volume &volume, bool upper, const QJsonValue &valueJson, const QString &unit, const QString &code)
+void _setFaaLimit(GeoZone::Volume &volume, GeoZoneVertical::Limit side, const QJsonValue &valueJson, const QString &unit, const QString &code)
 {
+    const bool upper = (side == GeoZoneVertical::Limit::Upper);
     double value = _number(valueJson);
     QString reference = code.isEmpty() ? QStringLiteral("MSL") : code;
     if (code == QLatin1String("UNLTD")) {
@@ -103,8 +105,9 @@ std::optional<FaaLimitText> _faaLimitPart(const QString &text)
 ///         the floor. The limit is unknown, with an issue, unless the whole text is understood, tells its reference
 ///         and gives a ceiling above the surface: the restriction then applies at all altitudes on that side rather
 ///         than up to a wrong ceiling.
-FaaLimitText _faaLimitText(const QString &text, bool upper, QStringList &issues)
+FaaLimitText _faaLimitText(const QString &text, GeoZoneVertical::Limit side, QStringList &issues)
 {
+    const bool upper = (side == GeoZoneVertical::Limit::Upper);
     const QString value = text.trimmed().toUpper();
     if (value.isEmpty()) {
         return FaaLimitText();
@@ -229,8 +232,8 @@ GeoZoneFormat::FeatureResult _nationalSecurityFeature(const QJsonObject &feature
 
     GeoZone::Volume layer;
     layer.feet = true;
-    const FaaLimitText floor = _faaLimitText(_trimmed(properties, "Floor"), false, zone.issues);
-    const FaaLimitText ceiling = _faaLimitText(_trimmed(properties, "Ceiling"), true, zone.issues);
+    const FaaLimitText floor = _faaLimitText(_trimmed(properties, "Floor"), GeoZoneVertical::Limit::Lower, zone.issues);
+    const FaaLimitText ceiling = _faaLimitText(_trimmed(properties, "Ceiling"), GeoZoneVertical::Limit::Upper, zone.issues);
     layer.lowerLimit = floor.feet;
     layer.upperLimit = ceiling.feet;
     layer.setReferences(floor.reference, ceiling.reference);
@@ -307,8 +310,8 @@ GeoZoneFormat::FeatureResult _airspaceFeature(const QJsonObject &feature, const 
 
     GeoZone::Volume layer;
     layer.feet = true;
-    _setFaaLimit(layer, false, properties.value(QStringLiteral("LOWER_VAL")), _trimmed(properties, "LOWER_UOM"), _trimmed(properties, "LOWER_CODE"));
-    _setFaaLimit(layer, true, properties.value(QStringLiteral("UPPER_VAL")), _trimmed(properties, "UPPER_UOM"), _trimmed(properties, "UPPER_CODE"));
+    _setFaaLimit(layer, GeoZoneVertical::Limit::Lower, properties.value(QStringLiteral("LOWER_VAL")), _trimmed(properties, "LOWER_UOM"), _trimmed(properties, "LOWER_CODE"));
+    _setFaaLimit(layer, GeoZoneVertical::Limit::Upper, properties.value(QStringLiteral("UPPER_VAL")), _trimmed(properties, "UPPER_UOM"), _trimmed(properties, "UPPER_CODE"));
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);
 }

@@ -10,6 +10,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneParserUtils.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QSet>
 
@@ -49,8 +50,9 @@ QString _typeName(int type)
 
 /// Sets a limit of the volume in feet from an OpenAIP limit: value, unit (0 m, 1 ft, 6 FL) and reference datum
 /// (0 GND, 1 MSL, 2 STD). Unknown units leave the limit unspecified with an issue.
-void _openAipLimit(const QJsonObject &limit, bool upper, GeoZone::Volume &volume, QStringList &issues)
+void _openAipLimit(const QJsonObject &limit, GeoZoneVertical::Limit side, GeoZone::Volume &volume, QStringList &issues)
 {
+    const bool upper = (side == GeoZoneVertical::Limit::Upper);
     double value = _number(limit.value(QStringLiteral("value")));
     const int unit = limit.value(QStringLiteral("unit")).toInt(-1);
     const int datum = limit.value(QStringLiteral("referenceDatum")).toInt(-1);
@@ -211,8 +213,8 @@ GeoZoneFormat::FeatureResult _openAipFeature(const QJsonObject &feature, GeoZone
 
     GeoZone::Volume layer;
     layer.feet = true;
-    _openAipLimit(item.value(QStringLiteral("lowerLimit")).toObject(), false, layer, zone.issues);
-    _openAipLimit(item.value(QStringLiteral("upperLimit")).toObject(), true, layer, zone.issues);
+    _openAipLimit(item.value(QStringLiteral("lowerLimit")).toObject(), GeoZoneVertical::Limit::Lower, layer, zone.issues);
+    _openAipLimit(item.value(QStringLiteral("upperLimit")).toObject(), GeoZoneVertical::Limit::Upper, layer, zone.issues);
     // The exports keep the geometry in the feature, the API in the item
     const QJsonObject geometry = feature.contains(QStringLiteral("properties")) ? feature.value(QStringLiteral("geometry")).toObject() : item.value(QStringLiteral("geometry")).toObject();
     _appendHorizontalGeometry(geometry, layer, 1.0, zone.volumes, zone.issues);

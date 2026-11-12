@@ -26,6 +26,12 @@ constexpr double kPressureExponent = 0.190263;
 /// Meters of height change between two positions below which the path between them is level
 constexpr double kLevelHeightChange = 1e-9;
 
+/// @return true if the volume has the limit, see hasFloor and hasCeiling
+bool hasLimit(const GeoZone::Volume &volume, Limit limit)
+{
+    return (limit == Limit::Upper) ? hasCeiling(volume) : hasFloor(volume);
+}
+
 } // namespace
 
 bool hasFloor(const GeoZone::Volume &volume)
@@ -44,15 +50,21 @@ bool aboveGround(const GeoZone::Volume &volume)
            (hasCeiling(volume) && (volume.upperReference == GeoZone::VerticalReference::Ground));
 }
 
-double comparableLimit(const GeoZone::Volume &volume, bool upper)
+double comparableLimit(const GeoZone::Volume &volume, Limit limit)
 {
+    const bool upper = (limit == Limit::Upper);
     const double meters = (upper ? volume.upperLimit : volume.lowerLimit) * (volume.feet ? metersPerFoot : 1.0);
-    if ((upper ? volume.upperReference : volume.lowerReference) != GeoZone::VerticalReference::FlightLevel) {
+    if (reference(volume, limit) != GeoZone::VerticalReference::FlightLevel) {
         return meters;
     }
     const double amsl = pressureAltitudeToAMSL(meters, GeoZoneEnvironment::qnhHPa());
     const double margin = flightLevelMargin * std::abs(amsl);
     return upper ? (amsl + margin) : (amsl - margin);
+}
+
+GeoZone::VerticalReference reference(const GeoZone::Volume &volume, Limit limit)
+{
+    return (limit == Limit::Upper) ? volume.upperReference : volume.lowerReference;
 }
 
 std::optional<std::pair<double, double>> referenceHeights(GeoZone::VerticalReference reference, const GeoZone::Position &from, const GeoZone::Position &to)
@@ -82,24 +94,24 @@ std::optional<std::pair<double, double>> referenceHeights(GeoZone::VerticalRefer
     return std::make_pair(height1, height2);
 }
 
-std::optional<Bound> bound(const GeoZone::Volume &volume, bool upper, const GeoZone::Position &from, const GeoZone::Position &to)
+std::optional<Bound> bound(const GeoZone::Volume &volume, Limit limit, const GeoZone::Position &from, const GeoZone::Position &to)
 {
-    if (!(upper ? hasCeiling(volume) : hasFloor(volume))) {
+    if (!hasLimit(volume, limit)) {
         return std::nullopt;
     }
-    const auto heights = referenceHeights(upper ? volume.upperReference : volume.lowerReference, from, to);
+    const auto heights = referenceHeights(reference(volume, limit), from, to);
     if (!heights) {
         return std::nullopt;
     }
-    return Bound{ comparableLimit(volume, upper), heights->first, heights->second };
+    return Bound{ comparableLimit(volume, limit), heights->first, heights->second };
 }
 
 bool overlap(const GeoZone::Volume &volume, const GeoZone::Position &from, const GeoZone::Position &to, double margin)
 {
-    if (const auto floor = bound(volume, false, from, to); floor && ((std::max)(floor->from, floor->to) < (floor->limit - margin))) {
+    if (const auto floor = bound(volume, Limit::Lower, from, to); floor && ((std::max)(floor->from, floor->to) < (floor->limit - margin))) {
         return false;
     }
-    if (const auto ceiling = bound(volume, true, from, to); ceiling && ((std::min)(ceiling->from, ceiling->to) > (ceiling->limit + margin))) {
+    if (const auto ceiling = bound(volume, Limit::Upper, from, to); ceiling && ((std::min)(ceiling->from, ceiling->to) > (ceiling->limit + margin))) {
         return false;
     }
     return true;
@@ -110,11 +122,12 @@ std::optional<std::pair<double, double>> interval(const GeoZone::Volume &volume,
     double first = 0;
     double last = 1;
     // Keeps the fractions at which the height in the datum of the limit is on the inner side of it
-    const auto constrain = [&first, &last, &volume, &from, &to, margin](bool upper) {
-        const auto limit = bound(volume, upper, from, to);
+    const auto constrain = [&first, &last, &volume, &from, &to, margin](Limit side) {
+        const auto limit = bound(volume, side, from, to);
         if (!limit) {
             return;
         }
+        const bool upper = (side == Limit::Upper);
         const double value = upper ? (limit->limit + margin) : (limit->limit - margin);
         const double slope = limit->to - limit->from;
         if (std::abs(slope) < kLevelHeightChange) {
@@ -131,8 +144,8 @@ std::optional<std::pair<double, double>> interval(const GeoZone::Volume &volume,
             first = (std::max)(first, crossing);
         }
     };
-    constrain(false);
-    constrain(true);
+    constrain(Limit::Lower);
+    constrain(Limit::Upper);
     if (first > last) {
         return std::nullopt;
     }
@@ -141,10 +154,10 @@ std::optional<std::pair<double, double>> interval(const GeoZone::Volume &volume,
 
 GeoZone::VerticalPosition position(const GeoZone::Volume &volume, const GeoZone::Position &position)
 {
-    if (const auto floor = bound(volume, false, position, position); floor && (floor->from < floor->limit)) {
+    if (const auto floor = bound(volume, Limit::Lower, position, position); floor && (floor->from < floor->limit)) {
         return GeoZone::VerticalPosition::Below;
     }
-    if (const auto ceiling = bound(volume, true, position, position); ceiling && (ceiling->from > ceiling->limit)) {
+    if (const auto ceiling = bound(volume, Limit::Upper, position, position); ceiling && (ceiling->from > ceiling->limit)) {
         return GeoZone::VerticalPosition::Above;
     }
     return GeoZone::VerticalPosition::Inside;
@@ -153,11 +166,11 @@ GeoZone::VerticalPosition position(const GeoZone::Volume &volume, const GeoZone:
 Approximations approximations(const GeoZone::Volume &volume, const GeoZone::Position &from, const GeoZone::Position &to)
 {
     Approximations result;
-    for (const bool upper : { false, true }) {
-        if (!(upper ? hasCeiling(volume) : hasFloor(volume))) {
+    for (const Limit limit : { Limit::Lower, Limit::Upper }) {
+        if (!hasLimit(volume, limit)) {
             continue;
         }
-        switch (upper ? volume.upperReference : volume.lowerReference) {
+        switch (reference(volume, limit)) {
         case GeoZone::VerticalReference::Unknown:
             result |= ReferenceUnknown;
             continue;
@@ -180,14 +193,14 @@ Approximations approximations(const GeoZone::Volume &volume, const GeoZone::Posi
     return result;
 }
 
-double limitAMSL(const GeoZone::Volume &volume, bool upper, const GeoZone::Position &position)
+double limitAMSL(const GeoZone::Volume &volume, Limit limit, const GeoZone::Position &position)
 {
-    if (!(upper ? hasCeiling(volume) : hasFloor(volume))) {
+    if (!hasLimit(volume, limit)) {
         return qQNaN();
     }
 
-    const double meters = comparableLimit(volume, upper);
-    switch (upper ? volume.upperReference : volume.lowerReference) {
+    const double meters = comparableLimit(volume, limit);
+    switch (reference(volume, limit)) {
     case GeoZone::VerticalReference::Ground:
         return meters + position.terrainAMSL;
     case GeoZone::VerticalReference::MeanSeaLevel:

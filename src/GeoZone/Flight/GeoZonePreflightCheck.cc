@@ -492,12 +492,12 @@ QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneC
     for (const GeoZone *zone : catalog.zonesInArea(area, GeoZonePolicy::alerts())) {
         const QList<GeoZone::Volume> &volumes = zone->data().volumes;
         const bool near = std::any_of(volumes.cbegin(), volumes.cend(), [&](const GeoZone::Volume &volume) {
-            for (const bool upper : { false, true }) {
-                if ((upper ? volume.upperReference : volume.lowerReference) != GeoZone::VerticalReference::FlightLevel) {
+            for (const GeoZoneVertical::Limit side : { GeoZoneVertical::Limit::Lower, GeoZoneVertical::Limit::Upper }) {
+                if (GeoZoneVertical::reference(volume, side) != GeoZone::VerticalReference::FlightLevel) {
                     continue;
                 }
                 // Any limit may be near unknown altitudes
-                const double limit = GeoZoneVertical::limitAMSL(volume, upper, center);
+                const double limit = GeoZoneVertical::limitAMSL(volume, side, center);
                 if (std::isnan(highest) || (!std::isnan(limit) && (limit >= (lowest - qnhVerticalMargin)) && (limit <= (highest + qnhVerticalMargin)))) {
                     return true;
                 }

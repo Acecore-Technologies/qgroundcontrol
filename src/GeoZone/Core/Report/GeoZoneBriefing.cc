@@ -292,8 +292,8 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
                 if ((volume < 0) || (volume >= zoneVolumes.count())) {
                     continue;
                 }
-                const double floor = GeoZoneVertical::limitAMSL(zoneVolumes[volume], false, crossing.entry.position);
-                const double ceiling = GeoZoneVertical::limitAMSL(zoneVolumes[volume], true, crossing.entry.position);
+                const double floor = GeoZoneVertical::limitAMSL(zoneVolumes[volume], GeoZoneVertical::Limit::Lower, crossing.entry.position);
+                const double ceiling = GeoZoneVertical::limitAMSL(zoneVolumes[volume], GeoZoneVertical::Limit::Upper, crossing.entry.position);
                 floorKnown = floorKnown && !qIsNaN(floor);
                 ceilingKnown = ceilingKnown && !qIsNaN(ceiling);
                 briefed.zoneFloor = qIsNaN(briefed.zoneFloor) ? floor : (std::min)(briefed.zoneFloor, floor);

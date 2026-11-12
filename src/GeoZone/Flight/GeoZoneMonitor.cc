@@ -1076,7 +1076,7 @@ double GeoZoneMonitor::_climbHeight(const GeoZoneVehicleMonitor *monitor, const 
     }
     double ceiling = qQNaN();
     for (const qsizetype i : std::as_const(indexes)) {
-        const double upper = GeoZoneVertical::limitAMSL(volumes[i], true, position);
+        const double upper = GeoZoneVertical::limitAMSL(volumes[i], GeoZoneVertical::Limit::Upper, position);
         if (std::isnan(upper)) {
             return qQNaN();
         }

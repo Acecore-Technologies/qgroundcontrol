@@ -1821,8 +1821,8 @@ void GeoZoneGeometryTest::_testFlightLevels()
     const auto at = [&center](double altitude) { return GeoZone::Position{ center, altitude }; };
     const double floor = floorAMSL * (1 - GeoZoneVertical::flightLevelMargin);
     const double ceiling = ceilingAMSL * (1 + GeoZoneVertical::flightLevelMargin);
-    QVERIFY(qAbs(GeoZoneVertical::limitAMSL(volume, false, at(qQNaN())) - floor) < 0.01);
-    QVERIFY(qAbs(GeoZoneVertical::limitAMSL(volume, true, at(qQNaN())) - ceiling) < 0.01);
+    QVERIFY(qAbs(GeoZoneVertical::limitAMSL(volume, GeoZoneVertical::Limit::Lower, at(qQNaN())) - floor) < 0.01);
+    QVERIFY(qAbs(GeoZoneVertical::limitAMSL(volume, GeoZoneVertical::Limit::Upper, at(qQNaN())) - ceiling) < 0.01);
     QCOMPARE(GeoZoneVertical::position(volume, at(floor - 1)), GeoZone::VerticalPosition::Below);
     QCOMPARE(GeoZoneVertical::position(volume, at(floor + 1)), GeoZone::VerticalPosition::Inside);
     QCOMPARE(GeoZoneVertical::position(volume, at(ceiling + 1)), GeoZone::VerticalPosition::Above);

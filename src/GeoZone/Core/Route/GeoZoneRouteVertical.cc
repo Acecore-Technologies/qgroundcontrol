@@ -95,7 +95,7 @@ GeoZoneRouteSearch::Route GeoZoneRouteVertical::route(GeoZoneRouteSearch::Kind k
                     positions.append(samples[i]);
                 }
                 for (const GeoZone::Position &position : std::as_const(positions)) {
-                    const double limit = GeoZoneVertical::limitAMSL(volume, climb, position);
+                    const double limit = GeoZoneVertical::limitAMSL(volume, climb ? GeoZoneVertical::Limit::Upper : GeoZoneVertical::Limit::Lower, position);
                     if (!qIsNaN(limit)) {
                         target = climb ? (std::max)(target, limit + _settings.verticalMargin) : (std::min)(target, limit - _settings.verticalMargin);
                         continue;

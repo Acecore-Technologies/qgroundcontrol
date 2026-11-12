@@ -34,6 +34,12 @@ inline constexpr double metersPerFoot = 0.3048;
 /// levels are lower by about 4 % of their height per 10 degrees Celsius.
 inline constexpr double flightLevelMargin = 0.04;
 
+/// One of the two vertical limits of a volume
+enum class Limit {
+    Lower,  ///< Its floor
+    Upper,  ///< Its ceiling
+};
+
 /// Why the comparison of altitudes with the limits of a volume is approximate
 enum Approximation : quint32 {
     TerrainUnknown = 0x1,   ///< A limit above ground where the terrain elevation is unknown, so it doesn't bound the volume
@@ -62,7 +68,10 @@ bool aboveGround(const GeoZone::Volume &volume);
 
 /// @return The limit of the volume in meters in its datum: as published, except for flight levels which are
 ///         converted to heights above mean sea level with the current QNH, then widened by flightLevelMargin
-double comparableLimit(const GeoZone::Volume &volume, bool upper);
+double comparableLimit(const GeoZone::Volume &volume, Limit limit);
+
+/// @return The vertical reference of the limit of the volume
+GeoZone::VerticalReference reference(const GeoZone::Volume &volume, Limit limit);
 
 /// @return Heights of the positions in the datum of a reference, nothing when they can't be compared: an unknown
 ///         reference, altitude, or terrain elevation for limits above ground
@@ -71,7 +80,7 @@ std::optional<std::pair<double, double>> referenceHeights(GeoZone::VerticalRefer
 
 /// The policy: the lower or upper limit of the volume with the heights of the positions to compare it with, nothing
 /// when it doesn't bound the volume, because the volume has no such limit or it can't be compared
-std::optional<Bound> bound(const GeoZone::Volume &volume, bool upper, const GeoZone::Position &from, const GeoZone::Position &to);
+std::optional<Bound> bound(const GeoZone::Volume &volume, Limit limit, const GeoZone::Position &from, const GeoZone::Position &to);
 
 /// @return true if the vertical limits of the volume overlap the altitudes between the positions, extended by
 ///         the margin
@@ -92,7 +101,7 @@ Approximations approximations(const GeoZone::Volume &volume, const GeoZone::Posi
 /// @return Lower or upper limit of the volume in meters above mean sea level at the position, using its terrain
 ///         elevation for limits above ground. NaN when the volume has no such limit or it can't be converted, like
 ///         limits above unknown terrain or in unknown references. Flight levels are widened like when compared.
-double limitAMSL(const GeoZone::Volume &volume, bool upper, const GeoZone::Position &position);
+double limitAMSL(const GeoZone::Volume &volume, Limit limit, const GeoZone::Position &position);
 
 /// @return Height in meters above mean sea level of a pressure altitude, like a flight level, where the sea
 ///         level pressure is qnhHPa. As read by an altimeter set to the QNH, which is the true altitude in the

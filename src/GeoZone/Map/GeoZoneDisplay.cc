@@ -82,8 +82,8 @@ bool GeoZoneMapFilter::nearAltitudes(const GeoZone &zone, const GeoZoneAltitudeR
     const GeoZone::Position highest{ zone.center(), range.maxAMSL, range.maxAMSL - range.maxAGL };
     const GeoZone::Position lowest{ zone.center(), range.minAMSL, range.minAMSL - range.minAGL };
     for (const GeoZone::Volume &volume : volumes) {
-        const double floor = GeoZoneVertical::limitAMSL(volume, false, highest);
-        const double ceiling = GeoZoneVertical::limitAMSL(volume, true, lowest);
+        const double floor = GeoZoneVertical::limitAMSL(volume, GeoZoneVertical::Limit::Lower, highest);
+        const double ceiling = GeoZoneVertical::limitAMSL(volume, GeoZoneVertical::Limit::Upper, lowest);
         if ((std::isnan(floor) || (floor <= (range.maxAMSL + altitudeMargin))) && (std::isnan(ceiling) || (ceiling >= (range.minAMSL - altitudeMargin)))) {
             return true;
         }

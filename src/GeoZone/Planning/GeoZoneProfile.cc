@@ -166,7 +166,8 @@ QList<GeoZoneProfile::Band> GeoZoneProfile::computeBands(const QList<GeoZoneMiss
 
             const GeoZone::Volume &volume = zoneResult.zone->data().volumes[stretch.volume];
             const auto bandPoint = [&volume](double distance, const GeoZone::Position &position) {
-                return BandPoint{ distance, GeoZoneVertical::limitAMSL(volume, false, position), GeoZoneVertical::limitAMSL(volume, true, position) };
+                return BandPoint{ distance, GeoZoneVertical::limitAMSL(volume, GeoZoneVertical::Limit::Lower, position),
+                                  GeoZoneVertical::limitAMSL(volume, GeoZoneVertical::Limit::Upper, position) };
             };
             // Crossings are inside the zone between its limits, the stretch only inside its horizontal projection
             const bool entered = std::any_of(zoneResult.crossings.cbegin(), zoneResult.crossings.cend(), [&](const GeoZonePathEvaluator::Crossing &crossing) {
