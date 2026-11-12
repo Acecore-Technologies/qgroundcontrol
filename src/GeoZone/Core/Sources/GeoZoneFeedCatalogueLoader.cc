@@ -319,7 +319,14 @@ void GeoZoneFeedCatalogueLoader::_readCache()
     if (!file.open(QIODevice::ReadOnly)) {
         return;
     }
-    const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
+    // A copy which can't be read is none: the catalogue is downloaded again
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if ((parseError.error != QJsonParseError::NoError) || !document.isObject()) {
+        qCWarning(GeoZoneSourceLog) << "The copy of the feed catalogue can't be read" << file.fileName() << parseError.errorString();
+        return;
+    }
+    const QJsonObject object = document.object();
     _cache.url = object.value(QStringLiteral("url")).toString();
     // Only the catalogue of the URL of the settings is used, and no copy of a URL which isn't downloaded any more
     if ((_cache.url != _url) || !_urlProblem().isEmpty()) {

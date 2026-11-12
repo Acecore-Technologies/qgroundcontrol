@@ -230,9 +230,9 @@ void GeoZoneDownloader::_send(Download download, const QUrl &url)
         if ((it == _downloads.end()) || !it->writeError.isEmpty() || it->tooLarge) {
             return;
         }
-        // Redirect and error responses have bodies which aren't the feed
+        // Redirect and error responses have bodies which aren't the feed, and what a failed reply still holds isn't kept
         const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if ((statusCode < 200) || (statusCode >= 300)) {
+        if ((reply->error() != QNetworkReply::NoError) || (statusCode < 200) || (statusCode >= 300)) {
             (void) reply->readAll();
             return;
         }
