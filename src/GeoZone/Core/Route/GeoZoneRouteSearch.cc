@@ -35,41 +35,40 @@ QStringList _names(QList<const GeoZone*> zones)
 }
 
 /// Sets the detour, or why there is none, from the outcome of the search
-void _setOutcome(GeoZoneRouteSearch::Route &route, const GeoZoneRouteDetour &search, GeoZoneRouteDetour::Outcome outcome, const QList<const GeoZone*> &avoided,
+void _setOutcome(GeoZoneRouteSearch::Route &route, const GeoZoneRouteDetour &search, GeoZoneRouteSearch::Failure outcome, const QList<const GeoZone*> &avoided,
                  double maxLength)
 {
     using Failure = GeoZoneRouteSearch::Failure;
-    using Outcome = GeoZoneRouteDetour::Outcome;
     const QList<const GeoZone*> &blocking = search.blockingZones();
     route.zones = _names(avoided);
+    route.failure = outcome;
     switch (outcome) {
-    case Outcome::Found:
+    case Failure::None:
         route.waypoints = search.waypoints();
         route.length = search.length();
         route.cost = (std::max)(route.length - search.directLength(), 0.0);
         return;
-    case Outcome::StartInside:
-        route.failure = Failure::StartInside;
-        break;
-    case Outcome::EndInside:
-        route.failure = Failure::EndInside;
-        break;
-    case Outcome::Enclosed:
-        route.failure = Failure::Enclosed;
-        break;
-    case Outcome::TooLong:
-        route.failure = Failure::TooLong;
+    case Failure::TooLong:
         route.length = search.length();
         route.limit = maxLength;
         return;
-    case Outcome::SearchLimit:
-        route.failure = Failure::SearchLimit;
+    case Failure::SearchLimit:
+    case Failure::Cancelled:
         return;
-    case Outcome::EntersZone:
-        route.failure = Failure::EntersZone;
+    // The zones in the way
+    case Failure::StartInside:
+    case Failure::EndInside:
+    case Failure::Enclosed:
+    case Failure::EntersZone:
         break;
-    case Outcome::Cancelled:
-        route.failure = Failure::Cancelled;
+    // Of climbs and descents, which a detour search doesn't report
+    case Failure::AltitudeUnknown:
+    case Failure::NoCeiling:
+    case Failure::ReachesGround:
+    case Failure::NoFloor:
+    case Failure::AboveMaxAltitude:
+    case Failure::BelowMinClearance:
+    case Failure::TerrainUnknown:
         return;
     }
     if (!blocking.isEmpty()) {
@@ -240,8 +239,8 @@ GeoZoneRouteSearch::Route GeoZoneRouteSearch::_detour(const Leg &leg, const QLis
                 }
             }
         }
-        const GeoZoneRouteDetour::Outcome outcome = search.run(verify);
-        if ((outcome != GeoZoneRouteDetour::Outcome::TooLong) || (length >= maxLength)) {
+        const Failure outcome = search.run(verify);
+        if ((outcome != Failure::TooLong) || (length >= maxLength)) {
             _setOutcome(route, search, outcome, crossed, maxLength);
             break;
         }

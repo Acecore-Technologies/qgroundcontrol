@@ -68,16 +68,17 @@ GeoZoneBox GeoZoneRouteDetour::reachBox() const
     return GeoZoneBox(std::clamp(southWest.latitude(), -90.0, 90.0), southWest.longitude(), std::clamp(northEast.latitude(), -90.0, 90.0), northEast.longitude());
 }
 
-GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
+GeoZoneRouteSearch::Failure GeoZoneRouteDetour::run(const Verify &verify)
 {
+    using Failure = GeoZoneRouteSearch::Failure;
     _obstacles.prepare();
     if (!_obstacles.startInside().isEmpty()) {
         _blockingZones = _obstacles.startInside();
-        return Outcome::StartInside;
+        return Failure::StartInside;
     }
     if (!_obstacles.endInside().isEmpty()) {
         _blockingZones = _obstacles.endInside();
-        return Outcome::EndInside;
+        return Failure::EndInside;
     }
     GeoZoneRouteGraph graph(_obstacles, _start, _end, _maxLength, _maxWork, _cancel, _statistics);
 
@@ -85,17 +86,17 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
     graph.include(graph.hits(GeoZoneRouteGraph::kStart, GeoZoneRouteGraph::kEnd));
     for (int round = 0; round < kMaxRounds; round++) {
         if (_cancel.isCancelled()) {
-            return Outcome::Cancelled;
+            return Failure::Cancelled;
         }
         _statistics.rounds++;
         QSet<int> blockers;
         QList<int> path = graph.shortestPath(true, &blockers, GeoZoneRouteGraph::Search::Near);
         if (_cancel.isCancelled()) {
-            return Outcome::Cancelled;
+            return Failure::Cancelled;
         }
         if (path.isEmpty()) {
             if (graph.limitReached()) {
-                return Outcome::SearchLimit;
+                return Failure::SearchLimit;
             }
             // The obstacles which left out nodes around those of the graph may leave a way around them
             const QList<int> pending = graph.takeNodeBlockers();
@@ -105,18 +106,18 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
             }
             if (graph.nearSearchIncomplete()) {
                 if (_preliminary) {
-                    return Outcome::TooLong;
+                    return Failure::TooLong;
                 }
                 blockers.clear();
                 path = graph.shortestPath(true, &blockers);
                 if (_cancel.isCancelled()) {
-                    return Outcome::Cancelled;
+                    return Failure::Cancelled;
                 }
             }
         }
         if (path.isEmpty()) {
             if (graph.limitReached()) {
-                return Outcome::SearchLimit;
+                return Failure::SearchLimit;
             }
             if (!std::isinf(_maxLength)) {
                 // Whether a longer detour goes around the obstacles found so far
@@ -127,20 +128,20 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
                     longer = graph.shortestPath(false, &allBlockers);
                 }
                 if (_cancel.isCancelled()) {
-                    return Outcome::Cancelled;
+                    return Failure::Cancelled;
                 }
                 if (!longer.isEmpty()) {
                     _pathLength = graph.lengthOf(longer);
                     _blockingZones = _obstacles.zones(blockers);
-                    return Outcome::TooLong;
+                    return Failure::TooLong;
                 }
                 if (graph.limitReached()) {
-                    return Outcome::SearchLimit;
+                    return Failure::SearchLimit;
                 }
                 blockers = allBlockers;
             }
             _blockingZones = _obstacles.zones(blockers);
-            return Outcome::Enclosed;
+            return Failure::Enclosed;
         }
 
         QList<int> hits;
@@ -161,15 +162,15 @@ GeoZoneRouteDetour::Outcome GeoZoneRouteDetour::run(const Verify &verify)
         if (entered.isEmpty()) {
             _waypoints = coordinates.mid(1, coordinates.count() - 2);
             _pathLength = graph.lengthOf(path);
-            return Outcome::Found;
+            return Failure::None;
         }
         // Zones whose volumes were left out as above or below the leg, or entered despite the margin
         if (graph.includeZones(entered) == 0) {
             _blockingZones = entered;
-            return Outcome::EntersZone;
+            return Failure::EntersZone;
         }
     }
-    return Outcome::SearchLimit;
+    return Failure::SearchLimit;
 }
 
 QList<QGeoCoordinate> GeoZoneRouteDetour::_coordinates(const GeoZoneRouteGraph &graph, const QList<int> &path) const

@@ -31,17 +31,6 @@ class GeoZoneRouteGraph;
 class GeoZoneRouteDetour
 {
 public:
-    enum class Outcome {
-        Found,
-        StartInside,
-        EndInside,
-        Enclosed,
-        TooLong,
-        SearchLimit,
-        EntersZone,
-        Cancelled,
-    };
-
     /// @return Zones the path through the coordinates enters
     using Verify = std::function<QList<const GeoZone*>(const QList<QGeoCoordinate> &path)>;
 
@@ -62,7 +51,8 @@ public:
     void setPreliminary(bool preliminary) { _preliminary = preliminary; }
 
     /// Searches the detour, verifying the paths keeping the margin with the function when set
-    Outcome run(const Verify &verify);
+    /// @return Why there is none, GeoZoneRouteSearch::Failure::None when it was found
+    GeoZoneRouteSearch::Failure run(const Verify &verify);
 
     const QList<QGeoCoordinate> &waypoints() const { return _waypoints; }
     /// Meters from the start to the end, of the shortest detour found when TooLong
