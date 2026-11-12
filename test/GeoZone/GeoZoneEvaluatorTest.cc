@@ -316,6 +316,88 @@ void GeoZoneEvaluatorTest::_testAuthorisationScope()
     QVERIFY(unlimited && !unlimited->limitsPath() && !unlimited->hasDailyHours());
 }
 
+void GeoZoneEvaluatorTest::_testAuthorisationLimits_data()
+{
+    QTest::addColumn<QString>("key");
+    QTest::addColumn<QJsonValue>("value");
+    QTest::addColumn<bool>("accepted");
+
+    const QJsonArray area{ QJsonArray{ 47.01, 7.98 }, QJsonArray{ 47.01, 8 }, QJsonArray{ 46.99, 8 } };
+    const auto circle = [](const QJsonValue &lat, const QJsonValue &radius) {
+        return QJsonObject{ { QStringLiteral("lat"), lat }, { QStringLiteral("lon"), 8 }, { QStringLiteral("radius"), radius } };
+    };
+    // As written
+    QTest::newRow("validFrom") << QStringLiteral("validFrom") << QJsonValue(QStringLiteral("2026-06-01T00:00:00Z")) << true;
+    QTest::newRow("validTo") << QStringLiteral("validTo") << QJsonValue(QStringLiteral("2026-12-31T00:00:00Z")) << true;
+    QTest::newRow("area") << QStringLiteral("area") << QJsonValue(area) << true;
+    QTest::newRow("areaCircle") << QStringLiteral("areaCircle") << QJsonValue(circle(47, 250)) << true;
+    QTest::newRow("kind notification") << QStringLiteral("kind") << QJsonValue(QStringLiteral("notification")) << true;
+    QTest::newRow("kind authorisation") << QStringLiteral("kind") << QJsonValue(QStringLiteral("authorisation")) << true;
+    // Limits which are there but can't be read would be no limits
+    QTest::newRow("validTo not a date") << QStringLiteral("validTo") << QJsonValue(QStringLiteral("31.12.2026")) << false;
+    QTest::newRow("validTo a number") << QStringLiteral("validTo") << QJsonValue(20261231) << false;
+    QTest::newRow("validTo empty") << QStringLiteral("validTo") << QJsonValue(QString()) << false;
+    QTest::newRow("validFrom not a date") << QStringLiteral("validFrom") << QJsonValue(QStringLiteral("tomorrow")) << false;
+    QTest::newRow("ceiling a text") << QStringLiteral("ceiling") << QJsonValue(QStringLiteral("120")) << false;
+    QTest::newRow("ceiling without reference") << QStringLiteral("ceiling") << QJsonValue(120) << false;
+    QTest::newRow("reference without ceiling") << QStringLiteral("ceilingReference") << QJsonValue(QStringLiteral("AGL")) << false;
+    QTest::newRow("area not a list") << QStringLiteral("area") << QJsonValue(QStringLiteral("47,8 47,9 46,9")) << false;
+    QTest::newRow("area of two vertices") << QStringLiteral("area") << QJsonValue(QJsonArray{ area[0], area[1] }) << false;
+    QTest::newRow("area with an invalid vertex") << QStringLiteral("area") << QJsonValue(QJsonArray{ area[0], area[1], area[2], QJsonArray{ 147.0, 8 } }) << false;
+    QTest::newRow("area with a text vertex") << QStringLiteral("area") << QJsonValue(QJsonArray{ area[0], area[1], area[2], QStringLiteral("47,8") }) << false;
+    QTest::newRow("areaCircle not an object") << QStringLiteral("areaCircle") << QJsonValue(250) << false;
+    QTest::newRow("areaCircle without center") << QStringLiteral("areaCircle") << QJsonValue(circle(QJsonValue(), 250)) << false;
+    QTest::newRow("areaCircle without radius") << QStringLiteral("areaCircle") << QJsonValue(circle(47, QJsonValue())) << false;
+    QTest::newRow("areaCircle of no radius") << QStringLiteral("areaCircle") << QJsonValue(circle(47, 0)) << false;
+    QTest::newRow("dailyFrom alone") << QStringLiteral("dailyFrom") << QJsonValue(QStringLiteral("08:00")) << false;
+    QTest::newRow("dailyTo alone") << QStringLiteral("dailyTo") << QJsonValue(QStringLiteral("18:00")) << false;
+    QTest::newRow("kind unknown") << QStringLiteral("kind") << QJsonValue(QStringLiteral("request")) << false;
+    QTest::newRow("kind a number") << QStringLiteral("kind") << QJsonValue(1) << false;
+}
+
+void GeoZoneEvaluatorTest::_testAuthorisationLimits()
+{
+    QFETCH(QString, key);
+    QFETCH(QJsonValue, value);
+    QFETCH(bool, accepted);
+
+    // An authorisation without limits, with the one of the row
+    QJsonObject json{ { QStringLiteral("zone"), QStringLiteral("CHE/X") }, { QStringLiteral("permit"), QStringLiteral("P-1") } };
+    QVERIFY(GeoZoneAuthorisation::fromJson(json));
+    json.insert(key, value);
+    const std::optional<GeoZoneAuthorisation> authorisation = GeoZoneAuthorisation::fromJson(json);
+    QCOMPARE(authorisation.has_value(), accepted);
+    if (authorisation) {
+        QVERIFY(authorisation->limitsValid());
+        QCOMPARE(GeoZoneAuthorisation::fromJson(authorisation->toJson()), authorisation);
+    }
+
+    if (key == QStringLiteral("ceiling")) {
+        // Read with its reference only
+        json.insert(QStringLiteral("ceilingReference"), QStringLiteral("AGL"));
+        QCOMPARE(GeoZoneAuthorisation::fromJson(json).has_value(), value.isDouble());
+        json.insert(QStringLiteral("ceilingReference"), QStringLiteral("FL"));
+        QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+        for (const double ceiling : { 0.0, -120.0 }) {
+            json.insert(QStringLiteral("ceiling"), ceiling);
+            json.insert(QStringLiteral("ceilingReference"), QStringLiteral("AMSL"));
+            QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+        }
+    } else if (key.startsWith(QStringLiteral("daily"))) {
+        // Both hours, as times of day
+        json.insert(QStringLiteral("dailyFrom"), QStringLiteral("08:00"));
+        json.insert(QStringLiteral("dailyTo"), QStringLiteral("18:00"));
+        QVERIFY(GeoZoneAuthorisation::fromJson(json));
+        json.insert(key, QStringLiteral("25:00"));
+        QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+    } else if (key == QStringLiteral("validFrom")) {
+        // A period which ends before it starts
+        json.insert(QStringLiteral("validFrom"), QStringLiteral("2026-06-02T00:00:00Z"));
+        json.insert(QStringLiteral("validTo"), QStringLiteral("2026-06-01T00:00:00Z"));
+        QVERIFY(!GeoZoneAuthorisation::fromJson(json));
+    }
+}
+
 void GeoZoneEvaluatorTest::_testUnknownTerrain()
 {
     // From 50 to 150 m above the ground, which is at 400 m except in a gap without terrain data around the zone center

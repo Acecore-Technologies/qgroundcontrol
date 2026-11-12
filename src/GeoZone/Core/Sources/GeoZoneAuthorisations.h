@@ -67,8 +67,16 @@ struct GeoZoneAuthorisation
     /// @return The area around a mission's bounds, widened by areaBuffer
     static QList<QGeoCoordinate> missionArea(const QGeoRectangle &missionBounds);
 
+    /// @return true for a ceiling an authorisation can have: a height above 0
+    static bool ceilingValid(double meters);
+    /// @return true if the limits can be applied: the end after the start, the ceiling a valid one, the area a polygon
+    ///         of valid vertices or a circle with a radius, and the daily hours both there or none. authorise() and
+    ///         fromJson() only give authorisations whose limits are.
+    bool limitsValid() const;
+
     QJsonObject toJson() const;
-    /// @return Nothing without a zone key
+    /// @return Nothing without a zone key, or when a limit which is there can't be read or isn't valid, see
+    ///         limitsValid: taken as no limit it would authorise more than the permit does
     static std::optional<GeoZoneAuthorisation> fromJson(const QJsonObject &json);
 
     friend bool operator==(const GeoZoneAuthorisation &, const GeoZoneAuthorisation &) = default;

@@ -41,6 +41,8 @@ constexpr const char *dailyFromKey = "dailyFrom";
 constexpr const char *dailyToKey = "dailyTo";
 constexpr const char *aircraftKey = "aircraft";
 constexpr const char *kindKey = "kind";
+constexpr const char *notificationKind = "notification";
+constexpr const char *authorisationKind = "authorisation";  ///< Read, authorisations are written without kind
 constexpr const char *versionKey = "version";
 constexpr const char *authorisationsKey = "authorisations";
 constexpr int fileVersion = 1;
@@ -196,9 +198,33 @@ QJsonObject GeoZoneAuthorisation::toJson() const
         json.insert(aircraftKey, aircraft);
     }
     if (notification) {
-        json.insert(kindKey, QStringLiteral("notification"));
+        json.insert(kindKey, QLatin1String(notificationKind));
     }
     return json;
+}
+
+bool GeoZoneAuthorisation::ceilingValid(double meters)
+{
+    return std::isfinite(meters) && (meters > 0);
+}
+
+bool GeoZoneAuthorisation::limitsValid() const
+{
+    if (validFrom.isValid() && validTo.isValid() && (validTo <= validFrom)) {
+        return false;
+    }
+    if (ceiling && !ceilingValid(*ceiling)) {
+        return false;
+    }
+    if (!area.isEmpty() && ((area.count() < 3) || !std::all_of(area.cbegin(), area.cend(), [](const QGeoCoordinate &vertex) { return vertex.isValid(); }))) {
+        return false;
+    }
+    // Without circle its center is invalid and its radius negative
+    const bool circle = areaCircle.center().isValid() || (areaCircle.radius() >= 0);
+    if (circle && (!areaCircle.isValid() || !std::isfinite(areaCircle.radius()) || !(areaCircle.radius() > 0))) {
+        return false;
+    }
+    return dailyFrom.isValid() == dailyTo.isValid();
 }
 
 std::optional<GeoZoneAuthorisation> GeoZoneAuthorisation::fromJson(const QJsonObject &json)
@@ -210,38 +236,66 @@ std::optional<GeoZoneAuthorisation> GeoZoneAuthorisation::fromJson(const QJsonOb
     }
     authorisation.zoneName = json.value(zoneNameKey).toString();
     authorisation.permit = json.value(permitKey).toString();
-    authorisation.validFrom = QDateTime::fromString(json.value(validFromKey).toString(), Qt::ISODate).toUTC();
-    authorisation.validTo = QDateTime::fromString(json.value(validToKey).toString(), Qt::ISODate).toUTC();
+    authorisation.aircraft = json.value(aircraftKey).toString();
 
-    // Without scope, like those saved before scopes, the authorisation covers the whole zone
-    if (json.value(ceilingKey).isDouble()) {
-        authorisation.ceiling = json.value(ceilingKey).toDouble();
-        authorisation.ceilingAboveGround = (json.value(ceilingReferenceKey).toString() == QStringLiteral("AGL"));
-    }
-    for (const QJsonValue &value : json.value(areaKey).toArray()) {
-        const QJsonArray vertex = value.toArray();
-        const QGeoCoordinate coordinate(vertex.at(0).toDouble(qQNaN()), vertex.at(1).toDouble(qQNaN()));
-        if (coordinate.isValid()) {
-            authorisation.area.append(coordinate);
+    // Without scope, like those saved before scopes, the authorisation covers the whole zone. A limit which is there
+    // but can't be read must not be taken as no limit: the entry is left out, so that the zone is checked.
+    const auto rejected = [&authorisation](const char *key) {
+        qCWarning(GeoZoneAuthorisationsLog) << "Authorisation of" << authorisation.zoneKey << "left out, unreadable" << key;
+        return std::nullopt;
+    };
+    for (const auto &[key, dateTime] : { std::pair{ validFromKey, &authorisation.validFrom }, std::pair{ validToKey, &authorisation.validTo } }) {
+        if (json.contains(QLatin1String(key))) {
+            *dateTime = QDateTime::fromString(json.value(QLatin1String(key)).toString(), Qt::ISODate).toUTC();
+            if (!dateTime->isValid()) {
+                return rejected(key);
+            }
         }
     }
-    if (authorisation.area.count() < 3) {
-        authorisation.area.clear();
+    if (json.contains(QLatin1String(ceilingKey)) || json.contains(QLatin1String(ceilingReferenceKey))) {
+        // The ceiling is written with its reference
+        const QString reference = json.value(ceilingReferenceKey).toString();
+        if (!json.value(ceilingKey).isDouble() || ((reference != QStringLiteral("AGL")) && (reference != QStringLiteral("AMSL")))) {
+            return rejected(ceilingKey);
+        }
+        authorisation.ceiling = json.value(ceilingKey).toDouble();
+        authorisation.ceilingAboveGround = (reference == QStringLiteral("AGL"));
     }
-    const QJsonObject circle = json.value(areaCircleKey).toObject();
-    const QGeoCircle areaCircle(QGeoCoordinate(circle.value(QStringLiteral("lat")).toDouble(qQNaN()), circle.value(QStringLiteral("lon")).toDouble(qQNaN())),
-                                circle.value(QStringLiteral("radius")).toDouble(-1));
-    if (areaCircle.isValid() && (areaCircle.radius() > 0)) {
-        authorisation.areaCircle = areaCircle;
+    if (json.contains(QLatin1String(areaKey))) {
+        for (const QJsonValue &value : json.value(areaKey).toArray()) {
+            const QJsonArray vertex = value.toArray();
+            authorisation.area.append(QGeoCoordinate(vertex.at(0).toDouble(qQNaN()), vertex.at(1).toDouble(qQNaN())));
+        }
+        if (authorisation.area.count() < 3) {
+            return rejected(areaKey);
+        }
     }
-    const QTime dailyFrom = QTime::fromString(json.value(dailyFromKey).toString(), QStringLiteral("HH:mm"));
-    const QTime dailyTo = QTime::fromString(json.value(dailyToKey).toString(), QStringLiteral("HH:mm"));
-    if (dailyFrom.isValid() && dailyTo.isValid()) {
-        authorisation.dailyFrom = dailyFrom;
-        authorisation.dailyTo = dailyTo;
+    if (json.contains(QLatin1String(areaCircleKey))) {
+        const QJsonObject circle = json.value(areaCircleKey).toObject();
+        authorisation.areaCircle = QGeoCircle(QGeoCoordinate(circle.value(QStringLiteral("lat")).toDouble(qQNaN()), circle.value(QStringLiteral("lon")).toDouble(qQNaN())),
+                                              circle.value(QStringLiteral("radius")).toDouble(qQNaN()));
+        if (!authorisation.areaCircle.isValid()) {
+            return rejected(areaCircleKey);
+        }
     }
-    authorisation.aircraft = json.value(aircraftKey).toString();
-    authorisation.notification = (json.value(kindKey).toString() == QStringLiteral("notification"));
+    if (json.contains(QLatin1String(dailyFromKey)) || json.contains(QLatin1String(dailyToKey))) {
+        authorisation.dailyFrom = QTime::fromString(json.value(dailyFromKey).toString(), QStringLiteral("HH:mm"));
+        authorisation.dailyTo = QTime::fromString(json.value(dailyToKey).toString(), QStringLiteral("HH:mm"));
+        if (!authorisation.hasDailyHours()) {
+            return rejected(dailyFromKey);
+        }
+    }
+    if (json.contains(QLatin1String(kindKey))) {
+        // An unknown kind may be less than an authorisation
+        const QString kind = json.value(kindKey).toString();
+        authorisation.notification = (kind == QLatin1String(notificationKind));
+        if (!authorisation.notification && (kind != QLatin1String(authorisationKind))) {
+            return rejected(kindKey);
+        }
+    }
+    if (!authorisation.limitsValid()) {
+        return rejected("limits");
+    }
     return authorisation;
 }
 
@@ -398,7 +452,7 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
         if (!ok) {
             value = ceiling.toDouble(&ok);
         }
-        if (!ok || !(value > 0)) {
+        if (!ok || !GeoZoneAuthorisation::ceilingValid(value * unitMeters())) {
             return tr("Enter the ceiling as a height, like 120.");
         }
         authorisation.ceiling = value * unitMeters();
@@ -430,6 +484,10 @@ QString GeoZoneAuthorisations::authorise(const QVariant &zone, const QString &pe
         } else {
             return tr("Plan a mission first to limit the authorisation to its area.");
         }
+    }
+    // The checks above tell which entry to correct, this is the one stored authorisations are read with
+    if (!authorisation.limitsValid()) {
+        return tr("The limits of the authorisation are not valid.");
     }
 
     set(authorisation);

@@ -329,6 +329,7 @@ A permit is often limited. The optional scope fields of the form limit the autho
 - **Only within the mission area**: limits the authorisation to the area of the mission planned in the Plan View, its bounds widened by 250 m. The mission check warns when the flight leaves it inside the zone.
 
 Flight alerts leave the zone out while the vehicle is within the area and below the ceiling; guided command checks leave it out when the path stays within them. **Route Around Zones...** goes around zones whose authorisation has a ceiling or an area. Authorisations saved before scopes existed, and those of plans without them, cover the whole zone.
+An authorisation kept in the file or offered by a plan is left out when one of its dates, its ceiling, its area, its daily hours or its kind is there but can't be read, rather than applied without that limit: the zone is then checked and alerted as without authorisation.
 Saved plans keep the flight time, the authorisations of the zones the mission enters and the version of the geozone data (see [Plan Data Audit](#plan-data-audit)). When a plan with authorisations you don't have is opened, the Plan View banner lists them with **Add** and **Ignore**, so permits from someone else's plan are only added when you choose to.
 
 #### Notifications {#notifications}
