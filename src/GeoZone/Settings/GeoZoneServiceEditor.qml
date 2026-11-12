@@ -24,7 +24,7 @@ ColumnLayout {
     readonly property var   _geoZoneManager:    GeoZoneManager
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
     readonly property var   _templates:         _geoZoneManager.serviceTemplates
-    readonly property var   _template:          _templates[Math.max(0, serviceTemplateCombo.currentIndex)]
+    readonly property var   _template:          _templates[Math.min(Math.max(0, serviceTemplateCombo.currentIndex), _templates.length - 1)]
     readonly property int   _auth:              authCombo.currentIndex
     readonly property var   _service:           _geoZoneManager.serviceFromForm(serviceTemplateCombo.currentIndex, {
                                                     method: methodCombo.currentIndex, auth: _auth, authParameter: authParameterField.text,
@@ -41,9 +41,12 @@ ColumnLayout {
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
+    property string _appliedTemplate: ""    ///< The template the fields of the form started from, as JSON
+
     // The fields of the form start from the template
     function applyTemplate() {
         const form = _template.form
+        _appliedTemplate = JSON.stringify(_template)
         trustOtherOriginsCheckBox.checked = false
         serviceUrlField.text = _template.url
         methodCombo.currentIndex = form.method
@@ -57,13 +60,36 @@ ColumnLayout {
         serviceSecretField.text = ""
     }
 
-    Component.onCompleted: applyTemplate()
+    // A changed feed catalogue selects the first template in the combo box. The template the form started from stays
+    // selected when the catalogue still has it as it was, otherwise the form starts again from the first one, so the
+    // template shown and the fields always belong together.
+    function _syncTemplates() {
+        serviceTemplateCombo.model = _templates.map(serviceTemplate => serviceTemplate.name)
+        const index = _templates.findIndex(serviceTemplate => JSON.stringify(serviceTemplate) === _appliedTemplate)
+        serviceTemplateCombo.currentIndex = Math.max(0, index)
+        if (index < 0) {
+            applyTemplate()
+        }
+    }
+
+    // Once the form is complete: the templates are also set while it is made, before its fields can be filled
+    property bool _completed: false
+
+    on_TemplatesChanged: {
+        if (_completed) {
+            _syncTemplates()
+        }
+    }
+
+    Component.onCompleted: {
+        _completed = true
+        _syncTemplates()
+    }
 
     // The names and notes of the templates may come from a feed catalogue
     GeoZoneChoiceComboBox {
         id:                 serviceTemplateCombo
         Layout.fillWidth:   true
-        model:              serviceEntry._templates.map(serviceTemplate => serviceTemplate.name)
         onActivated:        serviceEntry.applyTemplate()
     }
 
