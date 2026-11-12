@@ -141,9 +141,18 @@ public:
 
     QString staleText() const { return _staleText; }
 
-    /// Applies the selection and uploads the plan's fence to the vehicle, see GeoZoneFenceUpload
-    Q_INVOKABLE void uploadToVehicle();
+    /// Applies the selection and uploads the plan's fence to the vehicle, see GeoZoneFenceUpload, without asking about
+    /// the zones it doesn't fence: for callers which confirmed them, see requestUpload
+    void uploadToVehicle();
     GeoZoneFenceUpload *upload() const { return _upload; }
+
+    /// Uploads the selection once it is settled, so that what is asked about and uploaded is the selection of the last
+    /// change, also while its zones are still being prepared. A selection which fences all its zones is uploaded, see
+    /// uploadToVehicle. Otherwise nothing is uploaded and uploadConfirmationRequired names the zones it doesn't fence.
+    Q_INVOKABLE void requestUpload();
+    /// Uploads the selection whose zones not fenced were confirmed, see uploadConfirmationRequired. A selection which
+    /// changed since, so that other zones aren't fenced, is asked about again instead.
+    Q_INVOKABLE void confirmUpload(const QString &confirmation);
 
     /// @return Map with text ("Vehicle fence: 40 of 64 points"), note (where the limits come from), warning (fence
     ///         parameters which keep the vehicle from enforcing exclusion fences), usedItems, maxItems, usedBytes,
@@ -156,6 +165,11 @@ signals:
     void busyChanged();
     void staleChanged();
     void fenceNoteChanged();
+    /// The settled selection doesn't fence zones, which the user must confirm before it is uploaded
+    /// @param confirmation Identifies the zones, for confirmUpload
+    /// @param text See notFencedText
+    /// @param zones Each of the zones and why
+    void uploadConfirmationRequired(const QString &confirmation, const QString &text, const QStringList &zones);
 
 private:
     /// Fences for the zones which don't already exist in the fence, with their zones
@@ -217,6 +231,10 @@ private:
     void _updateFenceNote();
     /// Follows the edits of the fences from geozones, which end the fence note
     void _connectFenceEdits();
+    /// @return Identifies the zones the selection doesn't fence and why
+    QString _notFencedConfirmation() const;
+    void _requireUploadConfirmation();
+    static QStringList _zoneTexts(const QList<GeoZoneFenceTags::NotFenced> &zones);
 
     QPointer<GeoFenceController> _geoFenceController;
     std::optional<AreaQuery> _query;                    ///< Of the last updateSelection

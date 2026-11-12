@@ -35,6 +35,7 @@ private slots:
     void _testGeoFenceImport();
     void _testGeoFenceSelection();
     void _testGeoFenceNotFenced();
+    void _testGeoFenceUploadConfirmation();
     void _testGeoFenceActiveTime();
     void _testGeoFenceStale();
     void _testGeoFenceUpload();

@@ -432,6 +432,71 @@ void GeoZoneFenceImportTest::_testGeoFenceNotFenced()
     QVERIFY(masterController.saveToJson().object()[PlanMasterController::kJsonGeoFenceObjectKey].toObject().contains(QStringLiteral("geoZoneImport")));
 }
 
+void GeoZoneFenceImportTest::_testGeoFenceUploadConfirmation()
+{
+    // Three zones of 40 points, of which one fits without simplification
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager *const manager = GeoZoneManager::instance();
+    const auto clearZones = qScopeGuard([manager]() { manager->repository()->clear(); });
+    QJsonArray features;
+    for (int i = 0; i < 3; i++) {
+        features.append(_polygonFeature(QStringLiteral("Z%1").arg(i), QStringLiteral("PROHIBITED"), _circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
+    }
+    QString errorString;
+    QVERIFY2(manager->repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString), qPrintable(errorString));
+    QTRY_COMPARE(manager->zoneCount(), 3);
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+    GeoZoneFenceImporter importer;
+    importer.setGeoFenceController(geoFenceController);
+    GeoZoneFenceUpload *const upload = importer.upload();
+    QSignalSpy confirmationSpy(&importer, &GeoZoneFenceImporter::uploadConfirmationRequired);
+    QSignalSpy stateSpy(upload, &GeoZoneFenceUpload::stateChanged);
+
+    // While the zones of a selection are prepared, the importer still has the previous one, which fenced everything.
+    // The upload asks about the zones the new selection doesn't fence instead of uploading it unconfirmed.
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), GeoZoneFenceImporter::AnyTime, 0);
+    QVERIFY(importer.busy());
+    QCOMPARE(importer.notFencedCount(), 0);
+    importer.requestUpload();
+    QVERIFY(!importer.busy());
+    QCOMPARE(importer.notFencedCount(), 2);
+    QCOMPARE(confirmationSpy.count(), 1);
+    QCOMPARE(confirmationSpy.constLast().at(1).toString(), importer.notFencedText());
+    QCOMPARE(confirmationSpy.constLast().at(2).toStringList(), QStringList({ QStringLiteral("Z1: No room left in the vehicle fence"), QStringLiteral("Z2: No room left in the vehicle fence") }));
+    QCOMPARE(stateSpy.count(), 0);
+    QCOMPARE(geoFenceController->polygons()->count(), 0);
+
+    // A selection which changed before the answer leaves other zones out: it is asked about again
+    const QString first = confirmationSpy.constLast().at(0).toString();
+    importer.setZoneIncluded(importer.choices()->rows().constFirst().key, false);
+    importer.confirmUpload(first);
+    QCOMPARE(confirmationSpy.count(), 2);
+    QVERIFY(confirmationSpy.constLast().at(0).toString() != first);
+    QVERIFY(confirmationSpy.constLast().at(2).toStringList().contains(QStringLiteral("Z0: Left out by you")));
+    QCOMPARE(stateSpy.count(), 0);
+
+    // Confirmed, the upload starts, which fails without a vehicle
+    importer.confirmUpload(confirmationSpy.constLast().at(0).toString());
+    QCOMPARE(confirmationSpy.count(), 2);
+    QCOMPARE(stateSpy.count(), 1);
+    QCOMPARE(upload->state(), GeoZoneFenceUpload::Failed);
+
+    // A selection fencing all its zones is uploaded without asking
+    importer.setZoneIncluded(importer.choices()->rows().constFirst().key, true);
+    importer.updateSelection({ GeoZone::Prohibited }, QGeoRectangle(), GeoZoneFenceImporter::AnyTime, 50);
+    QVERIFY(importer.busy());
+    QCOMPARE(importer.notFencedCount(), 2);
+    importer.requestUpload();
+    QCOMPARE(importer.notFencedCount(), 0);
+    QCOMPARE(confirmationSpy.count(), 2);
+    QCOMPARE(stateSpy.count(), 2);
+}
+
 void GeoZoneFenceImportTest::_testGeoFenceActiveTime()
 {
     // A permanent zone, one ending in an hour and one starting in half an hour

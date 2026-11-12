@@ -43,10 +43,7 @@ QGCPopupDialog {
     Component.onCompleted: selectionTimer.start()
 
     onAccepted: {
-        if (selectionTimer.running) {
-            selectionTimer.stop()
-            _updateSelection()
-        }
+        _flushSelection()
         importer.applySelection()
     }
 
@@ -69,6 +66,20 @@ QGCPopupDialog {
         function onZonesChanged()   { selectionTimer.restart() }
     }
 
+    // The zones the vehicle won't stop at are confirmed: those of the settled selection, which the importer names
+    Connections {
+        target: importer
+        function onUploadConfirmationRequired(confirmation, text, zones) {
+            mainWindow.showMessageDialog(qsTr("Upload Fence"),
+                                         qsTr("%1\n\nThe vehicle doesn't stop at zones which are not fenced, QGroundControl only alerts about them. Click 'Ok' to upload the fence anyway.")
+                                            .arg(text.replace(/</g, "\u2039").replace(/>/g, "\u203A")),
+                                         Dialog.Ok | Dialog.Cancel,
+                                         function() {
+                                             control._flushSelection()
+                                             importer.confirmUpload(confirmation)
+                                         })
+        }
+    }
 
     function _restrictions() {
         const restrictions = []
@@ -87,6 +98,14 @@ QGCPopupDialog {
     function _updateSelection() {
         const area = mapViewOnlyCheck.checked ? flightMap.visibleRegion.boundingGeoRectangle() : QtPositioning.rectangle()
         importer.updateSelection(_restrictions(), area, activeCombo.hours[activeCombo.currentIndex], simplifyCombo.tolerances[simplifyCombo.currentIndex])
+    }
+
+    /// Starts the selection of the changes still settling, so that what is applied or uploaded is what the dialog shows
+    function _flushSelection() {
+        if (selectionTimer.running) {
+            selectionTimer.stop()
+            _updateSelection()
+        }
     }
 
     function _choiceDetail(choice) {
@@ -422,20 +441,9 @@ QGCPopupDialog {
                 text:       qsTr("Upload to Vehicle")
                 enabled:    _upload.canUpload && !control._uploading && importer.selectedCount > 0
                 onClicked: {
-                    if (selectionTimer.running) {
-                        selectionTimer.stop()
-                        control._updateSelection()
-                    }
-                    // The zones the vehicle won't stop at are confirmed
-                    if (importer.notFencedCount > 0) {
-                        mainWindow.showMessageDialog(qsTr("Upload Fence"),
-                                                     qsTr("%1\n\nThe vehicle doesn't stop at zones which are not fenced, QGroundControl only alerts about them. Click 'Ok' to upload the fence anyway.")
-                                                        .arg(importer.notFencedText.replace(/</g, "\u2039").replace(/>/g, "\u203A")),
-                                                     Dialog.Ok | Dialog.Cancel,
-                                                     function() { importer.uploadToVehicle() })
-                    } else {
-                        importer.uploadToVehicle()
-                    }
+                    control._flushSelection()
+                    // Asks first when zones aren't fenced, see onUploadConfirmationRequired
+                    importer.requestUpload()
                 }
             }
 

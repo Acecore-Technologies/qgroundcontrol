@@ -27,9 +27,9 @@
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QJsonArray>
 #include <QtCore/QSet>
-
 
 #include <algorithm>
 #include <cmath>
@@ -515,10 +515,7 @@ void GeoZoneFenceImporter::_updateFenceNote()
 {
     int count = 0;
     const QList<GeoZoneFenceTags::NotFenced> zones = GeoZoneFenceTags::notFenced(_geoFenceController, &count);
-    QStringList zoneTexts;
-    for (const GeoZoneFenceTags::NotFenced &zone : zones) {
-        zoneTexts.append(zone.reason.isEmpty() ? zone.name : tr("%1: %2").arg(zone.name, zone.reason));
-    }
+    QStringList zoneTexts = _zoneTexts(zones);
     if (count > zoneTexts.count()) {
         zoneTexts.append(tr("%n more", nullptr, count - static_cast<int>(zoneTexts.count())));
     }
@@ -529,6 +526,16 @@ void GeoZoneFenceImporter::_updateFenceNote()
         _fenceNoteZones = zoneTexts;
         emit fenceNoteChanged();
     }
+}
+
+QStringList GeoZoneFenceImporter::_zoneTexts(const QList<GeoZoneFenceTags::NotFenced> &zones)
+{
+    QStringList texts;
+    texts.reserve(zones.count());
+    for (const GeoZoneFenceTags::NotFenced &zone : zones) {
+        texts.append(zone.reason.isEmpty() ? zone.name : tr("%1: %2").arg(zone.name, zone.reason));
+    }
+    return texts;
 }
 
 QString GeoZoneFenceImporter::notFencedText() const
@@ -794,6 +801,54 @@ int GeoZoneFenceImporter::_addFences(const Fences &fences)
     }
 
     return added;
+}
+
+QString GeoZoneFenceImporter::_notFencedConfirmation() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha1);
+    for (const GeoZoneFenceTags::NotFenced &zone : _notFenced) {
+        // Each length first, so that no two lists of zones give the same bytes
+        for (const QString &text : { zone.name, zone.reason }) {
+            const QByteArray bytes = text.toUtf8();
+            hash.addData(QByteArray::number(bytes.size()));
+            hash.addData(QByteArrayView(":"));
+            hash.addData(bytes);
+        }
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+void GeoZoneFenceImporter::_requireUploadConfirmation()
+{
+    emit uploadConfirmationRequired(_notFencedConfirmation(), notFencedText(), _zoneTexts(_notFenced));
+}
+
+void GeoZoneFenceImporter::requestUpload()
+{
+    if (!_geoFenceController || _upload->busy()) {
+        return;
+    }
+    // The zones of a selection still being prepared aren't known: asking about the previous one would upload them
+    // unconfirmed
+    _finishSelection();
+    if (_notFenced.isEmpty()) {
+        uploadToVehicle();
+    } else {
+        _requireUploadConfirmation();
+    }
+}
+
+void GeoZoneFenceImporter::confirmUpload(const QString &confirmation)
+{
+    if (!_geoFenceController || _upload->busy()) {
+        return;
+    }
+    _finishSelection();
+    if (!_notFenced.isEmpty() && (confirmation != _notFencedConfirmation())) {
+        _requireUploadConfirmation();
+        return;
+    }
+    uploadToVehicle();
 }
 
 void GeoZoneFenceImporter::uploadToVehicle()
