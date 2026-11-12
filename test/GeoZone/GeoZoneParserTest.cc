@@ -18,7 +18,9 @@
 
 #include <QtCore/QBuffer>
 #include <QtCore/QIODevice>
+#include <QtCore/QMutex>
 
+#include <optional>
 #include <type_traits>
 
 #include <zlib.h>
@@ -244,15 +246,35 @@ private:
     qint64 _start = 0;
 };
 
-/// Canceled by cancelOnSkippedFeature
-const GeoZoneCancelToken *s_cancelOnSkip = nullptr;
+/// What cancelOnSkippedFeature uses: the handler runs on any thread and may outlive the test which installed it
+QBasicMutex s_cancelMutex;
+/// Canceled by cancelOnSkippedFeature. A copy, which shares the flag of the token of the parse and outlives it.
+std::optional<GeoZoneCancelToken> s_cancelOnSkip;
+/// The handler cancelOnSkippedFeature replaced, which still gets the messages
+QtMessageHandler s_previousHandler = nullptr;
 
-/// Cancels s_cancelOnSkip while the parser logs a feature it skips, which happens between features
-void cancelOnSkippedFeature(QtMsgType, const QMessageLogContext &, const QString &message)
+/// Cancels s_cancelOnSkip while the parser logs a feature it skips, which happens between features. The messages
+/// go on to the handler of the test, which records them and checks the warnings.
+void cancelOnSkippedFeature(QtMsgType type, const QMessageLogContext &context, const QString &message)
 {
-    if (s_cancelOnSkip && message.contains(QStringLiteral("Skipping feature"))) {
-        s_cancelOnSkip->cancel();
+    QtMessageHandler previousHandler = nullptr;
+    {
+        const QMutexLocker locker(&s_cancelMutex);
+        if (s_cancelOnSkip && message.contains(QStringLiteral("Skipping feature"))) {
+            s_cancelOnSkip->cancel();
+        }
+        previousHandler = s_previousHandler;
     }
+    if (previousHandler) {
+        previousHandler(type, context, message);
+    }
+}
+
+/// Sets the token cancelOnSkippedFeature cancels, none to cancel nothing
+void setCancelOnSkip(const std::optional<GeoZoneCancelToken> &cancelToken)
+{
+    const QMutexLocker locker(&s_cancelMutex);
+    s_cancelOnSkip = cancelToken;
 }
 
 
@@ -574,6 +596,7 @@ void GeoZoneParserTest::_testParseED269()
         GeoZoneParser::Result changed;
         QVERIFY2(GeoZoneParser::parse(changedBytes, changed, errorString), qPrintable(errorString));
         QVERIFY(changed.contentHash != result.contentHash);
+        QCOMPARE(changed.zones.count(), 3);
         QVERIFY(changed.zones[0].contentHash != result.zones[0].contentHash);
         QCOMPARE(changed.zones[1].contentHash, result.zones[1].contentHash);
         QCOMPARE(changed.zones[2].contentHash, result.zones[2].contentHash);
@@ -610,6 +633,7 @@ void GeoZoneParserTest::_testParseED269()
 
     const GeoZone::Data &scheduled = result.zones[2];
     QCOMPARE(scheduled.restriction, GeoZone::Conditional);
+    QVERIFY(!scheduled.volumes.isEmpty());
     QVERIFY(qIsNaN(scheduled.volumes[0].lowerLimit));
     QVERIFY(qIsNaN(scheduled.volumes[0].upperLimit));
     QCOMPARE(scheduled.applicability.count(), 1);
@@ -638,7 +662,10 @@ void GeoZoneParserTest::_testParseED269()
     QCOMPARE(classified.uSpaceClass, QStringLiteral("EUROCONTROL"));
     QCOMPARE(classified.regulationExemption, QStringLiteral("YES"));
     QCOMPARE(classified.extendedProperties, QStringList({ QStringLiteral("operator: Airport"), QStringLiteral("phone: 123") }));
+    QVERIFY(!classified.volumes.isEmpty());
     QVERIFY(std::isnan(classified.volumes[0].upperLimit));
+    QVERIFY(!classified.applicability.isEmpty());
+    QVERIFY(!classified.applicability[0].schedule.isEmpty());
     QVERIFY(classified.applicability[0].schedule[0].days.isEmpty());
     QCOMPARE(classified.issues.count(), 3);
     const QString unitIssue = QStringLiteral("Unknown unit NM, the altitude limits are ignored");
@@ -738,8 +765,10 @@ void GeoZoneParserTest::_testParseED318()
         { "name": "Tower", "phone": "+41 0000", "purpose": "NOTIFICATION", "intervalBefore": "P2DT12H" } ] },
         "geometry": { "type": "Polygon", "coordinates": [ [ [0, 0], [1, 0], [1, 1], [0, 0] ] ] } } ] })";
     QVERIFY2(GeoZoneParser::parse(notified, result, errorString), qPrintable(errorString));
+    QCOMPARE(result.zones.count(), 1);
     QCOMPARE(result.zones[0].notificationAuthority, QStringLiteral("Tower"));
     QCOMPARE(result.zones[0].notificationLeadSecs, qint64{ (2 * 24 + 12) * 3600 });
+    QCOMPARE(result.zones[0].authorities.count(), 2);
     QVERIFY(result.zones[0].authorities[1].contains(QStringLiteral("notice P2DT12H")));
 }
 
@@ -761,6 +790,7 @@ void GeoZoneParserTest::_testParseNationalVariants()
     QCOMPARE(aerodrome.country, QStringLiteral("ESP"));
     QCOMPARE(aerodrome.restriction, GeoZone::ReqAuthorisation);
     QCOMPARE(aerodrome.reasons, QStringList(QStringLiteral("AIR_TRAFFIC")));
+    QVERIFY(!aerodrome.volumes.isEmpty());
     QCOMPARE(aerodrome.volumes[0].lowerLimit, 45.0);
     QCOMPARE(aerodrome.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
     QCOMPARE(aerodrome.volumes[0].upperLimit, 900.0);
@@ -771,8 +801,10 @@ void GeoZoneParserTest::_testParseNationalVariants()
     QVERIFY2(!aerodrome.authorities.isEmpty() && aerodrome.authorities[0].startsWith(QStringLiteral("Authorisation: ")), qPrintable(aerodrome.authorities.join(QLatin1Char('|'))));
     const GeoZone::Data &photography = enaire.zones[1];
     QCOMPARE(photography.reasons, QStringList(QStringLiteral("PRIVACY")));
+    QVERIFY(!photography.volumes.isEmpty());
     QVERIFY(photography.volumes[0].feet);
     QCOMPARE(photography.volumes[0].upperLimit, 3000.0);
+    QVERIFY(!enaire.zones[2].volumes.isEmpty());
     QCOMPARE(enaire.zones[2].volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
     QCOMPARE(enaire.zones[2].volumes[0].upperLimit, 4938.0);
 
@@ -784,14 +816,17 @@ void GeoZoneParserTest::_testParseNationalVariants()
     QCOMPARE(servais.zones.count(), 2);
     QCOMPARE(servais.zones[0].identifier, QStringLiteral("LEGT0"));
     QCOMPARE(servais.zones[0].restriction, GeoZone::ReqAuthorisation);
+    QVERIFY(!servais.zones[0].volumes.isEmpty());
     QCOMPARE(servais.zones[0].volumes[0].upperLimit, 900.0);
     QVERIFY(servais.zones[0].applicability.isEmpty());
     const GeoZone::Data &railway = servais.zones[1];
     QCOMPARE(railway.restriction, GeoZone::Conditional);
     QCOMPARE(railway.otherReasonInfo, QStringLiteral("Protección Infraestructura Ferroviaria"));
+    QVERIFY(!railway.volumes.isEmpty());
     QCOMPARE(railway.volumes[0].upperLimit, 120.0);
     QCOMPARE(railway.notificationLeadSecs, qint64{ 20 * 24 * 3600 });
     QCOMPARE(railway.notificationAuthority, QStringLiteral("ADIF"));
+    QVERIFY(!railway.authorities.isEmpty());
     QVERIFY(railway.authorities.constFirst().contains(QStringLiteral("autorizacioneszonadeafeccion@adif.es")));
     // Untitled downloads are named after their service
     ScopedEnvironment environment;
@@ -820,6 +855,7 @@ void GeoZoneParserTest::_testParseNationalVariants()
     QCOMPARE(austria.zones[2].restriction, GeoZone::NoRestriction);
     GeoZoneParser::Result german;
     QVERIFY2(GeoZoneParser::parse(austriaBytes, german, errorString, GeoZoneParser::Format::Unknown, QStringLiteral("de")), qPrintable(errorString));
+    QVERIFY(!german.zones.isEmpty());
     QVERIFY(german.zones[0].message.startsWith(QStringLiteral("Kontrollzone Flughafen Graz (LOWG)")));
 
     // Markup in messages
@@ -855,6 +891,7 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     QCOMPARE(cell.restrictionConditions, QStringLiteral("LAANC up to 300 ft AGL"));
     QVERIFY(cell.message.contains(QStringLiteral("Class B airspace")));
     QCOMPARE(cell.reasons, QStringList(QStringLiteral("AIR_TRAFFIC")));
+    QVERIFY(!cell.volumes.isEmpty());
     QCOMPARE(cell.volumes[0].lowerLimit, 0.0);
     QCOMPARE(cell.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
     QVERIFY(GeoZone(cell).contains(GeoZone::Position{ QGeoCoordinate(38.896, -77.487), 2000, 90 }));
@@ -869,6 +906,7 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     QCOMPARE(security.reasons, QStringList(QStringLiteral("SENSITIVE")));
     QCOMPARE(security.otherReasonInfo, QStringLiteral("National Security"));
     QVERIFY(security.authorities.join(QLatin1Char('\n')).contains(QStringLiteral("henry.alderete@navy.mil")));
+    QVERIFY(!security.volumes.isEmpty());
     QVERIFY(security.volumes[0].feet);
     QCOMPARE(security.volumes[0].upperLimit, 400.0);
     QCOMPARE(security.volumes[0].upperReference, GeoZone::VerticalReference::Ground);
@@ -877,6 +915,7 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     const GeoZone::Data &classB = byCode.value(QStringLiteral("CLASS_B"));
     QCOMPARE(classB.restriction, GeoZone::ReqAuthorisation);
     QCOMPARE(classB.name, QStringLiteral("WASHINGTON-TRI AREA CLASS B"));
+    QVERIFY(!classB.volumes.isEmpty());
     QCOMPARE(classB.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
     QCOMPARE(classB.volumes[0].upperLimit, 10000.0);
     QCOMPARE(classB.volumes[0].upperReference, GeoZone::VerticalReference::MeanSeaLevel);
@@ -885,11 +924,13 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     const GeoZone::Data &prohibited = byCode.value(QStringLiteral("P"));
     QCOMPARE(prohibited.name, QStringLiteral("P-56"));
     QCOMPARE(prohibited.restriction, GeoZone::Prohibited);
+    QVERIFY(!prohibited.volumes.isEmpty());
     QCOMPARE(prohibited.volumes[0].upperLimit, 18000.0);
     const GeoZone::Data &restricted = byCode.value(QStringLiteral("R"));
     QCOMPARE(restricted.name, QStringLiteral("R-4001A"));
     QCOMPARE(restricted.restriction, GeoZone::ReqAuthorisation);
     QVERIFY(restricted.restrictionConditions.contains(QStringLiteral("SURFACE TO UNLIMITED")));
+    QVERIFY(!restricted.volumes.isEmpty());
     QCOMPARE(restricted.volumes[0].upperLimit, 99999.0);
     QCOMPARE(restricted.authorities, QStringList(QStringLiteral("FAA, WASHINGTON ARTCC")));
 
@@ -1002,6 +1043,7 @@ void GeoZoneParserTest::_testParseOpenAip()
     QCOMPARE(ctr.reasons, QStringList(QStringLiteral("AIR_TRAFFIC")));
     QCOMPARE(ctr.identifier, QStringLiteral("650000000000000000000001"));
     QVERIFY(ctr.extendedProperties.contains(QStringLiteral("Frequency: 118.100 MHz TESTHAUSEN TOWER")));
+    QVERIFY(!ctr.volumes.isEmpty());
     QVERIFY(ctr.volumes[0].feet);
     QCOMPARE(ctr.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
     QCOMPARE(ctr.volumes[0].upperLimit, 2500.0);
@@ -1010,6 +1052,7 @@ void GeoZoneParserTest::_testParseOpenAip()
     // Flight levels, hours of operation and activation
     const GeoZone::Data &restricted = byName.value(QStringLiteral("R-TEST RANGE"));
     QCOMPARE(restricted.restriction, GeoZone::ReqAuthorisation);
+    QVERIFY(!restricted.volumes.isEmpty());
     QCOMPARE(restricted.volumes[0].upperLimit, 9500.0);
     QCOMPARE(restricted.volumes[0].upperReference, GeoZone::VerticalReference::FlightLevel);
     QCOMPARE(restricted.restrictionConditions, QStringLiteral("Activated by NOTAM"));
@@ -1019,10 +1062,13 @@ void GeoZoneParserTest::_testParseOpenAip()
     // Limits in meters are converted to feet
     const GeoZone::Data &prohibited = byName.value(QStringLiteral("P-TEST PLANT"));
     QCOMPARE(prohibited.restriction, GeoZone::Prohibited);
+    QVERIFY(!prohibited.volumes.isEmpty());
     QVERIFY(qAbs(prohibited.volumes[0].upperLimit - (1000 / 0.3048)) < 0.01);
-    QVERIFY(qAbs(byName.value(QStringLiteral("TEST NATURE RESERVE")).volumes[0].upperLimit - (150 / 0.3048)) < 0.01);
-    QCOMPARE(byName.value(QStringLiteral("TEST NATURE RESERVE")).restriction, GeoZone::Conditional);
-    QCOMPARE(byName.value(QStringLiteral("TEST NATURE RESERVE")).reasons, QStringList(QStringLiteral("NATURE")));
+    const GeoZone::Data &reserve = byName.value(QStringLiteral("TEST NATURE RESERVE"));
+    QVERIFY(!reserve.volumes.isEmpty());
+    QVERIFY(qAbs(reserve.volumes[0].upperLimit - (150 / 0.3048)) < 0.01);
+    QCOMPARE(reserve.restriction, GeoZone::Conditional);
+    QCOMPARE(reserve.reasons, QStringList(QStringLiteral("NATURE")));
     QCOMPARE(byName.value(QStringLiteral("TESTHAUSEN TMA 1")).restriction, GeoZone::ReqAuthorisation);
     QCOMPARE(byName.value(QStringLiteral("D-TEST GLIDING")).restriction, GeoZone::Conditional);
     QCOMPARE(byName.value(QStringLiteral("D-TEST GLIDING")).restrictionConditions, QStringLiteral("Active on demand"));
@@ -1040,6 +1086,7 @@ void GeoZoneParserTest::_testParseOpenAip()
     QVERIFY2(GeoZoneParser::parse(list, api, errorString), qPrintable(errorString));
     QCOMPARE(api.format, GeoZoneParser::Format::OpenAip);
     QCOMPARE(api.zones.count(), 6);
+    QVERIFY(!api.zones[0].volumes.isEmpty() && !result.zones[0].volumes.isEmpty());
     QCOMPARE(api.zones[0].volumes[0].rings, result.zones[0].volumes[0].rings);
 }
 
@@ -1170,7 +1217,9 @@ void GeoZoneParserTest::_testParseFaaTfr()
     QFile tfrFile(QStringLiteral(":/unittest/faa_tfr_test.json"));
     QVERIFY(tfrFile.open(QIODevice::ReadOnly));
     const QJsonObject tfrRoot = QJsonDocument::fromJson(tfrFile.readAll()).object();
-    const QList<GeoZoneFormat::CompanionRequest> requests = GeoZoneFormat::find(GeoZoneParser::Format::FaaTfr)->companionRequests(
+    const GeoZoneFormat *const tfrFormat = GeoZoneFormat::find(GeoZoneParser::Format::FaaTfr);
+    QVERIFY(tfrFormat);
+    const QList<GeoZoneFormat::CompanionRequest> requests = tfrFormat->companionRequests(
         QUrl(QStringLiteral("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS")), tfrRoot, tfrRoot.value(QStringLiteral("features")).toArray());
     QCOMPARE(requests.count(), 2);
     QCOMPARE(requests[0].key, QStringLiteral("6/4240"));
@@ -1179,6 +1228,7 @@ void GeoZoneParserTest::_testParseFaaTfr()
     QVERIFY2(GeoZoneParser::parse(GeoZoneParser::composite(tfrRoot, { { QStringLiteral("6/4240"), { QStringLiteral("202603052027"), detail } } }), result, errorString), qPrintable(errorString));
     QCOMPARE(result.companions.count(), 1);
     for (const GeoZone::Data &tfr : std::as_const(result.zones)) {
+        QVERIFY(!tfr.volumes.isEmpty());
         if (!tfr.identifier.startsWith(QStringLiteral("6/4240"))) {
             QVERIFY(tfr.applicability.isEmpty());
             QVERIFY(std::isnan(tfr.volumes[0].upperLimit));
@@ -1207,6 +1257,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QCOMPARE(ctr.name, QStringLiteral("Testhausen control zone 1"));
     QCOMPARE(ctr.restriction, GeoZone::ReqAuthorisation);
     QCOMPARE(ctr.country, QStringLiteral("DEU"));
+    QVERIFY(!ctr.volumes.isEmpty());
     QCOMPARE(ctr.volumes[0].lowerLimit, 0.0);
     QCOMPARE(ctr.volumes[0].lowerReference, GeoZone::VerticalReference::Ground);
     QCOMPARE(ctr.volumes[0].upperLimit, 2500 * 0.3048);
@@ -1216,6 +1267,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QCOMPARE(temporary.restriction, GeoZone::Prohibited);
     QCOMPARE(temporary.applicability.count(), 1);
     QCOMPARE(temporary.applicability[0].end, _utc(QDate(2026, 12, 31), QTime(22, 59)));
+    QVERIFY(!temporary.volumes.isEmpty());
     QVERIFY(qAbs(temporary.volumes[0].upperLimit - 701.0) < 0.1);
     QCOMPARE(dipul.zones[3].reasons, QStringList(QStringLiteral("EMERGENCY")));
     QVERIFY(dipul.zones[3].message.contains(QStringLiteral("LuftVO")));
@@ -1227,6 +1279,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY2(GeoZoneParser::parse(franceFile.readAll(), france, errorString), qPrintable(errorString));
     QCOMPARE(france.zones.count(), 2);
     QCOMPARE(france.zones[0].name, QStringLiteral("Vol interdit"));
+    QVERIFY(!france.zones[0].volumes.isEmpty() && !france.zones[1].volumes.isEmpty());
     QVERIFY(std::isnan(france.zones[0].volumes[0].lowerLimit));
     QVERIFY(france.zones[0].restrictionConditions.contains(QStringLiteral("agglomération")));
     QCOMPARE(france.zones[1].volumes[0].lowerLimit, 50.0);
@@ -1258,6 +1311,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     const GeoZone::Data &frz = byName.value(QStringLiteral("BLACKBUSHE"));
     QCOMPARE(frz.restriction, GeoZone::ReqAuthorisation);
     QCOMPARE(frz.country, QStringLiteral("GBR"));
+    QVERIFY(!frz.volumes.isEmpty());
     QVERIFY(frz.volumes[0].feet);
     QCOMPARE(frz.volumes[0].upperLimit, 2000.0);
     QCOMPARE(frz.volumes[0].upperReference, GeoZone::VerticalReference::Ground);
@@ -1267,6 +1321,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(frzZone.contains(aerodrome.atDistanceAndAzimuth(3500, 0)));
     QVERIFY(!frzZone.contains(aerodrome.atDistanceAndAzimuth(4000, 0)));
     const GeoZone::Data &circle = byName.value(QStringLiteral("SPRINGFIELDS"));
+    QVERIFY(!circle.volumes.isEmpty());
     QVERIFY(circle.volumes[0].isCircle);
     QCOMPARE(circle.volumes[0].radius, 2 * 1852.0);
     QCOMPARE(byName.value(QStringLiteral("RAASAY")).restriction, GeoZone::Conditional);
@@ -1287,57 +1342,6 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QCOMPARE(GeoZoneLoader::extractZip(QByteArray("PK\x03\x04" "broken"), errorString), QByteArray());
     QVERIFY(!errorString.isEmpty());
 #endif
-
-    // Archives expanding beyond the limit are stopped while inflating, whatever their headers declare
-    const auto deflatedZeros = [](qint64 size) {
-        z_stream stream{};
-        (void) deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
-        const QByteArray zeros(1 << 20, '\0');
-        QByteArray output;
-        for (qint64 written = 0; written < size; written += zeros.size()) {
-            stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(zeros.constData()));
-            stream.avail_in = zeros.size();
-            const int flush = ((written + zeros.size()) >= size) ? Z_FINISH : Z_NO_FLUSH;
-            do {
-                char buffer[65536];
-                stream.next_out = reinterpret_cast<Bytef*>(buffer);
-                stream.avail_out = sizeof(buffer);
-                (void) deflate(&stream, flush);
-                output.append(buffer, sizeof(buffer) - stream.avail_out);
-            } while (stream.avail_out == 0);
-        }
-        deflateEnd(&stream);
-        return output;
-    };
-    const auto zipArchive = [](const QByteArray &name, const QByteArray &compressed, quint32 declaredSize, quint16 entryCount = 1) {
-        const auto u16 = [](QByteArray &bytes, quint16 value) { bytes.append(reinterpret_cast<const char*>(&value), 2); };
-        const auto u32 = [](QByteArray &bytes, quint32 value) { bytes.append(reinterpret_cast<const char*>(&value), 4); };
-        QByteArray archive;
-        u32(archive, 0x04034b50); u16(archive, 20); u16(archive, 0); u16(archive, 8); u16(archive, 0); u16(archive, 0);
-        u32(archive, 0); u32(archive, compressed.size()); u32(archive, declaredSize); u16(archive, name.size()); u16(archive, 0);
-        archive.append(name);
-        archive.append(compressed);
-        const quint32 directoryOffset = archive.size();
-        u32(archive, 0x02014b50); u16(archive, 20); u16(archive, 20); u16(archive, 0); u16(archive, 8); u16(archive, 0); u16(archive, 0);
-        u32(archive, 0); u32(archive, compressed.size()); u32(archive, declaredSize); u16(archive, name.size()); u16(archive, 0); u16(archive, 0);
-        u16(archive, 0); u16(archive, 0); u32(archive, 0); u32(archive, 0);
-        archive.append(name);
-        const quint32 directorySize = archive.size() - directoryOffset;
-        u32(archive, 0x06054b50); u16(archive, 0); u16(archive, 0); u16(archive, entryCount); u16(archive, entryCount);
-        u32(archive, directorySize); u32(archive, directoryOffset); u16(archive, 0);
-        return archive;
-    };
-    constexpr qint64 limit = 1 << 20;
-    const QByteArray bomb = deflatedZeros(8 * limit);
-    QVERIFY(bomb.size() < (limit / 10));
-    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 1000), { QStringLiteral(".json") }, limit, errorString).isEmpty());
-    QCOMPARE(errorString, QStringLiteral("The file in the zip archive is too large."));
-    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 8 * limit), { QStringLiteral(".json") }, limit, errorString).isEmpty());
-    QCOMPARE(errorString, QStringLiteral("The file in the zip archive is too large."));
-    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 1000, GeoZoneZip::maxEntries + 1), { QStringLiteral(".json") }, limit, errorString).isEmpty());
-    QCOMPARE(errorString, QStringLiteral("The zip archive has too many files."));
-    QVERIFY(GeoZoneZip::largestFile(zipArchive("readme.txt", bomb, 1000), { QStringLiteral(".json") }, limit, errorString).isEmpty());
-    QCOMPARE(errorString, QStringLiteral("The zip archive has no geozone file."));
 
     // The NATS page links the datasets of the current and the next AIRAC cycle
     const QByteArray page = "<!DOCTYPE html><html><body>"
@@ -1419,7 +1423,10 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(!GeoZoneProviders::areaDownloaded(QStringLiteral("france"), { dipulUrl }, insideArea));
     QVERIFY(GeoZoneProviders::areaDownloaded(QStringLiteral("france"), { dipulUrl, franceUrl }, insideArea));
 #ifndef GEOZONE_CORE_TEST
-    GeoZoneManager manager(QTemporaryDir().path());
+    // Declared before the manager, which stores in it until it is destroyed
+    const QTemporaryDir managerDir;
+    QVERIFY(managerDir.isValid());
+    GeoZoneManager manager(managerDir.path());
     QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
     QVERIFY(!manager.addArea(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(51, 8), QGeoCoordinate(49, 10))));
     QCOMPARE(failedSpy.count(), 1);
@@ -1453,6 +1460,7 @@ void GeoZoneParserTest::_testLiveNationalFeeds()
     QCOMPARE(manager.sources()->count(), 5);
     for (int i = 0; i < manager.sources()->count(); i++) {
         const GeoZoneSource *const source = manager.sources()->value<GeoZoneSource*>(i);
+        QVERIFY(source);
         qDebug() << source->name() << source->detailsText() << source->warningText();
         QVERIFY2(source->zoneCount() > 0, qPrintable(source->key()));
     }
@@ -1635,8 +1643,10 @@ void GeoZoneParserTest::_testRingValidation()
 
     const GeoZone::Data &data = result.zones.first();
     QCOMPARE(data.issues, issue.isEmpty() ? QStringList() : QStringList{ issue });
+    QVERIFY(!data.volumes.isEmpty());
     const GeoZone::Volume &volume = data.volumes.first();
     if (!volume.isCircle) {
+        QVERIFY(!volume.rings.isEmpty());
         QCOMPARE(volume.rings.first().count(), vertices);
         QCOMPARE(volume.rings.count(), holes + 1);
         QVERIFY(volume.rings.first().first() != volume.rings.first().last());
@@ -1665,6 +1675,7 @@ void GeoZoneParserTest::_testRingValidation()
     QCOMPARE(stream.status(), QDataStream::Ok);
     QCOMPARE(readBack.issues, result.issues);
     QCOMPARE(readBack.skippedFeatures, result.skippedFeatures);
+    QVERIFY(!readBack.zones.isEmpty() && !readBack.zones.first().volumes.isEmpty());
     QCOMPARE(readBack.zones.first().volumes.first().rings, volume.rings);
 }
 
@@ -1826,6 +1837,7 @@ void GeoZoneParserTest::_testEdgeInterpolation()
     QVERIFY2(GeoZoneParser::parse(document, result, errorString), qPrintable(errorString));
     QCOMPARE(result.zones.count(), 1);
     QVERIFY(result.issues.isEmpty());
+    QVERIFY(!result.zones.first().volumes.isEmpty() && !result.zones.first().volumes.first().rings.isEmpty());
     const GeoZone::Ring &published = result.zones.first().volumes.first().rings.first();
     const GeoZone zone(result.zones.first());
     if (greatCircles) {
@@ -1910,8 +1922,10 @@ void GeoZoneParserTest::_testTfrCircles()
     for (const QByteArray &document : { QJsonDocument(tfrRoot).toJson(QJsonDocument::Compact), withDetail("1.5") }) {
         const GeoZoneParser::Result polygonal = parse(document);
         QCOMPARE(polygonal.zones.count(), 1);
+        QCOMPARE(polygonal.zones.first().volumes.count(), 1);
         const GeoZone::Volume &polygon = polygonal.zones.first().volumes.first();
         QVERIFY(!polygon.isCircle);
+        QCOMPARE(polygon.rings.count(), 1);
         QCOMPARE(polygon.rings.first().count(), 36);
         QVERIFY(!GeoZone(polygonal.zones.first()).contains(inside));
     }
@@ -2004,6 +2018,7 @@ void GeoZoneParserTest::_testAixmArcs()
     QString errorString;
     QVERIFY2(GeoZoneParser::parse(aixm.toUtf8(), result, errorString), qPrintable(errorString));
     QCOMPARE(result.zones.count(), 1);
+    QVERIFY(!result.zones.first().volumes.isEmpty() && !result.zones.first().volumes.first().rings.isEmpty());
     const QList<QGeoCoordinate> vertices = GeoZone::toCoordinates(result.zones.first().volumes.first().rings.first());
     const QGeoCoordinate center(52, 0);
     const double radius = 20 * 1852;
@@ -2320,6 +2335,7 @@ void GeoZoneParserTest::_testFuzzFindings()
         QVERIFY2(GeoZoneParser::parse(aixm.arg(endAngle).toUtf8(), result, errorString), qPrintable(errorString));
         QCOMPARE(result.zones.count(), 1);
         // One turn, with a point every 2.66 degrees keeping the chords of the 2 NM arc within 1 m of it
+        QVERIFY(!result.zones[0].volumes.isEmpty() && !result.zones[0].volumes[0].rings.isEmpty());
         QVERIFY(qAbs(result.zones[0].volumes[0].rings[0].count() - 136) <= 1);
         QVERIFY(GeoZone(result.zones[0]).contains(QGeoCoordinate(51.3, -0.8)));
     }
@@ -2666,7 +2682,9 @@ void GeoZoneParserTest::_testXmlAndPackages()
     QVERIFY2(manager.repository()->loadFile(packagePath, errorString), qPrintable(errorString));
     // The fourth feature has no supported geometry, the zone in both files is loaded once
     QCOMPARE(manager.zoneCount(), 3);
-    QCOMPARE(manager.sources()->value<GeoZoneSource*>(0)->formatName(), QStringLiteral("ED-269"));
+    const GeoZoneSource *const packageSource = manager.sources()->value<GeoZoneSource*>(0);
+    QVERIFY(packageSource);
+    QCOMPARE(packageSource->formatName(), QStringLiteral("ED-269"));
 
     QFile archive(packagePath);
     QVERIFY(archive.open(QIODevice::ReadOnly));
@@ -2674,6 +2692,62 @@ void GeoZoneParserTest::_testXmlAndPackages()
     QCOMPARE(files.count(), 3);
     QVERIFY(files.first().data.size() >= files.last().data.size());
 #endif
+}
+
+void GeoZoneParserTest::_testZipLimits()
+{
+    QString errorString;
+
+    // Archives expanding beyond the limit are stopped while inflating, whatever their headers declare
+    const auto deflatedZeros = [](qint64 size) {
+        z_stream stream{};
+        (void) deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+        const QByteArray zeros(1 << 20, '\0');
+        QByteArray output;
+        for (qint64 written = 0; written < size; written += zeros.size()) {
+            stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(zeros.constData()));
+            stream.avail_in = zeros.size();
+            const int flush = ((written + zeros.size()) >= size) ? Z_FINISH : Z_NO_FLUSH;
+            do {
+                char buffer[65536];
+                stream.next_out = reinterpret_cast<Bytef*>(buffer);
+                stream.avail_out = sizeof(buffer);
+                (void) deflate(&stream, flush);
+                output.append(buffer, sizeof(buffer) - stream.avail_out);
+            } while (stream.avail_out == 0);
+        }
+        deflateEnd(&stream);
+        return output;
+    };
+    const auto zipArchive = [](const QByteArray &name, const QByteArray &compressed, quint32 declaredSize, quint16 entryCount = 1) {
+        const auto u16 = [](QByteArray &bytes, quint16 value) { bytes.append(reinterpret_cast<const char*>(&value), 2); };
+        const auto u32 = [](QByteArray &bytes, quint32 value) { bytes.append(reinterpret_cast<const char*>(&value), 4); };
+        QByteArray archive;
+        u32(archive, 0x04034b50); u16(archive, 20); u16(archive, 0); u16(archive, 8); u16(archive, 0); u16(archive, 0);
+        u32(archive, 0); u32(archive, compressed.size()); u32(archive, declaredSize); u16(archive, name.size()); u16(archive, 0);
+        archive.append(name);
+        archive.append(compressed);
+        const quint32 directoryOffset = archive.size();
+        u32(archive, 0x02014b50); u16(archive, 20); u16(archive, 20); u16(archive, 0); u16(archive, 8); u16(archive, 0); u16(archive, 0);
+        u32(archive, 0); u32(archive, compressed.size()); u32(archive, declaredSize); u16(archive, name.size()); u16(archive, 0); u16(archive, 0);
+        u16(archive, 0); u16(archive, 0); u32(archive, 0); u32(archive, 0);
+        archive.append(name);
+        const quint32 directorySize = archive.size() - directoryOffset;
+        u32(archive, 0x06054b50); u16(archive, 0); u16(archive, 0); u16(archive, entryCount); u16(archive, entryCount);
+        u32(archive, directorySize); u32(archive, directoryOffset); u16(archive, 0);
+        return archive;
+    };
+    constexpr qint64 limit = 1 << 20;
+    const QByteArray bomb = deflatedZeros(8 * limit);
+    QVERIFY(bomb.size() < (limit / 10));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 1000), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The file in the zip archive is too large."));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 8 * limit), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The file in the zip archive is too large."));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("zones.json", bomb, 1000, GeoZoneZip::maxEntries + 1), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The zip archive has too many files."));
+    QVERIFY(GeoZoneZip::largestFile(zipArchive("readme.txt", bomb, 1000), { QStringLiteral(".json") }, limit, errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("The zip archive has no geozone file."));
 }
 
 void GeoZoneParserTest::_testZipWriterLimit()
@@ -2749,15 +2823,21 @@ void GeoZoneParserTest::_testParseCancel()
     const bool debugEnabled = category.isDebugEnabled();
     category.setEnabled(QtDebugMsg, true);
     const QtMessageHandler previousHandler = qInstallMessageHandler(cancelOnSkippedFeature);
+    {
+        const QMutexLocker locker(&s_cancelMutex);
+        s_previousHandler = previousHandler;
+    }
+    // Restored whatever the test returns from. The handler has copies of the tokens, which it may still cancel after
+    // the parses declared below are gone.
     const auto restore = qScopeGuard([&category, debugEnabled, previousHandler]() {
+        setCancelOnSkip(std::nullopt);
         (void) qInstallMessageHandler(previousHandler);
         category.setEnabled(QtDebugMsg, debugEnabled);
-        s_cancelOnSkip = nullptr;
     });
 
     // Canceled while reading the features, the parse stops at the next one
     GeoZoneParser::Options options;
-    s_cancelOnSkip = &options.cancelToken;
+    setCancelOnSkip(options.cancelToken);
     QVERIFY(!GeoZoneParser::parse(document, result, errorString, options));
     QVERIFY(options.cancelToken.isCancelled());
     QCOMPARE(errorString, QStringLiteral("The parse was canceled."));
@@ -2774,7 +2854,7 @@ void GeoZoneParserTest::_testParseCancel()
     const QTemporaryDir dir;
     QVERIFY(dir.isValid());
     GeoZoneLoader::Job job = GeoZoneLoader::fileJob(_writeFeatures(dir, QStringLiteral("zones.json"), features));
-    s_cancelOnSkip = &job.cancelToken;
+    setCancelOnSkip(job.cancelToken);
     const GeoZoneStore store(dir.filePath(QStringLiteral("store")));
     const GeoZoneLoader::Result loadResult = GeoZoneLoader::run(job, store);
     QVERIFY(loadResult.cancelled);
