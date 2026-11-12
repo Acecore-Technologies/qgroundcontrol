@@ -353,7 +353,7 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/UI/MainWindow.qml` | +8 | `GeoZoneAlertPopup` |
 | `src/QmlControls/PlanView.qml` | +28/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks in every layer (`GeoZonePlanViewClicksCheck.cmake` checks that none is left out) and the upload confirmation (`GeoZoneMissionCheck::uploadReasonDetails()`) |
 | `src/QmlControls/GeoFenceEditor.qml` | +8 | `GeoZoneFenceGroup` (adding fences from geozones, the fences added from them and the fence points) beside the lists of polygon and circular fences |
-| `src/QmlControls/TerrainStatus.qml` | +28/-3 | `GeoZoneProfileOverlay`, over a distance axis in km or miles for long missions, with round ticks |
+| `src/QmlControls/TerrainStatus.qml` | +35/-3 | `GeoZoneProfileOverlay`, over a distance axis in km or miles for long missions, with round ticks. The unit follows the numbers of the labels when it is plain ASCII, and is the axis title otherwise: Qt Charts formats the labels with `QString::asprintf()` of the format converted to Latin-1 (`ChartAxisElement::createValueLabels()`), which draws a unit translated to another script as "?" |
 | `src/QmlControls/QGCFileDialog.qml` | +26/-2 | `fileName` proposed when saving, for the briefing export, and `selectMultiple` with `acceptedForLoadFiles`, to add several geozone files or packs at once |
 | `src/QmlControls/ToolStripDropPanel.qml` | +10/-8 | The panel is placed before it is resized, so that the Geozones panel keeps its scroll position when its content grows |
 | `src/FlightDisplay/FlyViewMap.qml` | +13/-1 | `GeoZoneFlyMapLayer`, `GeoZoneMapClickButton` and confirmed go to locations entering zones |

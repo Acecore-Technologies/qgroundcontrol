@@ -40,6 +40,9 @@ Rectangle {
     readonly property bool   _metricDistance:  _unitsConversion.appSettingsHorizontalDistanceUnitsString === "m"
     readonly property real   _axisScale:       _metricDistance ? (_axisDistance >= 1000 ? 1000 : 1) : (_axisDistance >= 5280 ? 5280 : 1)
     readonly property string _axisUnit:        _axisScale === 1 ? _unitsConversion.appSettingsHorizontalDistanceUnitsString : (_metricDistance ? qsTr("km") : qsTr("mi"))
+    // Qt Charts formats the axis labels with QString::asprintf() of the format converted to Latin-1, which only plain
+    // ASCII survives: a unit translated to another script would be drawn as "?". Such a unit is the axis title instead.
+    readonly property bool   _axisUnitInLabels: /^[\x20-\x7E]*$/.test(_axisUnit) && _axisUnit.indexOf("%") < 0
     readonly property real   _axisMax:         _axisDistance / _axisScale
     readonly property real   _axisTickInterval: {
         const raw = _axisMax / 4
@@ -99,7 +102,11 @@ Rectangle {
                     tickType:                   ValueAxis.TicksDynamic
                     tickAnchor:                 0
                     tickInterval:               _axisTickInterval
-                    labelFormat:                (_axisTickInterval < 1 ? "%.1f " : "%.0f ") + _axisUnit
+                    labelFormat:                (_axisTickInterval < 1 ? "%.1f" : "%.0f") + (_axisUnitInLabels ? " " + _axisUnit : "")
+                    titleVisible:               !_axisUnitInLabels
+                    titleText:                  _axisUnitInLabels ? "" : "<font color=\"%1\">%2</font>".arg(qgcPal.text).arg(_axisUnit.replace(/&/g, "&amp;").replace(/</g, "&lt;"))
+                    titleFont.family:           ScreenTools.normalFontFamily
+                    titleFont.pointSize:        ScreenTools.smallFontPointSize
                     gridLineColor:              applyOpacity(qgcPal.text, 0.25)
                 }
 
