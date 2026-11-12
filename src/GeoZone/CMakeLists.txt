@@ -52,6 +52,7 @@ qt_add_qml_module(GeoZoneModule
         Map/GeoZoneSummary.qml
         Planning/GeoZoneFenceGroup.qml
         Planning/GeoZoneFenceImportDialog.qml
+        Planning/GeoZoneFenceZoneListDialog.qml
         Planning/GeoZoneMissionBanner.qml
         Planning/GeoZoneOperatorZoneEditor.qml
         Planning/GeoZoneOperatorZonesSection.qml

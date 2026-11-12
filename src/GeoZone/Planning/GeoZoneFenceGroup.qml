@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 
@@ -21,31 +23,31 @@ import QGroundControl.ScreenTools
 /// named after their zones (see GeoZoneFenceTags), which can be selected for editing and deleted together
 Column {
     id:         control
-    spacing:    _margin
+    spacing:    control._margin
 
     required property var geoFenceController
     required property var flightMap
 
-    readonly property var   _polygons:  geoFenceController.polygons
-    readonly property var   _circles:   geoFenceController.circles
+    readonly property var   _polygons:  control.geoFenceController.polygons
+    readonly property var   _circles:   control.geoFenceController.circles
     readonly property real  _margin:    ScreenTools.defaultFontPixelWidth / 2
     // What a connected vehicle stores, see GeoZoneFenceImporter::capacityInfo: estimated unless the vehicle is known to have it
     readonly property var   _capacity:      staleImporter.capacity
-    readonly property int   _pointLimit:    staleImporter.upload.canUpload ? (_capacity.maxItems ?? 0) : 0
-    readonly property bool  _limitEstimated: _capacity.estimated ?? false
+    readonly property int   _pointLimit:    staleImporter.upload.canUpload ? (control._capacity.maxItems ?? 0) : 0
+    readonly property bool  _limitEstimated: control._capacity.estimated ?? false
 
     // Polygon vertices, one point per circle and the breach return point, as vehicles store them
     readonly property int _pointCount: {
-        let points = _circles.count + (geoFenceController.breachReturnPoint.isValid ? 1 : 0)
-        for (let i = 0; i < _polygons.count; i++) {
-            points += _polygons.get(i).count
+        let points = control._circles.count + (control.geoFenceController.breachReturnPoint.isValid ? 1 : 0)
+        for (let i = 0; i < control._polygons.count; i++) {
+            points += control._polygons.get(i).count
         }
         return points
     }
 
     readonly property int _geoZoneCount: {
         let count = 0
-        for (const fences of [ _polygons, _circles ]) {
+        for (const fences of [ control._polygons, control._circles ]) {
             for (let i = 0; i < fences.count; i++) {
                 count += GeoZoneFenceTags.tag(fences.get(i)).geoZone ? 1 : 0
             }
@@ -65,13 +67,16 @@ Column {
 
     /// Selects the fence for editing, moving the map to it when it is out of view
     function _select(fence) {
+        if (!fence) {
+            return
+        }
         // Selecting the selected fence again would recreate its editing handles
         if (!fence.interactive) {
-            geoFenceController.clearAllInteractive()
+            control.geoFenceController.clearAllInteractive()
             fence.interactive = true
         }
-        if (!flightMap.visibleRegion.boundingGeoRectangle().contains(fence.center)) {
-            flightMap.center = fence.center
+        if (!control.flightMap.visibleRegion.boundingGeoRectangle().contains(fence.center)) {
+            control.flightMap.center = fence.center
         }
     }
 
@@ -85,11 +90,11 @@ Column {
         width:          parent.width
         wrapMode:       Text.WordWrap
         font.pointSize: ScreenTools.smallFontPointSize
-        color:          (_pointLimit > 0 && _pointCount > _pointLimit) ? qgcPal.warningText : qgcPal.text
-        text:           _pointLimit > 0 ? (_limitEstimated ? qsTr("Fence points: %1 of about %2 the vehicle can store (estimated)").arg(_pointCount).arg(_pointLimit)
-                                                           : qsTr("Fence points: %1 of %2 the vehicle can store").arg(_pointCount).arg(_pointLimit))
-                                        : qsTr("Fence points: %1").arg(_pointCount)
-        visible:        _pointCount > 0
+        color:          (control._pointLimit > 0 && control._pointCount > control._pointLimit) ? qgcPal.warningText : qgcPal.text
+        text:           control._pointLimit > 0 ? (control._limitEstimated ? qsTr("Fence points: %1 of about %2 the vehicle can store (estimated)").arg(control._pointCount).arg(control._pointLimit)
+                                                           : qsTr("Fence points: %1 of %2 the vehicle can store").arg(control._pointCount).arg(control._pointLimit))
+                                        : qsTr("Fence points: %1").arg(control._pointCount)
+        visible:        control._pointCount > 0
     }
 
     // Fences from zones which changed, are no longer loaded or expired since they were added
@@ -153,46 +158,50 @@ Column {
         id:             geoZoneSection
         anchors.left:   parent.left
         anchors.right:  parent.right
-        text:           qsTr("Geozone Fences (%1)").arg(_geoZoneCount)
-        visible:        _geoZoneCount > 0
+        text:           qsTr("Geozone Fences (%1)").arg(control._geoZoneCount)
+        visible:        control._geoZoneCount > 0
     }
 
     Repeater {
-        model:      geoZoneSection.visible && geoZoneSection.checked ? _polygons : 0
-        delegate:   FenceName { isCircle: false }
+        model:      geoZoneSection.visible && geoZoneSection.checked ? control._polygons : 0
+        delegate:   FenceName { width: control.width; isCircle: false; onSelected: fence => control._select(fence) }
     }
 
     Repeater {
-        model:      geoZoneSection.visible && geoZoneSection.checked ? _circles : 0
-        delegate:   FenceName { isCircle: true }
+        model:      geoZoneSection.visible && geoZoneSection.checked ? control._circles : 0
+        delegate:   FenceName { width: control.width; isCircle: true; onSelected: fence => control._select(fence) }
     }
 
     QGCButton {
         text:       qsTr("Delete Geozone Fences")
         visible:    geoZoneSection.visible && geoZoneSection.checked
-        onClicked:  mainWindow.showMessageDialog(text, qsTr("Delete the %n fence(s) added from geozones?", "", _geoZoneCount), Dialog.Ok | Dialog.Cancel,
+        onClicked:  mainWindow.showMessageDialog(text, qsTr("Delete the %n fence(s) added from geozones?", "", control._geoZoneCount), Dialog.Ok | Dialog.Cancel,
                                                  function() { GeoZoneFenceTags.deleteFences(control.geoFenceController, true) })
     }
 
-    // Name of a fence added from a geozone with its place in the lists of polygon and circular fences
+    // Name of a fence added from a geozone with its place in the lists of polygon and circular fences. The fence is
+    // gone before its name when the fences are deleted.
     component FenceName: QGCLabel {
         id:         nameLabel
-        width:      control.width
-        visible:    _tag.geoZone
+        visible:    _tag?.geoZone ?? false
         elide:      Text.ElideRight
         textFormat: Text.PlainText
-        color:      object.interactive ? qgcPal.buttonHighlight : qgcPal.text
-        text:       (isCircle ? qsTr("Circle %1: %2") : qsTr("Polygon %1: %2")).arg(index + 1).arg(_tag.name)
+        color:      (object?.interactive ?? false) ? namePal.buttonHighlight : namePal.text
+        text:       (isCircle ? qsTr("Circle %1: %2") : qsTr("Polygon %1: %2")).arg(index + 1).arg(_tag?.name ?? "")
 
         required property var   object
         required property int   index
         property bool           isCircle
 
-        readonly property var _tag: GeoZoneFenceTags.tag(object)
+        readonly property var _tag: object ? GeoZoneFenceTags.tag(object) : null
+
+        signal selected(var fence)
+
+        QGCPalette { id: namePal; colorGroupEnabled: true }
 
         QGCMouseArea {
             anchors.fill:   parent
-            onClicked:      control._select(nameLabel.object)
+            onClicked:      nameLabel.selected(nameLabel.object)
         }
     }
 
@@ -205,6 +214,6 @@ Column {
     Component {
         id: zoneListDialogComponent
 
-        GeoZoneFenceImportDialog.ZoneListDialog { }
+        GeoZoneFenceZoneListDialog { }
     }
 }
