@@ -29,19 +29,32 @@ struct AixmLimit {
     QString reference;
 };
 
+/// @return Meters of a distance in an AIXM or UCUM unit, NaN when the unit is unknown or missing: a radius isn't guessed
 double _aixmDistance(double value, const QString &uom)
 {
-    const QString unit = uom.toUpper();
+    const QString unit = uom.trimmed().toUpper();
     if ((unit == QStringLiteral("[NMI_I]")) || (unit == QStringLiteral("NM"))) {
         return value * 1852;
     }
     if (unit == QStringLiteral("KM")) {
         return value * 1000;
     }
+    if (unit == QStringLiteral("M")) {
+        return value;
+    }
     if ((unit == QStringLiteral("[FT_I]")) || (unit == QStringLiteral("FT"))) {
         return value * kMetersPerFoot;
     }
-    return value;
+    if ((unit == QStringLiteral("[MI_I]")) || (unit == QStringLiteral("MI"))) {
+        return value * 1609.344;
+    }
+    return qQNaN();
+}
+
+/// @return Degrees of an angle, NaN when it isn't a number or its unit isn't degrees
+double _aixmAngle(const QString &text, QStringView uom)
+{
+    return (uom.trimmed().compare(QLatin1String("deg"), Qt::CaseInsensitive) == 0) ? _numberFromText(text) : qQNaN();
 }
 
 /// Sets the limits of the volume, in feet when both are published in feet or as flight levels, in meters otherwise
@@ -68,7 +81,9 @@ void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmL
 /// Parses the airspaces of an AIXM 5.1 message, like the UK flight restriction zones. Boundaries of geodesic strings,
 /// line strings, arcs and circles by center point are supported. As in the AIXM coding guidelines, geodesic strings are
 /// great circles, line strings in EPSG:4326 are straight in latitude and longitude, like parallels, and arcs are circles
-/// around their center whose angles are bearings.
+/// around their center whose angles are bearings. A volume whose boundary has a position, arc or unit which can't be
+/// read is left out with an issue of its airspace, rather than given another shape. Airspaces left without volume
+/// are returned too, GeoZoneParser counts them as skipped with their issues.
 bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString)
 {
     result.format = GeoZoneParser::Format::Aixm;
@@ -90,7 +105,9 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
     QList<QGeoCoordinate> ring;
     QList<bool> geodesicEdges;  ///< Of the edges from each ring vertex to the next, see GeoZoneGeometry::densifyGreatCircles
     bool circleOnly = true;
+    bool volumeRejected = false;
     QString segment;
+    bool segmentValid = true;
     QList<QGeoCoordinate> points;
     double radius = qQNaN();
     double startAngle = qQNaN();
@@ -108,17 +125,26 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
             }
         }
     };
-    const auto parsePositions = [](const QString &text) {
-        QList<QGeoCoordinate> positions;
+    // Adds the positions of a pos or posList, false when a value isn't a number or a position isn't on the globe
+    const auto parsePositions = [](const QString &text, QList<QGeoCoordinate> &positions) {
         const QStringList values = text.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
-        for (qsizetype i = 0; (i + 1) < values.count(); i += 2) {
-            // EPSG:4326 lists latitude first
-            const QGeoCoordinate coordinate(values[i].toDouble(), values[i + 1].toDouble());
-            if (coordinate.isValid()) {
-                positions.append(coordinate);
-            }
+        if ((values.count() % 2) != 0) {
+            return false;
         }
-        return positions;
+        for (qsizetype i = 0; i < values.count(); i += 2) {
+            // EPSG:4326 lists latitude first
+            const QGeoCoordinate coordinate(_numberFromText(values[i]), _numberFromText(values[i + 1]));
+            if (!coordinate.isValid()) {
+                return false;
+            }
+            positions.append(coordinate);
+        }
+        return true;
+    };
+    // The volume isn't added, its airspace tells why
+    const auto rejectVolume = [&volumeRejected, &zone](const QString &issue) {
+        volumeRejected = true;
+        zone.issues.append(issue);
     };
 
     while (!reader.atEnd()) {
@@ -154,6 +180,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 ring.clear();
                 geodesicEdges.clear();
                 circleOnly = true;
+                volumeRejected = false;
             } else if (!inVolume && (name == QLatin1String("type")) && type.isEmpty()) {
                 type = reader.readElementText().trimmed();
             } else if (!inVolume && (name == QLatin1String("localType")) && localType.isEmpty()) {
@@ -164,7 +191,8 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 zone.name = reader.readElementText().trimmed();
             } else if (inVolume && ((name == QLatin1String("upperLimit")) || (name == QLatin1String("lowerLimit")))) {
                 AixmLimit &limit = (name == QLatin1String("upperLimit")) ? upper : lower;
-                limit.uom = reader.attributes().value(QStringLiteral("uom")).toString().toUpper();
+                const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
+                limit.uom = uom.trimmed().toUpper();
                 const QString text = reader.readElementText().trimmed().toUpper();
                 if (text == QStringLiteral("GND")) {
                     limit.value = 0;
@@ -172,7 +200,13 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     limit.value = kUnlimitedSentinel;
                     limit.uom = QStringLiteral("FT");
                 } else {
-                    limit.value = _number(QJsonValue(text));
+                    limit.value = _numberFromText(text);
+                    // A limit in an unknown unit is unknown, which applies the volume at all altitudes on its side
+                    static const QStringList units = { QStringLiteral("FT"), QStringLiteral("FL"), QStringLiteral("M") };
+                    if (!std::isnan(limit.value) && !units.contains(limit.uom)) {
+                        limit.value = qQNaN();
+                        zone.issues.append(GeoZoneParser::tr("Unknown unit %1, the altitude limits are ignored").arg(uom));
+                    }
                 }
             } else if (inVolume && (name == QLatin1String("upperLimitReference"))) {
                 upper.reference = reader.readElementText().trimmed().toUpper();
@@ -183,40 +217,56 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
             } else if (inExterior && ((name == QLatin1String("GeodesicString")) || (name == QLatin1String("LineStringSegment")) ||
                                       (name == QLatin1String("ArcByCenterPoint")) || (name == QLatin1String("CircleByCenterPoint")))) {
                 segment = name.toString();
+                segmentValid = true;
                 points.clear();
                 radius = qQNaN();
                 startAngle = qQNaN();
                 endAngle = qQNaN();
             } else if (!segment.isEmpty() && ((name == QLatin1String("pos")) || (name == QLatin1String("posList")))) {
-                points.append(parsePositions(reader.readElementText()));
+                segmentValid = parsePositions(reader.readElementText(), points) && segmentValid;
             } else if (!segment.isEmpty() && (name == QLatin1String("radius"))) {
                 const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
-                radius = _aixmDistance(reader.readElementText().trimmed().toDouble(), uom);
+                radius = _aixmDistance(_numberFromText(reader.readElementText()), uom);
             } else if (!segment.isEmpty() && (name == QLatin1String("startAngle"))) {
-                startAngle = reader.readElementText().trimmed().toDouble();
+                const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
+                startAngle = _aixmAngle(reader.readElementText(), uom);
             } else if (!segment.isEmpty() && (name == QLatin1String("endAngle"))) {
-                endAngle = reader.readElementText().trimmed().toDouble();
+                const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
+                endAngle = _aixmAngle(reader.readElementText(), uom);
             }
         } else if (reader.isEndElement() && inAirspace) {
             if (!segment.isEmpty() && (name == segment)) {
-                if ((segment == QLatin1String("ArcByCenterPoint")) && !points.isEmpty() && (radius > 0) && std::isfinite(startAngle) && std::isfinite(endAngle)) {
-                    // The sweep is signed, clockwise when the end bearing is larger. Arcs of more than a turn are
-                    // malformed, they end after one.
-                    const double sweep = std::clamp(endAngle - startAngle, -360.0, 360.0);
-                    // Points close enough that the chords between them stay within the tolerance of the arc, every 3
-                    // degrees at least
-                    const double tolerance = GeoZoneGeometry::kGreatCircleToleranceMeters;
-                    const double maxStep = (radius > tolerance) ? (std::min)(3.0, qRadiansToDegrees(2 * std::acos(1 - (tolerance / radius)))) : 3.0;
-                    const int steps = std::clamp(static_cast<int>(std::ceil(std::abs(sweep) / maxStep)), 1, 3600);
-                    QList<QGeoCoordinate> arc;
-                    for (int i = 0; i <= steps; i++) {
-                        arc.append(points.constFirst().atDistanceAndAzimuth(radius, startAngle + (sweep * i / steps)));
+                if (!segmentValid) {
+                    rejectVolume(GeoZoneParser::tr("Boundary with an invalid position ignored"));
+                } else if (segment == QLatin1String("ArcByCenterPoint")) {
+                    // The center alone would be a vertex of another boundary, and a radius beyond the limit of circles
+                    // leaves no step between the points of the arc
+                    if ((points.count() == 1) && _validRadius(radius) && std::isfinite(startAngle) && std::isfinite(endAngle)) {
+                        // The sweep is signed, clockwise when the end bearing is larger. Arcs of more than a turn are
+                        // malformed, they end after one.
+                        const double sweep = std::clamp(endAngle - startAngle, -360.0, 360.0);
+                        // Points close enough that the chords between them stay within the tolerance of the arc, every
+                        // 3 degrees at least
+                        const double tolerance = GeoZoneGeometry::kGreatCircleToleranceMeters;
+                        const double maxStep = (radius > tolerance) ? (std::min)(3.0, qRadiansToDegrees(2 * std::acos(1 - (tolerance / radius)))) : 3.0;
+                        const int steps = std::clamp(static_cast<int>(std::ceil(std::abs(sweep) / maxStep)), 1, 3600);
+                        QList<QGeoCoordinate> arc;
+                        for (int i = 0; i <= steps; i++) {
+                            arc.append(points.constFirst().atDistanceAndAzimuth(radius, startAngle + (sweep * i / steps)));
+                        }
+                        appendPoints(arc, false);
+                        circleOnly = false;
+                    } else {
+                        rejectVolume(GeoZoneParser::tr("Boundary with an invalid arc ignored"));
                     }
-                    appendPoints(arc, false);
-                    circleOnly = false;
-                } else if ((segment == QLatin1String("CircleByCenterPoint")) && !points.isEmpty()) {
-                    volume.center = points.constFirst();
-                    volume.radius = radius;
+                } else if (segment == QLatin1String("CircleByCenterPoint")) {
+                    // An invalid radius is reported by GeoZoneParser
+                    if ((points.count() == 1) && !volume.center.isValid()) {
+                        volume.center = points.constFirst();
+                        volume.radius = radius;
+                    } else {
+                        rejectVolume(GeoZoneParser::tr("Boundary with an invalid circle ignored"));
+                    }
                 } else {
                     appendPoints(points, segment == QLatin1String("GeodesicString"));
                     circleOnly = false;
@@ -228,9 +278,15 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 inVolume = false;
                 _setAixmLimits(volume, lower, upper);
                 // Invalid radii and rings are reported by GeoZoneParser
-                if (circleOnly && volume.center.isValid()) {
+                if (volumeRejected) {
+                    // The issue of the airspace tells
+                } else if (volume.center.isValid() && !circleOnly) {
+                    zone.issues.append(GeoZoneParser::tr("Boundary with an invalid circle ignored"));
+                } else if (circleOnly && volume.center.isValid()) {
                     volume.isCircle = true;
                     _appendVolume(volume, zone.volumes);
+                } else if (ring.count() > kMaxRingVertices) {
+                    zone.issues.append(GeoZoneParser::tr("Boundary with more than %1 points ignored").arg(kMaxRingVertices));
                 } else {
                     if ((ring.count() > 1) && (ring.constFirst().distanceTo(ring.constLast()) < 1)) {
                         // The edge to the last vertex now closes the ring
@@ -238,7 +294,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     } else {
                         geodesicEdges.append(false);
                     }
-                    if (!ring.isEmpty() && (ring.count() <= kMaxRingVertices)) {
+                    if (!ring.isEmpty()) {
                         volume.isCircle = false;
                         const GeoZone::Ring published = GeoZone::toRing(ring);
                         volume.rings = { (ring.count() >= 3) ? GeoZoneGeometry::densifyGreatCircles(published, kMaxRingVertices, geodesicEdges) : published };
@@ -266,11 +322,8 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     zone.country = QStringLiteral("GBR");
                     zone.authorities.append(QStringLiteral("UK CAA / NATS"));
                 }
-                if (zone.volumes.isEmpty()) {
-                    result.skippedFeatures++;
-                } else {
-                    result.zones.append(zone);
-                }
+                // Also without volumes, for its issues
+                result.zones.append(zone);
             }
         }
     }
@@ -280,7 +333,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
         return false;
     }
     if (result.zones.isEmpty()) {
-        errorString = GeoZoneParser::tr("No airspaces with a supported geometry were found in the AIXM file.");
+        errorString = GeoZoneParser::tr("No airspaces were found in the AIXM file.");
         return false;
     }
     return true;

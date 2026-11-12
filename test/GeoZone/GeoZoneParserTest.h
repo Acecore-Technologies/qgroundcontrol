@@ -48,6 +48,8 @@ private slots:
     void _testTfrAreaLimits();
     void _testAixmArcs();
     void _testRejectedAixmGeometry();
+    void _testAixmInvalidBoundary_data();
+    void _testAixmInvalidBoundary();
     void _testParserFuzz();
     void _testFuzzFindings();
     void _testDisplayText();

@@ -206,6 +206,23 @@ QString _resultHash(GeoZoneParser::Result result)
     return QString::fromLatin1(QCryptographicHash::hash(serialized, QCryptographicHash::Sha256).toHex().left(16));
 }
 
+/// @return An AIXM message with the airspace TESTED, whose volume has the limits and the curve segments, and the
+///         airspace VALID, a circle in Scotland, so that the message loads when the tested airspace is rejected
+/// @param surfaceAttributes Of the surface of the tested volume, like its srsName
+QByteArray _aixmMessage(const QString &segments, const QString &limits = QString(), const QString &surfaceAttributes = QString())
+{
+    const QString airspace = QStringLiteral(R"(<message:hasMember><aixm:Airspace gml:id="A%1"><aixm:timeSlice><aixm:AirspaceTimeSlice gml:id="T%1">
+        <aixm:type>R</aixm:type><aixm:designator>%1</aixm:designator><aixm:geometryComponent><aixm:AirspaceGeometryComponent><aixm:theAirspaceVolume>
+        <aixm:AirspaceVolume gml:id="V%1">%2<aixm:horizontalProjection><aixm:Surface gml:id="S%1" %3><gml:patches><gml:PolygonPatch><gml:exterior><gml:Ring>
+        <gml:curveMember><gml:Curve gml:id="C%1"><gml:segments>%4</gml:segments></gml:Curve></gml:curveMember></gml:Ring></gml:exterior></gml:PolygonPatch>
+        </gml:patches></aixm:Surface></aixm:horizontalProjection></aixm:AirspaceVolume></aixm:theAirspaceVolume></aixm:AirspaceGeometryComponent>
+        </aixm:geometryComponent></aixm:AirspaceTimeSlice></aixm:timeSlice></aixm:Airspace></message:hasMember>)");
+    const QString circle = QStringLiteral(R"(<gml:CircleByCenterPoint numArc="1"><gml:pos>57 -5</gml:pos><gml:radius uom="[nmi_i]">2</gml:radius></gml:CircleByCenterPoint>)");
+    return (QStringLiteral(R"(<message:AIXMBasicMessage xmlns:message="http://www.aixm.aero/schema/5.1/message" xmlns:aixm="http://www.aixm.aero/schema/5.1"
+        xmlns:gml="http://www.opengis.net/gml/3.2">)") + airspace.arg(QStringLiteral("TESTED"), limits, surfaceAttributes, segments) +
+            airspace.arg(QStringLiteral("VALID"), QString(), QString(), circle) + QStringLiteral("</message:AIXMBasicMessage>")).toUtf8();
+}
+
 /// Canceled by cancelOnSkippedFeature
 const GeoZoneCancelToken *s_cancelOnSkip = nullptr;
 
@@ -1762,6 +1779,81 @@ void GeoZoneParserTest::_testRejectedAixmGeometry()
     QCOMPARE(result.zones.count(), 2);
     QCOMPARE(result.skippedFeatures, 1);
     QCOMPARE(result.issues, (QMap<QString, int>{ { QStringLiteral("Circle without a valid radius ignored"), 1 } }));
+}
+
+void GeoZoneParserTest::_testAixmInvalidBoundary_data()
+{
+    QTest::addColumn<QString>("segments");
+    QTest::addColumn<QString>("limits");
+    QTest::addColumn<QString>("issue");     ///< Empty when the airspace has none
+    QTest::addColumn<bool>("rejected");
+
+    // A sector of 20 NM around 52N 0E between north and east: a radius, an arc and the radius back
+    const QString north = QStringLiteral("<gml:GeodesicString><gml:posList>%1</gml:posList></gml:GeodesicString>");
+    const QString arc = QStringLiteral(R"(<gml:ArcByCenterPoint numArc="1">%1<gml:radius%2>%3</gml:radius><gml:startAngle uom="%4">%5</gml:startAngle>
+        <gml:endAngle uom="deg">90</gml:endAngle></gml:ArcByCenterPoint>)");
+    const QString back = QStringLiteral("<gml:GeodesicString><gml:posList>52 0.54 52 0</gml:posList></gml:GeodesicString>");
+    const QString center = QStringLiteral("<gml:pos>52 0</gml:pos>");
+    const QString miles = QStringLiteral(" uom=\"[nmi_i]\"");
+    const auto sector = [&](const QString &arcSegment, const QString &positions = QStringLiteral("52 0 52.33287 0")) { return north.arg(positions) + arcSegment + back; };
+    const QString validArc = arc.arg(center, miles, QStringLiteral("20"), QStringLiteral("deg"), QStringLiteral("0"));
+    const QString invalidArc = QStringLiteral("Boundary with an invalid arc ignored");
+    const QString invalidPosition = QStringLiteral("Boundary with an invalid position ignored");
+    const auto row = [](const char *name, const QString &segments, const QString &issue, bool rejected = true, const QString &limits = QString()) {
+        QTest::newRow(name) << segments << limits << issue << rejected;
+    };
+
+    row("valid", sector(validArc), QString(), false);
+    // An arc which can't be drawn rejects its volume: its center alone would make the sector a triangle
+    row("radius not a number", sector(arc.arg(center, miles, QStringLiteral("twenty"), QStringLiteral("deg"), QStringLiteral("0"))), invalidArc);
+    row("radius in an unknown unit", sector(arc.arg(center, QStringLiteral(" uom=\"furlong\""), QStringLiteral("20"), QStringLiteral("deg"), QStringLiteral("0"))), invalidArc);
+    row("radius without unit", sector(arc.arg(center, QString(), QStringLiteral("20"), QStringLiteral("deg"), QStringLiteral("0"))), invalidArc);
+    row("radius beyond the limit", sector(arc.arg(center, miles, QStringLiteral("1e300"), QStringLiteral("deg"), QStringLiteral("0"))), invalidArc);
+    row("negative radius", sector(arc.arg(center, miles, QStringLiteral("-20"), QStringLiteral("deg"), QStringLiteral("0"))), invalidArc);
+    row("angle not a number", sector(arc.arg(center, miles, QStringLiteral("20"), QStringLiteral("deg"), QStringLiteral("north"))), invalidArc);
+    row("angle in radians", sector(arc.arg(center, miles, QStringLiteral("20"), QStringLiteral("rad"), QStringLiteral("0"))), invalidArc);
+    row("arc without center", sector(arc.arg(QString(), miles, QStringLiteral("20"), QStringLiteral("deg"), QStringLiteral("0"))), invalidArc);
+    // Positions which aren't on the globe or aren't numbers reject it too, instead of being left out or read as 0
+    row("center out of range", sector(arc.arg(QStringLiteral("<gml:pos>152 0</gml:pos>"), miles, QStringLiteral("20"), QStringLiteral("deg"), QStringLiteral("0"))), invalidPosition);
+    row("position not a number", sector(validArc, QStringLiteral("52 0 north 0")), invalidPosition);
+    row("position without longitude", sector(validArc, QStringLiteral("52 0 52.33287")), invalidPosition);
+    row("circle with a line", north.arg(QStringLiteral("52 0 52.33287 0")) + QStringLiteral(R"(<gml:CircleByCenterPoint numArc="1"><gml:pos>52 0</gml:pos>
+        <gml:radius uom="[nmi_i]">20</gml:radius></gml:CircleByCenterPoint>)"), QStringLiteral("Boundary with an invalid circle ignored"));
+    // A limit in an unknown unit is unknown: the airspace has no ceiling, rather than one taken as meters
+    row("ceiling in an unknown unit", sector(validArc), QStringLiteral("Unknown unit SM, the altitude limits are ignored"), false,
+        QStringLiteral(R"(<aixm:upperLimit uom="SM">100</aixm:upperLimit><aixm:upperLimitReference>MSL</aixm:upperLimitReference>)"));
+    row("ceiling without unit", sector(validArc), QStringLiteral("Unknown unit , the altitude limits are ignored"), false,
+        QStringLiteral("<aixm:upperLimit>100</aixm:upperLimit><aixm:upperLimitReference>MSL</aixm:upperLimitReference>"));
+}
+
+void GeoZoneParserTest::_testAixmInvalidBoundary()
+{
+    QFETCH(QString, segments);
+    QFETCH(QString, limits);
+    QFETCH(QString, issue);
+    QFETCH(bool, rejected);
+
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(_aixmMessage(segments, limits), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.issues, issue.isEmpty() ? (QMap<QString, int>()) : (QMap<QString, int>{ { issue, 1 } }));
+    QCOMPARE(result.skippedFeatures, rejected ? 1 : 0);
+    QCOMPARE(result.zones.count(), rejected ? 1 : 2);
+    if (rejected) {
+        QCOMPARE(result.zones.first().identifier, QStringLiteral("VALID"));
+        return;
+    }
+
+    const GeoZone::Data &data = result.zones.first();
+    QCOMPARE(data.identifier, QStringLiteral("TESTED"));
+    QCOMPARE(data.issues, issue.isEmpty() ? QStringList() : QStringList{ issue });
+    QCOMPARE(data.volumes.count(), 1);
+    QCOMPARE(qIsNaN(data.volumes.first().upperLimit), true);
+    const GeoZone zone(data);
+    const QGeoCoordinate center(52, 0);
+    QVERIFY(zone.contains(center.atDistanceAndAzimuth(19 * 1852, 45)));
+    QVERIFY(!zone.contains(center.atDistanceAndAzimuth(21 * 1852, 45)));
+    QVERIFY(zone.contains(GeoZone::Position{ center.atDistanceAndAzimuth(10 * 1852, 45), 5000, 0 }));
 }
 
 void GeoZoneParserTest::_testParserFuzz()

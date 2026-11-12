@@ -265,17 +265,18 @@ QString _plainText(const QString &text)
 
 double _number(const QJsonValue &value)
 {
-    double number = qQNaN();
-    if (value.isDouble()) {
-        number = value.toDouble();
-    } else if (value.isString()) {
-        bool ok = false;
-        number = value.toString().toDouble(&ok);
-        if (!ok) {
-            number = qQNaN();
-        }
+    if (value.isString()) {
+        return _numberFromText(value.toString());
     }
+    const double number = value.isDouble() ? value.toDouble() : qQNaN();
     return std::isfinite(number) ? number : qQNaN();
+}
+
+double _numberFromText(QStringView text)
+{
+    bool ok = false;
+    const double number = text.toDouble(&ok);
+    return (ok && std::isfinite(number)) ? number : qQNaN();
 }
 
 /// Parses ISO 8601 dates and times. Times without an offset are UTC in both standards, dates start at midnight UTC.

@@ -58,7 +58,11 @@ QString _plainText(const QString &text);
 
 QStringList _stringList(const QJsonValue &value);
 
+/// @return The number of a JSON number or string, NaN when it isn't a finite number
 double _number(const QJsonValue &value);
+
+/// @return The number the text is, NaN when it isn't a finite number
+double _numberFromText(QStringView text);
 
 /// Parses ISO 8601 dates and times. Times without an offset are UTC in both standards, dates start at midnight UTC.
 QDateTime _dateTime(const QJsonValue &value);
