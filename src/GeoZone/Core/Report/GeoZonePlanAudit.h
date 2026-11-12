@@ -55,8 +55,12 @@ public:
         QList<Zone> zones;                      ///< Relevant to the mission
 
         static Record make(const QList<const GeoZone*> &zones, const QList<GeoZoneSourceVersion> &sources, const QDateTime &savedAt);
+        /// @return The record in the current version, with the restrictions as their stable codes, see
+        ///         GeoZoneBriefing::restrictionCode
         QJsonObject toJson() const;
-        /// @return Nothing for JSON without the version of the audit, like that of other applications
+        /// @return Nothing for JSON without the version of the audit, like that of other applications, or of a newer
+        ///         version than this one, whose fields may mean something else. Records of version 1, which kept the
+        ///         restrictions as the numbers of their enumerators, are still read.
         static std::optional<Record> fromJson(const QJsonObject &json);
 
         friend bool operator==(const Record &, const Record &) = default;
@@ -88,7 +92,8 @@ public:
         QStringList details() const;
     };
 
-    static constexpr int version = 1;   ///< Of the JSON of the record
+    /// Of the JSON of the record: 2 keeps the restriction of a zone as its stable code, 1 kept the number of its enumerator
+    static constexpr int version = 2;
 
     /// @return How the current data differs from the record
     /// @param relevantZones The zones relevant to the mission now, see Record::zones

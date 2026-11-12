@@ -11,11 +11,12 @@
 
 #include "GeoZoneTestBase.h"
 
-/// GeoZoneBriefing and the versions of the sources it reports, headless
+/// GeoZoneBriefing, the versions of the sources it reports and the record of them in plans, headless
 class GeoZoneBriefingTest : public GeoZoneTestBase
 {
     Q_OBJECT
 
 private slots:
     void _testBriefing();
+    void _testPlanAuditRecord();
 };

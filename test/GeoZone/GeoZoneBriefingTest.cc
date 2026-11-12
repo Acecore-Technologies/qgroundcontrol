@@ -9,6 +9,7 @@
 
 #include "GeoZoneBriefingTest.h"
 #include "GeoZoneBriefing.h"
+#include "GeoZonePlanAudit.h"
 #include "GeoZoneSourceVersion.h"
 #include "GeoZoneTestHelpers.h"
 
@@ -79,6 +80,72 @@ void GeoZoneBriefingTest::_testBriefing()
     QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2020, 12, 31)), QStringLiteral("2014"));
     QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2021, 1, 28)), QStringLiteral("2101"));
     QCOMPARE(GeoZoneSourceVersion::airacCycleOf(QDate(2019, 12, 31)), QStringLiteral("1913"));
+}
+
+void GeoZoneBriefingTest::_testPlanAuditRecord()
+{
+    // A zone of each restriction
+    const QList<GeoZone::Restriction> restrictions = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction,
+                                                       GeoZone::USpace, GeoZone::Unknown };
+    GeoZonePlanAudit::Record record;
+    record.savedAt = _utc(QDate(2027, 1, 1), QTime(8, 0));
+    for (const GeoZone::Restriction restriction : restrictions) {
+        GeoZonePlanAudit::Zone zone;
+        zone.key = QStringLiteral("zones.json/Z%1").arg(record.zones.count());
+        zone.identifier = QStringLiteral("Z%1").arg(record.zones.count());
+        zone.restriction = restriction;
+        zone.contentHash = QByteArray::fromHex("0123456789abcdef");
+        record.zones.append(zone);
+    }
+
+    // Kept with the restrictions as their stable codes, whatever the numbers of the enumerators
+    const QJsonObject json = record.toJson();
+    QCOMPARE(json[QStringLiteral("version")].toInt(), 2);
+    QCOMPARE(GeoZonePlanAudit::version, 2);
+    const QJsonArray zones = json[QStringLiteral("zones")].toArray();
+    QCOMPARE(zones.count(), restrictions.count());
+    const QStringList codes = { QStringLiteral("prohibited"), QStringLiteral("req_authorisation"), QStringLiteral("conditional"), QStringLiteral("no_restriction"),
+                                QStringLiteral("u_space"), QStringLiteral("unknown") };
+    for (qsizetype i = 0; i < zones.count(); i++) {
+        QCOMPARE(zones[i].toObject()[QStringLiteral("restriction")].toString(), codes[i]);
+        QCOMPARE(GeoZoneBriefing::restrictionFromCode(codes[i]), restrictions[i]);
+    }
+    QCOMPARE(GeoZoneBriefing::restrictionFromCode(QStringLiteral("something else")), GeoZone::Unknown);
+    const std::optional<GeoZonePlanAudit::Record> read = GeoZonePlanAudit::Record::fromJson(json);
+    QVERIFY(read.has_value());
+    QCOMPARE(read->zones, record.zones);
+    QCOMPARE(read->savedAt, record.savedAt);
+
+    // Records of version 1 kept the numbers of the enumerators, and are still read
+    QJsonObject version1 = json;
+    version1[QStringLiteral("version")] = 1;
+    QJsonArray numbered;
+    for (qsizetype i = 0; i < zones.count(); i++) {
+        QJsonObject zone = zones[i].toObject();
+        zone[QStringLiteral("restriction")] = static_cast<int>(i);
+        numbered.append(zone);
+    }
+    QJsonObject outOfRange = zones[0].toObject();
+    outOfRange[QStringLiteral("key")] = QStringLiteral("zones.json/other");
+    outOfRange[QStringLiteral("restriction")] = 42;
+    numbered.append(outOfRange);
+    version1[QStringLiteral("zones")] = numbered;
+    const std::optional<GeoZonePlanAudit::Record> readVersion1 = GeoZonePlanAudit::Record::fromJson(version1);
+    QVERIFY(readVersion1.has_value());
+    QCOMPARE(readVersion1->zones.count(), restrictions.count() + 1);
+    QCOMPARE(readVersion1->zones.first(restrictions.count()), record.zones);
+    QCOMPARE(readVersion1->zones.constLast().restriction, GeoZone::Unknown);
+
+    // A record of a newer version, whose fields may mean something else, isn't read, nor JSON which isn't a record
+    QJsonObject newer = json;
+    newer[QStringLiteral("version")] = GeoZonePlanAudit::version + 1;
+    QVERIFY(!GeoZonePlanAudit::Record::fromJson(newer).has_value());
+    QJsonObject fractional = json;
+    fractional[QStringLiteral("version")] = 1.5;
+    QVERIFY(!GeoZonePlanAudit::Record::fromJson(fractional).has_value());
+    QJsonObject versionless = json;
+    versionless.remove(QStringLiteral("version"));
+    QVERIFY(!GeoZonePlanAudit::Record::fromJson(versionless).has_value());
 }
 
 GEOZONE_TEST(GeoZoneBriefingTest)

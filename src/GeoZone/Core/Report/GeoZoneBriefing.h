@@ -178,8 +178,10 @@ public:
 
     /// @return Stable code of the involvement for exports: "entered", "contingency" or "nearby"
     static QString involvementCode(Involvement involvement);
-    /// @return Stable code of the restriction for exports, like "prohibited" or "req_authorisation"
+    /// @return Stable code of the restriction for exports and plan files, like "prohibited" or "req_authorisation"
     static QString restrictionCode(GeoZone::Restriction restriction);
+    /// @return The restriction of the code, see restrictionCode, GeoZone::Unknown for other codes
+    static GeoZone::Restriction restrictionFromCode(const QString &code);
 
     /// @return Periods from start to end during which the zone applies, sampled every minute or more
     static QList<Interval> activePeriods(const GeoZone *zone, const QDateTime &start, const QDateTime &end);

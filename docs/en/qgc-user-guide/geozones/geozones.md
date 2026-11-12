@@ -437,7 +437,7 @@ When the plan is opened again, and whenever the sources reload while it is open,
 - **new**: a zone the mission now enters which came with updated or newly loaded data. Zones the mission enters only because you edited it don't count.
 - **source updated** or **removed**: the data of a source covering the mission changed, even when the zones of the mission didn't.
 
-**Details** lists the changes and **Acknowledge** hides the warning, and the confirmation it asks for on upload, until the data changes again. Saving the plan records the current data, so the warning disappears. Plans saved without this record, like older plans, open without warning.
+**Details** lists the changes and **Acknowledge** hides the warning, and the confirmation it asks for on upload, until the data changes again. Saving the plan records the current data, so the warning disappears. Plans saved without this record, like older plans, open without warning, and so do plans whose record was written by a newer version of QGroundControl in a format this version doesn't know, which it doesn't read.
 
 ### My Zones {#my-zones}
 

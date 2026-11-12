@@ -8,6 +8,7 @@
  ****************************************************************************/
 
 #include "GeoZonePlanAudit.h"
+#include "GeoZoneBriefing.h"
 #include "GeoZoneCatalog.h"
 #include "GeoZoneText.h"
 
@@ -16,6 +17,7 @@
 #include <QtCore/QSet>
 
 #include <algorithm>
+#include <iterator>
 
 namespace {
 
@@ -27,6 +29,14 @@ constexpr const char *zonesKey = "zones";
 QString countryIdentifier(const QString &country, const QString &identifier)
 {
     return identifier.isEmpty() ? QString() : (country + QChar(u'/') + identifier);
+}
+
+/// @return The restriction a record of version 1 kept as the number its enumerator had then, Unknown for other numbers
+GeoZone::Restriction restrictionOfVersion1(int number)
+{
+    static constexpr GeoZone::Restriction restrictions[] = { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional,
+                                                              GeoZone::NoRestriction, GeoZone::USpace, GeoZone::Unknown };
+    return ((number >= 0) && (number < static_cast<int>(std::size(restrictions)))) ? restrictions[number] : GeoZone::Unknown;
 }
 
 QString dateText(const QDateTime &dateTime)
@@ -81,7 +91,7 @@ QJsonObject GeoZonePlanAudit::Record::toJson() const
         json.insert(QStringLiteral("identifier"), zone.identifier);
         json.insert(QStringLiteral("country"), zone.country);
         json.insert(QStringLiteral("name"), zone.name);
-        json.insert(QStringLiteral("restriction"), static_cast<int>(zone.restriction));
+        json.insert(QStringLiteral("restriction"), GeoZoneBriefing::restrictionCode(zone.restriction));
         json.insert(QStringLiteral("contentHash"), QString::fromLatin1(zone.contentHash.toHex()));
         zoneArray.append(json);
     }
@@ -95,7 +105,9 @@ QJsonObject GeoZonePlanAudit::Record::toJson() const
 
 std::optional<GeoZonePlanAudit::Record> GeoZonePlanAudit::Record::fromJson(const QJsonObject &json)
 {
-    if (json.value(versionKey).toInt() < 1) {
+    // Without a whole number as version the JSON isn't a record, a newer one can't be understood
+    const int recordVersion = json.value(versionKey).toInt();
+    if ((recordVersion < 1) || (recordVersion > version)) {
         return std::nullopt;
     }
     Record record;
@@ -114,8 +126,8 @@ std::optional<GeoZonePlanAudit::Record> GeoZonePlanAudit::Record::fromJson(const
         zone.identifier = object.value(QStringLiteral("identifier")).toString();
         zone.country = object.value(QStringLiteral("country")).toString();
         zone.name = object.value(QStringLiteral("name")).toString();
-        const int restriction = object.value(QStringLiteral("restriction")).toInt(GeoZone::Unknown);
-        zone.restriction = ((restriction >= GeoZone::Prohibited) && (restriction <= GeoZone::Unknown)) ? static_cast<GeoZone::Restriction>(restriction) : GeoZone::Unknown;
+        const QJsonValue restriction = object.value(QStringLiteral("restriction"));
+        zone.restriction = (recordVersion == 1) ? restrictionOfVersion1(restriction.toInt(-1)) : GeoZoneBriefing::restrictionFromCode(restriction.toString());
         zone.contentHash = QByteArray::fromHex(object.value(QStringLiteral("contentHash")).toString().toLatin1());
         if (!zone.key.isEmpty()) {
             record.zones.append(zone);

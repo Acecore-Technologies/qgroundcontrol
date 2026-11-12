@@ -82,6 +82,16 @@ QString GeoZoneBriefing::restrictionCode(GeoZone::Restriction restriction)
     return QStringLiteral("unknown");
 }
 
+GeoZone::Restriction GeoZoneBriefing::restrictionFromCode(const QString &code)
+{
+    for (const GeoZone::Restriction restriction : { GeoZone::Prohibited, GeoZone::ReqAuthorisation, GeoZone::Conditional, GeoZone::NoRestriction, GeoZone::USpace }) {
+        if (code == restrictionCode(restriction)) {
+            return restriction;
+        }
+    }
+    return GeoZone::Unknown;
+}
+
 QList<GeoZoneBriefing::Interval> GeoZoneBriefing::activePeriods(const GeoZone *zone, const QDateTime &start, const QDateTime &end)
 {
     if (!zone || !start.isValid() || !end.isValid() || (end < start)) {
