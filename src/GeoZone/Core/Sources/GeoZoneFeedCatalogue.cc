@@ -11,6 +11,7 @@
 #include "GeoZoneSource.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QHash>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -34,6 +35,79 @@ bool _supportedUrl(const QString &url)
     const QString scheme = parsed.scheme().toLower();
     return parsed.isValid() && ((((scheme == QStringLiteral("https")) || (scheme == QStringLiteral("http"))) && !parsed.host().isEmpty()) ||
                                 (scheme == QStringLiteral("file")));
+}
+
+/// What a member of a catalogue must be: one of another type would be read as its default, like "enabled": "false"
+/// as true
+enum class MemberType : quint8 {
+    Text,
+    Boolean,
+    Object,
+    Other,      ///< Checked where it is read
+};
+using Members = QHash<QString, MemberType>;
+
+const Members kRootMembers = {
+    { QStringLiteral("fileType"), MemberType::Other }, { QStringLiteral("version"), MemberType::Other }, { QStringLiteral("feeds"), MemberType::Other },
+    { QStringLiteral("services"), MemberType::Other },
+    // Of the built-in catalogue, for its translations
+    { QStringLiteral("translateKeys"), MemberType::Other }, { QStringLiteral("arrayIDKeys"), MemberType::Other },
+};
+const Members kFeedMembers = {
+    { QStringLiteral("id"), MemberType::Text }, { QStringLiteral("name"), MemberType::Text }, { QStringLiteral("country"), MemberType::Text },
+    { QStringLiteral("url"), MemberType::Text }, { QStringLiteral("areaUrl"), MemberType::Text }, { QStringLiteral("format"), MemberType::Text },
+    { QStringLiteral("match"), MemberType::Object }, { QStringLiteral("datasetLink"), MemberType::Object }, { QStringLiteral("airac"), MemberType::Boolean },
+    { QStringLiteral("refreshHours"), MemberType::Other }, { QStringLiteral("live"), MemberType::Boolean }, { QStringLiteral("licence"), MemberType::Text },
+    { QStringLiteral("attribution"), MemberType::Text }, { QStringLiteral("info"), MemberType::Text }, { QStringLiteral("note"), MemberType::Text },
+    { QStringLiteral("coverage"), MemberType::Other }, { QStringLiteral("serviceTemplate"), MemberType::Other }, { QStringLiteral("enabled"), MemberType::Boolean },
+};
+const Members kMatchMembers = { { QStringLiteral("host"), MemberType::Text }, { QStringLiteral("path"), MemberType::Text } };
+const Members kDatasetLinkMembers = { { QStringLiteral("pattern"), MemberType::Text }, { QStringLiteral("dateFormat"), MemberType::Text } };
+const Members kServiceTemplateMembers = { { QStringLiteral("maxAreaKm2"), MemberType::Other }, { QStringLiteral("note"), MemberType::Text } };
+const Members kServiceMembers = {
+    { QStringLiteral("id"), MemberType::Text }, { QStringLiteral("name"), MemberType::Text }, { QStringLiteral("nameFromData"), MemberType::Boolean },
+    { QStringLiteral("url"), MemberType::Text }, { QStringLiteral("note"), MemberType::Text }, { QStringLiteral("format"), MemberType::Text },
+    { QStringLiteral("supported"), MemberType::Boolean }, { QStringLiteral("service"), MemberType::Object }, { QStringLiteral("enabled"), MemberType::Boolean },
+};
+
+/// Checks the members of an object of a catalogue against those it may have
+/// @param path Of the object in its entry, like "match", empty for the entry
+/// @param unknown Appended with the members a catalogue doesn't have, like misspelled ones, which are ignored
+/// @return What the first member of another type than expected must be, empty when all are as expected
+QString _checkMembers(const QJsonObject &object, const Members &members, const QString &path, QStringList &unknown)
+{
+    QString problem;
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+        const QString name = path.isEmpty() ? it.key() : (path + QLatin1Char('.') + it.key());
+        const auto member = members.constFind(it.key());
+        if (member == members.cend()) {
+            unknown.append(name);
+            continue;
+        }
+        if (!problem.isEmpty()) {
+            continue;
+        }
+        switch (member.value()) {
+        case MemberType::Text:
+            if (!it.value().isString()) {
+                problem = GeoZoneFeedCatalogue::tr("Its %1 must be a text.").arg(name);
+            }
+            break;
+        case MemberType::Boolean:
+            if (!it.value().isBool()) {
+                problem = GeoZoneFeedCatalogue::tr("Its %1 must be true or false, without quotes.").arg(name);
+            }
+            break;
+        case MemberType::Object:
+            if (!it.value().isObject()) {
+                problem = GeoZoneFeedCatalogue::tr("Its %1 must be an object.").arg(name);
+            }
+            break;
+        case MemberType::Other:
+            break;
+        }
+    }
+    return problem;
 }
 
 } // namespace
@@ -93,6 +167,13 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
         return false;
     }
 
+    // Members a catalogue doesn't have are told: a misspelled one would otherwise be ignored without a word
+    QStringList unknown;
+    (void) _checkMembers(root, kRootMembers, QString(), unknown);
+    if (!unknown.isEmpty()) {
+        catalogue.warnings.append(tr("The catalogue has unknown members, which are ignored: %1.").arg(unknown.join(QStringLiteral(", "))));
+    }
+
     const bool translatable = origin.isEmpty();
     QSet<QString> ids;
     int index = 0;
@@ -109,6 +190,29 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
             continue;
         }
         ids.insert(id);
+        unknown.clear();
+        const QJsonValue serviceTemplate = entry.value(QStringLiteral("serviceTemplate"));
+        QString problem = _checkMembers(entry, kFeedMembers, QString(), unknown);
+        const auto checkMembersOf = [&entry, &unknown, &problem](const QString &member, const Members &members) {
+            const QString memberProblem = _checkMembers(entry.value(member).toObject(), members, member, unknown);
+            if (problem.isEmpty()) {
+                problem = memberProblem;
+            }
+        };
+        checkMembersOf(QStringLiteral("match"), kMatchMembers);
+        checkMembersOf(QStringLiteral("datasetLink"), kDatasetLinkMembers);
+        checkMembersOf(QStringLiteral("serviceTemplate"), kServiceTemplateMembers);
+        if (problem.isEmpty() && !serviceTemplate.isUndefined() && !serviceTemplate.isObject() && !serviceTemplate.isBool()) {
+            problem = tr("Its serviceTemplate must be an object, or true.");
+        }
+        if (!unknown.isEmpty()) {
+            catalogue.warnings.append(tr("Feed %1 has unknown members, which are ignored: %2.").arg(id, unknown.join(QStringLiteral(", "))));
+        }
+        // A member which isn't read as written could turn a feed off or on against the intent: the entry changes nothing
+        if (!problem.isEmpty()) {
+            catalogue.warnings.append(tr("Feed %1: %2 It is left out.").arg(id, problem));
+            continue;
+        }
         if (!entry.value(QStringLiteral("enabled")).toBool(true)) {
             catalogue.disabled.append(id);
             continue;
@@ -129,7 +233,6 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
         service.airac = entry.value(QStringLiteral("airac")).toBool();
         service.live = entry.value(QStringLiteral("live")).toBool();
 
-        QString problem;
         bool formatOk = true;
         service.format = formatFromName(_string(entry, "format"), formatOk);
         const QJsonValue refreshHours = entry.value(QStringLiteral("refreshHours"));
@@ -182,7 +285,6 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
             }
         }
 
-        const QJsonValue serviceTemplate = entry.value(QStringLiteral("serviceTemplate"));
         if (problem.isEmpty() && (serviceTemplate.isObject() || serviceTemplate.toBool())) {
             if (!service.servesAreas()) {
                 problem = tr("Only feeds with an areaUrl can be service templates.");
@@ -214,6 +316,23 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
             continue;
         }
         ids.insert(id);
+        unknown.clear();
+        QString problem = _checkMembers(entry, kServiceMembers, QString(), unknown);
+        QStringList unknownOfService;
+        const QStringList serviceProblems = GeoZoneService::jsonProblems(entry.value(QStringLiteral("service")).toObject(), &unknownOfService);
+        for (const QString &member : std::as_const(unknownOfService)) {
+            unknown.append(QStringLiteral("service.") + member);
+        }
+        if (problem.isEmpty() && !serviceProblems.isEmpty()) {
+            problem = tr("Its service isn't read as written: %1.").arg(serviceProblems.join(QStringLiteral("; ")));
+        }
+        if (!unknown.isEmpty()) {
+            catalogue.warnings.append(tr("Service %1 has unknown members, which are ignored: %2.").arg(id, unknown.join(QStringLiteral(", "))));
+        }
+        if (!problem.isEmpty()) {
+            catalogue.warnings.append(tr("Service %1: %2 It is left out.").arg(id, problem));
+            continue;
+        }
         if (!entry.value(QStringLiteral("enabled")).toBool(true)) {
             catalogue.disabled.append(id);
             continue;
@@ -238,15 +357,12 @@ bool GeoZoneFeedCatalogue::parse(const QByteArray &json, const QString &origin, 
         bool formatOk = true;
         serviceTemplate.format = formatFromName(_string(entry, "format"), formatOk);
 
-        QString problem;
         if (name.isEmpty()) {
             problem = tr("It has no name.");
         } else if (!serviceTemplate.url.isEmpty() && !_supportedUrl(serviceTemplate.url)) {
             problem = tr("Its url isn't an https, http or file address.");
         } else if (!formatOk) {
             problem = tr("Its format %1 is unknown.").arg(_string(entry, "format"));
-        } else if (!entry.value(QStringLiteral("service")).isUndefined() && !entry.value(QStringLiteral("service")).isObject()) {
-            problem = tr("Its service must be an object.");
         }
         if (!problem.isEmpty()) {
             catalogue.warnings.append(tr("Service %1: %2 It is left out.").arg(id, problem));

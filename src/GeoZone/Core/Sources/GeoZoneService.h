@@ -81,6 +81,11 @@ public:
     /// @return toJson without the custom headers, for packs and reports leaving the computer
     QJsonObject shareableJson() const;
     static GeoZoneService fromJson(const QJsonObject &object);
+    /// @return What fromJson would misread in the JSON of a service someone wrote, like a catalogue: members of
+    ///         another type than expected ("areaOfInterest": "true") and unknown methods or authentications, which
+    ///         would be taken as their defaults. Empty when it is read as written.
+    /// @param unknownMembers Set to the members fromJson ignores, like misspelled ones
+    static QStringList jsonProblems(const QJsonObject &object, QStringList *unknownMembers = nullptr);
     /// For QML: the fields of toJson with the enums as their names
     QVariantMap toVariantMap() const { return toJson().toVariantMap(); }
     static GeoZoneService fromVariantMap(const QVariantMap &map) { return fromJson(QJsonObject::fromVariantMap(map)); }

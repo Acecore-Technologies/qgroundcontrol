@@ -10,6 +10,7 @@
 #include "GeoZoneService.h"
 #include "GeoZoneOrigin.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QTimeZone>
@@ -177,6 +178,65 @@ GeoZoneService GeoZoneService::fromJson(const QJsonObject &object)
     service.sha256Url = object.value(QLatin1String(sha256UrlKey)).toString().trimmed();
     service.maxAreaKm2 = (std::max)(0.0, object.value(QLatin1String(maxAreaKey)).toDouble());
     return service;
+}
+
+QStringList GeoZoneService::jsonProblems(const QJsonObject &object, QStringList *unknownMembers)
+{
+    enum class Type : quint8 { Text, Boolean, Number, Object };
+    static const QHash<QString, Type> members = {
+        { QLatin1String(idKey), Type::Text }, { QLatin1String(nameKey), Type::Text }, { QLatin1String(methodKey), Type::Text }, { QLatin1String(authKey), Type::Text },
+        { QLatin1String(authParameterKey), Type::Text }, { QLatin1String(userKey), Type::Text }, { QLatin1String(tokenUrlKey), Type::Text },
+        { QLatin1String(scopeKey), Type::Text }, { QLatin1String(headersKey), Type::Object }, { QLatin1String(responseMemberKey), Type::Text },
+        { QLatin1String(areaOfInterestKey), Type::Boolean }, { QLatin1String(timeWindowKey), Type::Number }, { QLatin1String(sha256UrlKey), Type::Text },
+        { QLatin1String(maxAreaKey), Type::Number },
+    };
+    QStringList problems;
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+        const auto member = members.constFind(it.key());
+        if (member == members.cend()) {
+            if (unknownMembers) {
+                unknownMembers->append(it.key());
+            }
+            continue;
+        }
+        switch (member.value()) {
+        case Type::Text:
+            if (!it.value().isString()) {
+                problems.append(tr("%1 must be a text").arg(it.key()));
+            }
+            break;
+        case Type::Boolean:
+            if (!it.value().isBool()) {
+                problems.append(tr("%1 must be true or false, without quotes").arg(it.key()));
+            }
+            break;
+        case Type::Number:
+            if (!it.value().isDouble()) {
+                problems.append(tr("%1 must be a number").arg(it.key()));
+            }
+            break;
+        case Type::Object:
+            if (!it.value().isObject()) {
+                problems.append(tr("%1 must be an object").arg(it.key()));
+            }
+            break;
+        }
+    }
+    // Unknown names would be read as a GET without authentication
+    if (const QJsonValue method = object.value(QLatin1String(methodKey)); method.isString() &&
+        (method.toString() != methodToString(Method::Get)) && (method.toString() != methodToString(Method::Ed318Post))) {
+        problems.append(tr("the method %1 is unknown").arg(method.toString()));
+    }
+    if (const QJsonValue authValue = object.value(QLatin1String(authKey)); authValue.isString()) {
+        bool known = false;
+        for (const Auth candidate : { Auth::None, Auth::ApiKeyHeader, Auth::ApiKeyQuery, Auth::Bearer, Auth::Basic, Auth::OAuth2ClientCredentials }) {
+            known = known || (authValue.toString() == authToString(candidate));
+        }
+        if (!known) {
+            problems.append(tr("the authentication %1 is unknown").arg(authValue.toString()));
+        }
+    }
+    return problems;
 }
 
 QVariantMap GeoZoneService::toForm() const

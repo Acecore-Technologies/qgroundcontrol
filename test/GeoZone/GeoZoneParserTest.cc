@@ -3304,4 +3304,72 @@ void GeoZoneParserTest::_testDatasetLinkScope()
     QCOMPARE(patterns, 3);
 }
 
+void GeoZoneParserTest::_testCatalogueMembers()
+{
+    // Members which are misspelled or of another type than expected were ignored or read as their defaults without a
+    // word: "enabled": "false" left a feed on
+    const QByteArray json = R"json({
+        "version": 1, "comment": "typos", "feeds": [
+            { "id": "lgs", "enabled": "false" },
+            { "id": "foca", "enabled": false, "reason": "moved" },
+            { "id": "typo", "name": "Typo", "url": "https://zones.example.com/t.json", "refreshHour": 6, "Format": "ed269", "match": { "hosts": "example.com" } },
+            { "id": "quoted", "name": "Quoted", "url": "https://zones.example.com/q.json", "live": "true" },
+            { "id": "link", "name": "Link", "url": "https://zones.example.com/l", "datasetLink": "href=\"(x)\"" },
+            { "id": "number", "name": 5, "url": "https://zones.example.com/n.json" },
+            { "id": "template", "name": "Template", "areaUrl": "https://zones.example.com/a?bbox={bbox}", "serviceTemplate": "yes" },
+            { "id": "fine", "name": "Fine", "url": "https://zones.example.com/ok.json" }
+        ],
+        "services": [
+            { "id": "auth-case", "name": "Auth", "url": "https://utm.example.com/zones", "service": { "auth": "Basic" } },
+            { "id": "area-quoted", "name": "Area", "url": "https://utm.example.com/zones?bbox={bbox}", "service": { "areaOfInterest": "true" } },
+            { "id": "method", "name": "Method", "url": "https://utm.example.com/zones", "service": { "method": "post" } },
+            { "id": "extra", "name": "Extra", "url": "https://utm.example.com/z", "service": { "retries": 3, "auth": "bearer" }, "suported": false },
+            { "id": "airspacelink", "enabled": 0 }
+        ]
+    })json";
+    GeoZoneFeedCatalogue::Catalogue parsed;
+    QString errorString;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(json, QStringLiteral("feeds.json"), parsed, errorString), qPrintable(errorString));
+
+    // Only what is read as written changes the catalogue
+    QCOMPARE(parsed.disabled, QStringList{ QStringLiteral("foca") });
+    QCOMPARE(parsed.feeds.count(), 2);
+    QCOMPARE(parsed.feeds[0].id, QStringLiteral("typo"));
+    QCOMPARE(parsed.feeds[1].id, QStringLiteral("fine"));
+    QCOMPARE(parsed.templates.count(), 1);
+    QCOMPARE(parsed.templates[0].service.id, QStringLiteral("extra"));
+    QCOMPARE(parsed.templates[0].service.auth, GeoZoneService::Auth::Bearer);
+
+    // The rest is told
+    const QStringList expected = {
+        QStringLiteral("The catalogue has unknown members, which are ignored: comment."),
+        QStringLiteral("Feed lgs: Its enabled must be true or false, without quotes. It is left out."),
+        QStringLiteral("Feed foca has unknown members, which are ignored: reason."),
+        QStringLiteral("Feed typo has unknown members, which are ignored: Format, refreshHour, match.hosts."),
+        QStringLiteral("Feed quoted: Its live must be true or false, without quotes. It is left out."),
+        QStringLiteral("Feed link: Its datasetLink must be an object. It is left out."),
+        QStringLiteral("Feed number: Its name must be a text. It is left out."),
+        QStringLiteral("Feed template: Its serviceTemplate must be an object, or true. It is left out."),
+        QStringLiteral("Service auth-case: Its service isn't read as written: the authentication Basic is unknown. It is left out."),
+        QStringLiteral("Service area-quoted: Its service isn't read as written: areaOfInterest must be true or false, without quotes. It is left out."),
+        QStringLiteral("Service method: Its service isn't read as written: the method post is unknown. It is left out."),
+        QStringLiteral("Service extra has unknown members, which are ignored: suported, service.retries."),
+        QStringLiteral("Service airspacelink: Its enabled must be true or false, without quotes. It is left out."),
+    };
+    QCOMPARE(parsed.warnings, expected);
+
+    // The built-in catalogue has neither
+    QCOMPARE(GeoZoneFeedCatalogue::builtIn().warnings, QStringList());
+    // and the JSON a service is stored as is read as written
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    service.method = GeoZoneService::Method::Ed318Post;
+    service.headers.append({ QStringLiteral("X-Key"), QStringLiteral("value") });
+    service.maxAreaKm2 = 100;
+    service.areaOfInterest = true;
+    QStringList unknown;
+    QCOMPARE(GeoZoneService::jsonProblems(service.toJson(), &unknown), QStringList());
+    QCOMPARE(unknown, QStringList());
+}
+
 GEOZONE_TEST(GeoZoneParserTest)
