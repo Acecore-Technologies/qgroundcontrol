@@ -336,19 +336,22 @@ QString GeoZoneFenceTags::staleText(const QList<StaleZone> &staleZones)
             names.append(tr("%n more", nullptr, static_cast<int>(staleZones.count() - names.count())));
             break;
         }
-        switch (zone.reason) {
-        case StaleZone::Reason::Changed:
-            names.append(tr("%1 (changed)").arg(zone.name));
-            break;
-        case StaleZone::Reason::Removed:
-            names.append(tr("%1 (no longer loaded)").arg(zone.name));
-            break;
-        case StaleZone::Reason::Expired:
-            names.append(tr("%1 (expired)").arg(zone.name));
-            break;
-        }
+        names.append(staleZoneText(zone));
     }
     return tr("Geozone fences are outdated: %1. Rebuild the geozone fences.").arg(names.join(QStringLiteral(", ")));
+}
+
+QString GeoZoneFenceTags::staleZoneText(const StaleZone &zone)
+{
+    switch (zone.reason) {
+    case StaleZone::Reason::Changed:
+        return tr("%1 (changed)").arg(zone.name);
+    case StaleZone::Reason::Removed:
+        return tr("%1 (no longer loaded)").arg(zone.name);
+    case StaleZone::Reason::Expired:
+        return tr("%1 (expired)").arg(zone.name);
+    }
+    return zone.name;
 }
 
 QJsonObject GeoZoneFenceTags::importSettings(const GeoFenceController *geoFenceController)

@@ -159,28 +159,40 @@ Rectangle {
                                                         .join(" \u00B7 ")
 
     /// Asks for confirmation before uploading a mission which enters prohibited zones without authorisation, whose
-    /// geozone data expired or changed since the plan was saved, listing why, then calls uploadFunction unless cancelled
+    /// geozone data expired or changed since the plan was saved, or whose fence leaves out zones, listing why with each
+    /// zone and change, then calls uploadFunction unless cancelled
     function confirmUpload(uploadFunction) {
         // The banner updates after changes settle, so check the current plan
         check.update()
-        const reasons = Array.from(check.uploadReasons())
+        // Each reason heads the zones or changes it is about: all of them, in a list which scrolls
+        let rows = []
+        const add = (reason, zones) => {
+            rows.push({ heading: reason })
+            rows = rows.concat(Array.from(zones))
+        }
+        for (const reason of check.uploadReasonDetails()) {
+            add(reason.text, reason.zones)
+        }
         // Outdated data can miss zones, the mission check already gives expired data as a reason
         if (_outdatedText !== "" && !_dataInvalid) {
-            reasons.push(_outdatedText)
+            add(_outdatedText, [])
         }
         // The vehicle doesn't stop at the zones the fence import left out
-        if (fenceImporter.fenceNote !== "") {
-            reasons.push(fenceImporter.fenceNote)
+        if (fenceImporter.fenceNoteCount > 0) {
+            add(qsTr("%n geozone(s) are not fenced, the vehicle doesn't stop at them:", "", fenceImporter.fenceNoteCount), fenceImporter.fenceNoteZones)
         }
-        if (reasons.length === 0) {
+        if (rows.length === 0) {
             uploadFunction()
             return
         }
-        mainWindow.showMessageDialog(qsTr("Plan Upload"),
-                                     qsTr("Confirm the upload of this plan:\n\n%1\n\nClick 'Ok' to upload the Plan anyway.")
-                                        .arg(reasons.map(reason => "\u2022 " + control._plainText(reason)).join("\n\n")),
-                                     Dialog.Ok | Dialog.Cancel,
-                                     uploadFunction)
+        uploadDialogComponent.createObject(mainWindow, {
+            title:          qsTr("Plan Upload"),
+            buttons:        Dialog.Ok | Dialog.Cancel,
+            intro:          qsTr("Confirm the upload of this plan:"),
+            zones:          rows,
+            note:           qsTr("Click 'Ok' to upload the Plan anyway."),
+            acceptFunction: uploadFunction
+        }).open()
     }
 
     /// Asks for a file and exports the geozone briefing of the mission to it, as PDF, web page or JSON by its extension
@@ -256,6 +268,12 @@ Rectangle {
         id: routeDialogComponent
 
         GeoZoneRouteDialog { }
+    }
+
+    Component {
+        id: uploadDialogComponent
+
+        GeoZoneFenceZoneListDialog { }
     }
 
     GeoZoneFenceImporter {

@@ -117,6 +117,8 @@ public:
     /// @return Why the geozone fences are outdated, like "The zones of geozone fences changed: A (changed), B
     ///         (removed). Rebuild the geozone fences.", empty without stale zones
     static QString staleText(const QList<StaleZone> &staleZones);
+    /// @return The zone with why it is stale, like "A (changed)"
+    static QString staleZoneText(const StaleZone &zone);
 
     /// @return The settings the fences from geozones of the controller were last selected with, see
     ///         GeoZoneFenceImporter::rebuild, empty without. They are kept with the fences they were set for: once the

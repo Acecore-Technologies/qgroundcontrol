@@ -735,34 +735,74 @@ void GeoZoneMissionCheck::acknowledgeAudit()
 QStringList GeoZoneMissionCheck::uploadReasons() const
 {
     QStringList reasons;
+    for (const UploadReason &reason : uploadReasonList()) {
+        reasons.append(reason.summary);
+    }
+    return reasons;
+}
+
+QVariantList GeoZoneMissionCheck::uploadReasonDetails() const
+{
+    QVariantList reasons;
+    for (const UploadReason &reason : uploadReasonList()) {
+        reasons.append(QVariantMap{ { QStringLiteral("text"), reason.text }, { QStringLiteral("zones"), reason.zones } });
+    }
+    return reasons;
+}
+
+QList<GeoZoneMissionCheck::UploadReason> GeoZoneMissionCheck::uploadReasonList() const
+{
+    QList<UploadReason> reasons;
     // Authorised zones aren't crossed zones
     QList<const GeoZone*> prohibited = zones(Crossed);
     (void) prohibited.removeIf([](const GeoZone *zone) { return zone->restriction() != GeoZone::Prohibited; });
     if (!prohibited.isEmpty()) {
-        QString reason = tr("The mission path enters prohibited geozones: %1.").arg(GeoZonePathEvaluator::zoneNames(prohibited, maxListedZones, false));
-        const qsizetype unfenced = zones(Unfenced).count();
-        if (unfenced > 0) {
-            reason += QStringLiteral(" ") + tr("The GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.",
-                                               nullptr, static_cast<int>(unfenced));
+        UploadReason reason;
+        reason.summary = tr("The mission path enters prohibited geozones: %1.").arg(GeoZonePathEvaluator::zoneNames(prohibited, maxListedZones, false));
+        reason.text = tr("The mission path enters %n prohibited geozone(s).", nullptr, static_cast<int>(prohibited.count()));
+        const QList<const GeoZone*> unfenced = zones(Unfenced);
+        if (!unfenced.isEmpty()) {
+            const QString fenceText = QStringLiteral(" ") + tr("The GeoFence doesn't exclude %n of them, use 'Add Exclusion Fences' above the map so the vehicle stops at them.",
+                                                               nullptr, static_cast<int>(unfenced.count()));
+            reason.summary += fenceText;
+            reason.text += fenceText;
         }
+        QHash<const GeoZone*, QString> notes;
         for (const Entry &entry : _entries) {
             if (prohibited.contains(entry.zone) && !entry.authorisationNote.isEmpty()) {
-                reason += QStringLiteral(" ") + tr("%1: %2.").arg(entry.zone->displayName(), entry.authorisationNote);
+                reason.summary += QStringLiteral(" ") + tr("%1: %2.").arg(entry.zone->displayName(), entry.authorisationNote);
+                notes.insert(entry.zone, entry.authorisationNote);
             }
+        }
+        for (const GeoZone *zone : std::as_const(prohibited)) {
+            QStringList remarks;
+            if (unfenced.contains(zone)) {
+                remarks.append(tr("not fenced"));
+            }
+            if (notes.contains(zone)) {
+                remarks.append(notes.value(zone));
+            }
+            reason.zones.append(remarks.isEmpty() ? zone->displayName() : tr("%1: %2").arg(zone->displayName(), remarks.join(QStringLiteral(", "))));
         }
         reasons.append(reason);
     }
     // Zones of expired data still apply, but current data may have more or other zones
     if (_manager->repository()->dataInvalid() && missionController() && missionController()->containsItems()) {
-        reasons.append(tr("The geozone data is outdated and treated as invalid, zones may be missing or have changed:\n%1")
-                           .arg(_manager->repository()->validityWarning()));
+        const QString validityWarning = _manager->repository()->validityWarning();
+        reasons.append(UploadReason{ tr("The geozone data is outdated and treated as invalid, zones may be missing or have changed:\n%1").arg(validityWarning),
+                                     tr("The geozone data is outdated and treated as invalid, zones may be missing or have changed:"),
+                                     validityWarning.split(QLatin1Char('\n'), Qt::SkipEmptyParts) });
     }
     // Fences from zones which changed since, which the vehicle would enforce as they were
     if (_geoFenceController && !_manager->repository()->busy()) {
-        const QString stale = GeoZoneFenceTags::staleText(GeoZoneFenceTags::staleZones(_geoFenceController, _manager->catalog().zones(),
-                                                                                       GeoZoneEnvironment::currentDateTimeUtc()));
-        if (!stale.isEmpty()) {
-            reasons.append(stale);
+        const QList<GeoZoneFenceTags::StaleZone> staleZones = GeoZoneFenceTags::staleZones(_geoFenceController, _manager->catalog().zones(),
+                                                                                           GeoZoneEnvironment::currentDateTimeUtc());
+        if (!staleZones.isEmpty()) {
+            UploadReason reason{ GeoZoneFenceTags::staleText(staleZones), tr("Geozone fences are outdated, rebuild the geozone fences:"), {} };
+            for (const GeoZoneFenceTags::StaleZone &zone : staleZones) {
+                reason.zones.append(GeoZoneFenceTags::staleZoneText(zone));
+            }
+            reasons.append(reason);
         }
     }
     if (!_auditText.isEmpty()) {
@@ -771,7 +811,7 @@ QStringList GeoZoneMissionCheck::uploadReasons() const
         if (_auditDetails.count() > maxListedChanges) {
             lines.append(tr("%n more change(s).", nullptr, static_cast<int>(_auditDetails.count() - maxListedChanges)));
         }
-        reasons.append(lines.join(QStringLiteral("\n")));
+        reasons.append(UploadReason{ lines.join(QStringLiteral("\n")), _auditText, _auditDetails });
     }
     return reasons;
 }

@@ -16,12 +16,14 @@ import QGroundControl.Controls
 import QGroundControl.ScreenTools
 
 /// Lists zones with why, like those a fence leaves out: each of them, in a list which scrolls, for the fence import
-/// dialog and the GeoFence panel. With Ok and Cancel buttons it asks, and calls the accept function when accepted.
+/// dialog, the GeoFence panel and the confirmation of a plan upload, whose reasons head their zones. With Ok and Cancel
+/// buttons it asks, and calls the accept function when accepted.
 QGCPopupDialog {
     id: control
 
     property string intro
-    property var    zones:          []      ///< Texts, shown as plain text
+    /// Texts, shown as plain text. A map with a heading text instead heads the zones after it.
+    property var    zones:          []
     property string note
     property var    acceptFunction: null
 
@@ -51,12 +53,16 @@ QGCPopupDialog {
             model:                  control.zones
 
             delegate: QGCLabel {
-                required property string modelData
+                required property var modelData
+                required property int index
+
+                readonly property bool _heading: modelData.heading !== undefined
 
                 width:      ListView.view ? ListView.view.width : implicitWidth
+                topPadding: _heading && index > 0 ? ScreenTools.defaultFontPixelHeight / 2 : 0
                 wrapMode:   Text.WordWrap
                 textFormat: Text.PlainText
-                text:       "\u2022 " + modelData
+                text:       _heading ? modelData.heading : "\u2022 " + modelData
             }
         }
 

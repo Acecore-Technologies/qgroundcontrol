@@ -42,6 +42,7 @@ private slots:
     void _testPlanAudit();
     void _testPlanSave();
     void _testUploadReasons();
+    void _testUploadReasonDetails();
     void _testPlannedStartPerPlan();
     void _testProfileBands();
     void _testOperatorZones();

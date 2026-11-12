@@ -1157,6 +1157,71 @@ void GeoZonePlanningTest::_testUploadReasons()
     manager.repository()->clear();
 }
 
+void GeoZonePlanningTest::_testUploadReasonDetails()
+{
+    // Seven prohibited zones along a path west to east
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    const auto load = [&](double radius) {
+        QJsonArray features;
+        for (int i = 1; i <= 7; i++) {
+            features.append(_circleFeature(QStringLiteral("P%1").arg(i), QStringLiteral("PROHIBITED"), center.atDistanceAndAzimuth(500 * i, 90), radius));
+        }
+        QString errorString;
+        return manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), features), errorString);
+    };
+    QVERIFY(load(100));
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    (void) missionController->insertSimpleMissionItem(center, 1);
+    (void) missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(4000, 90), 2);
+    GeoZoneMissionCheck check(&manager);
+    check.setUpdateDelay(0);
+    check.setMissionController(missionController);
+    check.setGeoFenceController(masterController.geoFenceController());
+    QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Crossed).count(), 7);
+
+    // The summary names five of them and counts the others, the confirmation of the upload lists each one
+    QStringList reasons = check.uploadReasons();
+    QCOMPARE(reasons.count(), 1);
+    QVERIFY2(reasons[0].startsWith(QStringLiteral("The mission path enters prohibited geozones: P1, P2, P3, P4, P5 and 2 more.")), qPrintable(reasons[0]));
+    QList<GeoZoneMissionCheck::UploadReason> details = check.uploadReasonList();
+    QCOMPARE(details.count(), 1);
+    QCOMPARE(details[0].summary, reasons[0]);
+    QVERIFY2(details[0].text.startsWith(QStringLiteral("The mission path enters 7 prohibited geozone(s). The GeoFence doesn't exclude 7 of them")), qPrintable(details[0].text));
+    QStringList notFenced;
+    for (int i = 1; i <= 7; i++) {
+        notFenced.append(QStringLiteral("P%1: not fenced").arg(i));
+    }
+    QCOMPARE(details[0].zones, notFenced);
+    // As the dialog reads them
+    const QVariantList maps = check.uploadReasonDetails();
+    QCOMPARE(maps.count(), 1);
+    QCOMPARE(maps[0].toMap().value(QStringLiteral("text")).toString(), details[0].text);
+    QCOMPARE(maps[0].toMap().value(QStringLiteral("zones")).toStringList(), notFenced);
+
+    // All changes of the geozone data since the plan was saved too, where the summary lists five
+    QJsonObject planJson;
+    GeoZonePlanData::save(&masterController, planJson, &manager);
+    QVERIFY(load(150));
+    QTRY_VERIFY(!check.auditText().isEmpty());
+    QTRY_COMPARE(check.uploadReasonList().count(), 2);
+    details = check.uploadReasonList();
+    QCOMPARE(details[1].text, check.auditText());
+    // The seven zones and their source
+    QCOMPARE(details[1].zones.count(), 8);
+    QCOMPARE(details[1].zones, check.auditDetails());
+    QVERIFY2(details[1].zones.contains(QStringLiteral("Modified: P7 (Prohibited)")), qPrintable(details[1].zones.join(QChar(u'\n'))));
+    QVERIFY2(details[1].summary.endsWith(QStringLiteral("3 more change(s).")), qPrintable(details[1].summary));
+    QCOMPARE(check.uploadReasons(), QStringList({ details[0].summary, details[1].summary }));
+    manager.repository()->clear();
+}
+
 void GeoZonePlanningTest::_testPlannedStartPerPlan()
 {
     // Plan files are loaded and saved with the application's manager

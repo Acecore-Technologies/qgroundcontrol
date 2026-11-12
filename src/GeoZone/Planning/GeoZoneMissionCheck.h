@@ -155,6 +155,18 @@ public:
 
     static constexpr int maxListedChanges = 5;   ///< Changes of the geozone data listed by uploadReasons
 
+    /// Reason of uploadReasons with all it is about
+    struct UploadReason {
+        QString summary;    ///< The paragraph of uploadReasons, naming up to maxListedZones zones or maxListedChanges changes
+        QString text;       ///< What the reason is, like "The mission path enters 7 prohibited geozones:"
+        QStringList zones;  ///< Each zone or change the reason is about, all of them, none for a reason which lists nothing
+    };
+    /// @return The reasons of uploadReasons, each with every zone or change it is about
+    QList<UploadReason> uploadReasonList() const;
+    /// @return uploadReasonList as maps of the text and the zones, for the confirmation of the upload, which shows all
+    ///         of them
+    Q_INVOKABLE QVariantList uploadReasonDetails() const;
+
     /// @return true if exclusion fences of the controller cover the whole zone, like the fences GeoZoneFenceImporter
     ///         adds for it with any simplification, see GeoZoneFences::fencesCover
     static bool fenceExcludes(GeoFenceController *geoFenceController, const GeoZone *zone);
