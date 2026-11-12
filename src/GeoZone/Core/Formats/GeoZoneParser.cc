@@ -238,7 +238,12 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
         GeoZone::Data zone;
         zone.contentHash = QCryptographicHash::hash(QCborValue::fromJsonValue(featureValue).toCbor(), QCryptographicHash::Sha1);
         contentHash.addData(zone.contentHash);
-        if (!format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone) || !_addZone(zone, result)) {
+        const GeoZoneFormat::FeatureResult featureResult = format->parseFeatureWithCompanions(featureValue.toObject(), result.companions, zone);
+        if (featureResult == GeoZoneFormat::FeatureResult::Filtered) {
+            // Left out on purpose, which isn't a problem to report
+            continue;
+        }
+        if ((featureResult == GeoZoneFormat::FeatureResult::Unusable) || !_addZone(zone, result)) {
             qCDebug(GeoZoneParserLog) << "Skipping feature without usable geometry" << zone.identifier;
             result.skippedFeatures++;
         }
@@ -253,8 +258,10 @@ bool GeoZoneParser::parse(const QByteArray &bytes, Result &result, QString &erro
     }
     result.contentHash = contentHash.result();
 
-    // An empty list from a web service means no zones are in the area or in effect
-    if (result.zones.isEmpty() && !format->acceptsEmpty()) {
+    // An empty list from a web service means no zones are in the area or in effect, and so does a list whose features
+    // are all left out on purpose. A list with features of which none can be used is an error like for files, so that
+    // a feed keeps the zones of its last download instead of losing them all.
+    if (result.zones.isEmpty() && (!format->acceptsEmpty() || (result.skippedFeatures > 0))) {
         errorString = tr("No geozones with a supported geometry were found in the %1 file.").arg(formatToString(result.format));
         return false;
     }

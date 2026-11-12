@@ -89,7 +89,7 @@ DipulLimit _dipulLimit(const QJsonValue &value, const QString &unit, const QStri
 }
 
 /// German geographical zone of the DiPUL WFS
-bool _dipulFeature(const QJsonObject &feature, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _dipulFeature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     const QJsonObject properties = feature.value(QStringLiteral("properties")).toObject();
     const QString typeCode = _text(properties.value(QStringLiteral("type_code")));
@@ -152,7 +152,7 @@ bool _dipulFeature(const QJsonObject &feature, GeoZone::Data &zone)
     }
 
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// German geographical zones GeoJSON from the DiPUL WFS
@@ -177,7 +177,7 @@ public:
         result.issued = _dateTime(root.value(QStringLiteral("timeStamp")));
     }
     bool acceptsEmpty() const final { return true; }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _dipulFeature(feature, zone); }
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _dipulFeature(feature, zone); }
 };
 
 } // namespace

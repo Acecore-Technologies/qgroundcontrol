@@ -17,7 +17,7 @@ using namespace GeoZoneParserUtils;
 
 namespace {
 
-bool _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     _commonProperties(feature, QStringLiteral("restriction"), zone);
 
@@ -36,7 +36,7 @@ bool _ed269Feature(const QJsonObject &feature, GeoZone::Data &zone)
     }
     zone.applicability = _applicability(feature.value(QStringLiteral("applicability")), zone.country, zone.volumes, zone.issues);
 
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// EUROCAE ED-269 JSON
@@ -67,7 +67,7 @@ public:
     {
         result.title = _text(root.value(QStringLiteral("title")));
     }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _ed269Feature(feature, zone); }
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _ed269Feature(feature, zone); }
 };
 
 } // namespace

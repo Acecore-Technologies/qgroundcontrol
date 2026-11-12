@@ -32,14 +32,19 @@ void GeoZoneFormat::readMetadata(const QJsonObject &, GeoZoneParser::Result &) c
 {
 }
 
-bool GeoZoneFormat::parseFeature(const QJsonObject &, GeoZone::Data &) const
+GeoZoneFormat::FeatureResult GeoZoneFormat::parseFeature(const QJsonObject &, GeoZone::Data &) const
 {
-    return false;
+    return FeatureResult::Unusable;
 }
 
-bool GeoZoneFormat::parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &, GeoZone::Data &zone) const
+GeoZoneFormat::FeatureResult GeoZoneFormat::parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &, GeoZone::Data &zone) const
 {
     return parseFeature(feature, zone);
+}
+
+GeoZoneFormat::FeatureResult GeoZoneFormat::featureResult(const GeoZone::Data &zone)
+{
+    return zone.volumes.isEmpty() ? FeatureResult::Unusable : FeatureResult::Zone;
 }
 
 QList<GeoZoneFormat::CompanionRequest> GeoZoneFormat::companionRequests(const QUrl &, const QJsonObject &, const QJsonArray &) const

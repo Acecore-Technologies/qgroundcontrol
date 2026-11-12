@@ -48,10 +48,18 @@ public:
     virtual bool detect(const QJsonObject &root, const QJsonArray &features, GeoZoneParser::Format formatHint) const;
     /// Sets the dataset title, provider and issue time of the result from the document
     virtual void readMetadata(const QJsonObject &root, GeoZoneParser::Result &result) const;
-    /// @return true if the feature has a usable geometry
-    virtual bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const;
+    /// What a format made of a feature
+    enum class FeatureResult {
+        Zone,       ///< A zone with geometry, which GeoZoneParser checks
+        Filtered,   ///< Left out on purpose, like an airspace which doesn't concern drones: not a problem of the data
+        Unusable,   ///< Without usable geometry, counted in GeoZoneParser::Result::skippedFeatures
+    };
+    /// Converts a feature into a zone
+    virtual FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const;
     /// Like parseFeature, for formats whose features refer to companion documents
-    virtual bool parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone) const;
+    virtual FeatureResult parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone) const;
+    /// @return Zone when the format gave the zone a volume, Unusable otherwise
+    static FeatureResult featureResult(const GeoZone::Data &zone);
 
     /// Companion document of a feed's document, downloaded with it and kept in the stored copy
     struct CompanionRequest {
@@ -68,7 +76,8 @@ public:
     /// @param root Set to the document, which GeoZoneParser::composite() stores with its companions
     static QList<CompanionRequest> companionRequestsOf(const QUrl &documentUrl, const QByteArray &document, GeoZoneParser::Format formatHint,
                                                        QJsonObject &root, const QList<const GeoZoneFormat*> &candidates = formats());
-    /// Services answering with an empty list when no zones apply, unlike files which must have zones
+    /// Services answering with an empty list when no zones apply, unlike files which must have zones. A list whose
+    /// features are all Filtered is accepted like an empty one, a list with Unusable features and no zone isn't.
     virtual bool acceptsEmpty() const { return false; }
 
     /// @return The registered formats, in the order in which they are detected

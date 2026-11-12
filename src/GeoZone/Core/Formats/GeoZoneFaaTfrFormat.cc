@@ -280,7 +280,7 @@ QString _tfrNotam(const QJsonObject &feature)
 
 /// FAA temporary flight restriction from the tfr.faa.gov WFS GeoJSON, with the times and altitudes of its NOTAM
 /// detail when available
-bool _faaTfrFeature(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _faaTfrFeature(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone)
 {
     const QJsonObject properties = feature.value(QStringLiteral("properties")).toObject();
     const QString notamKey = _text(properties.value(QStringLiteral("NOTAM_KEY")));
@@ -329,7 +329,7 @@ bool _faaTfrFeature(const QJsonObject &feature, const GeoZoneParser::Companions 
     if (detail.greatCircleEdges) {
         _densifyGreatCircles(zone.volumes);
     }
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// FAA temporary flight restrictions GeoJSON from tfr.faa.gov
@@ -355,8 +355,8 @@ public:
         result.issued = _dateTime(root.value(QStringLiteral("timeStamp")));
     }
     bool acceptsEmpty() const final { return true; }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _faaTfrFeature(feature, {}, zone); }
-    bool parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone) const final
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _faaTfrFeature(feature, {}, zone); }
+    FeatureResult parseFeatureWithCompanions(const QJsonObject &feature, const GeoZoneParser::Companions &companions, GeoZone::Data &zone) const final
     {
         return _faaTfrFeature(feature, companions, zone);
     }

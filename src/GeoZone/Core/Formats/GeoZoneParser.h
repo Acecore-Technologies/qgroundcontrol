@@ -64,7 +64,7 @@ public:
         QDateTime validFrom;
         QDateTime validTo;
         QList<GeoZone::Data> zones;
-        int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry, see issues
+        int skippedFeatures = 0;    ///< Features ignored because they have no usable horizontal geometry, see issues. Not those a format leaves out on purpose.
         QByteArray contentHash;     ///< Hash of the features, which stays the same when only metadata changes
         int missingFeatures = 0;    ///< Features of a WFS response the server left out because of its limit
         QMap<QString, int> issues;  ///< Problems found in the zones, with the number of zones having each, including those skipped for their geometry

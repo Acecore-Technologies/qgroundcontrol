@@ -17,7 +17,7 @@ namespace {
 
 /// French UAS restriction of the IGN Géoplateforme, which describe the restriction in text: "Vol interdit" or
 /// "Hauteur maximale de vol de 50 m", with conditions in a remark
-bool _franceFeature(const QJsonObject &feature, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _franceFeature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     const QJsonObject properties = feature.value(QStringLiteral("properties")).toObject();
     QString limit = _text(properties.value(QStringLiteral("limite")));
@@ -44,7 +44,7 @@ bool _franceFeature(const QJsonObject &feature, GeoZone::Data &zone)
     }
 
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// French UAS restrictions GeoJSON of the IGN Géoplateforme WFS
@@ -69,7 +69,7 @@ public:
         result.issued = _dateTime(root.value(QStringLiteral("timeStamp")));
     }
     bool acceptsEmpty() const final { return true; }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _franceFeature(feature, zone); }
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _franceFeature(feature, zone); }
 };
 
 } // namespace

@@ -20,6 +20,7 @@ private slots:
     void _testParseFixtures();
     void _testEmptyResponses_data();
     void _testEmptyResponses();
+    void _testFilteredAndUnusableFeatures();
     void _testParseED269();
     void _testParseED318();
     void _testParseFaaTfr();

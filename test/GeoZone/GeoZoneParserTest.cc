@@ -311,7 +311,8 @@ void GeoZoneParserTest::_testParseFixtures_data()
         QTest::newRow(fileName) << QString::fromLatin1(fileName) << static_cast<int>(formatHint) << static_cast<int>(format) << zones << skippedFeatures
                                 << missingFeatures << QString::fromLatin1(resultHash);
     };
-    // The ED-269 and ED-318 test files each have a feature without a supported geometry, the IGN response was limited
+    // The ED-269 and ED-318 test files each have a feature without a supported geometry, the IGN response was limited.
+    // The airspaces the FAA and OpenAIP formats leave out on purpose aren't skipped features.
     row("ch_zurich_ed269.json", Format::Unknown, Format::ED269, 8, 0, 0, "9229fa5a8ab6ffc6");
     row("dipul_test.json", Format::Dipul, Format::Dipul, 4, 0, 0, "e2d4b0d264592f37");
     row("ed269_test.json", Format::Unknown, Format::ED269, 3, 1, 0, "3c0d3f716763a061");
@@ -319,10 +320,10 @@ void GeoZoneParserTest::_testParseFixtures_data()
     row("es_enaire_ed318_test.json", Format::ED318, Format::ED318, 3, 0, 0, "1ba7cfe75dd69cce");
     row("es_servais_ed318_test.json", Format::ED318, Format::ED318, 2, 0, 0, "4ca8ded0a0427a73");
     row("at_ed269_test.json", Format::ED269, Format::ED269, 3, 0, 0, "5a0999bafe784557");
-    row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 1, 0, "60bb56a4e18bf1b8");
+    row("faa_airspace_test.json", Format::Unknown, Format::FaaAirspace, 6, 0, 0, "fe995e6cbb9e88b9");
     row("faa_tfr_test.json", Format::Unknown, Format::FaaTfr, 2, 0, 0, "f3ce5eb69ad863e7");
     row("france_uas_test.json", Format::Unknown, Format::FranceUas, 2, 0, 8, "ad45dfe3891b4d6c");
-    row("openaip_test.json", Format::Unknown, Format::OpenAip, 6, 2, 0, "7c019bd11e66e495");
+    row("openaip_test.json", Format::Unknown, Format::OpenAip, 6, 0, 0, "4e6d00a175de6fd3");
     row("uk_aixm_test.xml", Format::Unknown, Format::Aixm, 3, 0, 0, "1cc47a3d61d437ed");
 }
 
@@ -434,6 +435,102 @@ void GeoZoneParserTest::_testEmptyResponses()
     QVERIFY2(parsed, qPrintable(errorString));
     QCOMPARE(static_cast<int>(result.format), format);
     QVERIFY(result.zones.isEmpty());
+}
+
+void GeoZoneParserTest::_testFilteredAndUnusableFeatures()
+{
+    const auto features = [](const QString &fileName) {
+        QFile file(QStringLiteral(":/unittest/") + fileName);
+        return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object().value(QStringLiteral("features")).toArray() : QJsonArray();
+    };
+    const auto withoutShape = [](const QJsonValue &feature) {
+        QJsonObject broken = feature.toObject();
+        broken.insert(QStringLiteral("geometry"), QJsonObject{ { "type", "Polygon" }, { "coordinates", QJsonArray{ QJsonArray{ QJsonArray{ 8, 47 }, QJsonArray{ 8, 47 } } } } });
+        return broken;
+    };
+    struct Parsed {
+        bool ok = false;
+        int zones = 0;
+        int skipped = 0;
+        QString error;
+    };
+    const auto parse = [](const QJsonObject &root, const QJsonArray &list, GeoZoneParser::Format hint) {
+        QJsonObject document = root;
+        document.insert(QStringLiteral("features"), list);
+        GeoZoneParser::Result result;
+        Parsed parsed;
+        parsed.ok = GeoZoneParser::parse(QJsonDocument(document).toJson(QJsonDocument::Compact), result, parsed.error, hint);
+        parsed.zones = static_cast<int>(result.zones.count());
+        parsed.skipped = result.skippedFeatures;
+        return parsed;
+    };
+    using Format = GeoZoneParser::Format;
+    const QString noZones = QStringLiteral("No geozones with a supported geometry were found in the %1 file.");
+
+    // OpenAIP: the control zone is kept, the class E control area and the flight information region are left out on
+    // purpose, which isn't reported as features skipped
+    const QJsonArray openAip = features(QStringLiteral("openaip_test.json"));
+    QCOMPARE(openAip.count(), 8);
+    const QJsonValue ctr = openAip[0];
+    const QJsonValue classE = openAip[4];
+    const QJsonValue fir = openAip[5];
+    const QJsonObject collection{ { "type", "FeatureCollection" } };
+    Parsed parsed = parse(collection, { ctr, classE, fir }, Format::OpenAip);
+    QVERIFY2(parsed.ok, qPrintable(parsed.error));
+    QCOMPARE(parsed.zones, 1);
+    QCOMPARE(parsed.skipped, 0);
+    // An area with only such airspaces has no zones, like an empty list
+    parsed = parse(collection, { classE, fir }, Format::OpenAip);
+    QVERIFY2(parsed.ok, qPrintable(parsed.error));
+    QCOMPARE(parsed.zones, 0);
+    QCOMPARE(parsed.skipped, 0);
+    // A control zone which can't be read is skipped
+    parsed = parse(collection, { ctr, withoutShape(ctr), fir }, Format::OpenAip);
+    QVERIFY2(parsed.ok, qPrintable(parsed.error));
+    QCOMPARE(parsed.zones, 1);
+    QCOMPARE(parsed.skipped, 1);
+    // When no airspace which matters can be read the list is an error, so that a feed keeps its previous zones
+    parsed = parse(collection, { withoutShape(ctr), classE, fir }, Format::OpenAip);
+    QVERIFY(!parsed.ok);
+    QCOMPARE(parsed.error, noZones.arg(QStringLiteral("OpenAIP")));
+    QCOMPARE(parsed.zones, 0);
+    QCOMPARE(parsed.skipped, 1);
+
+    // FAA airspace: the Mode C veil is left out on purpose
+    const QJsonArray faaAirspace = features(QStringLiteral("faa_airspace_test.json"));
+    QCOMPARE(faaAirspace.count(), 7);
+    const QJsonValue classB = faaAirspace[3];
+    const QJsonValue modeC = faaAirspace[4];
+    parsed = parse(collection, { modeC }, Format::FaaAirspace);
+    QVERIFY2(parsed.ok, qPrintable(parsed.error));
+    QCOMPARE(parsed.zones, 0);
+    QCOMPARE(parsed.skipped, 0);
+    parsed = parse(collection, { modeC, withoutShape(classB) }, Format::FaaAirspace);
+    QVERIFY(!parsed.ok);
+    QCOMPARE(parsed.error, noZones.arg(QStringLiteral("FAA airspace")));
+
+    // The list of the FAA TFRs: restrictions which can't be read don't make it a list without restrictions
+    const QJsonArray tfrs = features(QStringLiteral("faa_tfr_test.json"));
+    QCOMPARE(tfrs.count(), 2);
+    const QJsonObject tfrList{ { "type", "FeatureCollection" }, { "totalFeatures", 2 }, { "timeStamp", "2026-10-31T12:20:00.000Z" } };
+    parsed = parse(tfrList, {}, Format::FaaTfr);
+    QVERIFY2(parsed.ok, qPrintable(parsed.error));
+    QCOMPARE(parsed.zones, 0);
+    parsed = parse(tfrList, { tfrs[0], withoutShape(tfrs[1]) }, Format::FaaTfr);
+    QVERIFY2(parsed.ok, qPrintable(parsed.error));
+    QCOMPARE(parsed.zones, 1);
+    QCOMPARE(parsed.skipped, 1);
+    parsed = parse(tfrList, { withoutShape(tfrs[0]), withoutShape(tfrs[1]) }, Format::FaaTfr);
+    QVERIFY(!parsed.ok);
+    QCOMPARE(parsed.error, noZones.arg(QStringLiteral("FAA TFR")));
+    QCOMPARE(parsed.skipped, 2);
+
+    // And so for the other web feature services
+    const QJsonArray dipul = features(QStringLiteral("dipul_test.json"));
+    QVERIFY(!dipul.isEmpty());
+    parsed = parse(QJsonObject{ { "type", "FeatureCollection" }, { "totalFeatures", 1 }, { "numberMatched", 1 }, { "numberReturned", 1 } }, { withoutShape(dipul[0]) }, Format::Dipul);
+    QVERIFY(!parsed.ok);
+    QCOMPARE(parsed.error, noZones.arg(QStringLiteral("DiPUL")));
 }
 
 void GeoZoneParserTest::_testParseED269()
@@ -722,7 +819,7 @@ void GeoZoneParserTest::_testParseFaaAirspace()
     QVERIFY(result.title.contains(QStringLiteral("facility maps")));
     QVERIFY(result.provider.contains(QStringLiteral("informational")));
     QCOMPARE(result.zones.count(), 6);
-    QCOMPARE(result.skippedFeatures, 1);
+    QCOMPARE(result.skippedFeatures, 0);    // The Mode C veil is left out on purpose
     QMap<QString, GeoZone::Data> byCode;
     for (const GeoZone::Data &zone : std::as_const(result.zones)) {
         QCOMPARE(zone.country, QStringLiteral("USA"));
@@ -870,7 +967,7 @@ void GeoZoneParserTest::_testParseOpenAip()
     QCOMPARE(result.title, QStringLiteral("Airspaces of CH (OpenAIP, unofficial, CC BY-NC 4.0)"));
     QCOMPARE(result.provider, QStringLiteral("OpenAIP (unofficial, CC BY-NC 4.0)"));
     QCOMPARE(result.zones.count(), 6);
-    QCOMPARE(result.skippedFeatures, 2);     // The class E TMA and the FIR
+    QCOMPARE(result.skippedFeatures, 0);     // The class E TMA and the FIR are left out on purpose
     QMap<QString, GeoZone::Data> byName;
     for (const GeoZone::Data &zone : std::as_const(result.zones)) {
         QVERIFY(zone.extendedProperties.join(QLatin1Char('\n')).contains(QStringLiteral("unofficial community data (CC BY-NC 4.0")));

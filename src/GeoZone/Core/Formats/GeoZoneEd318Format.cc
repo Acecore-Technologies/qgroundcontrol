@@ -129,7 +129,7 @@ QJsonArray _withoutEmptySchedules(const QJsonValue &value)
     return periods;
 }
 
-bool _ed318Feature(const QJsonObject &feature, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _ed318Feature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     QJsonObject layer;
     const QJsonObject properties = _enaireProperties(feature.value(QStringLiteral("properties")).toObject(), layer);
@@ -142,7 +142,7 @@ bool _ed318Feature(const QJsonObject &feature, GeoZone::Data &zone)
     const QJsonValue applicability = properties.value(QStringLiteral("limitedApplicability"));
     zone.applicability = _applicability(layer.isEmpty() ? applicability : QJsonValue(_withoutEmptySchedules(applicability)), zone.country, zone.volumes, zone.issues);
 
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// EUROCAE ED-318 GeoJSON
@@ -163,7 +163,7 @@ public:
             result.title = _text(root.value(QStringLiteral("title")));
         }
     }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _ed318Feature(feature, zone); }
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _ed318Feature(feature, zone); }
 };
 
 } // namespace

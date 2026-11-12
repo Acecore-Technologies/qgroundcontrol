@@ -98,7 +98,7 @@ QString _hoursText(const QJsonObject &hours)
     return (always && (operatingHours.count() >= 7)) ? QString() : periods.join(QStringLiteral(", "));
 }
 
-bool _openAipFeature(const QJsonObject &feature, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _openAipFeature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     const QJsonObject item = _openAipItem(feature);
     const int type = item.value(QStringLiteral("type")).toInt(-1);
@@ -112,7 +112,8 @@ bool _openAipFeature(const QJsonObject &feature, GeoZone::Data &zone)
     zone.authorities.append(GeoZoneParser::tr("OpenAIP community data (unofficial)"));
 
     // Only the airspaces concerning drones flying low are kept: the restricted ones, the controlled airspace around
-    // aerodromes and the areas of hazardous activities
+    // aerodromes and the areas of hazardous activities. The others are left out on purpose, which isn't a problem of
+    // the data.
     switch (type) {
     case ProhibitedArea:
         zone.restriction = GeoZone::Prohibited;
@@ -139,7 +140,7 @@ bool _openAipFeature(const QJsonObject &feature, GeoZone::Data &zone)
     case Cta:
         // Controlled areas of classes E to G need no authorisation
         if ((icaoClass < 0) || (icaoClass > 3)) {
-            return false;
+            return GeoZoneFormat::FeatureResult::Filtered;
         }
         zone.restriction = GeoZone::ReqAuthorisation;
         zone.reasons.append(QStringLiteral("AIR_TRAFFIC"));
@@ -173,7 +174,7 @@ bool _openAipFeature(const QJsonObject &feature, GeoZone::Data &zone)
         break;
     default:
         // Flight information regions, airways, sectors and the like
-        return false;
+        return GeoZoneFormat::FeatureResult::Filtered;
     }
 
     QStringList conditions;
@@ -215,7 +216,7 @@ bool _openAipFeature(const QJsonObject &feature, GeoZone::Data &zone)
     // The exports keep the geometry in the feature, the API in the item
     const QJsonObject geometry = feature.contains(QStringLiteral("properties")) ? feature.value(QStringLiteral("geometry")).toObject() : item.value(QStringLiteral("geometry")).toObject();
     _appendHorizontalGeometry(geometry, layer, 1.0, zone.volumes);
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// Airspaces of OpenAIP (www.openaip.net), the items of its API's lists or the features of its GeoJSON exports.
@@ -247,7 +248,7 @@ public:
         result.provider = GeoZoneParser::tr("OpenAIP (unofficial, CC BY-NC 4.0)");
     }
     bool acceptsEmpty() const final { return true; }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _openAipFeature(feature, zone); }
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _openAipFeature(feature, zone); }
 };
 
 } // namespace

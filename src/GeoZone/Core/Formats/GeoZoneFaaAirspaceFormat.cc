@@ -148,7 +148,7 @@ void _faaCommon(GeoZone::Data &zone)
     zone.extendedProperties.append(GeoZoneParser::tr("Source: FAA public data, informational. Check B4UFLY or a LAANC provider before flying."));
 }
 
-bool _facilityMapFeature(const QJsonObject &feature, const QJsonObject &properties, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _facilityMapFeature(const QJsonObject &feature, const QJsonObject &properties, GeoZone::Data &zone)
 {
     const double ceiling = _number(properties.value(QStringLiteral("CEILING")));
     const QString airport = _trimmed(properties, "APT1_NAME");
@@ -196,10 +196,10 @@ bool _facilityMapFeature(const QJsonObject &feature, const QJsonObject &properti
     layer.upperLimit = kUnlimitedSentinel;
     layer.setReferences(QStringLiteral("SFC"), QStringLiteral("MSL"));
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
-bool _nationalSecurityFeature(const QJsonObject &feature, const QJsonObject &properties, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _nationalSecurityFeature(const QJsonObject &feature, const QJsonObject &properties, GeoZone::Data &zone)
 {
     const QString base = _trimmed(properties, "Base");
     const QString facility = _trimmed(properties, "Facility");
@@ -235,23 +235,24 @@ bool _nationalSecurityFeature(const QJsonObject &feature, const QJsonObject &pro
     layer.upperLimit = ceiling.feet;
     layer.setReferences(floor.reference, ceiling.reference);
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
 /// Class airspace or special use airspace, which share their limit fields
-bool _airspaceFeature(const QJsonObject &feature, const QJsonObject &properties, FaaLayer layerType, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _airspaceFeature(const QJsonObject &feature, const QJsonObject &properties, FaaLayer layerType, GeoZone::Data &zone)
 {
     zone.identifier = _trimmed(properties, "GLOBAL_ID");
     zone.name = _trimmed(properties, "NAME");
     const QString type = _trimmed(properties, "TYPE_CODE");
 
     if (layerType == FaaLayer::ClassAirspace) {
-        // Class A and E airspace starting above the surface don't concern drones flying under 400 ft
+        // Class A and E airspace starting above the surface don't concern drones flying under 400 ft, and are left out
+        // on purpose like the Mode C veils
         const QString localType = _trimmed(properties, "LOCAL_TYPE");
         static const QStringList surfaceClasses = { QStringLiteral("CLASS_B"), QStringLiteral("CLASS_C"), QStringLiteral("CLASS_D"),
                                                     QStringLiteral("CLASS_E2"), QStringLiteral("CLASS_E3"), QStringLiteral("CLASS_E4") };
         if ((type != QStringLiteral("CLASS")) || !surfaceClasses.contains(localType)) {
-            return false;
+            return GeoZoneFormat::FeatureResult::Filtered;
         }
         const QString airspaceClass = _trimmed(properties, "CLASS");
         zone.restrictionCode = localType;
@@ -309,10 +310,10 @@ bool _airspaceFeature(const QJsonObject &feature, const QJsonObject &properties,
     _setFaaLimit(layer, false, properties.value(QStringLiteral("LOWER_VAL")), _trimmed(properties, "LOWER_UOM"), _trimmed(properties, "LOWER_CODE"));
     _setFaaLimit(layer, true, properties.value(QStringLiteral("UPPER_VAL")), _trimmed(properties, "UPPER_UOM"), _trimmed(properties, "UPPER_CODE"));
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes);
-    return !zone.volumes.isEmpty();
+    return GeoZoneFormat::featureResult(zone);
 }
 
-bool _faaAirspaceFeature(const QJsonObject &feature, GeoZone::Data &zone)
+GeoZoneFormat::FeatureResult _faaAirspaceFeature(const QJsonObject &feature, GeoZone::Data &zone)
 {
     const QJsonObject properties = feature.value(QStringLiteral("properties")).toObject();
     const FaaLayer layer = _faaLayer(properties);
@@ -328,7 +329,7 @@ bool _faaAirspaceFeature(const QJsonObject &feature, GeoZone::Data &zone)
     case FaaLayer::Unknown:
         break;
     }
-    return false;
+    return GeoZoneFormat::FeatureResult::Unusable;
 }
 
 /// GeoJSON of the FAA's public ArcGIS feature services: UAS facility maps, national security UAS flight restrictions,
@@ -371,7 +372,7 @@ public:
         result.provider = GeoZoneParser::tr("FAA (informational)");
     }
     bool acceptsEmpty() const final { return true; }
-    bool parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _faaAirspaceFeature(feature, zone); }
+    FeatureResult parseFeature(const QJsonObject &feature, GeoZone::Data &zone) const final { return _faaAirspaceFeature(feature, zone); }
 };
 
 } // namespace
