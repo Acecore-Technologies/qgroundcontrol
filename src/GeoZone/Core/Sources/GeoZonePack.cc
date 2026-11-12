@@ -117,6 +117,12 @@ Contents read(const QString &packPath, const QString &directory)
         // The copy is the one the manifest, which the signature covers, and its provenance record
         const QByteArray expectedHash = QByteArray::fromHex(source.value(QStringLiteral("provenance")).toObject().value(QStringLiteral("blake2b256")).toString().toLatin1());
         const QByteArray expectedSha256 = QByteArray::fromHex(source.value(QStringLiteral("fileSha256")).toString().toLatin1());
+        if (expectedHash.isEmpty() && expectedSha256.isEmpty()) {
+            // Nothing says that the copy is the one the manifest describes, also in a signed pack, whose signature
+            // only covers the manifest
+            contents.errors.append(tr("%1: the pack has no hash of its data.").arg(name));
+            continue;
+        }
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly)) {
             contents.errors.append(tr("%1: its data could not be read after it was extracted: %2").arg(name, file.errorString()));

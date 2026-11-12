@@ -217,7 +217,7 @@ A custom build can compile in its own catalogue instead of the built-in one with
 | `sources/<name>` | The stored copy of each source, under its name in the store. Packs of earlier versions name all copies `.json`; the content decides how they are read. |
 | `signature.json` | In signed packs: `algorithm` (`Ed25519`), `publisher` (the name the publisher gives), `publicKey` (the raw 32 byte key in base64) and `signature` (base64) of the bytes of `manifest.json`. |
 
-The manifest gives the SHA-256 of each copy (`fileSha256`), so the signature of the manifest covers the copies too. Imported copies are checked against it and against the BLAKE2b-256 hash of their provenance, and their services follow the rules of [Origins and Credentials](#origins-and-credentials). `GeoZonePackTest::_testOfflinePack()` and `_testStoredFileNames()` test them.
+The manifest gives the SHA-256 of each copy (`fileSha256`), so the signature of the manifest covers the copies too. Imported copies are checked against it and against the BLAKE2b-256 hash of their provenance; a source with neither is left out, in signed packs too, since nothing then ties its copy to the manifest. Their services follow the rules of [Origins and Credentials](#origins-and-credentials). `GeoZonePackTest::_testOfflinePack()` and `_testStoredFileNames()` test them.
 
 ### Pack Signatures {#pack-signatures}
 

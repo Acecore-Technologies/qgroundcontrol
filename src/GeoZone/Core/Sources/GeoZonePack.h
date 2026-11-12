@@ -44,7 +44,8 @@ struct Contents {
 };
 
 /// Extracts the stored copies of a pack into the directory, checking them against their SHA-256 in the manifest and
-/// the hashes of their provenance
+/// the hashes of their provenance. A source needs at least one of them: its copy is left out otherwise, in signed
+/// packs too, since the signature covers the manifest and the copies only through their hashes.
 Contents read(const QString &packPath, const QString &directory);
 
 } // namespace GeoZonePack
