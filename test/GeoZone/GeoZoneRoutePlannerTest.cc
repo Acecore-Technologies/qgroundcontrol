@@ -363,6 +363,57 @@ void GeoZoneRoutePlannerTest::_testMissionChanges()
     QCOMPARE(remaining->altitude()->rawValue().toDouble(), altitude);
 }
 
+void GeoZoneRoutePlannerTest::_testLegsAfterReturn()
+{
+    // A prohibited zone on the leg to the second item, a return to launch, then two more items with a prohibited zone
+    // between them: the mission ends at the return, so the vehicle doesn't fly the legs after it
+    ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoCoordinate beyond = center.atDistanceAndAzimuth(6000, 0);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("FLOWN"), QStringLiteral("PROHIBITED"), center, 300),
+        _circleFeature(QStringLiteral("BEYOND"), QStringLiteral("PROHIBITED"), beyond, 300) }), errorString), qPrintable(errorString));
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    const auto addWaypoint = [missionController](const QGeoCoordinate &coordinate) {
+        return qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+    };
+    QVERIFY(addWaypoint(center.atDistanceAndAzimuth(2000, 270)));
+    QVERIFY(addWaypoint(center.atDistanceAndAzimuth(2000, 90)));
+    const auto legTexts = [](const GeoZoneRoutePlanner &planner) {
+        QStringList texts;
+        for (const QVariant &suggestion : planner.suggestions()) {
+            const QString legText = suggestion.toMap()[QStringLiteral("legText")].toString();
+            if (!texts.contains(legText)) {
+                texts.append(legText);
+            }
+        }
+        return texts;
+    };
+    GeoZoneRoutePlanner planner(&manager);
+    planner.setMissionController(missionController);
+
+    // Without the return both legs through the zones get suggestions
+    QVERIFY(addWaypoint(beyond.atDistanceAndAzimuth(2000, 270)));
+    QVERIFY(addWaypoint(beyond.atDistanceAndAzimuth(2000, 90)));
+    planner.update();
+    QCOMPARE(legTexts(planner), QStringList({ QStringLiteral("Leg to item 2"), QStringLiteral("Leg to item 4") }));
+
+    // With it after the second item, only the leg which is flown
+    SimpleMissionItem *const returnItem = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(center.atDistanceAndAzimuth(2000, 90), 3));
+    QVERIFY(returnItem);
+    returnItem->setCommand(MAV_CMD_NAV_RETURN_TO_LAUNCH);
+    QTRY_COMPARE(GeoZoneMissionReader::path(missionController).legs().count(), 4);
+    planner.update();
+    QCOMPARE(legTexts(planner), QStringList{ QStringLiteral("Leg to item 2") });
+}
+
 void GeoZoneRoutePlannerTest::_testDetourAltitudes()
 {
     // The altitude of an item in each altitude mode

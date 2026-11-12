@@ -93,6 +93,10 @@ GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, co
     }
 
     const FlightPaths flight = _flightPaths(path, missionItems, itemSegments);
+    // The legs between items the flight doesn't reach, like those after the first return to launch, aren't flown
+    for (GeoZoneMissionPath::Leg &leg : path._legs) {
+        leg.flown = flight.reachedItems.contains(leg.fromItemIndex) && flight.reachedItems.contains(leg.toItemIndex);
+    }
     path._paths = flight.paths;
     path._itemFlightDistances = flight.itemDistances;
     path._flightDistance = flight.distance;
@@ -142,6 +146,11 @@ GeoZoneMissionPathBuilder::FlightPaths GeoZoneMissionPathBuilder::_flightPaths(c
         }
         flight.paths = GeoZoneMissionPath::pathsFromSegments(flown);
         flight.itemDistances = path._itemDistances;
+        for (int i = 0; i < items.count(); i++) {
+            if ((flight.returnItem < 0) || (i < flight.returnItem)) {
+                flight.reachedItems.insert(i);
+            }
+        }
         return flight;
     }
 
@@ -170,6 +179,8 @@ GeoZoneMissionPathBuilder::FlightPaths GeoZoneMissionPathBuilder::_flightPaths(c
         flown.append(segment);
     }
     flight.itemDistances = walk.itemDistances;
+    const QList<int> reached = walk.itemDistances.keys();
+    flight.reachedItems = QSet<int>(reached.cbegin(), reached.cend());
     // Items the vehicle doesn't reach keep their place on the drawn path
     for (auto it = path._itemDistances.cbegin(); it != path._itemDistances.cend(); ++it) {
         if (!flight.itemDistances.contains(it.key())) {

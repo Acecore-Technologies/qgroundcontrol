@@ -11,6 +11,7 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QList>
+#include <QtCore/QSet>
 #include <QtPositioning/QGeoCoordinate>
 
 #include <optional>
@@ -72,6 +73,7 @@ private:
         bool repeatsIndefinitely = false;
         int returnItem = -1;                ///< Return to launch item the flight ends with, -1 without
         int returnFromItem = -1;            ///< Item the vehicle returns from, -1 without
+        QSet<int> reachedItems;             ///< Visual items the vehicle reaches before the flight ends, by index
     };
 
     /// @param itemSegments Indexes of the drawn segments of the items, see GeoZoneMissionJumps::walk

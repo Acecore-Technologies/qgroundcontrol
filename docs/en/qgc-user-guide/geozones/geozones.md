@@ -369,7 +369,7 @@ The return paths are estimates: wind, the turns and climb rate of fixed wings, t
 
 ### Route Around Zones {#route-around-zones}
 
-**Route Around Zones...** in the warning suggests, for each leg between waypoints which enters restricted zones, the ways to avoid them and recommends the cheapest one:
+**Route Around Zones...** in the warning suggests, for each leg between waypoints which enters restricted zones, the ways to avoid them and recommends the cheapest one. Legs the vehicle doesn't fly, like those after the first return to launch, where the mission ends, get no suggestions:
 
 - **Detour**: waypoints around the zones keeping 100 m from them, which **Insert** adds to the mission at the altitudes the leg changes evenly through, which are those the detour was checked at, in the altitude mode of the new waypoints. When these altitudes can't be set, like above terrain which isn't loaded yet, no waypoint is inserted and the dialog tells why. The detour is the shortest path around the outlines of the zones, so it passes between zones, enters the bays of concave zones which are wider than 200 m and stays out of narrower ones, and stays within holes of zones. Waypoints within 100 m of a zone leave it without coming much closer. Detours longer than three times the leg, or 3 km longer when that is more, aren't suggested.
 - **Climb**: raising the waypoints of the leg to 10 m above the ceilings of the zones, like "climb to 160 m above home over Zone X", when the leg then stays within the maximum height above the terrain set in the dialog (120 m by default).

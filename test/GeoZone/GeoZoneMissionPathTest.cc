@@ -305,6 +305,15 @@ void GeoZoneMissionPathTest::_testFlightEndsAtReturn()
     QVERIFY(_near(path.drawnFlightDistance(), untilReturn, 0.01));
     QVERIFY(_near(path.totalDistance(), untilReturn + 1000, 1));
     QCOMPARE(path.flightEnd(start, end), end);
+    // Nor are the legs to the items after it, between the items home, first, second and pattern
+    const auto flownLegs = [](const GeoZoneMissionPath &mission) {
+        QList<bool> flown;
+        for (const GeoZoneMissionPath::Leg &leg : mission.legs()) {
+            flown.append(leg.flown);
+        }
+        return flown;
+    };
+    QCOMPARE(flownLegs(path), QList<bool>({ true, true, false }));
     const QList<GeoZonePathEvaluator::Path> evaluatorPaths = path.evaluatorPaths(start, end);
     QCOMPARE(evaluatorPaths.count(), 1);
     QVERIFY(!evaluatorPaths.constFirst().vertices.isEmpty());
@@ -326,6 +335,7 @@ void GeoZoneMissionPathTest::_testFlightEndsAtReturn()
     const double loop = first.distanceTo(second) + second.distanceTo(first);
     QVERIFY(_near(jumped.flightDistance(), untilReturn + loop, 0.01));
     QVERIFY(_near(jumped.drawnFlightDistance(), untilReturn, 0.01));
+    QCOMPARE(flownLegs(jumped), QList<bool>({ true, true, false }));
     // The repeat lengthens the flight at the pace of the drawn flight path, without the pattern
     QVERIFY(_near(static_cast<double>(start.msecsTo(jumped.flightEnd(start, end))), 600000 * (untilReturn + loop) / untilReturn, 2));
 
@@ -336,6 +346,7 @@ void GeoZoneMissionPathTest::_testFlightEndsAtReturn()
     QVERIFY(flownTo(whole, patternExit));
     QVERIFY(_near(whole.flightDistance(), whole.totalDistance(), 0.01));
     QVERIFY(_near(whole.drawnFlightDistance(), whole.totalDistance(), 0.01));
+    QCOMPARE(flownLegs(whole), QList<bool>({ true, true, true }));
 }
 
 #ifndef GEOZONE_CORE_TEST

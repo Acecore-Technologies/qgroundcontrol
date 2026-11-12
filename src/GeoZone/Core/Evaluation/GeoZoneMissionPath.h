@@ -81,6 +81,7 @@ public:
         int toItemIndex = -1;
         int toSequenceNumber = -1;
         Segment segment;            ///< With altitudes and terrain when the flight path segment is known
+        bool flown = true;          ///< The vehicle flies the leg: false for the legs to the items the flight doesn't reach, like those after the first return to launch
     };
 
     /// Position along the mission where the vehicle may have to return from

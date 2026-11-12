@@ -298,7 +298,9 @@ GeoZoneRoutePlanner::Job GeoZoneRoutePlanner::_makeJob() const
     for (const GeoZoneMissionPath::Leg &missionLeg : missionPath.legs()) {
         const GeoZoneMissionPath::Segment &segment = missionLeg.segment;
         const double length = segment.isValid() ? segment.from.distanceTo(segment.to) : 0;
-        if (length < GeoZoneMissionPath::samePlaceTolerance) {
+        // Nor the legs the vehicle doesn't fly, like those after the first return to launch, which the mission check
+        // leaves out too
+        if ((length < GeoZoneMissionPath::samePlaceTolerance) || !missionLeg.flown) {
             continue;
         }
 
