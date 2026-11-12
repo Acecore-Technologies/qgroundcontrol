@@ -755,6 +755,98 @@ void GeoZoneMonitorTest::_testUnknownVelocity()
     QCOMPARE(inconsistent.thresholds().result().groundSpeed, 5.0);
 }
 
+void GeoZoneMonitorTest::_testAlertProfiles()
+{
+    using Thresholds = GeoZoneAlertThresholds;
+    const auto document = [](const QString &profiles, const QString &head = QStringLiteral(R"("fileType": "GeoZoneAlertProfiles", "version": 1)")) {
+        return QStringLiteral("{ %1, \"profiles\": %2 }").arg(head, profiles).toUtf8();
+    };
+    QString errorString;
+    QStringList warnings;
+
+    // The profiles of the application are read as they are
+    QVERIFY(Thresholds::profilesWarning().isEmpty());
+    QString warning;
+    QHash<QString, Thresholds::Profile> profiles = Thresholds::loadProfiles({ QString::fromLatin1(Thresholds::profilesResource) }, &warning);
+    QCOMPARE(profiles.count(), 4);
+    QVERIFY2(warning.isEmpty(), qPrintable(warning));
+    QCOMPARE(profiles.value(QStringLiteral("multirotor")).deceleration, 2.5);
+
+    // A file must say it is one of the version read, with an object of classes which are objects
+    QVERIFY(!Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": {} })")), &errorString, &warnings).isEmpty());
+    QVERIFY(errorString.isEmpty() && warnings.isEmpty());
+    QVERIFY(Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": {} })"), QStringLiteral(R"("fileType": "GeoZoneAlertProfiles")")), &errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("no version"));
+    for (const QString &version : { QStringLiteral("2"), QStringLiteral("0"), QStringLiteral("1.5"), QStringLiteral("\"1\"") }) {
+        QVERIFY2(Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": {} })"), QStringLiteral(R"("fileType": "GeoZoneAlertProfiles", "version": %1)").arg(version)),
+                                           &errorString).isEmpty(), qPrintable(version));
+        QVERIFY2(errorString.startsWith(QStringLiteral("unsupported version")), qPrintable(errorString));
+    }
+    QVERIFY(Thresholds::parseProfiles(R"({ "fileType": "GeoZoneAlertProfiles", "version": 1 })", &errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("no profiles"));
+    QVERIFY(Thresholds::parseProfiles(document(QStringLiteral("{}")), &errorString).isEmpty());
+    QVERIFY(Thresholds::parseProfiles(document(QStringLiteral(R"([ { "name": "default" } ])")), &errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("no profiles"));
+    QVERIFY(Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": {}, "multirotor": 3 })")), &errorString).isEmpty());
+    QCOMPARE(errorString, QStringLiteral("multirotor: not a profile"));
+
+    // The reaction times must be above zero: without one the geofence warning would never come
+    for (const QString &value : { QStringLiteral("pilotReactionTime"), QStringLiteral("automaticReactionTime") }) {
+        QVERIFY(Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": { "%1": 0 } })").arg(value)), &errorString).isEmpty());
+        QCOMPARE(errorString, QStringLiteral("default: invalid %1").arg(value));
+        QVERIFY(Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": {}, "vtol": { "%1": 0 } })").arg(value)), &errorString).isEmpty());
+        QCOMPARE(errorString, QStringLiteral("vtol: invalid %1").arg(value));
+    }
+    profiles = Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": { "pilotReactionTime": 0.5, "fenceWarningMargin": 0 } })")), &errorString);
+    QCOMPARE(profiles.value(QStringLiteral("default")).pilotReactionTime, 0.5);
+
+    // A value which isn't known, like a misspelt one, is told: the default stays in use for the one meant
+    profiles = Thresholds::parseProfiles(document(QStringLiteral(R"({ "default": { "pilotReactonTime": 8, "minDistance": 200, "description": "ours" },
+                                                                        "fixedwing": { "bankAngel": 20 } })"),
+                                                  QStringLiteral(R"("fileType": "GeoZoneAlertProfiles", "version": 1, "author": "us")")), &errorString, &warnings);
+    QVERIFY2(errorString.isEmpty(), qPrintable(errorString));
+    QCOMPARE(profiles.value(QStringLiteral("default")).minDistance, 200.0);
+    QCOMPARE(profiles.value(QStringLiteral("default")).pilotReactionTime, 5.0);
+    QCOMPARE(warnings, (QStringList{ QStringLiteral("unknown value author"), QStringLiteral("default: unknown value pilotReactonTime"),
+                                      QStringLiteral("fixedwing: unknown value bankAngel") }));
+
+    // The file of a custom build which can't be used gives way to the profiles of the application, and the pilot is
+    // told. One with unknown values is used, and they are told.
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto write = [&dir](const QString &name, const QByteArray &content) {
+        QFile file(dir.filePath(name));
+        return file.open(QIODevice::WriteOnly) && (file.write(content) == content.size()) ? file.fileName() : QString();
+    };
+    const QString stock = QString::fromLatin1(Thresholds::profilesResource);
+    const QString bad = write(QStringLiteral("bad.json"), document(QStringLiteral(R"({ "default": { "pilotReactionTime": 0, "minDistance": 500 } })")));
+    QVERIFY(!bad.isEmpty());
+    profiles = Thresholds::loadProfiles({ bad, stock }, &warning);
+    QCOMPARE(profiles.count(), 4);
+    QCOMPARE(profiles.value(QStringLiteral("default")).minDistance, 100.0);
+    QCOMPARE(warning, QStringLiteral("The alert profiles %1 can't be used (default: invalid pilotReactionTime). The default profiles are used instead.").arg(bad));
+    const QString typo = write(QStringLiteral("typo.json"), document(QStringLiteral(R"({ "default": { "minDistanse": 500 } })")));
+    QVERIFY(!typo.isEmpty());
+    profiles = Thresholds::loadProfiles({ typo, stock }, &warning);
+    QCOMPARE(profiles.count(), 1);
+    QCOMPARE(warning, QStringLiteral("Alert profiles %1: default: unknown value minDistanse. The default values are used for them.").arg(typo));
+    const QString good = write(QStringLiteral("good.json"), document(QStringLiteral(R"({ "default": { "minDistance": 500 } })")));
+    profiles = Thresholds::loadProfiles({ good, stock }, &warning);
+    QCOMPARE(profiles.value(QStringLiteral("default")).minDistance, 500.0);
+    QVERIFY(warning.isEmpty());
+    // Builds without their own file use the application's, and without any the defaults
+    profiles = Thresholds::loadProfiles({ dir.filePath(QStringLiteral("none.json")), stock }, &warning);
+    QCOMPARE(profiles.count(), 4);
+    QVERIFY(warning.isEmpty());
+    profiles = Thresholds::loadProfiles({ bad }, &warning);
+    QCOMPARE(profiles.count(), 1);
+    QCOMPARE(profiles.value(QStringLiteral("default")).pilotReactionTime, 5.0);
+    QVERIFY(!warning.isEmpty());
+
+    // The monitor publishes the warning for the indicator page
+    QCOMPARE(GeoZoneMonitor::profilesWarning(), Thresholds::profilesWarning());
+}
+
 void GeoZoneMonitorTest::_testMonitorMultipleVehicles()
 {
     const QGeoCoordinate center(47, 8);

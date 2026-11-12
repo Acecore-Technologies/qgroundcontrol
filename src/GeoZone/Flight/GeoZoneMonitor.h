@@ -99,6 +99,9 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(int              activeLevel         READ activeLevel        NOTIFY activeLevelChanged FINAL)
     /// GeoZoneAlertLevel of the predicted entry of the active vehicle, -1 without
     Q_PROPERTY(int              predictionLevel     READ predictionLevel    NOTIFY activeLevelChanged FINAL)
+    /// Why the alert thresholds aren't the manufacturer's as written, empty when they are, see
+    /// GeoZoneAlertThresholds::profilesWarning
+    Q_PROPERTY(QString          profilesWarning     READ profilesWarning    CONSTANT FINAL)
 
 public:
     /// Monitors the vehicles of MultiVehicleManager against the zones of GeoZoneManager::instance(), logs the alerts
@@ -341,6 +344,7 @@ public:
     int activeLevel() const { return _activeLevel; }
     int predictionLevel() const { return _predictionLevel; }
     static int defaultMuteSecs() { return GeoZoneAlertArbiter::defaultMuteMSecs / 1000; }
+    static QString profilesWarning() { return GeoZoneAlertThresholds::profilesWarning(); }
     QStringList approvedZoneKeys() const;
 
 signals:

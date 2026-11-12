@@ -251,6 +251,17 @@ ToolIndicatorPage {
                     visible:            control._monitor.monitoring && text !== ""
                 }
 
+                // The profiles of this build can't be used, or not entirely
+                QGCLabel {
+                    Layout.fillWidth:   true
+                    wrapMode:           Text.WordWrap
+                    font.pointSize:     ScreenTools.smallFontPointSize
+                    color:              qgcPal.warningText
+                    textFormat:         Text.PlainText
+                    text:               control._monitor.profilesWarning
+                    visible:            text !== ""
+                }
+
                 QGCLabel {
                     text: QGroundControl.multiVehicleManager.vehicles.count === 0 ? qsTr("No vehicle connected") : qsTr("No zones nearby")
                     visible: (!control._monitor.monitoring || !control._active?.nearbyModel.count) && !_pausedLabel.visible

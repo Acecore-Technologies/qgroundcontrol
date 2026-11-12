@@ -12,6 +12,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QHash>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QtNumeric>
 
 #include "GeoZoneAlertTracker.h"
@@ -43,6 +44,7 @@ public:
     static constexpr const char *profilesResource = ":/geozone/GeoZoneAlertProfiles.json";
     static constexpr const char *customProfilesResource = ":/Custom/GeoZone/GeoZoneAlertProfiles.json";
     static constexpr const char *defaultClass = "default";
+    static constexpr int profilesVersion = 1;           ///< Of the profiles files this build reads, their "version"
 
     /// Who reacts to the alert
     enum class Reaction {
@@ -147,11 +149,21 @@ public:
     static Result compute(const Profile &profile, const Input &input) { return compute(profile, input, Extras()); }
 
     /// @return Profiles of a JSON document by vehicle class, their missing values from the default class or the
-    ///         defaults of Profile, empty when the document can't be read
-    static QHash<QString, Profile> parseProfiles(const QByteArray &json, QString *errorString = nullptr);
+    ///         defaults of Profile. Empty when the document can't be used: it isn't a GeoZoneAlertProfiles file of
+    ///         profilesVersion with a profiles object of classes, or a value is out of range, like a reaction time
+    ///         which isn't above zero.
+    /// @param warnings Set to the keys which were ignored because they aren't known, like misspelt ones
+    static QHash<QString, Profile> parseProfiles(const QByteArray &json, QString *errorString = nullptr, QStringList *warnings = nullptr);
+    /// @return The profiles of the first of the files which exists and can be used, those of the next one when it
+    ///         can't, and the defaults of Profile when none can
+    /// @param warning Set to what the pilot is told: the files which can't be used and why, and the values ignored in
+    ///                the one used. Empty when the first file which exists was read as it is.
+    static QHash<QString, Profile> loadProfiles(const QStringList &fileNames, QString *warning = nullptr);
     /// @return The manufacturer's profiles: those of customProfilesResource when a custom build has it, otherwise those of
     ///         profilesResource, loaded once
     static const QHash<QString, Profile> &profiles();
+    /// @return The warning of loadProfiles() for the profiles in use, empty when they are the manufacturer's as written
+    static QString profilesWarning();
     /// @return The manufacturer's profile of the vehicle class (multirotor, fixedwing, vtol), that of the default class
     ///         for other classes
     static Profile profile(const QString &vehicleClass);

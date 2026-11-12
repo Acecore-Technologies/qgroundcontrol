@@ -9,6 +9,7 @@
 
 #include "GeoZoneAlertThresholds.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QFile>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -39,8 +40,8 @@ const QList<Field> &fields()
         { "uere", &Profile::uere, 0, false },
         { "defaultPositionError", &Profile::defaultPositionError, 0, false },
         { "verticalErrorFactor", &Profile::verticalErrorFactor, 0, false },
-        { "pilotReactionTime", &Profile::pilotReactionTime, 0, false },
-        { "automaticReactionTime", &Profile::automaticReactionTime, 0, false },
+        { "pilotReactionTime", &Profile::pilotReactionTime, 0, true },
+        { "automaticReactionTime", &Profile::automaticReactionTime, 0, true },
         { "deceleration", &Profile::deceleration, 0, true },
         { "bankAngle", &Profile::bankAngle, 0, true },
         { "verticalDeceleration", &Profile::verticalDeceleration, 0, true },
@@ -61,8 +62,18 @@ const QList<Field> &fields()
 }
 
 /// Reads the values of a profile over those it starts with
-bool readProfile(const QJsonObject &object, GeoZoneAlertThresholds::Profile &profile, QString &errorString)
+/// @param warnings Gets the keys which aren't values of a profile, like misspelt ones, whose values stay as they were
+bool readProfile(const QJsonObject &object, GeoZoneAlertThresholds::Profile &profile, QString &errorString, QStringList &warnings)
 {
+    static const QStringList otherKeys = { QStringLiteral("name"), QStringLiteral("manoeuvre"), QStringLiteral("description") };
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+        const QString &key = it.key();
+        const bool known = otherKeys.contains(key) ||
+                           std::any_of(fields().cbegin(), fields().cend(), [&key](const Field &field) { return key == QLatin1String(field.name); });
+        if (!known) {
+            warnings.append(QStringLiteral("%1: unknown value %2").arg(profile.vehicleClass, key));
+        }
+    }
     for (const Field &field : fields()) {
         const QJsonValue value = object.value(QLatin1String(field.name));
         if (value.isUndefined()) {
@@ -91,29 +102,29 @@ bool readProfile(const QJsonObject &object, GeoZoneAlertThresholds::Profile &pro
     if (object.contains(QStringLiteral("name"))) {
         profile.name = object.value(QStringLiteral("name")).toString();
     }
+    // The geofence warning comes this long before the breach, and never needs none
+    if ((profile.pilotReactionTime + profile.fenceWarningMargin) <= 0) {
+        errorString = QStringLiteral("%1: invalid fenceWarningMargin").arg(profile.vehicleClass);
+        return false;
+    }
     return true;
 }
 
-QHash<QString, GeoZoneAlertThresholds::Profile> loadProfiles()
+/// The profiles in use, with what the pilot is told about them
+struct Loaded {
+    QHash<QString, GeoZoneAlertThresholds::Profile> profiles;
+    QString warning;
+};
+
+const Loaded &loaded()
 {
-    for (const char *resource : { GeoZoneAlertThresholds::customProfilesResource, GeoZoneAlertThresholds::profilesResource }) {
-        QFile file(QString::fromLatin1(resource));
-        if (!file.exists()) {
-            continue;
-        }
-        QString errorString;
-        const QHash<QString, GeoZoneAlertThresholds::Profile> profiles = file.open(QIODevice::ReadOnly) ?
-            GeoZoneAlertThresholds::parseProfiles(file.readAll(), &errorString) : QHash<QString, GeoZoneAlertThresholds::Profile>();
-        if (!profiles.isEmpty()) {
-            qCDebug(GeoZoneAlertThresholdsLog) << "Alert profiles of" << resource;
-            return profiles;
-        }
-        qCWarning(GeoZoneAlertThresholdsLog) << "Unable to read the alert profiles of" << resource << errorString;
-    }
-    // The defaults of Profile
-    GeoZoneAlertThresholds::Profile fallback;
-    fallback.name = QStringLiteral("Default");
-    return { { fallback.vehicleClass, fallback } };
+    static const Loaded result = []() {
+        Loaded loading;
+        loading.profiles = GeoZoneAlertThresholds::loadProfiles({ QString::fromLatin1(GeoZoneAlertThresholds::customProfilesResource),
+                                                                  QString::fromLatin1(GeoZoneAlertThresholds::profilesResource) }, &loading.warning);
+        return loading;
+    }();
+    return result;
 }
 
 } // namespace
@@ -195,22 +206,42 @@ GeoZoneAlertThresholds::Result GeoZoneAlertThresholds::compute(const Profile &pr
     return result;
 }
 
-QHash<QString, GeoZoneAlertThresholds::Profile> GeoZoneAlertThresholds::parseProfiles(const QByteArray &json, QString *errorString)
+QHash<QString, GeoZoneAlertThresholds::Profile> GeoZoneAlertThresholds::parseProfiles(const QByteArray &json, QString *errorString, QStringList *warnings)
 {
     QString error;
+    QStringList ignored;
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
-    const QJsonObject classes = document.object().value(QStringLiteral("profiles")).toObject();
+    const QJsonObject root = document.object();
+    const QJsonValue version = root.value(QStringLiteral("version"));
+    const QJsonValue classesValue = root.value(QStringLiteral("profiles"));
+    const QJsonObject classes = classesValue.toObject();
     QHash<QString, Profile> profiles;
     if (parseError.error != QJsonParseError::NoError) {
         error = parseError.errorString();
-    } else if (document.object().value(QStringLiteral("fileType")).toString() != QStringLiteral("GeoZoneAlertProfiles")) {
+    } else if (root.value(QStringLiteral("fileType")).toString() != QStringLiteral("GeoZoneAlertProfiles")) {
         error = QStringLiteral("not a GeoZoneAlertProfiles file");
+    } else if (!version.isDouble() || (version.toDouble() != profilesVersion)) {
+        // A newer format may mean its values differently
+        error = version.isUndefined() ? QStringLiteral("no version") : QStringLiteral("unsupported version %1").arg(version.toVariant().toString());
+    } else if (!classesValue.isObject() || classes.isEmpty()) {
+        error = QStringLiteral("no profiles");
     } else {
+        static const QStringList rootKeys = { QStringLiteral("fileType"), QStringLiteral("version"), QStringLiteral("description"), QStringLiteral("profiles") };
+        for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
+            if (!rootKeys.contains(it.key())) {
+                ignored.append(QStringLiteral("unknown value %1").arg(it.key()));
+            }
+        }
+        for (auto it = classes.constBegin(); (it != classes.constEnd()) && error.isEmpty(); ++it) {
+            if (!it.value().isObject()) {
+                error = QStringLiteral("%1: not a profile").arg(it.key());
+            }
+        }
         // The default class first, the others start from it
         Profile base;
         base.name = QStringLiteral("Default");
-        if (readProfile(classes.value(QLatin1String(defaultClass)).toObject(), base, error)) {
+        if (error.isEmpty() && readProfile(classes.value(QLatin1String(defaultClass)).toObject(), base, error, ignored)) {
             profiles.insert(base.vehicleClass, base);
             for (auto it = classes.constBegin(); (it != classes.constEnd()) && error.isEmpty(); ++it) {
                 if (it.key() == QLatin1String(defaultClass)) {
@@ -219,7 +250,7 @@ QHash<QString, GeoZoneAlertThresholds::Profile> GeoZoneAlertThresholds::parsePro
                 Profile profile = base;
                 profile.vehicleClass = it.key();
                 profile.name = it.key();
-                if (readProfile(it.value().toObject(), profile, error)) {
+                if (readProfile(it.value().toObject(), profile, error, ignored)) {
                     profiles.insert(profile.vehicleClass, profile);
                 }
             }
@@ -227,17 +258,67 @@ QHash<QString, GeoZoneAlertThresholds::Profile> GeoZoneAlertThresholds::parsePro
     }
     if (!error.isEmpty()) {
         profiles.clear();
+        ignored.clear();
     }
     if (errorString) {
         *errorString = error;
+    }
+    if (warnings) {
+        *warnings = ignored;
+    }
+    return profiles;
+}
+
+QHash<QString, GeoZoneAlertThresholds::Profile> GeoZoneAlertThresholds::loadProfiles(const QStringList &fileNames, QString *warning)
+{
+    QStringList told;
+    QHash<QString, Profile> profiles;
+    for (const QString &fileName : fileNames) {
+        QFile file(fileName);
+        if (!file.exists()) {
+            continue;
+        }
+        QString errorString;
+        QStringList ignored;
+        if (file.open(QIODevice::ReadOnly)) {
+            profiles = parseProfiles(file.readAll(), &errorString, &ignored);
+        } else {
+            errorString = file.errorString();
+        }
+        if (!profiles.isEmpty()) {
+            qCDebug(GeoZoneAlertThresholdsLog) << "Alert profiles of" << fileName;
+            if (!ignored.isEmpty()) {
+                // A misspelt value leaves the default one in use, which the manufacturer didn't mean
+                qCWarning(GeoZoneAlertThresholdsLog) << "Alert profiles of" << fileName << "ignored:" << ignored;
+                told.append(QCoreApplication::translate("GeoZoneAlertThresholds", "Alert profiles %1: %2. The default values are used for them.")
+                                .arg(fileName, ignored.join(QStringLiteral(", "))));
+            }
+            break;
+        }
+        qCWarning(GeoZoneAlertThresholdsLog) << "Unable to read the alert profiles of" << fileName << errorString;
+        told.append(QCoreApplication::translate("GeoZoneAlertThresholds", "The alert profiles %1 can't be used (%2). The default profiles are used instead.")
+                        .arg(fileName, errorString));
+    }
+    if (profiles.isEmpty()) {
+        // The defaults of Profile
+        Profile fallback;
+        fallback.name = QStringLiteral("Default");
+        profiles.insert(fallback.vehicleClass, fallback);
+    }
+    if (warning) {
+        *warning = told.join(QLatin1Char(' '));
     }
     return profiles;
 }
 
 const QHash<QString, GeoZoneAlertThresholds::Profile> &GeoZoneAlertThresholds::profiles()
 {
-    static const QHash<QString, Profile> loaded = loadProfiles();
-    return loaded;
+    return loaded().profiles;
+}
+
+QString GeoZoneAlertThresholds::profilesWarning()
+{
+    return loaded().warning;
 }
 
 GeoZoneAlertThresholds::Profile GeoZoneAlertThresholds::profile(const QString &vehicleClass)
