@@ -347,13 +347,17 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/UI/MainWindow.qml` | +8 | `GeoZoneAlertPopup` |
 | `src/QmlControls/PlanView.qml` | +26/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks and the upload confirmation (`GeoZoneMissionCheck::uploadReasons()`) |
 | `src/QmlControls/GeoFenceEditor.qml` | +8 | `GeoZoneFenceGroup` (adding fences from geozones, the fences added from them and the fence points) beside the lists of polygon and circular fences |
-| `src/QmlControls/TerrainStatus.qml` | +7 | `GeoZoneProfileOverlay` |
-| `src/QmlControls/QGCFileDialog.qml` | +5 | `fileName` proposed when saving, for the briefing export |
+| `src/QmlControls/TerrainStatus.qml` | +28/-3 | `GeoZoneProfileOverlay`, over a distance axis in km or miles for long missions, with round ticks |
+| `src/QmlControls/QGCFileDialog.qml` | +26/-2 | `fileName` proposed when saving, for the briefing export, and `selectMultiple` with `acceptedForLoadFiles`, to add several geozone files or packs at once |
+| `src/QmlControls/ToolStripDropPanel.qml` | +10/-8 | The panel is placed before it is resized, so that the Geozones panel keeps its scroll position when its content grows |
 | `src/FlightDisplay/FlyViewMap.qml` | +13/-1 | `GeoZoneFlyMapLayer`, `GeoZoneMapClickButton` and confirmed go to locations entering zones |
 | `src/FlightDisplay/FlyViewWidgetLayer.qml` | +9 | `GeoZoneAltitudeStrip` |
 | `src/FlightDisplay/GuidedActionConfirm.qml` | +3 | `GeoZoneGuidedActionWarning` |
+| `src/FlightDisplay/FlyViewPreFlightChecklistPopup.qml` | +2 | `destroyOnClose: false`, so that the checklist with its Geozones group is kept for the next opening |
 | `src/MissionManager/PlanMasterController.cc` | +12 | `GeoZonePlanData::load()` and `save()` of the `geoZones` section of plan files, and `follow()`, which resets the planned start and audit record when the Plan View replaces its mission |
 | `src/API/QGCOptions.h` | +5/-1 | `preFlightChecklistUrl()` points to `GeoZonePreFlightCheckList.qml`, which loads the checklist of the vehicle type and adds the Geozones group of `GeoZonePreflightCheck` |
 | `src/Vehicle/Vehicle.cc` | +2 | Clears `altitudeAboveTerr` when the terrain query fails |
+| `src/QmlControls/QGCMapPolygon.cc`, `src/QmlControls/QGCMapPolyline.cc` | +4/-1, +4/-1 | Their destructors run without the application: the fences of vehicles still connected at exit are deleted after it |
+| `src/Comms/MockLink/MockLink.cc` | +23 | The simulated ArduPilot vehicles start in their mode 0, change modes with `MAV_CMD_DO_SET_MODE` and keep the modes of their firmware plugin, so that the guided actions can be tried with them |
 
-The `fileName` of `QGCFileDialog.qml` and the `Vehicle.cc` change don't depend on the module and could go upstream on their own. The C++ hooks are within `#ifndef QGC_DISABLE_GEOZONE`, counted in the lines above, and the QML hooks have their stubs in `src/GeoZone/Stub`, see [Building Without Geozones](#building-without-geozones).
+The table is that command's output and lists every file it names: update it with each change outside the module. The changes of `QGCFileDialog.qml`, `ToolStripDropPanel.qml`, `FlyViewPreFlightChecklistPopup.qml`, `Vehicle.cc`, `QGCMapPolygon.cc`, `QGCMapPolyline.cc` and `MockLink.cc`, and the distance axis of `TerrainStatus.qml`, don't depend on the module and could go upstream on their own. The C++ hooks are within `#ifndef QGC_DISABLE_GEOZONE`, counted in the lines above, and the QML hooks have their stubs in `src/GeoZone/Stub`, see [Building Without Geozones](#building-without-geozones).
