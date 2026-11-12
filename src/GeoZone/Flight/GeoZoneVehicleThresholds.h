@@ -61,6 +61,8 @@ public:
     }
     /// Of the last update()
     const GeoZoneAlertThresholds::Result &result() const { return _result; }
+    /// @return false before the first update()
+    bool updated() const { return _updated; }
     /// @return The last result for QML: distance, verticalDistance and time thresholds, groundSpeed, verticalSpeed,
     ///         speedSource ("velocity", "reported", "assumed" or "rest", see GeoZoneAlertThresholds::SpeedSource),
     ///         positionError, reactionTime, extraTime, extraDistance and profileName, empty before the first update()

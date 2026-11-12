@@ -444,13 +444,17 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
             velocity = GeoZoneAlertTracker::Velocity{ plane->speed * std::cos(heading), plane->speed * std::sin(heading), plane->verticalSpeed, true };
         }
         // The thresholds of the default profile at the aircraft's velocity
-        const GeoZoneAlertTracker::Limits limits = context.limits.value_or(
-            GeoZoneAlertThresholds::compute(GeoZoneAlertThresholds::profile(QString::fromLatin1(GeoZoneAlertThresholds::defaultClass)), { velocity }).limits());
+        const GeoZoneAlertThresholds::Result thresholds =
+            GeoZoneAlertThresholds::compute(GeoZoneAlertThresholds::profile(QString::fromLatin1(GeoZoneAlertThresholds::defaultClass)), { velocity });
+        const GeoZoneAlertTracker::Limits limits = context.limits.value_or(thresholds.limits());
         const GeoZoneAlertTracker::Update update = tracker.update(*context.catalog, context.policy, position, velocity, limits);
         for (const GeoZoneAlertTracker::Alert &zoneAlert : update.alerts) {
             if (zoneAlert.inside) {
                 AlertEvent event = _alertEvent(zoneAlert.zone, AlertEvent::Traffic, true, 0, qQNaN(), position, noVehicle, plane->label());
                 event.level = alertLevel(event);
+                if (!context.limits) {
+                    _setThresholds(event, thresholds);
+                }
                 entries.append(event);
             }
         }
@@ -593,15 +597,6 @@ void GeoZoneMonitor::_raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneA
                                                                                : (zoneAlert.activated ? AlertEvent::Activated : AlertEvent::Entry));
         AlertEvent event = _alertEvent(zoneAlert.zone, kind, zoneAlert.inside, zoneAlert.distance, zoneAlert.timeToEntry, monitor->position(), monitor->vehicleId());
         event.level = alertLevel(event, zoneAlert.imminent);
-        // The thresholds which raised it, logged with it
-        if (!settings().limits) {
-            const GeoZoneAlertThresholds::Result &thresholds = monitor->thresholds().result();
-            event.warningDistance = thresholds.distance;
-            event.warningVerticalDistance = thresholds.verticalDistance;
-            event.warningTime = thresholds.time;
-            event.groundSpeed = thresholds.groundSpeed;
-            event.verticalSpeed = thresholds.verticalSpeed;
-        }
         _submit(monitor, event, zoneAlert.zone);
     }
     _raiseActivations(monitor);
@@ -634,9 +629,28 @@ void GeoZoneMonitor::_raiseActivations(GeoZoneVehicleMonitor *monitor)
     }
 }
 
+void GeoZoneMonitor::_setThresholds(AlertEvent &event, const GeoZoneAlertThresholds::Result &thresholds)
+{
+    event.warningDistance = thresholds.distance;
+    event.warningVerticalDistance = thresholds.verticalDistance;
+    event.warningTime = thresholds.time;
+    event.groundSpeed = thresholds.groundSpeed;
+    event.verticalSpeed = thresholds.verticalSpeed;
+}
+
+void GeoZoneMonitor::_setThresholds(AlertEvent &event, const GeoZoneVehicleMonitor *monitor) const
+{
+    // Not while the limits are fixed, nor before the vehicle was evaluated
+    if (monitor && !settings().limits && monitor->thresholds().updated()) {
+        _setThresholds(event, monitor->thresholds().result());
+    }
+}
+
 void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &raised, const GeoZone *zone)
 {
     AlertEvent event = raised;
+    // The thresholds the vehicle is warned at, logged with each of its alerts
+    _setThresholds(event, monitor);
     const bool zoneAlert = (event.kind == AlertEvent::Approach) || (event.kind == AlertEvent::Entry) || (event.kind == AlertEvent::OnGround) ||
                            (event.kind == AlertEvent::Activated);
     // With a permit for the flight, the alerts are logged and an entry is shown as an advisory, not spoken
@@ -738,6 +752,7 @@ void GeoZoneMonitor::_logFenceEvent(GeoZoneVehicleMonitor *monitor, AlertEvent::
     event.level = GeoZoneAlertLevel::Warning;
     event.zoneIdentifier = QStringLiteral("FENCE");
     event.message = message;
+    _setThresholds(event, monitor);
     const GeoZoneFenceWarning *const warning = monitor->fenceWarning();
     if (warning) {
         if (!event.position.coordinate.isValid()) {
@@ -889,6 +904,7 @@ void GeoZoneMonitor::_raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const 
     event.distance = qQNaN();
     event.zoneIdentifier = GeoZoneAwareness::stateCode(change.to);
     event.zoneName = change.status.reasons().join(QStringLiteral("; "));
+    _setThresholds(event, monitor);
     event.message = _labelled(monitor->vehicleId(), alertMessage(event, event.zoneName, QString()));
     qCDebug(GeoZoneMonitorLog) << event.message;
     const int severity = GeoZoneAlertLevel::severity(level, 0);
@@ -1549,6 +1565,7 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind ki
     const int severity = GeoZoneAlertLevel::severity(level, GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
     const auto monitor = std::find_if(_monitors.cbegin(), _monitors.cend(), [vehicleId](const GeoZoneVehicleMonitor *candidate) { return candidate->vehicleId() == vehicleId; });
     const int vehicleKey = (monitor != _monitors.cend()) ? (*monitor)->key() : 0;
+    _setThresholds(event, (monitor != _monitors.cend()) ? *monitor : nullptr);
     // Shown in the popup like the alerts about zones, where the pilot dismisses it
     _keepSubject(AlertSubject{ vehicleKey, event, false });
     emit alertEvent(event);

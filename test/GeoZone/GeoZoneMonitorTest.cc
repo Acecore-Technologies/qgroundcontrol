@@ -1084,6 +1084,7 @@ void GeoZoneMonitorTest::_testAlertLogFailure()
     QCOMPARE(degraded.kind, GeoZoneMonitor::AlertEvent::Awareness);
     QCOMPARE(degraded.message, QStringLiteral("Geo-awareness degraded: alert log not written"));
     QCOMPARE(degraded.level, GeoZoneAlertLevel::Caution);
+    QCOMPARE(degraded.warningDistance, 100.0);
     QCOMPARE(log.pendingLogLines(), 4);
 
     // It is tried again by itself, and once the folder can be made everything is written in order
@@ -2376,6 +2377,9 @@ void GeoZoneMonitorTest::_testPositionLoss()
     const GeoZoneMonitor::AlertEvent lost = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
     QVERIFY(lost.kind == GeoZoneMonitor::AlertEvent::PositionLost);
     QVERIFY(lost.inside);
+    // With the alert thresholds of the vehicle, like every kind of alert
+    QCOMPARE(lost.warningDistance, 100.0);
+    QCOMPARE(GeoZoneAlertHistory::logFields(GeoZoneAlertHistory::logLine(lost)).mid(16, 3), (QStringList{ QStringLiteral("100"), QStringLiteral("45"), QStringLiteral("96") }));
     QCOMPARE(lost.position.coordinate, inside.coordinate);
     QVERIFY(vehicleMonitor->inside());
     QCOMPARE(vehicleMonitor->verticalBands().count(), 1);
@@ -2615,6 +2619,7 @@ void GeoZoneMonitorTest::_testAlertActions()
     const GeoZoneMonitor::AlertEvent outside = counting.raiseVehicleAlert(GeoZoneMonitor::AlertEvent::NonConformance, 3, GeoZone::Position{ uSpaceCenter, 450, 400 }, 40,
                                                                           QStringLiteral("above"), QStringLiteral("40 m above it"));
     QCOMPARE(outside.message, QStringLiteral("Vehicle 3: Outside planned volume: 40 m above it"));
+    QCOMPARE(outside.warningDistance, 100.0);
     std::optional<GeoZoneAlertModel::Alert> shownOutside = shownAlert(counting, outside.id);
     QVERIFY(shownOutside);
     QCOMPARE(shownOutside->message, outside.message);
@@ -2791,6 +2796,7 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     QCOMPARE(alertSpy.count(), 2);
     QCOMPARE(alertSpy.last()[0].toString(), arming);
     QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().detail, QStringLiteral("arming"));
+    QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().warningDistance, 100.0);
     QCOMPARE(GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>()))->message, arming);
     QCOMPARE(monitor.alertModel()->count(), 1);
     now += 1000;
@@ -3543,6 +3549,8 @@ void GeoZoneMonitorTest::_testActivationCaution()
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::ActivationSoon);
     QCOMPARE(event.level, GeoZoneAlertLevel::Caution);
     QCOMPARE(event.timeToEntry, 510.0);
+    QCOMPARE(event.warningDistance, 100.0);
+    QCOMPARE(event.warningVerticalDistance, 45.0);
     QCOMPARE(event.message, QStringLiteral("Geozone S (Prohibited) becomes active in 9 min, you are inside it"));
     QCOMPARE(sink->spoken.last(), QStringLiteral("Caution: ") + event.message);
     QVERIFY(shownAlert(monitor, event.id));

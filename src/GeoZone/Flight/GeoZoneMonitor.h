@@ -177,8 +177,8 @@ public:
         QString traffic;            ///< Callsign or ICAO address of the aircraft of a Traffic alert
         QString detail;             ///< Of pilot events: the question asked, or the button pressed
         GeoZoneAlertLevel::Level level = GeoZoneAlertLevel::Caution;   ///< Of the alert, also for its pilot events
-        /// Alert thresholds of the vehicle when it approached or entered the zone, NaN when not known, see
-        /// GeoZoneAlertThresholds::Result
+        /// Alert thresholds of the vehicle at the alert, of any kind, NaN when not known, like for pilot events and
+        /// while the limits are fixed, see GeoZoneAlertThresholds::Result
         double warningDistance = qQNaN();
         double warningVerticalDistance = qQNaN();
         double warningTime = qQNaN();
@@ -391,6 +391,9 @@ private:
     void _raise(GeoZoneVehicleMonitor *monitor, const QList<GeoZoneAlertTracker::Alert> &alerts);
     void _raiseActivations(GeoZoneVehicleMonitor *monitor);
     void _submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &event, const GeoZone *zone);
+    /// Sets the alert thresholds of the vehicle in its alert, which the log records with every kind of alert
+    void _setThresholds(AlertEvent &event, const GeoZoneVehicleMonitor *monitor) const;
+    static void _setThresholds(AlertEvent &event, const GeoZoneAlertThresholds::Result &thresholds);
     /// Suspends the breaches of a vehicle whose position is lost and alerts it once, or resumes them
     void _positionAvailabilityChanged(GeoZoneVehicleMonitor *monitor);
     /// A vehicle on the ground tried to arm, or armed: alerts the restricted zones it is in again, once per attempt
