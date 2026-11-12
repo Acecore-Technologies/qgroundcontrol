@@ -140,10 +140,6 @@ public:
     /// Writes a new Ed25519 private key to sign packs with, and selects it. fileOperationFinished tells the outcome.
     Q_INVOKABLE bool createSigningKey(const QString &fileName);
 
-    /// @return Zones to label in the map region: those centered in it, limited to maxLabelCount
-    ///         preferring the most restrictive
-    Q_INVOKABLE QVariantList labelZones(const QGeoRectangle &region) const;
-
     /// @return Zones shown on maps whose horizontal projection contains the coordinate at any altitude, the most
     ///         restrictive and active first
     Q_INVOKABLE QVariantList zonesAt(const QGeoCoordinate &coordinate) const;

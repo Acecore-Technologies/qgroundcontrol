@@ -203,17 +203,18 @@ void GeoZoneManagerTest::_testLabelZonesLimit()
     QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
     QCOMPARE(manager.zoneCount(), zoneCount);
 
-    QVERIFY(manager.labelZones(QGeoRectangle()).isEmpty());
+    const GeoZoneCatalog &catalog = manager.catalog();
+    QVERIFY(catalog.labelZones(QGeoRectangle(), GeoZoneManager::maxLabelCount).isEmpty());
 
     // Only zones centered in the region are labelled
     const QGeoRectangle smallRegion(QGeoCoordinate(47.005, 7.995), QGeoCoordinate(46.995, 8.035));
-    QCOMPARE(manager.labelZones(smallRegion).count(), 4);
+    QCOMPARE(catalog.labelZones(smallRegion, GeoZoneManager::maxLabelCount).count(), 4);
 
     // The limit keeps the most restrictive zones
-    const QVariantList labels = manager.labelZones(manager.boundingBox());
+    const QList<const GeoZone*> labels = catalog.labelZones(manager.boundingBox(), GeoZoneManager::maxLabelCount);
     QCOMPARE(labels.count(), GeoZoneManager::maxLabelCount);
-    for (const QVariant &object : labels) {
-        QCOMPARE(GeoZoneInfo::fromVariant(object)->restriction(), GeoZone::Prohibited);
+    for (const GeoZone *zone : labels) {
+        QCOMPARE(zone->restriction(), GeoZone::Prohibited);
     }
 }
 

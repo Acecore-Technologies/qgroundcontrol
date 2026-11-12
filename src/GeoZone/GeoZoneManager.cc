@@ -574,11 +574,6 @@ void GeoZoneManager::_updateActive()
     }
 }
 
-QVariantList GeoZoneManager::labelZones(const QGeoRectangle &region) const
-{
-    return GeoZoneInfo::toVariantList(_catalog.labelZones(region, maxLabelCount));
-}
-
 QVariantList GeoZoneManager::zonesAt(const QGeoCoordinate &coordinate) const
 {
     QList<const GeoZone*> zones = _catalog.zonesAt(coordinate);
