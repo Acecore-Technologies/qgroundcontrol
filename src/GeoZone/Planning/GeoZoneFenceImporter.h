@@ -74,6 +74,8 @@ class GeoZoneFenceImporter : public QObject
 
 public:
     explicit GeoZoneFenceImporter(QObject *parent = nullptr);
+    /// An upload in progress goes on without the importer, like when its dialog is closed, see GeoZoneFenceUpload::detach
+    ~GeoZoneFenceImporter() override;
 
     /// Special values of the activeWithinHours of updateSelection
     enum ActiveTime {

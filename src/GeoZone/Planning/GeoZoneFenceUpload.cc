@@ -15,6 +15,7 @@
 #include "GeoZoneManager.h"
 #include "GeoZoneSourceRepository.h"
 #include "PlanMasterController.h"
+#include "QGCApplication.h"
 #include "QGCFenceCircle.h"
 #include "QGCFencePolygon.h"
 #include "QmlObjectListModel.h"
@@ -479,6 +480,27 @@ void GeoZoneFenceUpload::abort(const QString &reason)
     if (busy()) {
         (void) _transition(Aborted, reason);
     }
+}
+
+bool GeoZoneFenceUpload::detach()
+{
+    if (!busy() || !_geoFenceController) {
+        return false;
+    }
+    // With the plan, which the upload ends with
+    setParent(_geoFenceController);
+    (void) connect(this, &GeoZoneFenceUpload::stateChanged, this, [this]() {
+        if (busy()) {
+            return;
+        }
+        emit finishedDetached(_state, _message);
+        // Nobody shows the state any more. Names from geozone data aren't markup.
+        QString text = _message;
+        (void) text.replace(QLatin1Char('<'), QChar(0x2039)).replace(QLatin1Char('>'), QChar(0x203A));
+        qgcApp()->showAppMessage(text, tr("Fence Upload"));
+        deleteLater();
+    });
+    return true;
 }
 
 void GeoZoneFenceUpload::_checkFence()

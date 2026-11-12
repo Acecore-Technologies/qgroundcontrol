@@ -45,6 +45,7 @@ private slots:
     void _testGeoFenceSettingsReplaced();
     void _testGeoFenceUpload();
     void _testGeoFenceUploadChanges();
+    void _testGeoFenceUploadDetached();
     void _testFenceWarningVehicle();
     void _testFenceUploadRejected();
     void _testFenceOverrideCommands();

@@ -1381,6 +1381,85 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     QVERIFY2(upload->message().contains(QStringLiteral("disconnected")), qPrintable(upload->message()));
 }
 
+void GeoZoneFenceImportTest::_testGeoFenceUploadDetached()
+{
+    // Two zones of 40 points, of which one fits into the 63 points of the MockLink PX4 without simplification
+    ZoneOwner zoneParent;
+    QList<const GeoZone*> zones;
+    for (int i = 0; i < 2; i++) {
+        GeoZone::Volume volume;
+        volume.rings.append(GeoZone::toRing(_circleRing(QGeoCoordinate(47, 8 + (i * 0.1)), 500, 40)));
+        GeoZone::Data data;
+        data.identifier = QStringLiteral("Z%1").arg(i);
+        data.restriction = GeoZone::Prohibited;
+        data.volumes.append(volume);
+        zones.append(zoneParent.add(data));
+    }
+
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->initialPlanRequestComplete(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    GeoZoneFenceUpload::clearVerification(vehicle);
+
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    GeoFenceController *const geoFenceController = masterController.geoFenceController();
+
+    // The dialog is closed while its upload is sending or reading the fence back, which deletes its importer. The
+    // upload goes on: the fence is read back and compared, recorded as verified with the zone not fenced, and how it
+    // ended is told.
+    for (const GeoZoneFenceUpload::State closedIn : { GeoZoneFenceUpload::Sending, GeoZoneFenceUpload::Verifying }) {
+        GeoZoneFenceUpload::clearVerification(vehicle);
+        auto *importer = new GeoZoneFenceImporter;
+        importer->setGeoFenceController(geoFenceController);
+        importer->select(zones);
+        QCOMPARE(importer->selectedCount(), 1);
+        const QPointer<GeoZoneFenceUpload> upload = importer->upload();
+        QList<GeoZoneFenceUpload::State> ended;
+        QStringList messages;
+        (void) connect(upload, &GeoZoneFenceUpload::finishedDetached, this, [&ended, &messages](GeoZoneFenceUpload::State state, const QString &message) {
+            ended.append(state);
+            messages.append(message);
+        });
+        QSignalSpy stateSpy(upload, &GeoZoneFenceUpload::stateChanged);
+        importer->uploadToVehicle();
+        QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
+        // As soon as it is in the state, which polling could miss
+        while (upload->state() != closedIn) {
+            QVERIFY2(stateSpy.wait(15000), "the upload didn't go on");
+        }
+        delete importer;
+        importer = nullptr;
+        QVERIFY(upload);
+        QCOMPARE(upload->parent(), geoFenceController);
+        QVERIFY(upload->busy());
+
+        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, 15000);
+        QCOMPARE(ended.constFirst(), GeoZoneFenceUpload::Verified);
+        QVERIFY2(messages.constFirst().startsWith(QStringLiteral("Verified: the vehicle stores the fence of 1 polygon(s) with 40 point(s)")), qPrintable(messages.constFirst()));
+        QVERIFY2(messages.constFirst().endsWith(QStringLiteral("1 geozone(s) are not fenced: Z1 (No room left in the vehicle fence).")), qPrintable(messages.constFirst()));
+        const std::optional<GeoZoneFenceUpload::Verification> record = GeoZoneFenceUpload::verification(vehicle);
+        QVERIFY(record);
+        QVERIFY(record->verified);
+        QCOMPARE(record->notFencedCount, 1);
+        // Done, it is gone
+        QTRY_VERIFY(!upload);
+        QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
+    }
+
+    // An importer whose upload isn't in progress takes it along
+    auto *const importer = new GeoZoneFenceImporter;
+    importer->setGeoFenceController(geoFenceController);
+    const QPointer<GeoZoneFenceUpload> idle = importer->upload();
+    delete importer;
+    QVERIFY(!idle);
+
+    _disconnectMockLink();
+}
+
 void GeoZoneFenceImportTest::_testFenceWarningVehicle()
 {
     // A prohibited zone 500 m east of the MockLink vehicle, as an exclusion fence of the vehicle

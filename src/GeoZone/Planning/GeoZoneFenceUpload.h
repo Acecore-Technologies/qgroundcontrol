@@ -120,6 +120,11 @@ public:
     Q_INVOKABLE void start();
     /// Stops following an upload in progress, which ends Aborted with the reason. The vehicle may still store the fence.
     Q_INVOKABLE void abort(const QString &reason);
+    /// Lets an upload in progress finish without its owner, like the dialog which started it and was closed: the upload
+    /// then belongs to the plan's fence controller, is verified and recorded like any other, reports how it ended as an
+    /// application message, see finishedDetached, and deletes itself.
+    /// @return false if no upload is in progress, the upload then stays with its owner
+    bool detach();
 
     /// Fence sent to or read back from a vehicle
     struct FenceSnapshot {
@@ -184,6 +189,8 @@ signals:
     void geoFenceControllerChanged();
     void stateChanged();
     void canUploadChanged();
+    /// A detached upload ended in the state with the message, which the application shows
+    void finishedDetached(GeoZoneFenceUpload::State state, const QString &message);
 
 private:
     /// @return The plan's vehicle, null without controller

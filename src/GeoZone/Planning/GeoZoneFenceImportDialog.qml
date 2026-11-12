@@ -20,7 +20,8 @@ import QGroundControl.ScreenTools
 
 /// Fits loaded geozones into the vehicle's fence as exclusion fences, the zones of the planned flight first, and
 /// uploads the fence to the vehicle and verifies it. The explanations are behind the Help toggle, the zones left out
-/// are listed on demand.
+/// are listed on demand. An upload goes on when the dialog is closed: the importer hands it to the plan, and how it
+/// ended is then shown as a message.
 QGCPopupDialog {
     id:                     control
     title:                  qsTr("Fences from Geozones")

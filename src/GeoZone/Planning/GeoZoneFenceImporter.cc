@@ -70,6 +70,12 @@ GeoZoneFenceImporter::GeoZoneFenceImporter(QObject *parent)
     });
 }
 
+GeoZoneFenceImporter::~GeoZoneFenceImporter()
+{
+    // The vehicle goes on storing the fence: whether it stores the fence sent is still checked, recorded and told
+    (void) _upload->detach();
+}
+
 void GeoZoneFenceImporter::setGeoFenceController(GeoFenceController *geoFenceController)
 {
     if (geoFenceController != _geoFenceController) {
