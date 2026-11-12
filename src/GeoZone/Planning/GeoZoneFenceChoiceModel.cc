@@ -141,7 +141,8 @@ QVariant GeoZoneFenceChoiceModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneFenceChoiceModel::roleNames() const
 {
-    return {
+    // Views ask for them again and again
+    static const QHash<int, QByteArray> names = {
         { KeyRole,                  "key" },
         { NameRole,                 "name" },
         { RestrictionRole,          "restriction" },
@@ -155,4 +156,5 @@ QHash<int, QByteArray> GeoZoneFenceChoiceModel::roleNames() const
         { IncludableRole,           "includable" },
         { ReasonRole,               "reason" },
     };
+    return names;
 }
