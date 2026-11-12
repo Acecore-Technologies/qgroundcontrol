@@ -419,6 +419,8 @@ Item {
                     } else if (_addROIOnClick) {
                     	insertROIAfterCurrent(coordinate)
                         _addROIOnClick = false
+                    } else {
+                        geoZoneOverlay.showZonesAt(coordinate)
                     }
                     break
                 }

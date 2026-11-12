@@ -4,6 +4,10 @@
 add_test(NAME GeoZoneStubCheck COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneStubCheck.cmake)
 set_tests_properties(GeoZoneStubCheck PROPERTIES LABELS "geozone;core")
 
+# A map click shows the geozones in every layer of the Plan View, also the layers this build doesn't have
+add_test(NAME GeoZonePlanViewClicksCheck COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/GeoZonePlanViewClicksCheck.cmake)
+set_tests_properties(GeoZonePlanViewClicksCheck PROPERTIES LABELS "geozone;core")
+
 # GeoZoneStubLoad checks the same uses with the QML engine, which knows the members of the base types of the stubs: it
 # loads the stub types from their files, needing no display and nothing of the application but ToolStripAction, which
 # the stub of GeoZoneToolStripAction derives from. Built in all builds like the check above. Its test builds it first,

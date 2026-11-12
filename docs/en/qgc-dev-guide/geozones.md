@@ -351,7 +351,7 @@ The edits outside the module, from `git diff --stat <branch point> HEAD -- . ':!
 | `src/API/QGCCorePlugin.cc` | +3 | `GeoZoneIndicator.qml` in the toolbar indicators |
 | `src/UI/AppSettings/SettingsPagesModel.qml` | +8 | The Geozones settings page |
 | `src/UI/MainWindow.qml` | +8 | `GeoZoneAlertPopup` |
-| `src/QmlControls/PlanView.qml` | +26/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks and the upload confirmation (`GeoZoneMissionCheck::uploadReasons()`) |
+| `src/QmlControls/PlanView.qml` | +28/-1 | `GeoZonePlanViewOverlay` (zones, mission banner, Geozones panel), `GeoZoneToolStripAction`, map clicks in every layer (`GeoZonePlanViewClicksCheck.cmake` checks that none is left out) and the upload confirmation (`GeoZoneMissionCheck::uploadReasonDetails()`) |
 | `src/QmlControls/GeoFenceEditor.qml` | +8 | `GeoZoneFenceGroup` (adding fences from geozones, the fences added from them and the fence points) beside the lists of polygon and circular fences |
 | `src/QmlControls/TerrainStatus.qml` | +28/-3 | `GeoZoneProfileOverlay`, over a distance axis in km or miles for long missions, with round ticks |
 | `src/QmlControls/QGCFileDialog.qml` | +26/-2 | `fileName` proposed when saving, for the briefing export, and `selectMultiple` with `acceptedForLoadFiles`, to add several geozone files or packs at once |
