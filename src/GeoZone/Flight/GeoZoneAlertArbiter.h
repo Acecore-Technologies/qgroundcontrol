@@ -36,7 +36,7 @@
 /// - Muting silences the speech of the alerts and repeats for a while, except the first announcement of a new breach.
 ///   It never hides them: the repeats are still due and shown. Alerts raised while muted aren't spoken later.
 /// - Approving a zone for a vehicle, when the pilot confirms the permission to fly there, drops its alerts about the
-///   zone and ends its breach until the vehicle leaves the zone and its approach range.
+///   zone and ends its breach until the vehicle leaves the zone and its approach range, or its flight ends.
 class GeoZoneAlertArbiter
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZoneAlertArbiter)
@@ -99,9 +99,11 @@ public:
     /// @return Milliseconds of the clock until which the alerts are muted, -1 when they aren't
     qint64 mutedUntil() const { return muted() ? _mutedUntilMSecs : -1; }
 
-    /// Approves the zone, by GeoZone::key, for the vehicle until setZones() no longer has it near: its pending alerts
-    /// and breach are dropped and its new alerts aren't announced
+    /// Approves the zone, by GeoZone::key, for the vehicle until setZones() no longer has it near or endApprovals():
+    /// its pending alerts and breach are dropped and its new alerts aren't announced
     void approveZone(int vehicleKey, const QString &zoneKey);
+    /// Ends the approvals of the vehicle, like when its flight ends: its zones alert again
+    void endApprovals(int vehicleKey) { (void) _approvals.remove(vehicleKey); }
     bool zoneApproved(int vehicleKey, const QString &zoneKey) const { return _approvals.value(vehicleKey).contains(zoneKey); }
     /// @return Zones approved for the vehicle, by GeoZone::key
     QSet<QString> approvedZones(int vehicleKey) const { return _approvals.value(vehicleKey); }

@@ -234,6 +234,12 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
             _armingAttempted(monitor);
         } else if (monitor->onGround() && _flying.remove(monitor->key())) {
             _permits->endFlight(monitor->vehicleId(), QStringLiteral("flight ended"));
+            // The pilot confirmed the permission for that flight: a vehicle which landed in the zone is warned on the
+            // ground and when it arms again, like before its first flight
+            const int approvalCount = _arbiter.approvalCount();
+            _arbiter.endApprovals(monitor->key());
+            _approvalsChanged(approvalCount);
+            _updateAlertActions();
         }
         _updateGroundStatus(monitor);
     });

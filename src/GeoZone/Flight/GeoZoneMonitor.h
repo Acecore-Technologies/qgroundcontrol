@@ -63,7 +63,8 @@ class Vehicle;
 /// The alerts shown to the pilot are kept in a GeoZoneAlertModel with what can be done about them. An alert of a
 /// vehicle approaching or entering a restricted zone asks whether the pilot has the permission to fly there: confirming
 /// it (approveAlert()) acknowledges the alert and ends the alerts and repeats about the zone until the vehicle leaves
-/// the zone and its approach range.
+/// the zone and its approach range, or its flight ends where the permits end: when it disarms after having been armed,
+/// or disconnects. So a vehicle which landed inside an approved zone is warned again before its next flight.
 /// A vehicle on the ground (see GeoZoneVehicleMonitor::onGround) inside a restricted zone is alerted as such, like by a
 /// pre-arm check, and again when it tries to arm there, see AlertEvent::OnGround.
 /// Whether geo-awareness is available for the active vehicle is published as awareness(), and the changes of state of
@@ -80,7 +81,7 @@ class GeoZoneMonitor : public QObject
     Q_PROPERTY(GeoZoneAlertHistory *alertHistory READ alertHistory      CONSTANT FINAL)                       ///< Alerts of the session and earlier today
     Q_PROPERTY(bool             alertsMuted         READ alertsMuted        NOTIFY alertsMutedChanged FINAL)     ///< The speech of the alerts is silenced, see muteAlerts()
     Q_PROPERTY(int              defaultMuteSecs     READ defaultMuteSecs    CONSTANT FINAL)
-    Q_PROPERTY(QStringList      approvedZoneKeys    READ approvedZoneKeys   NOTIFY approvalsChanged FINAL)   ///< Zones approved for the active vehicle until it leaves them, see approveAlert()
+    Q_PROPERTY(QStringList      approvedZoneKeys    READ approvedZoneKeys   NOTIFY approvalsChanged FINAL)   ///< Zones approved for the active vehicle until it leaves them or its flight ends, see approveAlert()
     Q_PROPERTY(GeoZoneAlertModel *alerts            READ alertModel         CONSTANT FINAL)                  ///< Alerts shown by the alert popup
     /// Aircraft in or near zones while traffic is checked, the most restrictive zone and those inside first, as maps
     /// with callsign (or the ICAO address), zone (GeoZoneInfo of the most restrictive zone), inside, distance (meters to
@@ -281,8 +282,9 @@ public:
     void acknowledgeAlert(int alertId);
     /// The pilot confirmed the permission to fly in the zone of the alert, and of the alerts it replaced (see
     /// GeoZoneAlertModel::show()): acknowledges the alerts about the zones and approves them for the vehicle, whose
-    /// alerts about them are neither shown, spoken nor repeated until it leaves them and their approach range. They are
-    /// still logged. Zones requiring an authorisation or a notification get a permit for the flight instead.
+    /// alerts about them are neither shown, spoken nor repeated until it leaves them and their approach range, or its
+    /// flight ends. They are still logged. Zones requiring an authorisation or a notification get a permit for the
+    /// flight instead.
     Q_INVOKABLE void approveAlert(int alertId);
     /// The pilot dismissed a shown alert: acknowledges it and removes it from the shown alerts
     Q_INVOKABLE void dismissAlert(int alertId);

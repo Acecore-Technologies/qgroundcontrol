@@ -2286,15 +2286,43 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     vehicle->handleMessage(ack, now);
     QCOMPARE(alertSpy.count(), 3);
 
-    // The pilot confirming the permission ends the warning and the alerts, until the vehicle leaves the zone
+    // The pilot confirming the permission ends the warning and the alerts, until the vehicle leaves the zone or its
+    // flight ends
     vehicle->setArmed(false);
+    monitor.setActiveVehicleId(vehicleId);
+    QSignalSpy approvalSpy(&monitor, &GeoZoneMonitor::approvalsChanged);
     monitor.approveAlert(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().id);
     QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
     QCOMPARE(vehicle->groundWarning(), QStringLiteral("On the ground inside geozone P (Prohibited), permission confirmed"));
     QCOMPARE(monitor.arbiter().breachCount(), 0);
+    QCOMPARE(monitor.approvedZoneKeys().count(), 1);
+    QCOMPARE(approvalSpy.count(), 1);
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
     now += GeoZoneMonitor::armingAlertIntervalMSecs;
     vehicle->setArmed(true);
     QCOMPARE(alertSpy.count(), 3);
+    // ... also while it flies inside the zone
+    monitor.evaluate({ center.atDistanceAndAzimuth(50, 0), 450, 400 }, vehicleId);
+    QCOMPARE(alertSpy.count(), 3);
+    QCOMPARE(monitor.approvedZoneKeys().count(), 1);
+
+    // The permission was for that flight. Landed inside the zone, the vehicle is warned on the ground again, and
+    // alerted and asked when it arms for the next flight.
+    vehicle->setArmed(false);
+    QVERIFY(monitor.approvedZoneKeys().isEmpty());
+    QCOMPARE(approvalSpy.count(), 2);
+    QCOMPARE(vehicle->groundWarning(), onGround);
+    QCOMPARE(vehicle->groundLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
+    now += GeoZoneMonitor::armingAlertIntervalMSecs;
+    vehicle->setArmed(true);
+    QCOMPARE(alertSpy.count(), 4);
+    QCOMPARE(alertSpy.last()[0].toString(), arming);
+    const std::optional<GeoZoneAlertModel::Alert> asked = shownAlert(monitor, alertSpy.last()[2].toInt());
+    QVERIFY(asked);
+    QVERIFY(asked->question);
+    QCOMPARE(monitor.arbiter().breachCount(), 1);
+    monitor.setActiveVehicleId(GeoZoneMonitor::noVehicle);
 
     // Inside a zone requiring an authorisation, a caution
     vehicle->setArmed(false);
