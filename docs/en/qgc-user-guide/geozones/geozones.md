@@ -514,6 +514,7 @@ Each fence from a geozone also keeps the zone's key, the content hash of its dat
 ::: warning
 GeoFences have no altitude limits, so a zone's vertical limits are not transferred and the whole zone is excluded at all altitudes.
 Holes in zone polygons are also dropped. The ArduPilot fence storage is estimated, so verify the upload.
+Autopilots fill a fence polygon with the even-odd rule: where the published boundary of a zone crosses itself and encloses an area twice, its fence leaves that area open. The [mission check](#mission-check) and the pre-flight checklist then report the zone as not excluded by the fence.
 :::
 
 ## Flight {#flight}

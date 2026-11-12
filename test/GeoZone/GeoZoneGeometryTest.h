@@ -29,6 +29,7 @@ private slots:
     void _testSpatialIndex();
     void _testExclusionShapes();
     void _testFenceCapacity();
+    void _testFenceCoversOverlaps();
     void _testFenceSelection();
     void _testFencePrediction();
     void _testContainsAndPaths();

@@ -400,7 +400,11 @@ QString GeoZoneFenceUpload::compareFences(const FenceSnapshot &sent, const Fence
         bool found = false;
         for (qsizetype i = 0; (i < received.circles.count()) && !found; i++) {
             const FenceSnapshot::Circle &other = received.circles[i];
-            found = !circleMatched[i] && (other.inclusion == circle.inclusion) && near(circle.circle.center(), other.circle.center()) &&
+            // Each circle read back matches one circle sent: those matched stay matched, also for repeated circles
+            if (circleMatched[i]) {
+                continue;
+            }
+            found = (other.inclusion == circle.inclusion) && near(circle.circle.center(), other.circle.center()) &&
                     (qAbs(circle.circle.radius() - other.circle.radius()) <= verifyTolerance);
             circleMatched[i] = found;
         }

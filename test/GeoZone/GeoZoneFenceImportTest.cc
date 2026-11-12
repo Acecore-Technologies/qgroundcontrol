@@ -792,6 +792,18 @@ void GeoZoneFenceImportTest::_testGeoFenceUpload()
     received = sent;
     received.returnPoint = QGeoCoordinate();
     QVERIFY(!GeoZoneFenceUpload::compareFences(sent, received).isEmpty());
+
+    // A circle sent twice must be stored twice: the vehicle storing another circle in place of the second differs
+    const GeoZoneFenceUpload::FenceSnapshot::Circle circleA{ false, QGeoCircle(QGeoCoordinate(47, 8.05), 300) };
+    const GeoZoneFenceUpload::FenceSnapshot::Circle circleB{ false, QGeoCircle(QGeoCoordinate(47, 8.1), 300) };
+    GeoZoneFenceUpload::FenceSnapshot repeated;
+    repeated.circles = { circleA, circleB, circleA };
+    GeoZoneFenceUpload::FenceSnapshot stored;
+    stored.circles = { circleA, circleB, circleB };
+    QCOMPARE(GeoZoneFenceUpload::compareFences(repeated, stored), QStringLiteral("Fences differing from the plan: 1."));
+    QCOMPARE(GeoZoneFenceUpload::compareFences(stored, repeated), QStringLiteral("Fences differing from the plan: 1."));
+    stored.circles = { circleA, circleA, circleB };
+    QVERIFY(GeoZoneFenceUpload::compareFences(repeated, stored).isEmpty());
 }
 
 void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()

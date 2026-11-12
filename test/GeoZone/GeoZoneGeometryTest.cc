@@ -797,6 +797,51 @@ void GeoZoneGeometryTest::_testFenceCapacity()
     QVERIFY(previousCount < star.count() / 4);
 }
 
+void GeoZoneGeometryTest::_testFenceCoversOverlaps()
+{
+    using namespace GeoZoneFences;
+
+    ZoneOwner owner;
+    const QGeoCoordinate origin(47, 8);
+    const auto polygonZone = [&owner, &origin](const QList<QPointF> &points) {
+        QList<QGeoCoordinate> ring;
+        for (const QPointF &point : points) {
+            ring.append(_offsetFrom(origin, point.y(), point.x()));
+        }
+        GeoZone::Volume volume;
+        volume.rings.append(GeoZone::toRing(ring));
+        GeoZone::Data data;
+        data.restriction = GeoZone::Prohibited;
+        data.volumes = { volume };
+        return static_cast<const GeoZone*>(owner.add(data));
+    };
+
+    // A boundary going around its middle twice: a square of 400 m, then one of 200 m inside it. The zone includes the
+    // middle, which the even-odd rule of the autopilots leaves out of a fence with that boundary.
+    const GeoZone *const twice = polygonZone({ { -200, -200 }, { 200, -200 }, { 200, 200 }, { -200, 200 }, { -100, -100 }, { 100, -100 }, { 100, 100 }, { -100, 100 } });
+    QVERIFY(twice->contains(origin));
+    const ZoneFences twiceFences = zoneFences(twice);
+    QCOMPARE(twiceFences.polygons.count(), 1);
+    const GeoZoneGeometry::LocalProjection projection(origin);
+    QVERIFY(!GeoZoneGeometry::ringContains(projection.toLocal(twiceFences.polygons.constFirst()), QPointF(0, 0), Qt::OddEvenFill));
+    // So the fence made of the zone's own boundary doesn't cover it
+    QVERIFY(!fencesCover(twiceFences, twice));
+    // Nor a zone around the middle whose boundary stays in the part enclosed once, through the crossing of the fence
+    const GeoZone *const around = polygonZone({ { 150, -150 }, { 150, 150 }, { -150, 150 }, { -400.0 / 3, 0 }, { -150, -150 } });
+    QVERIFY(around->contains(origin));
+    QVERIFY(!fencesCover(twiceFences, around));
+    // While it covers a zone in the part enclosed once
+    QVERIFY(fencesCover(twiceFences, polygonZone({ { 120, -30 }, { 180, -30 }, { 180, 30 }, { 120, 30 } })));
+    // A fence enclosing all of it once covers the zone
+    const GeoZone *const square = polygonZone({ { -210, -210 }, { 210, -210 }, { 210, 210 }, { -210, 210 } });
+    QVERIFY(fencesCover(zoneFences(square), twice));
+
+    // A boundary crossing itself like a figure eight encloses each part once, so its fence covers it
+    const GeoZone *const eight = polygonZone({ { -100, -100 }, { 100, 100 }, { 100, -100 }, { -100, 100 } });
+    QVERIFY(eight->contains(_offsetFrom(origin, 0, 50)));
+    QVERIFY(fencesCover(zoneFences(eight), eight));
+}
+
 void GeoZoneGeometryTest::_testFenceSelection()
 {
     using namespace GeoZoneFences;

@@ -64,16 +64,64 @@ ZoneFences zoneFences(const GeoZone *zone, double simplifyTolerance, bool circle
 
 namespace {
 
-/// @return true if the polygon lies within the fence polygon up to the tolerance, edges included. Fences are filled
-///         with the even-odd rule of the autopilots, so a fence crossing itself doesn't count as covering what it
-///         encloses twice.
-bool _polygonWithin(const QList<QGeoCoordinate> &polygon, const QList<QGeoCoordinate> &fence)
+/// @return Points in the areas the ring winds around an even number of times, each half the boundary tolerance beside
+///         a stretch of an edge between its crossings with the other edges. Zones include these areas, see
+///         GeoZoneGeometry::ringContains, while the even-odd rule of the autopilots leaves them out of a fence.
+///         Nothing for rings which don't cross themselves, and for those crossing like a figure eight, whose parts
+///         are each enclosed once.
+QList<QPointF> _openOverlaps(const QList<QPointF> &ring)
 {
-    if (polygon == fence) {
-        return true;
+    QList<QPointF> open;
+    if (GeoZoneGeometry::isSimple(ring)) {
+        return open;
     }
-    const GeoZoneGeometry::LocalProjection projection(fence.first());
-    const QList<QList<QPointF>> fenceRings = { projection.toLocal(fence) };
+    const auto cross = [](const QPointF &a, const QPointF &b) { return (a.x() * b.y()) - (a.y() * b.x()); };
+    constexpr double offset = boundaryTolerance / 2;
+    const qsizetype count = ring.count();
+    for (qsizetype i = 0; i < count; i++) {
+        const QPointF &a = ring[i];
+        const QPointF direction = ring[(i + 1) % count] - a;
+        const double length = std::hypot(direction.x(), direction.y());
+        if (!(length > 0)) {
+            continue;
+        }
+        // Where the other edges cross this one, as fractions of it
+        QList<double> cuts = { 0, 1 };
+        for (qsizetype j = 0; j < count; j++) {
+            const QPointF &c = ring[j];
+            const QPointF other = ring[(j + 1) % count] - c;
+            const double denominator = cross(direction, other);
+            if ((j == i) || (denominator == 0)) {
+                continue;
+            }
+            const double fraction = cross(c - a, other) / denominator;
+            const double otherFraction = cross(c - a, direction) / denominator;
+            if ((fraction > 0) && (fraction < 1) && (otherFraction >= 0) && (otherFraction <= 1)) {
+                cuts.append(fraction);
+            }
+        }
+        std::sort(cuts.begin(), cuts.end());
+        const QPointF normal(-direction.y() / length, direction.x() / length);
+        for (qsizetype cut = 1; cut < cuts.count(); cut++) {
+            if (((cuts[cut] - cuts[cut - 1]) * length) <= GeoZoneGeometry::kBoundaryTolerance) {
+                continue;
+            }
+            const QPointF middle = a + (direction * ((cuts[cut - 1] + cuts[cut]) / 2));
+            for (const double side : { -offset, offset }) {
+                const QPointF point = middle + (normal * side);
+                if (GeoZoneGeometry::ringContains(ring, point, Qt::WindingFill) && !GeoZoneGeometry::ringContains(ring, point, Qt::OddEvenFill)) {
+                    open.append(point);
+                }
+            }
+        }
+    }
+    return open;
+}
+
+/// @return true if the vertices and edges of the polygon are within the fence filled with the even-odd rule, or
+///         within the boundary tolerance of its ring
+bool _boundaryWithin(const QList<QGeoCoordinate> &polygon, const GeoZoneGeometry::LocalProjection &projection, const QList<QList<QPointF>> &fenceRings)
+{
     const QList<QPointF> &ring = fenceRings.first();
     const auto near = [&ring](const QPointF &point) {
         return GeoZoneGeometry::ringContains(ring, point, Qt::OddEvenFill) || (GeoZoneGeometry::distanceToRing(point, ring) <= boundaryTolerance);
@@ -100,6 +148,26 @@ bool _polygonWithin(const QList<QGeoCoordinate> &polygon, const QList<QGeoCoordi
         }
     }
     return true;
+}
+
+/// @return true if the polygon lies within the fence polygon up to the tolerance, edges included. Fences are filled
+///         with the even-odd rule of the autopilots, so a fence crossing itself doesn't cover what it encloses twice:
+///         neither a polygon reaching into such an area, nor one around it, nor the fence's own polygon.
+bool _polygonWithin(const QList<QGeoCoordinate> &polygon, const QList<QGeoCoordinate> &fence)
+{
+    const GeoZoneGeometry::LocalProjection projection(fence.first());
+    const QList<QList<QPointF>> fenceRings = { projection.toLocal(fence) };
+    const QList<QPointF> &ring = fenceRings.first();
+    // The boundary of the fence's own polygon is on the fence
+    if ((polygon != fence) && !_boundaryWithin(polygon, projection, fenceRings)) {
+        return false;
+    }
+    const QList<QPointF> open = _openOverlaps(ring);
+    if (open.isEmpty()) {
+        return true;
+    }
+    const QList<QPointF> polygonRing = projection.toLocal(polygon);
+    return std::none_of(open.cbegin(), open.cend(), [&polygonRing](const QPointF &point) { return GeoZoneGeometry::ringContains(polygonRing, point); });
 }
 
 bool _polygonWithinCircle(const QList<QGeoCoordinate> &polygon, const QGeoCircle &fence)
