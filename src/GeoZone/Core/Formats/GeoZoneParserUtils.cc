@@ -27,6 +27,11 @@ namespace {
 
 constexpr double kMetersPerDegree = 6371008.8 * M_PI / 180.0;
 
+/// Preferred language of localized texts for the parse running on this thread, see LanguageScope
+thread_local QString t_language;
+/// Cancel token of the parse running on this thread, see CancelScope
+thread_local const GeoZoneCancelToken *t_cancelToken = nullptr;
+
 bool _samePosition(const QPointF &a, const QPointF &b)
 {
     const double north = (b.y() - a.y()) * kMetersPerDegree;
@@ -124,34 +129,31 @@ RingProblem _normalizeRing(GeoZone::Ring &ring, bool outer, bool &selfIntersecti
 
 } // namespace
 
-/// Preferred language of localized texts for the parse running on this thread
-thread_local QString t_language;
-
 const QString &language()
 {
     return t_language;
 }
 
 LanguageScope::LanguageScope(const QString &language)
+    : _previous(t_language)
 {
     t_language = language.left(2).toLower();
 }
 
 LanguageScope::~LanguageScope()
 {
-    t_language.clear();
+    t_language = _previous;
 }
 
-thread_local const GeoZoneCancelToken *t_cancelToken = nullptr;
-
 CancelScope::CancelScope(const GeoZoneCancelToken &cancelToken)
+    : _previous(t_cancelToken)
 {
     t_cancelToken = &cancelToken;
 }
 
 CancelScope::~CancelScope()
 {
-    t_cancelToken = nullptr;
+    t_cancelToken = _previous;
 }
 
 bool cancelled()

@@ -24,6 +24,8 @@
 /// them geodesics add points on their great circles, see GeoZoneParserUtils::_densifyGreatCircles.
 class GeoZoneFormat
 {
+    Q_DISABLE_COPY_MOVE(GeoZoneFormat)
+
 public:
     virtual ~GeoZoneFormat() = default;
 
@@ -90,6 +92,10 @@ public:
 
     /// @return true for the response of a web feature service whose features are all filtered out
     static bool isEmptyWfsResponse(const QJsonObject &root);
+
+protected:
+    /// Formats are the instances of GEOZONE_REGISTER_FORMAT, used by pointer
+    GeoZoneFormat() = default;
 };
 
 /// Defines the instance of a format class for GeoZoneFormat::formats(). Formats don't add themselves while the

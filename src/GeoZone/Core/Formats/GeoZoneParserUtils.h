@@ -32,19 +32,35 @@ inline constexpr double kDuplicateVertexMeters = 0.01;      ///< Consecutive ver
 inline constexpr double kMinRingAreaSquareMeters = 1;       ///< Rings with less area are degenerate unless they cross themselves
 inline constexpr double kMaxPolygonLatitude = 89.9;         ///< Polygons reaching closer to a pole are rejected, about 11 km
 
-/// Sets the preferred language of localized texts for the parse running on this thread
 /// @return Code of the preferred language of the parse running on this thread, like "de", empty for English
 const QString &language();
 
-struct LanguageScope {
+/// Sets the preferred language of localized texts for the parse running on this thread, and sets the previous one
+/// again when it ends
+class LanguageScope
+{
+    Q_DISABLE_COPY_MOVE(LanguageScope)
+
+public:
     explicit LanguageScope(const QString &language);
     ~LanguageScope();
+
+private:
+    QString _previous;
 };
 
-/// Sets the cancel token of the parse running on this thread, which formats check between features
-struct CancelScope {
+/// Sets the cancel token of the parse running on this thread, which formats check between features, and sets the
+/// previous one again when it ends. The token must outlive the scope.
+class CancelScope
+{
+    Q_DISABLE_COPY_MOVE(CancelScope)
+
+public:
     explicit CancelScope(const GeoZoneCancelToken &cancelToken);
     ~CancelScope();
+
+private:
+    const GeoZoneCancelToken *_previous = nullptr;
 };
 
 /// @return true if the parse running on this thread was canceled

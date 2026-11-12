@@ -19,6 +19,8 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QIODevice>
 
+#include <type_traits>
+
 #include <zlib.h>
 
 using namespace GeoZoneTestHelpers;
@@ -2757,6 +2759,44 @@ void GeoZoneParserTest::_testParseCancel()
     QVERIFY(!loadResult.stored);
     QVERIFY(loadResult.result.zones.isEmpty());
     QVERIFY(!QFile::exists(store.path(job.storedFileName)));
+}
+
+void GeoZoneParserTest::_testParseScopes()
+{
+    // The language and the cancel token of a parse are those of its scope, the ones before it are set again after it
+    static_assert(!std::is_copy_constructible_v<GeoZoneParserUtils::LanguageScope> && !std::is_move_assignable_v<GeoZoneParserUtils::LanguageScope>);
+    static_assert(!std::is_copy_constructible_v<GeoZoneParserUtils::CancelScope> && !std::is_move_assignable_v<GeoZoneParserUtils::CancelScope>);
+    static_assert(!std::is_copy_assignable_v<GeoZoneFormat> && !std::is_move_assignable_v<GeoZoneFormat>);
+
+    QCOMPARE(GeoZoneParserUtils::language(), QString());
+    QVERIFY(!GeoZoneParserUtils::cancelled());
+    {
+        const GeoZoneParserUtils::LanguageScope outerLanguage(QStringLiteral("de-CH"));
+        const GeoZoneCancelToken cancelledToken;
+        cancelledToken.cancel();
+        const GeoZoneParserUtils::CancelScope outerCancel(cancelledToken);
+        QCOMPARE(GeoZoneParserUtils::language(), QStringLiteral("de"));
+        QVERIFY(GeoZoneParserUtils::cancelled());
+        {
+            const GeoZoneParserUtils::LanguageScope innerLanguage(QStringLiteral("FR"));
+            const GeoZoneCancelToken token;
+            const GeoZoneParserUtils::CancelScope innerCancel(token);
+            QCOMPARE(GeoZoneParserUtils::language(), QStringLiteral("fr"));
+            QVERIFY(!GeoZoneParserUtils::cancelled());
+        }
+        QCOMPARE(GeoZoneParserUtils::language(), QStringLiteral("de"));
+        QVERIFY(GeoZoneParserUtils::cancelled());
+
+        // A parse within the scopes has its own, and leaves those around it
+        GeoZoneParser::Result result;
+        QString errorString;
+        QVERIFY2(GeoZoneParser::parse(QJsonDocument(QJsonObject{ { "features", QJsonArray{ _circleFeature(QStringLiteral("Z"), QStringLiteral("PROHIBITED"), QGeoCoordinate(47, 8), 100) } } }).toJson(),
+                                      result, errorString), qPrintable(errorString));
+        QCOMPARE(GeoZoneParserUtils::language(), QStringLiteral("de"));
+        QVERIFY(GeoZoneParserUtils::cancelled());
+    }
+    QCOMPARE(GeoZoneParserUtils::language(), QString());
+    QVERIFY(!GeoZoneParserUtils::cancelled());
 }
 
 void GeoZoneParserTest::_testParseCacheRoundTrip_data()
