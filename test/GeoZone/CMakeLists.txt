@@ -92,6 +92,10 @@ qt_add_executable(GeoZoneCoreTest
     GeoZoneTestHelpers.h
 )
 
+# The helpers have a QObject for the tests in QGroundControl only, which the headless targets of this directory leave
+# out with GEOZONE_CORE_TEST: moc has nothing to generate for them
+set_source_files_properties(GeoZoneTestHelpers.h PROPERTIES SKIP_AUTOMOC ON)
+
 target_compile_definitions(GeoZoneCoreTest PRIVATE GEOZONE_CORE_TEST)
 target_link_libraries(GeoZoneCoreTest
     PRIVATE

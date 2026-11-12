@@ -110,8 +110,9 @@ struct ZoneOwner {
 
 /// Replaces the clock, the terrain and the QNH of GeoZoneEnvironment while in scope, so that tests don't depend on when
 /// and where they run. The clock stands still at the second it was created, or the time it is set to, until the test
-/// advances it. The terrain is unknown until set, the QNH standard. The previous hooks are restored when the workers
-/// are done.
+/// advances it. The terrain is unknown until set, the QNH standard. The hooks are replaced, and the previous ones
+/// restored, once the evaluations on the worker threads are done, since they read them: the test run ends if they
+/// don't finish within a minute.
 class ScopedEnvironment
 {
 public:
@@ -253,6 +254,8 @@ private:
 /// the client abandoned by closing the connection first, like aborted downloads.
 class TestFeedServer : public QTcpServer
 {
+    Q_OBJECT
+
 public:
     /// Answers a request instead of the defaults when it returns true
     using Handler = std::function<bool(const QByteArray &request, QByteArray &status, QByteArray &content, QByteArray &headers)>;

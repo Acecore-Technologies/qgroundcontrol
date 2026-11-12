@@ -17,6 +17,22 @@ GeoZone *ZoneOwner::add(const GeoZone::Data &data)
     return zones.last().data();
 }
 
+namespace {
+
+/// Replaces the hooks of GeoZoneEnvironment once the evaluations on the worker threads, which read them, are done:
+/// GeoZoneEnvironment::setHooks isn't thread safe. Workers still running after the timeout end the test run, since
+/// replacing the hooks under them is a data race and keeping the hooks of a test would make later tests wrong.
+void _setHooksWhenIdle(const GeoZoneEnvironment::Hooks &hooks)
+{
+    constexpr int timeoutMSecs = 60000;
+    if (!QThreadPool::globalInstance()->waitForDone(timeoutMSecs)) {
+        qFatal("Geozone test workers still run after %d s, the hooks of GeoZoneEnvironment can't be replaced", timeoutMSecs / 1000);
+    }
+    GeoZoneEnvironment::setHooks(hooks);
+}
+
+} // namespace
+
 ScopedEnvironment::ScopedEnvironment()
     : _saved(GeoZoneEnvironment::hooks())
 {
@@ -29,14 +45,14 @@ ScopedEnvironment::ScopedEnvironment()
         return state->terrain ? state->terrain(coordinate) : qQNaN();
     };
     hooks.qnhHPa = [state = _state]() { return state->qnhHPa.load(); };
-    GeoZoneEnvironment::setHooks(hooks);
+    // Evaluations of an earlier test may still use the hooks
+    _setHooksWhenIdle(hooks);
 }
 
 ScopedEnvironment::~ScopedEnvironment()
 {
     // Evaluations on worker threads may still use the hooks
-    (void) QThreadPool::globalInstance()->waitForDone(10000);
-    GeoZoneEnvironment::setHooks(_saved);
+    _setHooksWhenIdle(_saved);
 }
 
 void ScopedEnvironment::setTerrain(const Terrain &terrain)
