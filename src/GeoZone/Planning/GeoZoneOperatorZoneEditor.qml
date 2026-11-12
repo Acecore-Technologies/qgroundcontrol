@@ -228,6 +228,7 @@ Item {
                 Layout.fillWidth:       true
                 Layout.maximumWidth:    ScreenTools.defaultFontPixelWidth * 40
                 wrapMode:               Text.WordWrap
+                textFormat:             Text.PlainText
                 color:                  qgcPal.warningText
                 visible:                text !== ""
             }

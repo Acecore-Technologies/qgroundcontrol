@@ -49,7 +49,8 @@ GeoZoneOperatorZones::GeoZoneOperatorZones(GeoZoneSourceRepository *repository, 
     , _polygon(new QGCMapPolygon(this))
     , _circle(new QGCMapCircle(this))
 {
-    (void) connect(_repository, &GeoZoneSourceRepository::sourceRemoved, this, &GeoZoneOperatorZones::_sourceRemoved);
+    // Emitted when a source was removed or its zones were replaced
+    (void) connect(_repository, &GeoZoneSourceRepository::sourceChanged, this, &GeoZoneOperatorZones::_sourceChanged);
     load();
 }
 
@@ -65,16 +66,82 @@ QString GeoZoneOperatorZones::fileName() const
 
 void GeoZoneOperatorZones::load()
 {
-    QFile file(fileName());
-    if (!file.open(QIODevice::ReadOnly)) {
-        return;
+    const QString path = fileName();
+    QList<GeoZone::Data> zones;
+    QString loadError;
+    QFile file(path);
+    // No file, or one emptied instead of deleted, is no zones
+    if (file.exists() && (file.size() > 0)) {
+        GeoZoneParser::Result result;
+        QString errorString;
+        if (!file.open(QIODevice::ReadOnly)) {
+            errorString = file.errorString();
+        } else {
+            const QByteArray document = file.readAll();
+            if (file.error() != QFileDevice::NoError) {
+                errorString = file.errorString();
+            } else if (GeoZoneParser::parse(document, result, errorString)) {
+                zones = result.zones;
+            } else if (errorString.isEmpty()) {
+                errorString = tr("it is not a geozone file");
+            }
+        }
+        if (!errorString.isEmpty()) {
+            loadError = tr("The zones you drew can't be read from %1: %2. They aren't shown or checked. The file is kept, new zones are saved beside it.")
+                            .arg(path, errorString);
+        }
     }
-    GeoZoneParser::Result result;
-    QString errorString;
-    if (GeoZoneParser::parse(file.readAll(), result, errorString)) {
-        _zones = result.zones;
+    const bool changed = !_zones.isEmpty() || !zones.isEmpty();
+    _zones = zones;
+    if (changed) {
         emit zonesChanged();
     }
+    _setLoadError(loadError);
+}
+
+void GeoZoneOperatorZones::_setLoadError(const QString &loadError)
+{
+    if (loadError != _loadError) {
+        _loadError = loadError;
+        emit loadErrorChanged();
+    }
+}
+
+bool GeoZoneOperatorZones::_removeFile(QString &errorString)
+{
+    QFile file(fileName());
+    if (!file.exists() || file.remove()) {
+        return true;
+    }
+    // An empty file has no zones either, see load
+    const QString removeError = file.errorString();
+    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return true;
+    }
+    errorString = tr("The zones can't be removed from %1: %2").arg(file.fileName(), removeError);
+    return false;
+}
+
+bool GeoZoneOperatorZones::_setUnreadableFileAside(QString &errorString)
+{
+    const QString path = fileName();
+    if (!QFile::exists(path)) {
+        return true;
+    }
+    const QFileInfo info(path);
+    const QString stamp = GeoZoneEnvironment::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    for (int attempt = 0; attempt < 100; attempt++) {
+        const QString suffix = (attempt == 0) ? stamp : QStringLiteral("%1-%2").arg(stamp).arg(attempt);
+        const QString aside = info.dir().filePath(QStringLiteral("%1.unreadable-%2.%3").arg(info.completeBaseName(), suffix, info.suffix()));
+        if (!QFile::exists(aside)) {
+            if (QFile::rename(path, aside)) {
+                return true;
+            }
+            break;
+        }
+    }
+    errorString = tr("The zones can't be saved: the file %1, which couldn't be read, can't be moved out of the way.").arg(path);
+    return false;
 }
 
 QVariantList GeoZoneOperatorZones::zones() const
@@ -224,6 +291,11 @@ bool GeoZoneOperatorZones::setZones(const QList<GeoZone::Data> &zones, QString &
 {
     const QString path = fileName();
     if (zones.isEmpty()) {
+        // The file first: zones left in it would be listed again at the next start, without their source. A file which
+        // couldn't be read has none of the zones to remove, and is kept.
+        if (_loadError.isEmpty() && !_removeFile(errorString)) {
+            return false;
+        }
         _saving = true;
         for (qsizetype i = 0; i < _repository->sources().count(); i++) {
             if (_repository->sources()[i]->key() == path) {
@@ -232,9 +304,10 @@ bool GeoZoneOperatorZones::setZones(const QList<GeoZone::Data> &zones, QString &
             }
         }
         _saving = false;
-        (void) QFile::remove(path);
-        _zones.clear();
-        emit zonesChanged();
+        if (!_zones.isEmpty()) {
+            _zones.clear();
+            emit zonesChanged();
+        }
         return true;
     }
 
@@ -246,6 +319,13 @@ bool GeoZoneOperatorZones::setZones(const QList<GeoZone::Data> &zones, QString &
         return false;
     }
 
+    // Never over a file which couldn't be read, whose zones would be lost
+    if (!_loadError.isEmpty()) {
+        if (!_setUnreadableFileAside(errorString)) {
+            return false;
+        }
+        _setLoadError(QString());
+    }
     QSaveFile file(path);
     if (!QDir().mkpath(QFileInfo(path).absolutePath()) || !file.open(QIODevice::WriteOnly) || (file.write(document) != document.size()) || !file.commit()) {
         errorString = tr("The zones can't be saved to %1: %2").arg(path, file.errorString());
@@ -314,14 +394,42 @@ GeoZone::Data GeoZoneOperatorZones::zoneFromProperties(const QVariantMap &proper
     return zone;
 }
 
-void GeoZoneOperatorZones::_sourceRemoved()
+void GeoZoneOperatorZones::_sourceChanged(GeoZoneSource *source)
 {
-    if (_saving || _zones.isEmpty() || _repository->hasSource(fileName())) {
+    // Only the source of the zones, once it is removed: the removal of another source, like before the source of the
+    // zones is loaded at the start, must leave the file
+    if (_saving || !source || (source->key() != fileName()) || _repository->sources().contains(source)) {
+        return;
+    }
+    // A file which couldn't be read is kept, see load
+    if (!_loadError.isEmpty()) {
         return;
     }
     // The user removed the source, with the zones
     cancelEdit();
-    (void) QFile::remove(fileName());
-    _zones.clear();
-    emit zonesChanged();
+    QString errorString;
+    if (!_removeFile(errorString)) {
+        // The zones left in the file stay loaded, rather than come back at the next start without their source
+        emit failed(errorString);
+        QMetaObject::invokeMethod(this, &GeoZoneOperatorZones::_reloadSource, Qt::QueuedConnection);
+        return;
+    }
+    if (!_zones.isEmpty()) {
+        _zones.clear();
+        emit zonesChanged();
+    }
+}
+
+void GeoZoneOperatorZones::_reloadSource()
+{
+    if (_zones.isEmpty() || _repository->hasSource(fileName())) {
+        return;
+    }
+    QString errorString;
+    _saving = true;
+    const bool loaded = _repository->loadFile(fileName(), errorString);
+    _saving = false;
+    if (!loaded) {
+        emit failed(errorString);
+    }
 }

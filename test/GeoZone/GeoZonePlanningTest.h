@@ -45,6 +45,8 @@ private slots:
     void _testPlannedStartPerPlan();
     void _testProfileBands();
     void _testOperatorZones();
+    void _testOperatorZonesFile();
+    void _testOperatorZonesRemovalFailure();
     void _testMapModel();
     void _testMapModelShapeLimit();
     void _testMapModelLabels();

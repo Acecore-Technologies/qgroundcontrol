@@ -33,6 +33,10 @@
 
 #include <algorithm>
 
+#ifdef Q_OS_UNIX
+#include <unistd.h>
+#endif
+
 using namespace GeoZoneTestHelpers;
 
 namespace {
@@ -1410,6 +1414,149 @@ void GeoZonePlanningTest::_testOperatorZones()
     restarted.repository()->clear();
     QVERIFY(zones->zones().isEmpty());
     QVERIFY(!QFile::exists(zones->fileName()));
+}
+
+void GeoZonePlanningTest::_testOperatorZonesFile()
+{
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoRectangle view(center.atDistanceAndAzimuth(4000, 315), center.atDistanceAndAzimuth(4000, 135));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto contents = [](const QString &fileName) {
+        QFile file(fileName);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const auto write = [](const QString &fileName, const QByteArray &data) {
+        QFile file(fileName);
+        return QDir().mkpath(QFileInfo(fileName).absolutePath()) && file.open(QIODevice::WriteOnly) && (file.write(data) == data.size());
+    };
+
+    // The zones of a previous session, listed from their file before the stored sources are loaded
+    const QString storage = dir.filePath(QStringLiteral("storage"));
+    QString fileName;
+    {
+        GeoZoneManager manager(storage);
+        manager.operatorZones()->startCircle(view);
+        QVERIFY(manager.operatorZones()->saveEdit(manager.operatorZones()->editProperties()));
+        fileName = manager.operatorZones()->fileName();
+    }
+    const QByteArray saved = contents(fileName);
+    QVERIFY(!saved.isEmpty());
+    {
+        GeoZoneManager manager(storage);
+        GeoZoneOperatorZones *const zones = manager.operatorZones();
+        QCOMPARE(zones->zones().count(), 1);
+        QVERIFY(zones->loadError().isEmpty());
+        QVERIFY(!manager.repository()->hasSource(fileName));
+        // Removing another source meanwhile leaves the zones and their file
+        QString errorString;
+        const QString other = _writeFeatures(dir, QStringLiteral("other.json"), QJsonArray{ _circleFeature(QStringLiteral("O"), QStringLiteral("PROHIBITED"), center, 300) });
+        QVERIFY2(manager.repository()->loadFile(other, errorString), qPrintable(errorString));
+        QCOMPARE(manager.repository()->sources().count(), 1);
+        manager.repository()->removeSource(0);
+        QVERIFY(manager.repository()->sources().isEmpty());
+        QCOMPARE(zones->zones().count(), 1);
+        QCOMPARE(contents(fileName), saved);
+    }
+
+    // A file which can't be read is told, and kept beside the zones saved next
+    const QString unreadableStorage = dir.filePath(QStringLiteral("unreadable"));
+    const QString unreadable = QDir(unreadableStorage).filePath(QStringLiteral("operator/my-zones.json"));
+    const QByteArray damaged = saved.first(saved.size() / 2);
+    QVERIFY(write(unreadable, damaged));
+    {
+        GeoZoneManager manager(unreadableStorage);
+        GeoZoneOperatorZones *const zones = manager.operatorZones();
+        QCOMPARE(QFileInfo(zones->fileName()), QFileInfo(unreadable));
+        QVERIFY(zones->zones().isEmpty());
+        QVERIFY2(zones->loadError().contains(QStringLiteral("can't be read")) && zones->loadError().contains(zones->fileName()), qPrintable(zones->loadError()));
+        // Nothing to remove, the file stays
+        QString errorString;
+        QVERIFY(zones->setZones({}, errorString));
+        QCOMPARE(contents(unreadable), damaged);
+
+        QSignalSpy loadErrorSpy(zones, &GeoZoneOperatorZones::loadErrorChanged);
+        zones->startCircle(view);
+        QVERIFY(zones->saveEdit(zones->editProperties()));
+        QCOMPARE(zones->zones().count(), 1);
+        QCOMPARE(manager.zoneCount(), 1);
+        QVERIFY(zones->loadError().isEmpty());
+        QCOMPARE(loadErrorSpy.count(), 1);
+        const QDir operatorDir = QFileInfo(unreadable).dir();
+        const QStringList kept = operatorDir.entryList({ QStringLiteral("my-zones.unreadable-*.json") }, QDir::Files);
+        QCOMPARE(kept.count(), 1);
+        QCOMPARE(contents(operatorDir.filePath(kept.constFirst())), damaged);
+        QVERIFY(contents(unreadable) != damaged);
+    }
+
+    // An empty file has no zones, and isn't a file which can't be read
+    const QString emptyStorage = dir.filePath(QStringLiteral("empty"));
+    QVERIFY(write(QDir(emptyStorage).filePath(QStringLiteral("operator/my-zones.json")), QByteArray()));
+    GeoZoneManager manager(emptyStorage);
+    QVERIFY(manager.operatorZones()->zones().isEmpty());
+    QVERIFY2(manager.operatorZones()->loadError().isEmpty(), qPrintable(manager.operatorZones()->loadError()));
+}
+
+void GeoZonePlanningTest::_testOperatorZonesRemovalFailure()
+{
+#ifndef Q_OS_UNIX
+    QSKIP("Needs the file permissions of Unix");
+#else
+    if (::geteuid() == 0) {
+        QSKIP("The administrator can delete files in read-only directories");
+    }
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoRectangle view(center.atDistanceAndAzimuth(4000, 315), center.atDistanceAndAzimuth(4000, 135));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString storage = dir.filePath(QStringLiteral("storage"));
+    GeoZoneManager manager(storage);
+    GeoZoneOperatorZones *const zones = manager.operatorZones();
+    zones->startCircle(view);
+    QVERIFY(zones->saveEdit(zones->editProperties()));
+    const QString fileName = zones->fileName();
+    const QString operatorDir = QFileInfo(fileName).absolutePath();
+    const QFileDevice::Permissions readOnly = QFileDevice::ReadOwner | QFileDevice::ExeOwner;
+    const QFileDevice::Permissions writable = readOnly | QFileDevice::WriteOwner;
+    // The temporary directory is deleted with its contents
+    const auto restore = qScopeGuard([&operatorDir, &fileName, writable]() {
+        (void) QFile::setPermissions(operatorDir, writable);
+        (void) QFile::setPermissions(fileName, writable);
+    });
+
+    // Neither deleted nor emptied: the zone stays, listed and loaded, and the pilot is told
+    QVERIFY(QFile::setPermissions(operatorDir, readOnly));
+    QVERIFY(QFile::setPermissions(fileName, QFileDevice::ReadOwner));
+    QSignalSpy failedSpy(zones, &GeoZoneOperatorZones::failed);
+    QVERIFY(!zones->removeZone(0));
+    QCOMPARE(failedSpy.count(), 1);
+    QVERIFY2(failedSpy[0][0].toString().contains(QStringLiteral("can't be removed")), qPrintable(failedSpy[0][0].toString()));
+    QCOMPARE(zones->zones().count(), 1);
+    QCOMPARE(manager.zoneCount(), 1);
+    QVERIFY(QFileInfo(fileName).size() > 0);
+
+    // Nor when the source is removed in the settings: it is loaded again, with the zones left in the file
+    QVERIFY(manager.repository()->hasSource(fileName));
+    manager.repository()->clear();
+    QCOMPARE(failedSpy.count(), 2);
+    QCOMPARE(zones->zones().count(), 1);
+    QTRY_VERIFY(manager.repository()->hasSource(fileName));
+    QCOMPARE(manager.zoneCount(), 1);
+
+    // A file which can't be deleted is emptied, so that its zone doesn't come back at the next start
+    QVERIFY(QFile::setPermissions(fileName, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    QVERIFY(zones->removeZone(0));
+    QCOMPARE(failedSpy.count(), 2);
+    QVERIFY(zones->zones().isEmpty());
+    QVERIFY(!manager.repository()->hasSource(fileName));
+    QVERIFY(QFile::exists(fileName));
+    QCOMPARE(QFileInfo(fileName).size(), 0);
+    GeoZoneManager restarted(storage);
+    QVERIFY(restarted.operatorZones()->zones().isEmpty());
+    QVERIFY(restarted.operatorZones()->loadError().isEmpty());
+#endif
 }
 
 void GeoZonePlanningTest::_testMapModel()
