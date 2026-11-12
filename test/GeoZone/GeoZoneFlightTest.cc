@@ -1385,6 +1385,76 @@ void GeoZoneFlightTest::_testPreflightPermits()
     QTRY_COMPARE(check.permit().state, Check::NotApplicable);
     manager.repository()->clear();
 }
+
+void GeoZoneFlightTest::_testPreflightCheckUpdates()
+{
+    using Check = GeoZonePreflightCheck;
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 6, 15), QTime(10, 0)));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    const QGeoCoordinate center(47, 8);
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("A"), QStringLiteral("REQ_AUTHORISATION"), center, 300),
+    }), errorString), qPrintable(errorString));
+    const auto addMission = [&center](PlanMasterController &masterController) {
+        MissionController *const missionController = masterController.missionController();
+        for (const QGeoCoordinate &coordinate : { center.atDistanceAndAzimuth(1000, 270), center.atDistanceAndAzimuth(1000, 90) }) {
+            SimpleMissionItem *const item = qobject_cast<SimpleMissionItem*>(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+            if (item) {
+                item->setAltitudeMode(QGroundControlQmlGlobal::AltitudeModeAbsolute);
+                item->altitude()->setRawValue(500);
+            }
+        }
+    };
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    addMission(masterController);
+    QCOMPARE(masterController.missionController()->visualItems()->count(), 3);
+    GeoZoneMonitor monitor(&manager);
+    Check check(&manager);
+    check.setMonitor(&monitor);
+    check.setPlanController(&masterController);
+    QTRY_COMPARE(check.permitZones().count(), 1);
+
+    // The zones listed for their permits aren't kept once they are about to be deleted
+    QSignalSpy itemsSpy(&check, &Check::itemsChanged);
+    manager.repository()->clear();
+    QVERIFY(itemsSpy.count() >= 1);
+    QVERIFY(check.permitZones().isEmpty());
+    QTRY_COMPARE(check.permit().state, Check::NotApplicable);
+
+    // The mission item names the planned start, also when it changes without changing the zones entered
+    QTRY_COMPARE(check.mission().state, Check::Passed);
+    QVERIFY2(check.mission().text.contains(QStringLiteral("at any time, without a planned start")), qPrintable(check.mission().text));
+    manager.planning()->setPlannedStart(environment.now().addSecs(3600));
+    QTRY_VERIFY2_WITH_TIMEOUT(check.mission().text.contains(QStringLiteral("for the planned start")), qPrintable(check.mission().text), 5000);
+    manager.planning()->setPlannedStart(QDateTime());
+    QTRY_VERIFY(check.mission().text.contains(QStringLiteral("at any time, without a planned start")));
+
+    // Another plan and another monitor replace the ones before, which no longer update the check
+    PlanMasterController otherController;
+    otherController.setFlyView(false);
+    otherController.start();
+    GeoZoneMonitor otherMonitor(&manager);
+    check.setPlanController(&otherController);
+    check.setMonitor(&otherMonitor);
+    QTRY_COMPARE(check.mission().state, Check::NotApplicable);
+    itemsSpy.clear();
+    masterController.missionController()->removeAll();
+    QTest::qWait(600);
+    QCOMPARE(itemsSpy.count(), 0);
+    QCOMPARE(check.mission().state, Check::NotApplicable);
+    check.setPlanController(&masterController);
+    addMission(masterController);
+    QTRY_COMPARE(check.mission().state, Check::Passed);
+    check.setPlanController(nullptr);
+    check.setMonitor(nullptr);
+}
+
 void GeoZoneFlightTest::_testArduPilotTakeoff()
 {
     const ScopedEnvironment environment;

@@ -288,6 +288,16 @@ void GeoZoneFenceWarning::setConfig(const Config &config)
     _enabledChanged();
 }
 
+void GeoZoneFenceWarning::setWarningTime(double seconds)
+{
+    if (seconds > 0) {
+        _warningTime = seconds;
+    } else if (_warningTime != defaultWarningTime) {
+        qCWarning(GeoZoneMonitorLog) << "Geofence warning time" << seconds << "ignored, using" << defaultWarningTime << "s";
+        _warningTime = defaultWarningTime;
+    }
+}
+
 void GeoZoneFenceWarning::_enabledChanged()
 {
     emit configChanged();

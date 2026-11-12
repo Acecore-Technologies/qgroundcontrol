@@ -1242,6 +1242,15 @@ void GeoZoneMonitorTest::_testFenceTakeControl()
     warning.setConfig(config);
     QVERIFY(!warning.canTakeControl());
 
+    // A warning time which isn't positive, like the one of a profile with both of its times at 0, isn't taken
+    warning.setWarningTime(12);
+    QCOMPARE(warning.warningTime(), 12.0);
+    for (const double seconds : { 0.0, -3.0, qQNaN() }) {
+        warning.setWarningTime(seconds);
+        QCOMPARE(warning.warningTime(), Warning::defaultWarningTime);
+        warning.setWarningTime(12);
+    }
+
     // The pilot disabling the fence shows in the checklist until it is enabled again
     GeoZonePreflightCheck::FenceInput input;
     QCOMPARE(GeoZonePreflightCheck::fenceItem(input).state, GeoZonePreflightCheck::NotApplicable);

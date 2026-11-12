@@ -139,7 +139,8 @@ public:
     /// Seconds before the predicted breach the warning comes: the pilot reaction time of the vehicle's alert profile
     /// (EN 4709-003 Annex A) and its fence warning margin, see GeoZoneAlertThresholds::Profile
     double warningTime() const { return _warningTime; }
-    void setWarningTime(double seconds) { _warningTime = seconds; }
+    /// Times which aren't positive, like those of a profile with both at 0, would end the warning: they are ignored
+    void setWarningTime(double seconds);
 
     /// Evaluates the position of GLOBAL_POSITION_INT messages, at most every minEvaluateIntervalMSecs, with the
     /// velocity the vehicle reports or, when it reports none, estimated from its positions. Follows whether an

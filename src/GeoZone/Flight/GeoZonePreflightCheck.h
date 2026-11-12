@@ -168,6 +168,8 @@ signals:
 private:
     void _connectPlan();
     void _connectVehicle();
+    /// Forgets the zones kept between updates, which are about to be deleted
+    void _forgetZones();
     /// Follows the monitor of the vehicle, which may be added after the vehicle
     void _connectMonitor();
     GeoZoneVehicleMonitor *_vehicleMonitor() const;
@@ -176,9 +178,11 @@ private:
     GeoZoneManager *_manager = nullptr;
     GeoZoneMissionCheck *_missionCheck = nullptr;
     QPointer<PlanMasterController> _planController;
+    QObject *_planConnections = nullptr;        ///< Receiver of the signals of the plan controller and its mission controller, replaced to disconnect them
     QPointer<Vehicle> _vehicle;
-    QObject *_vehicleConnections = nullptr;     ///< Receiver of the vehicle's signals, replaced to disconnect them
+    QObject *_vehicleConnections = nullptr;     ///< Receiver of the vehicle's signals
     QPointer<GeoZoneMonitor> _monitor;
+    QObject *_monitoringConnections = nullptr;  ///< Receiver of the signals of the monitor, its awareness and its permits
     QObject *_monitorConnections = nullptr;     ///< Receiver of the signals of the vehicle's monitor
     QTimer _updateTimer;
 

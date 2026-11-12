@@ -79,6 +79,9 @@ GeoZonePreflightCheck::GeoZonePreflightCheck(GeoZoneManager *manager, QObject *p
 
     (void) connect(_missionCheck, &GeoZoneMissionCheck::zonesChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     (void) connect(_manager, &GeoZoneManager::zonesChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
+    (void) connect(_manager, &GeoZoneManager::zonesAboutToChange, this, &GeoZonePreflightCheck::_forgetZones);
+    // The text of the mission item names the planned start
+    (void) connect(_manager->planning(), &GeoZonePlanning::plannedStartChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     (void) connect(_manager->repository(), &GeoZoneSourceRepository::validityWarningChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     (void) connect(GeoZoneSettings::instance()->qnhHPa(), &Fact::rawValueChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
     RemoteIDSettings *const remoteIdSettings = SettingsManager::instance()->remoteIDSettings();
@@ -98,9 +101,6 @@ void GeoZonePreflightCheck::setPlanController(PlanMasterController *planControll
     if (planController == _planController) {
         return;
     }
-    if (_planController) {
-        (void) disconnect(_planController, nullptr, this, nullptr);
-    }
     _planController = planController;
     _connectPlan();
     emit planControllerChanged();
@@ -108,13 +108,26 @@ void GeoZonePreflightCheck::setPlanController(PlanMasterController *planControll
 
 void GeoZonePreflightCheck::_connectPlan()
 {
+    // Also ends the connections to the mission controller of the plan controller before
+    delete _planConnections;
+    _planConnections = new QObject(this);
     _missionCheck->setMissionController(_planController ? _planController->missionController() : nullptr);
     _missionCheck->setGeoFenceController(_planController ? _planController->geoFenceController() : nullptr);
     if (_planController) {
-        (void) connect(_planController, &PlanMasterController::managerVehicleChanged, this, &GeoZonePreflightCheck::_connectVehicle);
-        (void) connect(_planController->missionController(), &MissionController::visualItemsChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
+        (void) connect(_planController, &PlanMasterController::managerVehicleChanged, _planConnections, [this]() { _connectVehicle(); });
+        (void) connect(_planController->missionController(), &MissionController::visualItemsChanged, _planConnections, [this]() { _scheduleUpdate(); });
     }
     _connectVehicle();
+}
+
+void GeoZonePreflightCheck::_forgetZones()
+{
+    if (_permitZones.isEmpty()) {
+        return;
+    }
+    // Listed again by the update the changed zones schedule
+    _permitZones.clear();
+    emit itemsChanged();
 }
 
 void GeoZonePreflightCheck::_connectVehicle()
@@ -143,15 +156,15 @@ void GeoZonePreflightCheck::setMonitor(GeoZoneMonitor *monitor)
     if (monitor == _monitor) {
         return;
     }
-    if (_monitor) {
-        (void) disconnect(_monitor, nullptr, this, nullptr);
-    }
+    // Also ends the connections to the awareness and the permits of the monitor before
+    delete _monitoringConnections;
+    _monitoringConnections = new QObject(this);
     _monitor = monitor;
     if (_monitor) {
-        (void) connect(_monitor, &GeoZoneMonitor::activeMonitorChanged, this, &GeoZonePreflightCheck::_connectMonitor);
-        (void) connect(_monitor, &GeoZoneMonitor::monitoringChanged, this, &GeoZonePreflightCheck::_connectMonitor);
-        (void) connect(_monitor->awareness(), &GeoZoneAwareness::changed, this, &GeoZonePreflightCheck::_scheduleUpdate);
-        (void) connect(_monitor->permits(), &GeoZonePermits::countChanged, this, &GeoZonePreflightCheck::_scheduleUpdate);
+        (void) connect(_monitor, &GeoZoneMonitor::activeMonitorChanged, _monitoringConnections, [this]() { _connectMonitor(); });
+        (void) connect(_monitor, &GeoZoneMonitor::monitoringChanged, _monitoringConnections, [this]() { _connectMonitor(); });
+        (void) connect(_monitor->awareness(), &GeoZoneAwareness::changed, _monitoringConnections, [this]() { _scheduleUpdate(); });
+        (void) connect(_monitor->permits(), &GeoZonePermits::countChanged, _monitoringConnections, [this]() { _scheduleUpdate(); });
     }
     _connectMonitor();
 }
