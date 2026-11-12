@@ -30,7 +30,6 @@ ColumnLayout {
     QGCLabel { text: qsTr("Sources (%1)").arg(root._geoZoneManager.sources.count) }
 
     QGCListView {
-        id:                     sourceList
         Layout.fillWidth:       true
         Layout.preferredHeight: Math.min(contentHeight, root.maxListHeight)
         implicitWidth:          ScreenTools.defaultFontPixelWidth * 30
@@ -58,16 +57,18 @@ ColumnLayout {
                 textFormat:         Text.PlainText
                 opacity:            sourceRow.object.enabled ? 1 : 0.5
 
-                MouseArea {
-                    id:                 labelMouseArea
-                    anchors.fill:       parent
-                    hoverEnabled:       true
-                    onClicked:          sourceRow.object.enabled = !sourceRow.object.enabled
-
-                    ToolTip.visible:    containsMouse && sourceLabel.truncated
-                    ToolTip.text:       sourceLabel.text
-                    ToolTip.delay:      500
+                // Handlers rather than a mouse area, which would keep a drag over the name from scrolling the list
+                TapHandler {
+                    onTapped: sourceRow.object.enabled = !sourceRow.object.enabled
                 }
+
+                HoverHandler {
+                    id: labelHover
+                }
+
+                ToolTip.visible:    labelHover.hovered && sourceLabel.truncated
+                ToolTip.text:       sourceLabel.text
+                ToolTip.delay:      500
             }
         }
     }
