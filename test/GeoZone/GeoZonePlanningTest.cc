@@ -579,6 +579,12 @@ void GeoZonePlanningTest::_testAuthorisations()
              qPrintable(authorisations->authorisationOf(zoneInfo)[QStringLiteral("statusText")].toString()));
     QTRY_COMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
     QVERIFY(check.zones(GeoZoneMissionCheck::Crossed).isEmpty());
+    // The check on this thread, like before an upload, checks the flight against the scope of the authorisation too,
+    // so that the zone isn't reported as crossed and the plan keeps the authorisation
+    check.update();
+    QCOMPARE(check.zones(GeoZoneMissionCheck::Authorised).count(), 1);
+    QVERIFY2(check.zones(GeoZoneMissionCheck::Crossed).isEmpty(), qPrintable(check.warningText()));
+    QVERIFY(check.settled());
     planJson = QJsonObject();
     GeoZonePlanData::save(&masterController, planJson, &manager);
     QCOMPARE(planJson[QString(GeoZonePlanData::jsonKey)].toObject()[QStringLiteral("authorisations")].toArray()[0].toObject()[QStringLiteral("area")].toArray().count(), 4);

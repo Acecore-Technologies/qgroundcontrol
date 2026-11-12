@@ -17,14 +17,16 @@
 #include <QtPositioning/QGeoCoordinate>
 #include <QtPositioning/QGeoRectangle>
 
+#include <memory>
+
 #include "GeoZone.h"
+#include "GeoZoneCatalog.h"
 #include "GeoZoneInfo.h"
 #include "GeoZoneMissionPath.h"
 #include "GeoZonePlanAudit.h"
 
 class GeoFenceController;
 class GeoZoneAuthorisations;
-class GeoZoneCatalog;
 class GeoZoneManager;
 class GeoZoneMissionWorker;
 class GeoZoneSource;
@@ -189,13 +191,29 @@ public:
         QHash<const GeoZone*, QString> scopeIssues;
     };
 
+    /// What the evaluation of a planned flight needs, copied on the GUI thread so that it can run on another one
+    struct Inputs {
+        GeoZoneCatalog catalog;
+        GeoZoneMissionPath path;
+        QDateTime start;    ///< Of the planned flight, invalid to check the zones whatever their schedule
+        QDateTime end;
+        /// Copy of the operator's authorisations, which change on the GUI thread. Without them the authorisations
+        /// limiting the area or altitude aren't checked, and their zones count as crossed.
+        std::shared_ptr<const GeoZoneAuthorisations> authorisations;
+    };
+
+    /// @return What the checks of the planned flight of the controller's mission evaluate, on this thread or another:
+    ///         the manager's zones, planned start and authorisations with the mission's path. Without side effects.
+    static Inputs inputs(const GeoZoneManager *manager, MissionController *missionController);
+
     /// @return Zones the path or its areas enter whatever their authorisations, for a flight from start to end or at
     ///         any time without start, with the scope issues of the authorisations. Can run on any thread with copies
     ///         of the catalog and the authorisations.
     static Evaluation evaluate(const GeoZoneCatalog &catalog, const GeoZoneMissionPath &path, const QDateTime &start = QDateTime(),
                                const QDateTime &end = QDateTime(), const GeoZoneAuthorisations *authorisations = nullptr);
-    /// @return The evaluation of the planned flight of the controller's mission with the manager's zones and planned
-    ///         start, on the calling thread without side effects, like setting the area of interest
+    static Evaluation evaluate(const Inputs &inputs);
+    /// @return The evaluation of the planned flight of the controller's mission with the manager's zones, planned
+    ///         start and authorisations, on the calling thread without side effects, like setting the area of interest
     static Evaluation evaluatePlan(const GeoZoneManager *manager, MissionController *missionController);
 
     /// @return The zones of the evaluation by how they apply during its flight, unfenced ones only with a fence
@@ -226,6 +244,8 @@ private:
     void _connectRallyPoints();
     /// Connects the return parameters of the vehicle, see GeoZoneReturnModel::parameterNames
     void _connectVehicle();
+    /// @return The inputs of the check of the current mission, see inputs, whose area becomes the area of interest
+    Inputs _currentInputs();
     /// Evaluates the mission path on another thread, the result is dropped when the mission or zones change meanwhile
     void _updateConcurrently();
     /// Sorts the zones on the path by the policies of the planned flight
