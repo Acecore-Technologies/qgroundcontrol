@@ -474,8 +474,7 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
 
     // Not about a vehicle, so neither spoken, repeated nor approved
     for (const AlertEvent &event : std::as_const(entries)) {
-        _alertSubjects.insert(event.id, AlertSubject{ 0, event, false });
-        (void) _alertSubjects.remove(event.id - maxActionAlerts);
+        _keepSubject(AlertSubject{ 0, event, false });
         emit alertEvent(event);
         const int severity = trafficSeverity + GeoZoneAlertLevel::severity(event.level, GeoZone::restrictionSeverity(event.restriction));
         emit alert(event.message, severity, event.id);
@@ -653,8 +652,7 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
     }
     const int severity = GeoZoneAlertLevel::severity(event.level, GeoZone::restrictionSeverity(event.restriction));
     const bool asks = zoneAlert && asksPermission(event.restriction) && !permitted;
-    _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event, asks, GeoZonePermits::applies(zone) ? GeoZonePermits::key(zone) : QString() });
-    (void) _alertSubjects.remove(event.id - maxActionAlerts);
+    _keepSubject(AlertSubject{ monitor->key(), event, asks, GeoZonePermits::applies(zone) ? GeoZonePermits::key(zone) : QString() });
     emit alertEvent(event);
     if (permitted) {
         _alertHistory->acknowledgeAlert(event.id);
@@ -894,8 +892,7 @@ void GeoZoneMonitor::_raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const 
     event.message = _labelled(monitor->vehicleId(), alertMessage(event, event.zoneName, QString()));
     qCDebug(GeoZoneMonitorLog) << event.message;
     const int severity = GeoZoneAlertLevel::severity(level, 0);
-    _alertSubjects.insert(event.id, AlertSubject{ monitor->key(), event, false });
-    (void) _alertSubjects.remove(event.id - maxActionAlerts);
+    _keepSubject(AlertSubject{ monitor->key(), event, false });
     emit alertEvent(event);
     emit alert(event.message, severity, event.id);
     _show(event.id, event.message, severity, level);
@@ -928,6 +925,15 @@ void GeoZoneMonitor::_announce()
     _updateMuted();
     _updateAlertActions();
     _updateActiveLevel();
+}
+
+void GeoZoneMonitor::_keepSubject(const AlertSubject &subject)
+{
+    _alertSubjects.insert(subject.event.id, subject);
+    // All those older than the latest ones go: the ids between them may belong to alerts which aren't kept, like those
+    // of the fence, so the alert maxActionAlerts ids back may never have been
+    const int oldest = subject.event.id - maxActionAlerts;
+    (void) _alertSubjects.removeIf([oldest](const QHash<int, AlertSubject>::iterator &kept) { return kept.key() <= oldest; });
 }
 
 void GeoZoneMonitor::_show(int alertId, const QString &message, int severity, GeoZoneAlertLevel::Level level)

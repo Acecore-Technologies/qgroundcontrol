@@ -117,7 +117,7 @@ public:
     static constexpr int evaluateIntervalMSecs = 1000;
     static constexpr int noVehicle = -1;                    ///< Vehicle id of positions which don't belong to a vehicle
     static constexpr double climbClearance = 30;            ///< Meters above the ceiling of a zone a climb out of it goes to, see GeoZoneAlertModel
-    static constexpr int maxActionAlerts = 200;             ///< Latest alerts whose actions are kept
+    static constexpr int maxActionAlerts = 200;             ///< Latest alert ids whose alerts keep their actions
     static constexpr int maxMuteSecs = 24 * 60 * 60;        ///< Longest mute, see muteAlerts()
     static constexpr int trafficSeverity = 100;             ///< Added to the severity of traffic alerts, which are less urgent than those of vehicles
     static constexpr const char *permissionQuestion = "Do you have legal permission to fly here?";    ///< As logged, see approveAlert()
@@ -281,6 +281,8 @@ public:
     /// The settings in use, read from GeoZoneSettings again after they change
     const Settings &settings() const;
     const GeoZoneAlertArbiter &arbiter() const { return _arbiter; }
+    /// @return Alerts whose actions are kept: those among the latest maxActionAlerts alert ids
+    int alertSubjectCount() const { return static_cast<int>(_alertSubjects.count()); }
 
     /// Shows, logs and announces an alert of a vehicle which isn't about a zone of the catalog, like the
     /// NonConformance alerts of GeoZoneConformance, as urgent as a zone requiring an authorisation at its level. It
@@ -464,7 +466,9 @@ private:
         bool asksPermission = false;
         QString permitKey;          ///< GeoZonePermits::key of a zone a permit applies to, empty for others
     };
-    QHash<int, AlertSubject> _alertSubjects;    ///< Of the latest maxActionAlerts alerts by id
+    /// Keeps the subject of an alert for its actions, forgetting those more than maxActionAlerts ids before it
+    void _keepSubject(const AlertSubject &subject);
+    QHash<int, AlertSubject> _alertSubjects;    ///< Of the alerts among the latest maxActionAlerts ids, by id
     QHash<int, qint64> _armingAlerts;           ///< When the arming attempts were alerted by vehicle key
     GeoZoneAwareness *_awareness = nullptr;
     QHash<int, GeoZoneAwareness::Tracker> _awarenessTrackers;  ///< By vehicle key

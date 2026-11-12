@@ -2597,6 +2597,17 @@ void GeoZoneMonitorTest::_testAlertActions()
     QCOMPARE(monitor.arbiter().approvedZones(monitor.positionMonitor(9)->key()).count(), 2);
     QCOMPARE(monitor.arbiter().breachCount(), 0);
     QCOMPARE(history->unacknowledgedCount(), earlierUnacknowledged);
+
+    // The actions are kept for the alerts among the latest ids only, whatever took the ids in between: alerts which
+    // aren't about zones, like those of the conformance, don't leave an older alert behind for the session
+    GeoZoneMonitor counting(&manager);
+    counting.evaluate({ uSpaceCenter, 450, 400 }, 1);
+    QCOMPARE(counting.alertSubjectCount(), 1);
+    for (int i = 0; i < GeoZoneMonitor::maxActionAlerts + 50; i++) {
+        (void) counting.raiseVehicleAlert(GeoZoneMonitor::AlertEvent::NonConformance, 2, GeoZone::Position{ center }, 10, QStringLiteral("horizontal"), QStringLiteral("10 m beside it"));
+    }
+    counting.evaluate({ uSpaceCenter, 450, 400 }, 3);
+    QCOMPARE(counting.alertSubjectCount(), 1);
 }
 
 void GeoZoneMonitorTest::_testTraffic()
