@@ -43,6 +43,7 @@
 #include "RemoteIDSettings.h"
 #include "SettingsManager.h"
 #include "SimpleMissionItem.h"
+#include "TerrainQuery.h"
 #include "Vehicle.h"
 
 #include <QtCore/QFile>
@@ -57,6 +58,7 @@
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlPropertyMap>
 #include <QtQuick/QQuickItem>
+#include <QtCore/QTimer>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -441,6 +443,28 @@ void GeoZoneFlightTest::_testMockLinkVehicle()
     _disconnectMockLink();
     QTRY_VERIFY(!monitor.monitoring());
     QVERIFY(!monitor.activeMonitor());
+}
+
+void GeoZoneFlightTest::_testTerrainQueryRetry()
+{
+    // The limits above ground of the zones are compared with the vehicle's height above the terrain, which it gets
+    // from terrain queries for its position. The queries are sent in batches by the timer of their manager.
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->coordinate().isValid(), 30000);
+    const QList<QTimer*> timers = TerrainAtCoordinateBatchManager::instance()->findChildren<QTimer*>(Qt::FindDirectChildrenOnly);
+    QCOMPARE(timers.count(), 1);
+    const QTimer *const batchTimer = timers.constFirst();
+    QTRY_VERIFY_WITH_TIMEOUT(!batchTimer->isActive(), 10000);
+
+    // A query fails, like when the terrain tile can't be downloaded: the height is unknown. The vehicle stays where
+    // it is, so no query follows for a new position: the same position is queried again after a while.
+    QVERIFY(QMetaObject::invokeMethod(vehicle, "_altitudeAboveTerrainReceived", Q_ARG(bool, false), Q_ARG(QList<double>, QList<double>())));
+    QVERIFY(std::isnan(vehicle->altitudeAboveTerr()->rawValue().toDouble()));
+    QVERIFY(!batchTimer->isActive());
+    QTRY_VERIFY_WITH_TIMEOUT(batchTimer->isActive(), 15000);
+    _disconnectMockLink();
 }
 
 void GeoZoneFlightTest::_testReturnParameterChanges()

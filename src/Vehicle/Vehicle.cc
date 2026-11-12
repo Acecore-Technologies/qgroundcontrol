@@ -3778,6 +3778,15 @@ void Vehicle::_altitudeAboveTerrainReceived(bool success, QList<double> heights)
         qCDebug(VehicleLog) << "_altitudeAboveTerrainReceived: terrain data not available for vehicle coordinate";
         // The previous value is for another position
         _altitudeAboveTerrFact.setRawValue(qQNaN());
+        // The failure may pass, like a terrain tile which couldn't be downloaded. A vehicle which stays where it is isn't
+        // queried again for its position, so it is after a while.
+        constexpr int retryMSecs = 5000;
+        QTimer::singleShot(retryMSecs, this, [this]() {
+            if (qIsNaN(_altitudeAboveTerrFact.rawValue().toDouble())) {
+                _altitudeAboveTerrLastCoord = QGeoCoordinate();
+                _updateAltAboveTerrain();
+            }
+        });
     } else {
         // Query was succesful, save the data.
         double terrainAltitude = heights[0];

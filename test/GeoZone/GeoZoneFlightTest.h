@@ -22,6 +22,7 @@ private slots:
     void _testFlightAlertSequence();
     void _testMissionCrossedZones();
     void _testMockLinkVehicle();
+    void _testTerrainQueryRetry();
     void _testReturnParameterChanges();
     void _testGuidedReturnLandMission();
     void _testPreflightChecklist();
