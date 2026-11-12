@@ -214,6 +214,8 @@ private:
         QDateTime activeTo;     ///< see GeoZoneFences::Candidate::partTime. Invalid for any time.
     };
 
+    /// Sets the zones of updateSelection without preparing them
+    void _setQuery(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double maxSimplifyTolerance);
     /// @return When the zones fenced must be active from and to, both invalid for AnyTime
     std::pair<QDateTime, QDateTime> _activeTimes(int activeWithinHours) const;
 

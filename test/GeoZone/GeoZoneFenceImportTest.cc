@@ -862,7 +862,14 @@ void GeoZoneFenceImportTest::_testGeoFenceStale()
     GeoZoneMissionCheck check(manager);
     check.setGeoFenceController(geoFenceController);
     QVERIFY(check.uploadReasons().contains(importer.staleText()));
+    // Rebuilding prepares the zones once, right away: not also on the thread pool, which makes the importer busy,
+    // for a result it would drop
+    QSignalSpy busySpy(&importer, &GeoZoneFenceImporter::busyChanged);
+    QSignalSpy selectionSpy(&importer, &GeoZoneFenceImporter::selectionChanged);
     QCOMPARE(importer.rebuild(), 1);
+    QCOMPARE(busySpy.count(), 0);
+    QCOMPARE(selectionSpy.count(), 1);
+    QVERIFY(!importer.busy());
     QVERIFY(importer.staleText().isEmpty());
     QVERIFY(check.uploadReasons().isEmpty());
 

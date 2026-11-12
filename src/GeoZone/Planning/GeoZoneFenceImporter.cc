@@ -279,6 +279,12 @@ double _validSimplifyTolerance(double tolerance)
 
 void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double maxSimplifyTolerance)
 {
+    _setQuery(restrictions, area, activeWithinHours, maxSimplifyTolerance);
+    _prepareSelection(false);
+}
+
+void GeoZoneFenceImporter::_setQuery(const QVariantList &restrictions, const QGeoRectangle &area, int activeWithinHours, double maxSimplifyTolerance)
+{
     // From QML or the import settings of a plan file, which may hold anything
     QList<GeoZone::Restriction> restrictionList;
     QJsonArray restrictionSettings;
@@ -305,7 +311,6 @@ void GeoZoneFenceImporter::updateSelection(const QVariantList &restrictions, con
     }
     _zones.clear();
     _setSimplifyTolerances(maxSimplifyTolerance);
-    _prepareSelection(false);
 }
 
 std::pair<QDateTime, QDateTime> GeoZoneFenceImporter::_activeTimes(int activeWithinHours) const
@@ -619,9 +624,11 @@ int GeoZoneFenceImporter::rebuild()
                 _included.insert(it.key(), it.value().toBool());
             }
         }
-        // The restrictions, hours and tolerance are checked by updateSelection
-        updateSelection(settings.value(QStringLiteral("restrictions")).toArray().toVariantList(), area,
-                        settings.value(QStringLiteral("activeWithinHours")).toInt(Now), settings.value(QStringLiteral("maxSimplifyTolerance")).toDouble());
+        // The restrictions, hours and tolerance are checked like those of updateSelection. The zones are prepared
+        // once, here: the fences are applied right away, which a preparation on the thread pool would be dropped for.
+        _setQuery(settings.value(QStringLiteral("restrictions")).toArray().toVariantList(), area,
+                  settings.value(QStringLiteral("activeWithinHours")).toInt(Now), settings.value(QStringLiteral("maxSimplifyTolerance")).toDouble());
+        _prepareSelection(true);
     }
     return applySelection();
 }
