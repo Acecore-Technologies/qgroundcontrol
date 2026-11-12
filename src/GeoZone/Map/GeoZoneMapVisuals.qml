@@ -93,18 +93,21 @@ Item {
         }
     }
 
-    // Zones picked in a search are shown on the visible map
+    // Zones picked in a search are shown on the visible map. A map which shows no zones, like the small picture in
+    // picture map, is left as it is and still opens the details, so that the pick is never lost.
     Connections {
         target:     _root._geoZoneManager
-        enabled:    _root.map.visible && _root.showZones
+        enabled:    _root.map.visible
         function onShowZoneRequested(zone) {
-            _root._geoZoneManager.display.visible = true
             const box = zone.boundingBox
-            if (box.isValid) {
-                // At least about a kilometer across, so small zones are shown with their surroundings
-                const minimumSize = 0.01
-                const fitBox = QtPositioning.rectangle(box.center, Math.max(box.width, minimumSize), Math.max(box.height, minimumSize))
-                _root.map.fitViewportToGeoShape(fitBox, ScreenTools.defaultFontPixelHeight * 4)
+            if (_root.showZones) {
+                _root._geoZoneManager.display.visible = true
+                if (box.isValid) {
+                    // At least about a kilometer across, so small zones are shown with their surroundings
+                    const minimumSize = 0.01
+                    const fitBox = QtPositioning.rectangle(box.center, Math.max(box.width, minimumSize), Math.max(box.height, minimumSize))
+                    _root.map.fitViewportToGeoShape(fitBox, ScreenTools.defaultFontPixelHeight * 4)
+                }
             }
             _root._showZoneInfo(zone)
         }
