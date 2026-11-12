@@ -538,6 +538,8 @@ A [caution](#alert-levels) gives the pilot time to leave before a zone applies: 
 
 When a zone becomes active while a vehicle is inside it (its schedule starts, new data adds or changes it, or an authorisation for it ends), _QGroundControl_ raises a [warning](#alert-levels) "Geozone ... is now active — you are inside it. Leave or land as soon as possible.", asks for the [permission](#permission-question) and, for a prohibited zone, repeats it like an entry. As EN 4709-003 §6.2.1 requires, this is only a warning: _QGroundControl_ never sends a manoeuvre by itself, so the pilot decides how to leave or land (the popup's **Hold**, **Return** and **Climb Above Ceiling** only open the usual confirmation slider). The vehicle's own fence doesn't change either: fences built from geozones with **From Geozones...** are static, uploaded before the flight, and time-limited zones aren't fenced (see [Add Geozones to the GeoFence](#add-geozones-to-the-geofence)), so a zone becoming active never triggers the vehicle's fence action. A vehicle taking off inside an active zone gets the usual "Entered geozone ..." alert.
 
+The alerts follow the schedules of the zones around each vehicle at every evaluation, once a second: the warning comes within a second of the zone's start, the approach and entry alerts apply from then, and the map draws the zone as active at the same time. Zones away from the vehicles are looked at every minute.
+
 ### Alert Levels {#alert-levels}
 
 Alerts have a level after EN 4709-003 Annex D, shown by its color and word in the alert popup, the indicator, the predicted path on the map and the **Recent Alerts**, spoken first ("Warning: ...", "Caution: ...") and recorded in the [alert log](#alert-log):

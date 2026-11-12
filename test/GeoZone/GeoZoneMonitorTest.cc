@@ -2695,7 +2695,16 @@ void GeoZoneMonitorTest::_testZoneActivation()
     QString errorString;
     const QString fileName = _writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ scheduled, _circleFeature(QStringLiteral("A"), QStringLiteral("PROHIBITED"), always, 300) });
     QVERIFY2(manager.repository()->loadFile(fileName, errorString), qPrintable(errorString));
-    const auto updateActive = [&manager]() { QVERIFY(QMetaObject::invokeMethod(&manager, "_updateActive")); };
+    const auto scheduledActive = [&manager]() -> std::optional<bool> {
+        for (const GeoZone *zone : manager.zoneList()) {
+            if (zone->identifier() == QStringLiteral("S")) {
+                return zone->active();
+            }
+        }
+        return std::nullopt;
+    };
+    QCOMPARE(scheduledActive(), std::optional<bool>(false));
+    QSignalSpy activeSpy(&manager, &GeoZoneManager::activeZonesChanged);
 
     GeoZoneMonitor monitor(&manager);
     monitor.setActiveVehicleId(1);
@@ -2709,10 +2718,22 @@ void GeoZoneMonitorTest::_testZoneActivation()
     monitor.evaluate(inside, 1);
     QVERIFY(eventSpy.isEmpty());
 
-    // Once it applies, a warning tells the pilot to leave or land, without a manoeuvre from QGroundControl
-    environment.setNow(_utc(day, QTime(12, 0, 30)));
-    updateActive();
+    // A second before it applies, still nothing
+    environment.setNow(_utc(day, QTime(11, 59, 59)));
     monitor.evaluate(inside, 1);
+    QCOMPARE(eventSpy.count(), 1);
+    QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().kind, GeoZoneMonitor::AlertEvent::ActivationSoon);
+    QCOMPARE(scheduledActive(), std::optional<bool>(false));
+    QVERIFY(activeSpy.isEmpty());
+    eventSpy.clear();
+
+    // Once it applies, a warning tells the pilot to leave or land, without a manoeuvre from QGroundControl: at the
+    // evaluation after its start, which doesn't wait for the manager to look at the schedules every minute. The map
+    // shows the zone as active from then too.
+    environment.setNow(_utc(day, QTime(12, 0, 0)));
+    monitor.evaluate(inside, 1);
+    QCOMPARE(scheduledActive(), std::optional<bool>(true));
+    QCOMPARE(activeSpy.count(), 1);
     QCOMPARE(eventSpy.count(), 1);
     GeoZoneMonitor::AlertEvent event = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Activated);
@@ -2757,6 +2778,27 @@ void GeoZoneMonitorTest::_testZoneActivation()
     QVERIFY(event.kind == GeoZoneMonitor::AlertEvent::Activated);
     QCOMPARE(event.message, QStringLiteral("Vehicle 3: Geozone NEW (Authorisation required) is now active \u2014 you are inside it. Leave or land as soon as possible."));
     QCOMPARE(event.level, GeoZoneAlertLevel::Warning);
+
+    // The zone ends: at the next evaluation the vehicle inside it is no longer in a zone
+    monitor.evaluate(inside, 1);
+    const GeoZoneVehicleMonitor *const first = monitor.positionMonitor(1);
+    QVERIFY(first);
+    QVERIFY(first->inside());
+    activeSpy.clear();
+    environment.setNow(_utc(day, QTime(13, 0, 1)));
+    monitor.evaluate(inside, 1);
+    QCOMPARE(scheduledActive(), std::optional<bool>(false));
+    QCOMPARE(activeSpy.count(), 1);
+    QVERIFY(!first->inside());
+    QVERIFY(first->nearby().isEmpty());
+
+    // Zones away from the vehicles keep the state the manager gave them
+    environment.setNow(_utc(day, QTime(12, 30)));
+    monitor.evaluate(elsewhere, 3);
+    QCOMPARE(scheduledActive(), std::optional<bool>(false));
+    QVERIFY(manager.updateActive(GeoZoneBox(QGeoRectangle(center.atDistanceAndAzimuth(100, 315), center.atDistanceAndAzimuth(100, 135)))));
+    QCOMPARE(scheduledActive(), std::optional<bool>(true));
+    QVERIFY(!manager.updateActive(GeoZoneBox(QGeoRectangle(center.atDistanceAndAzimuth(100, 315), center.atDistanceAndAzimuth(100, 135)))));
 }
 
 void GeoZoneMonitorTest::_testActivationCaution()
@@ -2777,10 +2819,8 @@ void GeoZoneMonitorTest::_testActivationCaution()
     QString errorString;
     QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{ scheduled }), errorString), qPrintable(errorString));
     const GeoZone *const zone = manager.zoneList().constFirst();
-    const auto at = [&environment, &manager](const QTime &time) {
-        environment.setNow(_utc(QDate(2027, 3, 1), time));
-        QVERIFY(QMetaObject::invokeMethod(&manager, "_updateActive"));
-    };
+    // The evaluations follow the schedule themselves
+    const auto at = [&environment](const QTime &time) { environment.setNow(_utc(QDate(2027, 3, 1), time)); };
 
     // The activation to the second
     QCOMPARE(GeoZoneActivationTracker::nextActivation(zone, _utc(day, QTime(11, 51, 17)), 600), _utc(day, QTime(12, 0)));

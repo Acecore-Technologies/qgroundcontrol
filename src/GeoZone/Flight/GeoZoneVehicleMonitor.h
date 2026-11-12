@@ -108,6 +108,9 @@ public:
         GeoZonePolicy policy;
         GeoZoneAlertThresholds::Extras extras;              ///< Added to the thresholds of the vehicle
         std::optional<GeoZoneAlertTracker::Limits> limits;  ///< Instead of the thresholds of the vehicle, like tests use
+        /// Brings GeoZone::active of the zones in the area up to date before the vehicle is evaluated against them, so
+        /// that its alerts follow their schedules at each evaluation, see GeoZoneManager::updateActive
+        std::function<void(const GeoZoneBox &area)> refreshActive;
     };
 
     /// @param vehicle Vehicle whose messages and position are followed, null for positions passed to evaluate()

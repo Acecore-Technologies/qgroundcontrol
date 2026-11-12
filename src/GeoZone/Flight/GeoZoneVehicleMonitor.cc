@@ -313,6 +313,10 @@ QList<GeoZoneAlertTracker::Alert> GeoZoneVehicleMonitor::evaluate(const GeoZone:
         emit alertThresholdsChanged();
     }
 
+    // A zone which started or ended since the last evaluation applies, or no longer does, from this one
+    if (context.refreshActive) {
+        context.refreshActive(GeoZoneAlertTracker::searchArea(position, velocity, limits));
+    }
     const GeoZoneAlertTracker::Update update = _alerts.update(*context.catalog, context.policy, position, velocity, limits);
     if (update.nearby != _nearby) {
         _nearby = update.nearby;

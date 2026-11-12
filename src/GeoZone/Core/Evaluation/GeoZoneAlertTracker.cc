@@ -27,19 +27,16 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
         return update;
     }
 
-    // Never less than minWarningTime at the current speed, so the distance alone warns fast vehicles in time too
-    const double distanceLimit = velocity.valid ? (std::max)(limits.distance, velocity.groundSpeed() * minWarningTime) : limits.distance;
+    const double distanceLimit = _distanceLimit(velocity, limits);
     const double verticalLimit = velocity.valid ? (std::max)(limits.verticalDistance, std::abs(velocity.up) * minWarningTime) : limits.verticalDistance;
 
-    GeoZoneBox area(QGeoCircle(position.coordinate, distanceLimit + hysteresisDistance).boundingGeoRectangle());
+    const GeoZoneBox area = searchArea(position, velocity, limits);
     // Zones the vehicle would enter at its velocity within the approach time are near too
-    const bool predict = velocity.valid && (limits.time > 0) &&
-                         ((velocity.groundSpeed() >= minPredictionSpeed) || (std::abs(velocity.up) >= minPredictionSpeed));
+    const bool predict = _predicts(velocity, limits);
     const double horizon = limits.time + hysteresisTime;
     QList<GeoZone::Position> ahead;
     if (predict) {
         ahead = predictedPath(position, velocity, horizon);
-        area = area.united(GeoZoneBox::fromPath({ position.coordinate, ahead.constLast().coordinate }));
     }
 
     QSet<QString> nearbyZones;
@@ -118,6 +115,32 @@ GeoZoneAlertTracker::Update GeoZoneAlertTracker::update(const GeoZoneCatalog &ca
     });
 
     return update;
+}
+
+double GeoZoneAlertTracker::_distanceLimit(const Velocity &velocity, const Limits &limits)
+{
+    // Never less than minWarningTime at the current speed, so the distance alone warns fast vehicles in time too
+    return velocity.valid ? (std::max)(limits.distance, velocity.groundSpeed() * minWarningTime) : limits.distance;
+}
+
+bool GeoZoneAlertTracker::_predicts(const Velocity &velocity, const Limits &limits)
+{
+    return velocity.valid && (limits.time > 0) && ((velocity.groundSpeed() >= minPredictionSpeed) || (std::abs(velocity.up) >= minPredictionSpeed));
+}
+
+GeoZoneBox GeoZoneAlertTracker::searchArea(const GeoZone::Position &position, const Velocity &velocity, const Limits &limits)
+{
+    if (!position.coordinate.isValid()) {
+        return GeoZoneBox();
+    }
+    GeoZoneBox area(QGeoCircle(position.coordinate, _distanceLimit(velocity, limits) + hysteresisDistance).boundingGeoRectangle());
+    if (_predicts(velocity, limits)) {
+        // To where predictedPath() ends
+        const double course = qRadiansToDegrees(std::atan2(velocity.east, velocity.north));
+        const QGeoCoordinate end = position.coordinate.atDistanceAndAzimuth(velocity.groundSpeed() * (limits.time + hysteresisTime), course);
+        area = area.united(GeoZoneBox::fromPath({ position.coordinate, end }));
+    }
+    return area;
 }
 
 void GeoZoneAlertTracker::forget(const QSet<QString> &zoneKeys, bool asEntry)

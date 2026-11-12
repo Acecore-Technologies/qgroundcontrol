@@ -34,6 +34,7 @@
 
 #include <QtCore/QtMath>
 #include <QtCore/qapplicationstatic.h>
+#include <QtPositioning/QGeoCircle>
 
 #include <algorithm>
 #include <cmath>
@@ -203,7 +204,9 @@ GeoZoneVehicleMonitor::Context GeoZoneMonitor::_context() const
         // Authorised zones don't alert while the authorisation is valid
         _policy = GeoZonePolicy::alerts().excludingAuthorised(_manager->planning()->authorisations());
     }
-    return GeoZoneVehicleMonitor::Context{ &_manager->catalog(), *_policy, settings().extras, settings().limits };
+    GeoZoneManager *const manager = _manager;
+    return GeoZoneVehicleMonitor::Context{ &_manager->catalog(), *_policy, settings().extras, settings().limits,
+                                           [manager](const GeoZoneBox &area) { (void) manager->updateActive(area); } };
 }
 
 GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehicleId)
@@ -387,6 +390,8 @@ void GeoZoneMonitor::evaluateTraffic(const QList<Aircraft> &aircraft)
     }
     const GeoZone::Position &center = active->position();
     const GeoZoneVehicleMonitor::Context context = _context();
+    // The zones the aircraft may be in follow their schedules like those around the vehicles
+    context.refreshActive(GeoZoneBox(QGeoCircle(center.coordinate, trafficRadius()).boundingGeoRectangle()));
 
     // The closest aircraft within the radius
     QList<std::pair<double, const Aircraft*>> nearby;

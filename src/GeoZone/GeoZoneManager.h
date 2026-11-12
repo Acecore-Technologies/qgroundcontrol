@@ -160,6 +160,11 @@ public:
     const QList<GeoZone*> &zoneList() const { return _catalog.zones(); }
     /// Zones of all sources with their spatial index
     const GeoZoneCatalog &catalog() const { return _catalog; }
+    /// Re-evaluates GeoZone::active now for the zones whose bounding box intersects the area, notifying
+    /// activeZonesChanged. The flight alerts do it around their vehicles at each evaluation, so that the alerts and
+    /// the map there follow the schedules of the zones to the second. All zones are re-evaluated every minute.
+    /// @return true when a zone became active or inactive
+    bool updateActive(const GeoZoneBox &area);
     QmlObjectListModel *sources() const { return _sources; }
     GeoZoneSourceRepository *repository() const { return _repository; }
     GeoZoneDisplay *display() const { return _display; }

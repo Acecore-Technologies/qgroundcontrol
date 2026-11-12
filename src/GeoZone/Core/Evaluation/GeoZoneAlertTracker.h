@@ -15,6 +15,7 @@
 #include <QtCore/QString>
 
 #include "GeoZone.h"
+#include "GeoZoneBox.h"
 
 #include <cmath>
 #include <optional>
@@ -108,6 +109,11 @@ public:
     /// activation.
     void forget(const QSet<QString> &zoneKeys, bool asEntry = false);
 
+    /// @return Area update() looks for zones in at the position, velocity and limits: around the position within the
+    ///         approach distance and along the predicted path. The zones in it have their GeoZone::active brought up
+    ///         to date before an update, so that the alerts follow their schedules. Invalid for an invalid position.
+    static GeoZoneBox searchArea(const GeoZone::Position &position, const Velocity &velocity, const Limits &limits);
+
     /// @return Straight path from the position at the velocity for the seconds, with the terrain along it from
     ///         GeoZoneTerrain where it is loaded, unknown elsewhere
     static QList<GeoZone::Position> predictedPath(const GeoZone::Position &position, const Velocity &velocity, double seconds);
@@ -123,6 +129,11 @@ private:
         Imminent,   ///< Near, with its entry predicted within the imminent time once
         Inside,
     };
+
+    /// @return Meters within which a zone is near
+    static double _distanceLimit(const Velocity &velocity, const Limits &limits);
+    /// @return true when the entries into zones are predicted along the velocity
+    static bool _predicts(const Velocity &velocity, const Limits &limits);
 
     QHash<QString, State> _states;  ///< Zones which are not Away by GeoZone::key
     QSet<QString> _entries;         ///< Zones forgotten to alert as entries until the next update, see forget()

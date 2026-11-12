@@ -561,6 +561,21 @@ void GeoZoneManager::clearSourceNote()
     }
 }
 
+bool GeoZoneManager::updateActive(const GeoZoneBox &area)
+{
+    const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
+    bool changed = false;
+    for (GeoZone *zone : _catalog.zones()) {
+        if (zone->box().intersects(area)) {
+            changed = zone->updateActive(now) || changed;
+        }
+    }
+    if (changed) {
+        emit activeZonesChanged();
+    }
+    return changed;
+}
+
 void GeoZoneManager::_updateActive()
 {
     const QDateTime now = GeoZoneEnvironment::currentDateTimeUtc();
