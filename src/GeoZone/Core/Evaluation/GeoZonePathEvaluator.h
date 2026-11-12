@@ -93,6 +93,14 @@ public:
         /// Sets the times of the vertices from start to end in proportion to the distance along the path, all to start
         /// without end, and all invalid without start
         void setTimes(const QDateTime &start, const QDateTime &end);
+
+        /// The conversion of the datums of the path, for the evaluation and for what reports the altitudes flown
+        /// @return Altitude above mean sea level of an altitude in the datum of the path where the ground elevation is
+        ///         terrainAMSL, NaN when the altitude, or what it is relative to, is unknown
+        double altitudeAMSL(double altitude, double terrainAMSL) const;
+        /// @return Altitude above mean sea level of the vertex, with the ground elevation from the lookup where the
+        ///         vertex has none, like the evaluation with that lookup, see setTerrainLookup
+        double altitudeAMSL(const Vertex &vertex, const TerrainLookup &terrainLookup = TerrainLookup()) const;
     };
 
     /// Point on a path, its vertex indexes refer to the input path even where terrain positions are added

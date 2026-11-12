@@ -23,20 +23,6 @@ namespace {
 
 using Evaluator = GeoZonePathEvaluator;
 
-/// @return Altitude of the vertex above mean sea level, NaN when unknown
-double vertexAltitudeAMSL(const Evaluator::Path &path, const Evaluator::Vertex &vertex)
-{
-    switch (path.altitudeReference) {
-    case Evaluator::AltitudeReference::MeanSeaLevel:
-        return vertex.altitude;
-    case Evaluator::AltitudeReference::Relative:
-        return vertex.altitude + path.referenceAltitudeAMSL;
-    case Evaluator::AltitudeReference::Terrain:
-        return vertex.altitude + vertex.terrainAMSL;
-    }
-    return qQNaN();
-}
-
 void extend(double &minimum, double &maximum, double value)
 {
     if (qIsNaN(value)) {
@@ -263,7 +249,7 @@ GeoZoneBriefing GeoZoneBriefing::build(const GeoZoneCatalog &catalog, const Inpu
             extend(briefed.pathAltitudeMin, briefed.pathAltitudeMax, crossing.exit.position.altitudeAMSL);
             if (crossing.exit.path == crossing.entry.path) {
                 for (qsizetype i = crossing.entry.segment + 1; (i <= crossing.exit.segment) && (i < path.vertices.count()); i++) {
-                    extend(briefed.pathAltitudeMin, briefed.pathAltitudeMax, vertexAltitudeAMSL(path, path.vertices[i]));
+                    extend(briefed.pathAltitudeMin, briefed.pathAltitudeMax, path.altitudeAMSL(path.vertices[i]));
                 }
             }
 

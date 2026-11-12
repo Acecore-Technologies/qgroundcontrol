@@ -293,6 +293,28 @@ void GeoZonePathEvaluator::Path::setTimes(const QDateTime &start, const QDateTim
     }
 }
 
+double GeoZonePathEvaluator::Path::altitudeAMSL(double altitude, double terrainAMSL) const
+{
+    switch (altitudeReference) {
+    case AltitudeReference::MeanSeaLevel:
+        return altitude;
+    case AltitudeReference::Relative:
+        return altitude + referenceAltitudeAMSL;
+    case AltitudeReference::Terrain:
+        return altitude + terrainAMSL;
+    }
+    return qQNaN();
+}
+
+double GeoZonePathEvaluator::Path::altitudeAMSL(const Vertex &vertex, const TerrainLookup &terrainLookup) const
+{
+    double terrainAMSL = vertex.terrainAMSL;
+    if (std::isnan(terrainAMSL) && terrainLookup && vertex.coordinate.isValid() && (altitudeReference == AltitudeReference::Terrain)) {
+        terrainAMSL = terrainLookup(vertex.coordinate);
+    }
+    return altitudeAMSL(vertex.altitude, terrainAMSL);
+}
+
 bool GeoZonePathEvaluator::ZoneResult::active() const
 {
     if (entered()) {
@@ -385,17 +407,8 @@ QList<GeoZonePathEvaluator::Prepared> GeoZonePathEvaluator::_prepare(const QList
         double distance = 0;
         for (qsizetype i = 0; i < vertices.count(); i++) {
             const RawVertex &vertex = vertices[i];
-            double altitudeAMSL = vertex.altitude;
-            switch (path.altitudeReference) {
-            case AltitudeReference::MeanSeaLevel:
-                break;
-            case AltitudeReference::Relative:
-                altitudeAMSL += path.referenceAltitudeAMSL;
-                break;
-            case AltitudeReference::Terrain:
-                altitudeAMSL += vertex.terrain;
-                break;
-            }
+            // With the terrain from the lookup where the vertex had none
+            const double altitudeAMSL = path.altitudeAMSL(vertex.altitude, vertex.terrain);
             if ((i > 0) && vertices[i - 1].coordinate.isValid() && vertex.coordinate.isValid()) {
                 distance += vertices[i - 1].coordinate.distanceTo(vertex.coordinate);
             }

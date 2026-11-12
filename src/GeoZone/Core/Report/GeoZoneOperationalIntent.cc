@@ -137,20 +137,6 @@ Group merged(const Group &a, const Group &b, const QList<Sample> &samples)
     return group;
 }
 
-/// @return Altitude above mean sea level of the vertex of the path, NaN when unknown
-double altitudeAMSL(const GeoZonePathEvaluator::Path &path, const GeoZonePathEvaluator::Vertex &vertex)
-{
-    switch (path.altitudeReference) {
-    case GeoZonePathEvaluator::AltitudeReference::MeanSeaLevel:
-        return vertex.altitude;
-    case GeoZonePathEvaluator::AltitudeReference::Relative:
-        return vertex.altitude + path.referenceAltitudeAMSL;
-    case GeoZonePathEvaluator::AltitudeReference::Terrain:
-        return vertex.altitude + vertex.terrainAMSL;
-    }
-    return qQNaN();
-}
-
 /// @return The outline of the group: the convex hull of the polygons circumscribing the buffer around its positions,
 ///         with no edge longer than maxEdgeLength
 QList<QGeoCoordinate> outline(const Group &group, const QList<Sample> &samples, const LocalProjection &projection, double buffer)
@@ -243,7 +229,7 @@ std::optional<QList<GeoZoneOperationalIntent::Volume>> GeoZoneOperationalIntent:
             if (!projection) {
                 projection.emplace(vertex.coordinate);
             }
-            const double amsl = altitudeAMSL(path, vertex);
+            const double amsl = path.altitudeAMSL(vertex);
             const qint64 time = vertex.time.toMSecsSinceEpoch();
             if (previous < 0) {
                 samples.append(Sample{ vertex.coordinate, projection->toLocal(vertex.coordinate), amsl + GeoZoneGeometry::geoidHeight(vertex.coordinate), time });

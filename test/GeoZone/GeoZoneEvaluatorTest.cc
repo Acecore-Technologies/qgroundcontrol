@@ -234,6 +234,21 @@ void GeoZoneEvaluatorTest::_testAltitudes()
     QVERIFY(_near(crossing.entry.fraction, 0.35, 0.001));
     QVERIFY(_near(crossing.entry.position.altitudeAMSL, 500));
     QVERIFY(_near(crossing.entry.position.terrainAMSL, 400));
+
+    // The conversion of the datums of a path gives the altitudes the evaluation compares, with the terrain of the
+    // lookup where the vertices have none
+    const GeoZonePathEvaluator::TerrainLookup ground = [](const QGeoCoordinate &) { return 400.0; };
+    QVERIFY(!aboveGround.vertices.isEmpty() && !relative.vertices.isEmpty() && !high.vertices.isEmpty());
+    QCOMPARE(aboveGround.altitudeAMSL(aboveGround.vertices.constFirst(), ground), 500.0);
+    QVERIFY(qIsNaN(aboveGround.altitudeAMSL(aboveGround.vertices.constFirst())));
+    aboveGround.vertices[0].terrainAMSL = 350;
+    QCOMPARE(aboveGround.altitudeAMSL(aboveGround.vertices.constFirst(), ground), 450.0);
+    QCOMPARE(aboveGround.altitudeAMSL(aboveGround.vertices.constFirst()), 450.0);
+    QCOMPARE(aboveGround.altitudeAMSL(100, 400), 500.0);
+    QVERIFY(qIsNaN(relative.altitudeAMSL(relative.vertices.constFirst(), ground)));
+    relative.referenceAltitudeAMSL = 100;
+    QCOMPARE(relative.altitudeAMSL(relative.vertices.constFirst(), ground), 220.0);
+    QCOMPARE(high.altitudeAMSL(high.vertices.constFirst(), ground), 600.0);
 }
 
 void GeoZoneEvaluatorTest::_testAuthorisationScope()
