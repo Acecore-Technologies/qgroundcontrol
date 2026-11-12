@@ -732,15 +732,6 @@ void GeoZoneGeometryTest::_testFenceCapacity()
     QVERIFY(!copter.fits(polygonOf(38)));
     QCOMPARE(Capacity::arduPilot(false).storageBytes, 416);
     QCOMPARE(Capacity::arduPilot(false).maxItems, 51);
-    // Flight controllers known to have 16 KB of storage hold 560 or 672 bytes, those with 4 KB 48 or 160
-    const Capacity large = Capacity::arduPilot(true, 0, Capacity::ArduPilotStorage::Large);
-    QCOMPARE(large.maxItems, 69);
-    QVERIFY(large.estimated);
-    QVERIFY(large.fits(polygonOf(69)));
-    QVERIFY(!large.fits(polygonOf(70)));
-    QCOMPARE(Capacity::arduPilotBytes(false, Capacity::ArduPilotStorage::Large), 672);
-    QCOMPARE(Capacity::arduPilot(true, 0, Capacity::ArduPilotStorage::Small).maxItems, 5);
-    QCOMPARE(Capacity::arduPilot(false, 0, Capacity::ArduPilotStorage::Small).storageBytes, 160);
     // Fences stored on the SD card hold more, but no polygon of more than 255 vertices
     const Capacity sdCard = Capacity::arduPilot(true, 4);
     QVERIFY(!sdCard.estimated);
@@ -770,20 +761,24 @@ void GeoZoneGeometryTest::_testFenceCapacity()
     reduced = reduced.reducedBelow(polygonOf(12));
     QCOMPARE(reduced.maxItems, 11);
     QCOMPARE(reduced.reducedBelow(polygonOf(1)).maxItems, 1);
-    reduced = large.reducedBelow(polygonOf(50));
-    QCOMPARE(reduced.storageBytes, 304);
-    QCOMPARE(reduced.maxItems, 37);
-    QVERIFY(reduced.estimated && reduced.reduced);
-    QVERIFY(!reduced.fits(polygonOf(50)));
-    reduced = reduced.reducedBelow(polygonOf(30));
+    // ... for ArduPilot the fence storage of the next smaller flight controllers: 160 bytes after a fence of 30 points
+    // which the 304 bytes assumed for a copter should hold
+    reduced = copter.reducedBelow(polygonOf(30));
     QCOMPARE(reduced.storageBytes, 160);
+    QCOMPARE(reduced.maxItems, 19);
+    QVERIFY(reduced.estimated && reduced.reduced);
+    QVERIFY(!reduced.fits(polygonOf(30)));
     reduced = reduced.reducedBelow(polygonOf(4));
     QCOMPARE(reduced.storageBytes, Capacity::arduPilotPolygonBytes + (4 * Capacity::arduPilotVertexBytes) + Capacity::arduPilotFixedBytes - 1);
     QVERIFY(!reduced.fits(polygonOf(4)));
-    // ... also when the fence was to be on the SD card, like without the card
+    // ... also when the fence was to be on the SD card, like without the card: what the largest flight controllers
+    // store, then the next smaller ones
     reduced = sdCard.reducedBelow(polygonOf(200));
     QCOMPARE(reduced.storageBytes, 672);
     QVERIFY(reduced.estimated);
+    reduced = reduced.reducedBelow(polygonOf(60));
+    QCOMPARE(reduced.storageBytes, 416);
+    QCOMPARE(reduced.reducedBelow(polygonOf(40)).storageBytes, 304);
 
     // Circles become polygons enclosing them for vehicles without fence circles, fewer vertices when simplified
     ZoneOwner owner;

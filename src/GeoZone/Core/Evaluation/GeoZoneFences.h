@@ -85,8 +85,9 @@ struct Usage {
 /// and stores each polygon as a type and vertex count byte plus 8 bytes per vertex, each circle in 13 bytes and the
 /// return point in 9 bytes, after the header and before an end marker (AC_PolyFence_loader), rejecting fences which
 /// need more bytes with MAV_MISSION_ERROR ("Fence exceeds storage size"). Its storage size depends on the storage of
-/// the flight controller and the vehicle type (StorageManager), see ArduPilotStorage, so it is estimated unless the
-/// fence is stored on the SD card (BRD_SD_FENCE).
+/// the flight controller and the vehicle type (StorageManager): 48 bytes for copters and 160 for the others with 4 KB
+/// of storage, 304 and 416 with 8 KB or 15 KB, 560 and 672 with 16 KB or more. No parameter tells which, so it is
+/// estimated unless the fence is stored on the SD card (BRD_SD_FENCE).
 struct Capacity {
     int maxItems = 0;               ///< Fence items, 0 without limit
     int storageBytes = 0;           ///< ArduPilot fence storage, 0 when only the items are limited
@@ -118,26 +119,20 @@ struct Capacity {
     static constexpr int arduPilotReturnPointBytes = 9;     ///< Type and position of the return point
     static constexpr int arduPilotMaxBytes = 65535;         ///< ArduPilot addresses fence storage with 16 bits
 
-    /// Fence storage of ArduPilot's storage layouts, by the storage of the flight controller
-    enum class ArduPilotStorage {
-        Small,      ///< 4 KB: 5 items for copters, 19 for the others
-        Common,     ///< 8 KB, or 15 KB without CAN: 37 and 51 items. The smallest of the flight controllers in common use.
-        Large,      ///< 16 KB and more, or 15 KB with CAN: 69 and 83 items
-    };
-    /// @param copter Copter and helicopter builds have less fence storage than the others
-    static int arduPilotBytes(bool copter, ArduPilotStorage storage);
-    static constexpr int arduPilotCopterBytes = 304;        ///< Assumed for copters and helicopters: ArduPilotStorage::Common
-    static constexpr int arduPilotOtherBytes = 416;         ///< Assumed for planes, rovers and subs
+    /// Fence storage assumed for ArduPilot: that of flight controllers with 8 KB or 15 KB of storage, the smallest in
+    /// common use, 37 items for copters and helicopters and 51 for planes, rovers and subs. Those with 16 KB or more,
+    /// like the Pixhawk and Cube, store more.
+    static constexpr int arduPilotCopterBytes = 304;
+    static constexpr int arduPilotOtherBytes = 416;
 
     /// @param majorVersion Of the firmware, with minorVersion, negative when unknown: 63 items are then assumed, estimated
     static Capacity px4(int majorVersion = -1, int minorVersion = -1);
     /// @param copter Copter and helicopter builds have less fence storage than the others
     /// @param sdCardKB Fence storage on the SD card (BRD_SD_FENCE), used instead of the board's when positive. Otherwise
-    ///                 the storage is estimated
-    /// @param storage of the flight controller, which those with less don't have
-    static Capacity arduPilot(bool copter, int sdCardKB = 0, ArduPilotStorage storage = ArduPilotStorage::Common);
-    /// Fits PX4 of any version and ArduPilot copters with ArduPilotStorage::Common, without fence circles, for other or
-    /// unknown autopilots. Estimated.
+    ///                 the storage is estimated, see arduPilotCopterBytes
+    static Capacity arduPilot(bool copter, int sdCardKB = 0);
+    /// Fits PX4 of any version and ArduPilot copters as estimated, without fence circles, for other or unknown
+    /// autopilots. Estimated.
     static Capacity conservative();
     /// Vehicles which don't support fences through the mission protocol
     static Capacity unsupported();

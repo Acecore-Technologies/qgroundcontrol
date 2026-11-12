@@ -310,9 +310,10 @@ bool Capacity::fits(const Usage &usage) const
 
 namespace {
 
-// Fence areas of ArduPilot's StorageManager layouts, largest first, see Capacity::ArduPilotStorage
-constexpr std::array<int, 3> arduPilotCopterLayouts = { 560, 304, 48 };
-constexpr std::array<int, 3> arduPilotOtherLayouts = { 672, 416, 160 };
+// Fence areas of ArduPilot's StorageManager layouts, for flight controllers with 16 KB of storage or more, with 8 KB or
+// 15 KB and with 4 KB
+constexpr std::array<int, 3> arduPilotCopterLayouts = { 560, Capacity::arduPilotCopterBytes, 48 };
+constexpr std::array<int, 3> arduPilotOtherLayouts = { 672, Capacity::arduPilotOtherBytes, 160 };
 
 int _arduPilotMaxItems(int storageBytes)
 {
@@ -335,13 +336,7 @@ Capacity Capacity::px4(int majorVersion, int minorVersion)
     return capacity;
 }
 
-int Capacity::arduPilotBytes(bool copter, ArduPilotStorage storage)
-{
-    const int index = (storage == ArduPilotStorage::Large) ? 0 : ((storage == ArduPilotStorage::Common) ? 1 : 2);
-    return copter ? arduPilotCopterLayouts[index] : arduPilotOtherLayouts[index];
-}
-
-Capacity Capacity::arduPilot(bool copter, int sdCardKB, ArduPilotStorage storage)
+Capacity Capacity::arduPilot(bool copter, int sdCardKB)
 {
     Capacity capacity;
     if (sdCardKB > 0) {
@@ -349,7 +344,7 @@ Capacity Capacity::arduPilot(bool copter, int sdCardKB, ArduPilotStorage storage
         constexpr int maxKB = (arduPilotMaxBytes / 1024) + 1;
         capacity.storageBytes = (std::min)((std::min)(sdCardKB, maxKB) * 1024, arduPilotMaxBytes);
     } else {
-        capacity.storageBytes = arduPilotBytes(copter, storage);
+        capacity.storageBytes = copter ? arduPilotCopterBytes : arduPilotOtherBytes;
         capacity.estimated = true;
     }
     capacity.maxItems = _arduPilotMaxItems(capacity.storageBytes);

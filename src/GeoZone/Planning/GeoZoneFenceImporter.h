@@ -93,9 +93,9 @@ public:
     static GeoZoneFences::ZoneFences exclusionFences(GeoFenceController *geoFenceController);
 
     /// @return What the fence of the vehicle can store: PX4's dataman for its firmware version, ArduPilot's fence
-    ///         storage on the SD card, or estimated for the vehicle type and the storage of its flight controller, a
-    ///         conservative estimate without a vehicle, nothing without fence support. Less after the vehicle rejected
-    ///         a fence for lack of room, see reduceCapacity.
+    ///         storage on the SD card, or estimated for the vehicle type, a conservative estimate without a vehicle,
+    ///         nothing without fence support. Less after the vehicle rejected a fence for lack of room, see
+    ///         reduceCapacity.
     static GeoZoneFences::Capacity vehicleCapacity(Vehicle *vehicle);
     /// Lowers the capacity assumed for the vehicle, until it disconnects, after it rejected a fence with the usage for
     /// lack of room, see GeoZoneFences::Capacity::reducedBelow

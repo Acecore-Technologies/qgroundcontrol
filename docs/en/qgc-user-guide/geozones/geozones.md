@@ -469,11 +469,11 @@ The dialog shows how much of the vehicle's fence the selection uses, like _Vehic
 
   | Storage of the flight controller | Copter and Heli | Plane, Rover and Sub |
   |---|---|---|
-  | 16 KB and more (Pixhawk, Cube), or 15 KB with CAN | 560 bytes (69 items) | 672 bytes (83 items) |
-  | 8 KB, or 15 KB without CAN | 304 bytes (37 items) | 416 bytes (51 items) |
+  | 16 KB and more (Pixhawk, Cube) | 560 bytes (69 items) | 672 bytes (83 items) |
+  | 8 KB or 15 KB | 304 bytes (37 items) | 416 bytes (51 items) |
   | 4 KB | 48 bytes (5 items) | 160 bytes (19 items) |
 
-  _QGroundControl_ assumes the 8 KB row, the smallest storage in common use, so that it doesn't promise room a small flight controller lacks: a Pixhawk or Cube stores more than shown. A vehicle with the `BRD_SD_FENCE` parameter can keep the fence on the SD card and has 16 KB of storage or more: with the parameter at 0 the first row is assumed, otherwise the size it sets is used and not marked as estimated (without the card the flight controller stores less). `FENCE_TOTAL` only counts the points of the last upload and is not a limit.
+  No parameter tells which, so _QGroundControl_ assumes the 8 KB row, the smallest storage in common use, and doesn't promise room a small flight controller lacks: a Pixhawk or Cube stores more than shown. To fence more zones on such a vehicle, set `BRD_SD_FENCE` to keep the fence on the SD card: the size it sets is then used and not marked as estimated (without the card the flight controller stores less). `FENCE_TOTAL` only counts the points of the last upload and is not a limit.
 - Without a connected vehicle the fence is fitted to what both PX4 and ArduPilot copters with 8 KB of storage hold (63 points, 304 bytes), as an estimate, and circles are added as polygons enclosing them.
 
 The fence budget is a hard limit of the autopilot, not of _QGroundControl_: PX4 rejects a fence of more items than it stores (`MAV_MISSION_NO_SPACE`), ArduPilot rejects more items than its storage holds (`MAV_MISSION_NO_SPACE`, "Only N items are supported") and fences which need more bytes than its storage has (`MAV_MISSION_ERROR`, "Fence exceeds storage size"). When the vehicle rejects an upload, the dialog says why, the fence on the vehicle stays as it was and the plan's fence stays marked as changed.
@@ -701,7 +701,7 @@ PX4 doesn't send `FENCE_STATUS`. For a vehicle which doesn't report its fence st
 
 | | PX4 | ArduPilot (Copter 4.x) |
 |---|---|---|
-| Fence storage | 64 items from v1.15, 63 before, 16 on flight controllers with constrained memory: a firmware limit | Storage of the flight controller (estimated, 304 bytes for Copter on 8 KB boards, 560 on 16 KB boards) or the SD card (`BRD_SD_FENCE`), at most 255 vertices per polygon |
+| Fence storage | 64 items from v1.15, 63 before, 16 on flight controllers with constrained memory: a firmware limit | Storage of the flight controller (estimated as 304 bytes for Copter, which boards with 8 KB of storage have; those with 16 KB have 560) or the SD card (`BRD_SD_FENCE`), at most 255 vertices per polygon |
 | Fence types | Inclusion and exclusion polygons and circles (inclusions as their union), `GF_MAX_HOR_DIST` from home, `GF_MAX_VER_DIST` above home | `FENCE_TYPE`: inclusion and exclusion polygons and circles (inclusions as their intersection, or union with `FENCE_OPTIONS` bit 1), the `FENCE_RADIUS` circle around home, `FENCE_ALT_MAX`, `FENCE_ALT_MIN` |
 | Enabled | Unless `GF_ACTION` is None | `FENCE_ENABLE`, `FENCE_AUTOENABLE`, an RC switch or `MAV_CMD_DO_FENCE_ENABLE` |
 | Action at a breach | `GF_ACTION`: none, warning, hold, return, flight termination, land | `FENCE_ACTION`: report only, RTL or land, land, SmartRTL or RTL or land, brake or land, SmartRTL or land; land beyond 100 m outside; disarm when landed |

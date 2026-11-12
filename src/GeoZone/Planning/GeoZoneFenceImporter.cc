@@ -160,16 +160,14 @@ GeoZoneFences::Capacity _firmwareCapacity(Vehicle *vehicle)
         return GeoZoneFences::Capacity::px4(vehicle->firmwareMajorVersion(), vehicle->firmwareMinorVersion());
     }
     if (vehicle->apmFirmware()) {
+        // No parameter tells the storage of the flight controller: without a fence on the SD card the smallest fence
+        // storage in common use is assumed
         int sdCardKB = 0;
-        // Flight controllers which can keep the fence on the SD card have 16 KB of storage or more. The others are
-        // assumed to have the smallest storage in common use, since the vehicle doesn't report it.
-        GeoZoneFences::Capacity::ArduPilotStorage storage = GeoZoneFences::Capacity::ArduPilotStorage::Common;
         ParameterManager *const parameters = vehicle->parameterManager();
         if (parameters->parametersReady() && parameters->parameterExists(ParameterManager::defaultComponentId, QStringLiteral("BRD_SD_FENCE"))) {
             sdCardKB = parameters->getParameter(ParameterManager::defaultComponentId, QStringLiteral("BRD_SD_FENCE"))->rawValue().toInt();
-            storage = GeoZoneFences::Capacity::ArduPilotStorage::Large;
         }
-        return GeoZoneFences::Capacity::arduPilot(vehicle->multiRotor(), sdCardKB, storage);
+        return GeoZoneFences::Capacity::arduPilot(vehicle->multiRotor(), sdCardKB);
     }
     return GeoZoneFences::Capacity::conservative();
 }
@@ -759,10 +757,8 @@ QString GeoZoneFenceImporter::_capacityNote() const
         if (!_capacity.estimated) {
             return tr("ArduPilot fence stored on the SD card (BRD_SD_FENCE), a firmware limit. Without the card the flight controller stores less.") + QLatin1Char(' ') + retry;
         }
-        const bool large = _capacity.storageBytes == GeoZoneFences::Capacity::arduPilotBytes(vehicle->multiRotor(), GeoZoneFences::Capacity::ArduPilotStorage::Large);
-        return (large ? tr("ArduPilot doesn't report its fence storage: estimated for flight controllers with 16 KB of storage or more, like those which can store the fence on the SD card.")
-                      : tr("ArduPilot doesn't report its fence storage: estimated for flight controllers with 8 KB of storage. Those with 16 KB store more, those with 4 KB fewer points.")) +
-               QLatin1Char(' ') + retry;
+        return tr("ArduPilot doesn't report its fence storage: estimated for flight controllers with 8 KB or 15 KB of storage. Those with 16 KB or more, like the Pixhawk and Cube, store more, "
+                  "those with 4 KB fewer points. BRD_SD_FENCE stores a larger fence on the SD card.") + QLatin1Char(' ') + retry;
     }
     return tr("Estimated, the autopilot doesn't report its fence storage. Circles are added as polygons.");
 }
