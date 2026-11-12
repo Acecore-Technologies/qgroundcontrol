@@ -428,7 +428,6 @@ void GeoZoneFenceUpload::start()
     _ackResult = MAV_MISSION_ACCEPTED;
     _rejectedForRoom = false;
     _uploadNumber++;
-    (void) _transition(Sending, tr("Uploading the fence…"));
 
     _uploadConnections.disconnect();
     // The fence manager reports a rejected upload without the reason the vehicle gave
@@ -462,6 +461,16 @@ void GeoZoneFenceUpload::start()
         _uploadConnections << connect(fences, &QmlObjectListModel::dirtyChanged, this, edited);
     }
 
+    // Once the upload is wired, so that what those told about it do right away is followed: an edit of the fence, or
+    // aborting it, ends it before anything is sent
+    if (!_transition(Sending, tr("Uploading the fence…"))) {
+        return;
+    }
+    // An edit of a fence which is dirty already signals nothing
+    _checkFence();
+    if (_state != Sending) {
+        return;
+    }
     _geoFenceController->sendToVehicle();
 }
 

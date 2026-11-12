@@ -1340,6 +1340,26 @@ void GeoZoneFenceImportTest::_testGeoFenceUploadChanges()
     QTRY_VERIFY_WITH_TIMEOUT(!geoFenceController->syncInProgress(), 15000);
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
 
+    // The upload is followed from the moment it tells that it is sending: an edit made right then, or aborting it,
+    // ends it before anything is sent to the vehicle
+    for (const bool edit : { true, false }) {
+        QObject context;
+        (void) connect(upload, &GeoZoneFenceUpload::stateChanged, &context, [upload, edit, &moveVertex]() {
+            if (upload->state() == GeoZoneFenceUpload::Sending) {
+                if (edit) {
+                    moveVertex();
+                } else {
+                    upload->abort(QStringLiteral("Not now"));
+                }
+            }
+        });
+        upload->start();
+        QCOMPARE(upload->state(), GeoZoneFenceUpload::Aborted);
+        QVERIFY2(upload->message().contains(edit ? QStringLiteral("changed") : QStringLiteral("Not now")), qPrintable(upload->message()));
+        QVERIFY(!geoFenceController->syncInProgress());
+        QVERIFY(geoFenceController->dirty());
+    }
+
     // Clearing the plan
     upload->start();
     QCOMPARE(upload->state(), GeoZoneFenceUpload::Sending);
