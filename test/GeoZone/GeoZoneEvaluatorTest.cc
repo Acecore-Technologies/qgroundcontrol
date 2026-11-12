@@ -609,6 +609,21 @@ void GeoZoneEvaluatorTest::_testProhibitedAuthorisations()
     QVERIFY(authorisations.find(restricted));
     QVERIFY(!authorisations.find(restricted)->prohibitedZone);
     QVERIFY(!policy.accepts(restricted));
+
+    // The list shows both by the names of its roles
+    QCOMPARE(authorisations.rowCount(), 2);
+    const QHash<int, QByteArray> roles = authorisations.roleNames();
+    QCOMPARE(roles.count(), 5);
+    QCOMPARE(roles, authorisations.roleNames());
+    const auto shown = [&authorisations, &roles](int row, const char *role) { return authorisations.data(authorisations.index(row), roles.key(role)); };
+    QCOMPARE(shown(0, "zoneKey").toString(), GeoZoneAuthorisations::zoneKey(prohibited));
+    QVERIFY(shown(0, "notification").toBool());
+    QCOMPARE(shown(0, "statusText").toString(), QStringLiteral("Notified, valid"));
+    QCOMPARE(shown(1, "zoneKey").toString(), GeoZoneAuthorisations::zoneKey(restricted));
+    QCOMPARE(shown(1, "zoneName").toString(), restricted->displayName());
+    QVERIFY(shown(1, "permit").toString().isEmpty());
+    QVERIFY(!shown(1, "notification").toBool());
+    QCOMPARE(shown(1, "statusText").toString(), QStringLiteral("Valid"));
 }
 
 void GeoZoneEvaluatorTest::_testAuthorisationFile()

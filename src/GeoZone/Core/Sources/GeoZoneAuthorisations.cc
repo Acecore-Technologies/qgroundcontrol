@@ -762,8 +762,10 @@ QVariant GeoZoneAuthorisations::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> GeoZoneAuthorisations::roleNames() const
 {
-    return { { ZoneKeyRole, "zoneKey" }, { ZoneNameRole, "zoneName" }, { PermitRole, "permit" }, { StatusTextRole, "statusText" },
-             { NotificationRole, "notification" } };
+    // Asked for by every view and delegate
+    static const QHash<int, QByteArray> names = { { ZoneKeyRole, "zoneKey" }, { ZoneNameRole, "zoneName" }, { PermitRole, "permit" },
+                                                  { StatusTextRole, "statusText" }, { NotificationRole, "notification" } };
+    return names;
 }
 
 void GeoZoneAuthorisations::_reset(const QList<GeoZoneAuthorisation> &authorisations)
