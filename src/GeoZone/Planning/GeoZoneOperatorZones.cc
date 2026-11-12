@@ -98,6 +98,13 @@ void GeoZoneOperatorZones::load()
     _setLoadError(loadError);
 }
 
+void GeoZoneOperatorZones::restoreSource()
+{
+    if (!_zones.isEmpty() && !_repository->hasSource(fileName())) {
+        _repository->restoreFile(fileName());
+    }
+}
+
 void GeoZoneOperatorZones::_setLoadError(const QString &loadError)
 {
     if (loadError != _loadError) {

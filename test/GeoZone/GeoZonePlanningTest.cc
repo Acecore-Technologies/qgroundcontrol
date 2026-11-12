@@ -14,6 +14,7 @@
 #include "GeoZoneMissionReader.h"
 #include "GeoZoneMissionWorker.h"
 #include "GeoZoneOperatorZones.h"
+#include "GeoZoneSourceIndex.h"
 #include "GeoZonePlanAudit.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneTestBase.h"
@@ -1600,6 +1601,78 @@ void GeoZonePlanningTest::_testOperatorZonesFile()
     GeoZoneManager manager(emptyStorage);
     QVERIFY(manager.operatorZones()->zones().isEmpty());
     QVERIFY2(manager.operatorZones()->loadError().isEmpty(), qPrintable(manager.operatorZones()->loadError()));
+}
+
+void GeoZonePlanningTest::_testOperatorZonesSourceRestored()
+{
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QGeoRectangle view(center.atDistanceAndAzimuth(4000, 315), center.atDistanceAndAzimuth(4000, 135));
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString storage = dir.filePath(QStringLiteral("storage"));
+    const QString indexFile = QDir(storage).filePath(QString::fromLatin1(GeoZoneSourceIndex::indexFileName));
+    QString fileName;
+    {
+        GeoZoneManager manager(storage);
+        manager.operatorZones()->startCircle(view);
+        QVERIFY(manager.operatorZones()->saveEdit(manager.operatorZones()->editProperties()));
+        fileName = manager.operatorZones()->fileName();
+        QVERIFY(manager.repository()->hasSource(fileName));
+    }
+    QVERIFY(QFile::exists(indexFile));
+
+    // The next session lists the zone from its file and restores its source from the index of the sources
+    {
+        GeoZoneManager manager(storage);
+        manager.init();
+        QCOMPARE(manager.operatorZones()->zones().count(), 1);
+        QVERIFY(manager.repository()->hasSource(fileName));
+        QTRY_VERIFY(!manager.repository()->busy());
+        QCOMPARE(manager.sources()->count(), 1);
+        QCOMPARE(manager.zoneCount(), 1);
+    }
+
+    // The index is lost, deleted or set aside as unreadable: the zone is still listed, and is a source again, so that
+    // it is shown and checked, without the map moving to it like to a source the user adds
+    for (const bool unreadable : { false, true }) {
+        if (unreadable) {
+            QFile file(indexFile);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QVERIFY(file.write("{ \"version\": 1, \"sources\": [ {") > 0);
+        } else {
+            QVERIFY(QFile::remove(indexFile));
+        }
+        GeoZoneManager manager(storage);
+        QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+        QSignalSpy storageSpy(&manager, &GeoZoneManager::storageFailed);
+        QCOMPARE(manager.operatorZones()->zones().count(), 1);
+        QVERIFY(!manager.repository()->hasSource(fileName));
+        manager.init();
+        QTRY_VERIFY(manager.repository()->hasSource(fileName));
+        QTRY_VERIFY(!manager.repository()->busy());
+        QCOMPARE(storageSpy.count(), unreadable ? 1 : 0);
+        QCOMPARE(manager.sources()->count(), 1);
+        QCOMPARE(manager.zoneCount(), 1);
+        QCOMPARE(manager.catalog().zonesAt(center).count(), 1);
+        QCOMPARE(addedSpy.count(), 0);
+        // The index names it again for the next session
+        QVERIFY(QFile::exists(indexFile));
+    }
+
+    // Without zones there is no source to restore
+    {
+        GeoZoneManager manager(storage);
+        manager.init();
+        QTRY_VERIFY(!manager.repository()->busy());
+        QVERIFY(manager.operatorZones()->removeZone(0));
+        QVERIFY(!QFile::exists(fileName));
+    }
+    GeoZoneManager manager(storage);
+    manager.init();
+    QTRY_VERIFY(!manager.repository()->busy());
+    QVERIFY(manager.operatorZones()->zones().isEmpty());
+    QCOMPARE(manager.sources()->count(), 0);
 }
 
 void GeoZonePlanningTest::_testOperatorZonesRemovalFailure()

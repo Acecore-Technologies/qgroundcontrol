@@ -54,6 +54,10 @@ public:
     /// opened or parsed leaves none either, loadError tells why.
     void load();
     QString loadError() const { return _loadError; }
+    /// Loads the file as a source again when the zones read from it have none: once the stored sources are restored
+    /// at the start, for zones whose source was lost with the index of the sources, which would be listed but neither
+    /// shown nor checked
+    void restoreSource();
 
     const QList<GeoZone::Data> &zoneData() const { return _zones; }
     QVariantList zones() const;

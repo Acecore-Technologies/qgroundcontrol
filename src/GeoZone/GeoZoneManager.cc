@@ -184,6 +184,8 @@ GeoZoneManager *GeoZoneManager::instance()
 void GeoZoneManager::init()
 {
     _repository->init();
+    // The zones the operator drew are a source like the others, also when the index of the sources lost it
+    _operatorZones->restoreSource();
 
     // The services taking the area of interest download the zones around the active vehicle
     MultiVehicleManager *const vehicles = MultiVehicleManager::instance();

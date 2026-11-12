@@ -116,6 +116,13 @@ void GeoZoneSourceRepository::addFiles(const QStringList &fileNames)
     }
 }
 
+void GeoZoneSourceRepository::restoreFile(const QString &fileName)
+{
+    GeoZoneLoader::Job job = GeoZoneLoader::fileJob(fileName);
+    job.cancelToken = _beginOperation(job.key);
+    _startLoad(job, LoadMode::Background);
+}
+
 void GeoZoneSourceRepository::_batchLoaded(const GeoZoneLoader::Job &job, const GeoZoneLoader::Result &loadResult)
 {
     const auto it = _fileBatches.find(job.batchId);

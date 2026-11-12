@@ -70,6 +70,9 @@ public:
     /// Loads files in the background like addFile. With several files, filesAdded tells the outcome once all are
     /// loaded instead of loadFailed for each.
     Q_INVOKABLE void addFiles(const QStringList &fileNames);
+    /// Loads a file in the background as the source it was before its entry was lost with the index of the sources,
+    /// like the stored sources at the start: without the signals of a source the user adds
+    void restoreFile(const QString &fileName);
     /// Downloads an ED-269 or ED-318 feed from an http, https or file URL in the background, replacing the source with
     /// the same URL. loadFailed is emitted on errors and sourceAdded on success.
     Q_INVOKABLE void addUrl(const QString &url);
