@@ -19,7 +19,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace {
 
@@ -29,7 +28,7 @@ constexpr double kEntryTolerance = 0.01;    ///< Meters along a path within whic
 
 /// Meters of a degree of latitude at least: of the sphere of the projection, less the 1 % the degrees of the earth are
 /// shorter by near the equator, so that areas grown by a distance in degrees aren't too small
-constexpr double kMinMetersPerDegree = GeoZoneGeometry::kEarthRadiusMeters * (std::numbers::pi / 180) * 0.99;
+constexpr double kMinMetersPerDegree = GeoZoneGeometry::kMetersPerDegree * 0.99;
 
 void extend(double &minimum, double &maximum, double value)
 {

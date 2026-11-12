@@ -19,7 +19,6 @@ namespace GeoZoneGeometry {
 namespace {
 
 constexpr double kDegreesToRadians = M_PI / 180.0;
-constexpr double kMetersPerDegree = kEarthRadiusMeters * kDegreesToRadians;
 /// Sine of the angle between two points seen from the center of the earth below which they are the same or opposite
 /// points, which have no single great circle and are joined straight in latitude and longitude
 constexpr double kSamePointsSine = 1e-12;

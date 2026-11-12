@@ -10,6 +10,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneParserUtils.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QSet>
 #include <QtCore/QTimeZone>
@@ -58,7 +59,7 @@ double _tfrMeters(double value, const QString &unit)
         { QStringLiteral("NM"), 1852 },
         { QStringLiteral("KM"), 1000 },
         { QStringLiteral("M"), 1 },
-        { QStringLiteral("FT"), 0.3048 },
+        { QStringLiteral("FT"), GeoZoneVertical::metersPerFoot },
         { QStringLiteral("SM"), 1609.344 },
     };
     return value * metersPerUnit.value(unit.trimmed().toUpper(), qQNaN());

@@ -196,7 +196,7 @@ QGeoRectangle GeoZoneAreaOfInterest::expanded(const QGeoRectangle &area, double 
     if (!area.isValid()) {
         return QGeoRectangle();
     }
-    constexpr double metersPerDegree = 111320.0;
+    constexpr double metersPerDegree = GeoZoneService::areaMetersPerDegree;
     const double latitudeMargin = meters / metersPerDegree;
     const double maxLatitude = (std::max)(std::abs(area.topLeft().latitude()), std::abs(area.bottomRight().latitude()));
     const double longitudeMargin = meters / (metersPerDegree * (std::max)(0.01, std::cos(qDegreesToRadians((std::min)(maxLatitude + latitudeMargin, 89.0)))));
@@ -220,7 +220,7 @@ QGeoRectangle GeoZoneAreaOfInterest::cropped(const QGeoRectangle &area, double m
     if (!area.isValid()) {
         return QGeoRectangle();
     }
-    constexpr double metersPerDegree = 111320.0;
+    constexpr double metersPerDegree = GeoZoneService::areaMetersPerDegree;
     const QGeoCoordinate center = area.center();
     const double maxHeight = maxMeters / metersPerDegree;
     const double maxWidth = maxMeters / (metersPerDegree * (std::max)(0.01, std::cos(qDegreesToRadians(center.latitude()))));
@@ -235,7 +235,7 @@ double GeoZoneAreaOfInterest::spanMeters(const QGeoRectangle &area)
     if (!area.isValid()) {
         return 0;
     }
-    constexpr double metersPerDegree = 111320.0;
+    constexpr double metersPerDegree = GeoZoneService::areaMetersPerDegree;
     const double width = area.width() * metersPerDegree * (std::max)(0.01, std::cos(qDegreesToRadians(area.center().latitude())));
     return (std::max)(area.height() * metersPerDegree, width);
 }

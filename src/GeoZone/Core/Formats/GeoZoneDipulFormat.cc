@@ -10,6 +10,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneParserUtils.h"
+#include "GeoZoneVertical.h"
 
 using namespace GeoZoneParserUtils;
 
@@ -74,9 +75,9 @@ DipulLimit _dipulLimit(const QJsonValue &value, const QString &unit, const QStri
     }
     const QString upperUnit = unit.trimmed().toUpper();
     if (upperUnit == QStringLiteral("FT")) {
-        limit.meters = number * kMetersPerFoot;
+        limit.meters = number * GeoZoneVertical::metersPerFoot;
     } else if (upperUnit == QStringLiteral("FL")) {
-        limit.meters = number * 100 * kMetersPerFoot;
+        limit.meters = number * 100 * GeoZoneVertical::metersPerFoot;
     } else if (upperUnit.isEmpty() || (upperUnit == QStringLiteral("M"))) {
         limit.meters = number;
     } else {

@@ -17,6 +17,7 @@
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneText.h"
+#include "GeoZoneVertical.h"
 #include "MissionController.h"
 #include "PlanMasterController.h"
 #include "QmlObjectListModel.h"
@@ -99,7 +100,7 @@ QString altitudeText(double meters)
     if (!std::isfinite(meters)) {
         return Text::tr("unknown");
     }
-    return Text::tr("%1 m (%2 ft) AMSL").arg(std::lround(meters)).arg(std::lround(meters / 0.3048));
+    return Text::tr("%1 m (%2 ft) AMSL").arg(std::lround(meters)).arg(std::lround(meters / GeoZoneVertical::metersPerFoot));
 }
 
 QString distanceText(double meters)

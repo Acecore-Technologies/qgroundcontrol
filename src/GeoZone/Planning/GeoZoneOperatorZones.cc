@@ -14,6 +14,7 @@
 #include "GeoZoneSource.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneText.h"
+#include "GeoZoneVertical.h"
 #include "QGCMapCircle.h"
 #include "QGCMapPolygon.h"
 
@@ -27,11 +28,9 @@
 
 namespace {
 
-constexpr double kMetersPerFoot = 0.3048;
-
 double _meters(double limit, bool feet)
 {
-    return feet ? (limit * kMetersPerFoot) : limit;
+    return feet ? (limit * GeoZoneVertical::metersPerFoot) : limit;
 }
 
 double _number(const QVariant &value)

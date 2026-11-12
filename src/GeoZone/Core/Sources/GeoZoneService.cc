@@ -276,7 +276,7 @@ double GeoZoneService::areaKm2(const QGeoRectangle &area)
     if (!area.isValid()) {
         return 0;
     }
-    constexpr double kmPerDegree = 111.32;
+    constexpr double kmPerDegree = areaMetersPerDegree / 1000;
     const double latitude = qDegreesToRadians(area.center().latitude());
     return (area.height() * kmPerDegree) * (area.width() * kmPerDegree * std::cos(latitude));
 }

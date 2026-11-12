@@ -13,11 +13,15 @@
 #include <QtCore/QPointF>
 #include <QtPositioning/QGeoCoordinate>
 
+#include <numbers>
+
 /// Local projection of the geozone geometry, see GeoZoneGeometry.h
 namespace GeoZoneGeometry {
 
 /// Mean radius of the spherical earth of the projection and the great circles, in meters
 inline constexpr double kEarthRadiusMeters = 6371008.8;
+/// Meters per degree of latitude on that sphere, and per degree of longitude at its equator
+inline constexpr double kMetersPerDegree = kEarthRadiusMeters * (std::numbers::pi / 180);
 
 /// Equirectangular projection to meters around an origin. It is affine in latitude and longitude, so edges
 /// which are straight in latitude/longitude stay straight and containment tests are exact. Distances are

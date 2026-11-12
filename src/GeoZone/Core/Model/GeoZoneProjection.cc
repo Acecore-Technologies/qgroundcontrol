@@ -24,8 +24,8 @@ constexpr double kPoleCosine = 1e-9;
 LocalProjection::LocalProjection(const QGeoCoordinate &origin)
     : _originLatitude(origin.latitude())
     , _originLongitude(origin.longitude())
-    , _metersPerDegreeLatitude(kEarthRadiusMeters * kDegreesToRadians)
-    , _metersPerDegreeLongitude(kEarthRadiusMeters * kDegreesToRadians * std::cos(origin.latitude() * kDegreesToRadians))
+    , _metersPerDegreeLatitude(kMetersPerDegree)
+    , _metersPerDegreeLongitude(kMetersPerDegree * std::cos(origin.latitude() * kDegreesToRadians))
 {
 }
 

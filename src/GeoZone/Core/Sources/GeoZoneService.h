@@ -96,6 +96,12 @@ public:
 
     /// @return true when the URL template has placeholders of the area
     static bool hasAreaPlaceholders(const QString &urlTemplate);
+    /// Meters per degree of latitude, and of longitude at the equator, which the areas requested from services are
+    /// sized with: the degree at the equator of the WGS 84 ellipsoid. It is 0.1 % more than
+    /// GeoZoneGeometry::kMetersPerDegree of the mean sphere and stays apart from it, since the areas requested, their
+    /// margins and what is compared with the largest area a service answers depend on it.
+    static constexpr double areaMetersPerDegree = 111320.0;
+
     /// @return Approximate surface of the area in km²
     static double areaKm2(const QGeoRectangle &area);
     /// @return true when the service answers the area

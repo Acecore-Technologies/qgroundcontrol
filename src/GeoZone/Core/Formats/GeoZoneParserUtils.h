@@ -20,8 +20,6 @@
 /// Conversions shared by the geozone formats
 namespace GeoZoneParserUtils {
 
-inline constexpr double kMetersPerFoot = 0.3048;
-inline constexpr double kUnlimitedSentinel = 99999.0;   ///< Upper limit of airspaces without a ceiling, as in GeoZone
 // Bounds keeping a broken or hostile file from stalling the application
 inline constexpr qsizetype kMaxRingVertices = 200000;
 inline constexpr qsizetype kMaxVolumesPerZone = 10000;

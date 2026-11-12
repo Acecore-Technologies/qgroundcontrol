@@ -10,6 +10,7 @@
 #include "GeoZoneFormat.h"
 #include "GeoZoneParser.h"
 #include "GeoZoneParserUtils.h"
+#include "GeoZoneVertical.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QtMath>
@@ -43,7 +44,7 @@ double _aixmDistance(double value, const QString &uom)
         return value;
     }
     if ((unit == QStringLiteral("[FT_I]")) || (unit == QStringLiteral("FT"))) {
-        return value * kMetersPerFoot;
+        return value * GeoZoneVertical::metersPerFoot;
     }
     if ((unit == QStringLiteral("[MI_I]")) || (unit == QStringLiteral("MI"))) {
         return value * 1609.344;
@@ -157,7 +158,7 @@ void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmL
         if (volume.feet) {
             return feet;
         }
-        return ((limit.uom == QStringLiteral("FT")) || (limit.uom == QStringLiteral("FL"))) ? (feet * kMetersPerFoot) : limit.value;
+        return ((limit.uom == QStringLiteral("FT")) || (limit.uom == QStringLiteral("FL"))) ? (feet * GeoZoneVertical::metersPerFoot) : limit.value;
     };
     volume.lowerLimit = convert(lower);
     volume.upperLimit = convert(upper);
@@ -332,7 +333,7 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 if (text == QStringLiteral("GND")) {
                     limit.value = 0;
                 } else if (text == QStringLiteral("UNL")) {
-                    limit.value = kUnlimitedSentinel;
+                    limit.value = GeoZoneVertical::unlimitedSentinel;
                     limit.uom = QStringLiteral("FT");
                 } else {
                     limit.value = _numberFromText(text);

@@ -57,7 +57,7 @@ void _setFaaLimit(GeoZone::Volume &volume, GeoZoneVertical::Limit side, const QJ
     double value = _number(valueJson);
     QString reference = code.isEmpty() ? QStringLiteral("MSL") : code;
     if (code == QLatin1String("UNLTD")) {
-        value = upper ? kUnlimitedSentinel : 0;
+        value = upper ? GeoZoneVertical::unlimitedSentinel : 0;
         reference = upper ? QStringLiteral("MSL") : QStringLiteral("SFC");
     } else if (std::isnan(value) || (value <= -9998)) {
         // -9998 is up to the overlying airspace, which the layer doesn't give
@@ -114,7 +114,7 @@ FaaLimitText _faaLimitText(const QString &text, GeoZoneVertical::Limit side, QSt
     }
     static const QStringList unlimited = { QStringLiteral("UNLIMITED"), QStringLiteral("UNLTD"), QStringLiteral("UNL") };
     if (upper && unlimited.contains(value)) {
-        return FaaLimitText{ kUnlimitedSentinel, QStringLiteral("MSL") };
+        return FaaLimitText{ GeoZoneVertical::unlimitedSentinel, QStringLiteral("MSL") };
     }
 
     std::optional<FaaLimitText> limit = _faaLimitPart(value);
@@ -196,7 +196,7 @@ GeoZoneFormat::FeatureResult _facilityMapFeature(const QJsonObject &feature, con
     GeoZone::Volume layer;
     layer.feet = true;
     layer.lowerLimit = 0;
-    layer.upperLimit = kUnlimitedSentinel;
+    layer.upperLimit = GeoZoneVertical::unlimitedSentinel;
     layer.setReferences(QStringLiteral("SFC"), QStringLiteral("MSL"));
     _appendHorizontalGeometry(feature.value(QStringLiteral("geometry")).toObject(), layer, 1.0, zone.volumes, zone.issues);
     return GeoZoneFormat::featureResult(zone);

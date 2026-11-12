@@ -58,7 +58,7 @@ void _openAipLimit(const QJsonObject &limit, GeoZoneVertical::Limit side, GeoZon
     const int datum = limit.value(QStringLiteral("referenceDatum")).toInt(-1);
     QString reference = (datum == 0) ? QStringLiteral("AGL") : (datum == 1) ? QStringLiteral("MSL") : (datum == 2) ? QStringLiteral("STD") : QString();
     if (unit == 0) {
-        value /= kMetersPerFoot;
+        value /= GeoZoneVertical::metersPerFoot;
     } else if (unit == 6) {
         value *= 100;
         reference = QStringLiteral("STD");
@@ -70,7 +70,7 @@ void _openAipLimit(const QJsonObject &limit, GeoZoneVertical::Limit side, GeoZon
     }
     // Ceilings of airspaces without one are published as very high flight levels
     if (upper && (reference == QStringLiteral("STD")) && (value >= 99900)) {
-        value = kUnlimitedSentinel;
+        value = GeoZoneVertical::unlimitedSentinel;
     }
     (upper ? volume.upperLimit : volume.lowerLimit) = value;
     volume.setReferences(upper ? volume.lowerReferenceCode : reference, upper ? reference : volume.upperReferenceCode);
