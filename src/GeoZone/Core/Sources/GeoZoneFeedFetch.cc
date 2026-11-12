@@ -16,7 +16,9 @@
 #include "GeoZoneSource.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QUrl>
@@ -319,6 +321,7 @@ bool GeoZoneFeedFetch::_startPages()
     }
 
     _stage = Stage::Pages;
+    _pagedBytes = QFileInfo(_result.filePath).size();
     // Numbered pages tell their count at once, the pages aren't downloaded for a response which stays incomplete
     if (_paging.truncated && (_paging.scheme == GeoZoneProviders::Paging::Scheme::PageNumber)) {
         _finishTruncated();
@@ -360,6 +363,12 @@ void GeoZoneFeedFetch::_fetchNextPage()
         const bool failed = (page.status != GeoZoneDownloader::Result::Status::Ok) || errorRegExp.match(QString::fromLatin1(head)).hasMatch();
         if (!failed) {
             _result.pagePaths.append(page.filePath);
+            // The pages are merged in memory to be loaded: together they are no larger than one download may be
+            _pagedBytes += QFileInfo(page.filePath).size();
+            if (const qint64 maxBytes = _downloader ? _downloader->maxBytes() : GeoZoneDownloader::defaultMaxBytes; _pagedBytes > maxBytes) {
+                _finish(Result::Status::Failed, tr("The pages of the response are larger than %1 together. Download a smaller area.").arg(QLocale().formattedDataSize(maxBytes)));
+                return;
+            }
             // ArcGIS pages tell whether more follow, the last one downloaded whether the response is still incomplete
             if (_paging.scheme == GeoZoneProviders::Paging::Scheme::ArcGisOffset) {
                 if (!GeoZoneProviders::arcGisExceeded(head, tail)) {

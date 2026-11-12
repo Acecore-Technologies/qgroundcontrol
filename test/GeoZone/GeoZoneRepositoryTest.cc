@@ -1727,6 +1727,52 @@ void GeoZoneRepositoryTest::_testDownloadSizeLimit()
     QCOMPARE(downloader.count(), 0);
 }
 
+void GeoZoneRepositoryTest::_testPagedSizeLimit()
+{
+    // A WFS answering 6 zones in 3 pages
+    QFile restrictions(QStringLiteral(":/unittest/france_uas_test.json"));
+    QVERIFY(restrictions.open(QIODevice::ReadOnly));
+    const QJsonObject collection = QJsonDocument::fromJson(restrictions.readAll()).object();
+    const QJsonArray zones = wfsFeatures(collection, 6);
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [&](const QByteArray &request, QByteArray &, QByteArray &content, QByteArray &) {
+        content = wfsPage(collection, zones, request, 2);
+        return true;
+    };
+    const qint64 pageBytes = wfsPage(collection, zones, "GET /wfs HTTP/1.1", 2).size();
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneDownloader downloader;
+    downloader.setDirectory(dir.path());
+    GeoZoneFeedFetch::Request request;
+    request.url = server.url(QStringLiteral("/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=restrictions&OUTPUTFORMAT=application/json"));
+    const auto fetchResult = [&downloader, &request]() {
+        GeoZoneFeedFetch fetch(&downloader, request);
+        std::optional<GeoZoneFeedFetch::Result> result;
+        (void) connect(&fetch, &GeoZoneFeedFetch::finished, &fetch, [&result](const GeoZoneFeedFetch::Result &finished) { result = finished; });
+        fetch.start();
+        (void) QTest::qWaitFor([&result]() { return result.has_value(); }, stepTimeoutMSecs);
+        return result;
+    };
+
+    // Each page fits the size a download may have, but not all together, which are loaded as one document
+    downloader.setMaxBytes((5 * pageBytes) / 2);
+    std::optional<GeoZoneFeedFetch::Result> result = fetchResult();
+    QVERIFY(result.has_value());
+    QCOMPARE(result->status, GeoZoneFeedFetch::Result::Status::Failed);
+    QVERIFY2(result->errorString.startsWith(QStringLiteral("The pages of the response are larger than")), qPrintable(result->errorString));
+    QCOMPARE(server.requestCount, 3);
+    QVERIFY(QDir(dir.path()).entryList(QDir::Files).isEmpty());
+
+    // Within the size, all pages are kept
+    downloader.setMaxBytes(4 * pageBytes);
+    result = fetchResult();
+    QVERIFY(result.has_value());
+    QCOMPARE(result->status, GeoZoneFeedFetch::Result::Status::Ready);
+    QCOMPARE(result->pagePaths.count(), 2);
+}
+
 void GeoZoneRepositoryTest::_testDownloadWithoutFile()
 {
     TestFeedServer server;

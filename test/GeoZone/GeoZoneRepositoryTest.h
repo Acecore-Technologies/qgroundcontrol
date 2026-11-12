@@ -46,6 +46,7 @@ private slots:
     void _testSourceValidity();
     void _testFeedAgeFromLastCheck();
     void _testDownloadSizeLimit();
+    void _testPagedSizeLimit();
     void _testDownloadWithoutFile();
     void _testDownloadFailures();
     void _testDownloadRedirects();

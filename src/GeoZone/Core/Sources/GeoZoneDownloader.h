@@ -98,6 +98,7 @@ public:
 
     /// Downloads larger than this fail without being read
     void setMaxBytes(qint64 maxBytes) { _maxBytes = maxBytes; }
+    qint64 maxBytes() const { return _maxBytes; }
     void setTimeout(std::chrono::milliseconds timeout) { _timeout = timeout; }
 
     int count() const { return static_cast<int>(_downloads.count()); }

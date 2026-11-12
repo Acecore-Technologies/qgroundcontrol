@@ -28,7 +28,7 @@ class GeoZoneFormat;
 
 /// Downloads one feed for loading, in stages: the OAuth2 token of its service, the feed URL, which may be a page
 /// linking to the current dataset, then that dataset, the further pages of a response the server limited (WFS, ArcGIS
-/// or numbered pages, see GeoZoneProviders::paging), and the
+/// or numbered pages, see GeoZoneProviders::paging), which together stay within the size limit of a download, and the
 /// companion documents the format of the document refers to. The document is checked against the SHA-256 its
 /// publisher gives in a digest header or a .sha256 file, see GeoZoneService::sha256Url. The result is a document ready to load, the confirmation that the stored copy is current,
 /// or a failure. Canceling stops the downloads and drops whatever arrives later.
@@ -151,6 +151,7 @@ private:
 
     GeoZoneProviders::Paging _paging;
     int _nextPage = 1;      ///< 1 for the page after the first
+    qint64 _pagedBytes = 0; ///< Size of the document with its further pages, which are loaded together
 
     QJsonObject _document;  ///< Document whose companions are downloaded
     GeoZoneParser::Companions _companions;
