@@ -733,6 +733,36 @@ void GeoZoneMonitorTest::_testAlertLog()
     event.zoneName = QStringLiteral("=1+1");
     event.zoneIdentifier = QStringLiteral("@A1");
     QVERIFY(GeoZoneAlertHistory::logLine(event).contains(QStringLiteral(",'@A1,'=1+1,")));
+
+    // A record is one line whatever the feed's text has: line breaks and backslashes are escaped and read back
+    event.zoneIdentifier = QStringLiteral("NL-1");
+    event.zoneName = QStringLiteral("Harbour,\n\"East\"\r\nbasin");
+    event.sourceText = QStringLiteral("C:\\new\\zones.json");
+    event.detail = QStringLiteral("\rstarts with a break");
+    event.kind = GeoZoneMonitor::AlertEvent::Entry;
+    const QString record = GeoZoneAlertHistory::logLine(event);
+    QVERIFY(!record.contains(QLatin1Char('\n')));
+    QVERIFY(!record.contains(QLatin1Char('\r')));
+    QVERIFY2(record.contains(QStringLiteral(",NL-1,\"Harbour,\\n\"\"East\"\"\\nbasin\",")), qPrintable(record));
+    const QStringList recordFields = GeoZoneAlertHistory::logFields(record);
+    QCOMPARE(recordFields.value(9), QStringLiteral("Harbour,\n\"East\"\nbasin"));
+    QCOMPARE(recordFields.value(11), event.sourceText);
+    QCOMPARE(recordFields.value(15), QStringLiteral("\nstarts with a break"));
+    const std::optional<GeoZoneMonitor::AlertEvent> readBack = GeoZoneAlertHistory::parseLogLine(record);
+    QVERIFY(readBack);
+    QCOMPARE(readBack->zoneName, QStringLiteral("Harbour,\n\"East\"\nbasin"));
+    // ... so the alert is among those of earlier today after a restart
+    GeoZoneAlertHistory written(&manager);
+    written.startLog(dir.filePath(QStringLiteral("breaks")));
+    written.append(event);
+    event.zoneName = QStringLiteral("Next");
+    written.append(event);
+    QVERIFY(written.flushLog());
+    GeoZoneAlertHistory restarted(&manager);
+    restarted.startLog(dir.filePath(QStringLiteral("breaks")));
+    QCOMPARE(restarted.count(), 2);
+    QCOMPARE(restarted.data(restarted.index(1), GeoZoneAlertHistory::ZoneNameRole).toString(), QStringLiteral("Harbour,\n\"East\"\nbasin"));
+    QCOMPARE(restarted.data(restarted.index(0), GeoZoneAlertHistory::ZoneNameRole).toString(), QStringLiteral("Next"));
 }
 
 void GeoZoneMonitorTest::_testAlertLogFailure()

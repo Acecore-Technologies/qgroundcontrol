@@ -41,10 +41,60 @@ const QStringList &eventNames()
     return names;
 }
 
+/// A record of the log is one line, which its readers rely on: line breaks in text from feeds, like a zone name, are
+/// written as a backslash and n, and backslashes doubled
+QString escapedLineBreaks(const QString &text)
+{
+    if (!text.contains(QLatin1Char('\n')) && !text.contains(QLatin1Char('\r')) && !text.contains(QLatin1Char('\\'))) {
+        return text;
+    }
+    QString escaped;
+    escaped.reserve(text.size() + 8);
+    for (qsizetype i = 0; i < text.size(); i++) {
+        const QChar character = text.at(i);
+        if (character == QLatin1Char('\\')) {
+            escaped += QStringLiteral("\\\\");
+        } else if (character == QLatin1Char('\r')) {
+            // With the line feed which follows it, one line break
+            if ((i + 1 < text.size()) && (text.at(i + 1) == QLatin1Char('\n'))) {
+                i++;
+            }
+            escaped += QStringLiteral("\\n");
+        } else if (character == QLatin1Char('\n')) {
+            escaped += QStringLiteral("\\n");
+        } else {
+            escaped += character;
+        }
+    }
+    return escaped;
+}
+
+/// Undoes escapedLineBreaks()
+QString unescapedLineBreaks(const QString &text)
+{
+    if (!text.contains(QLatin1Char('\\'))) {
+        return text;
+    }
+    QString unescaped;
+    unescaped.reserve(text.size());
+    for (qsizetype i = 0; i < text.size(); i++) {
+        const QChar character = text.at(i);
+        const QChar next = (i + 1 < text.size()) ? text.at(i + 1) : QChar();
+        if ((character == QLatin1Char('\\')) && ((next == QLatin1Char('\\')) || (next == QLatin1Char('n')))) {
+            unescaped += (next == QLatin1Char('n')) ? QLatin1Char('\n') : QLatin1Char('\\');
+            i++;
+        } else {
+            unescaped += character;
+        }
+    }
+    return unescaped;
+}
+
 QString csvField(const QString &text)
 {
-    const QString value = (!text.isEmpty() && formulaStarts.contains(text.front())) ? (QLatin1Char('\'') + text) : text;
-    if (!value.contains(QLatin1Char(',')) && !value.contains(QLatin1Char('"')) && !value.contains(QLatin1Char('\n')) && !value.contains(QLatin1Char('\r'))) {
+    const QString escaped = escapedLineBreaks(text);
+    const QString value = (!escaped.isEmpty() && formulaStarts.contains(escaped.front())) ? (QLatin1Char('\'') + escaped) : escaped;
+    if (!value.contains(QLatin1Char(',')) && !value.contains(QLatin1Char('"'))) {
         return value;
     }
     QString quoted = value;
@@ -86,6 +136,7 @@ QStringList csvFields(const QString &line)
         if ((text.size() >= 2) && (text.front() == QLatin1Char('\'')) && formulaStarts.contains(text.at(1))) {
             text.remove(0, 1);
         }
+        text = unescapedLineBreaks(text);
     }
     return fields;
 }
