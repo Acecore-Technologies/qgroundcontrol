@@ -3207,6 +3207,18 @@ void GeoZoneMonitorTest::_testPermits()
     QCOMPARE(alertSpy.count(), alertCount + 1);
     QCOMPARE(alertSpy.last()[0].toString(), QStringLiteral("Vehicle 2: Entered geozone A (Authorisation required)"));
 
+    // The level of the active vehicle follows its permits at once, not at the next evaluation
+    monitor.setActiveVehicleId(otherId);
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
+    QSignalSpy levelSpy(&monitor, &GeoZoneMonitor::activeLevelChanged);
+    QVERIFY(permits->acknowledge(authorisation, GeoZonePermits::ZoneDetails, otherId));
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
+    QCOMPARE(levelSpy.count(), 1);
+    permits->withdraw(GeoZonePermits::key(authorisation), otherId);
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
+    QCOMPARE(levelSpy.count(), 2);
+    monitor.setActiveVehicleId(vehicleId);
+
     // A permit acknowledged without a vehicle becomes that of the next active vehicle
     GeoZonePermits loose;
     QSignalSpy looseSpy(&loose, &GeoZonePermits::countChanged);

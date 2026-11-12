@@ -402,8 +402,8 @@ private:
     void _raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change);
     /// Logs a permit acknowledged or ended
     void _logPermit(const GeoZonePermits::Permit &permit, AlertEvent::Kind kind, const QString &detail);
-    /// Updates the questions and ground warnings after a permit was acknowledged or ended, and alerts its vehicle
-    /// about the zones of a withdrawn permit again
+    /// Updates the questions, ground warnings and level after a permit was acknowledged or ended, and alerts its
+    /// vehicle about the zones of a withdrawn permit again
     void _permitsChanged(const GeoZonePermits::Permit &permit, bool withdrawn);
     /// Announces the alerts raised since the last time and the repeats due, as the arbiter decides
     void _announce();

@@ -1247,6 +1247,8 @@ void GeoZoneMonitor::_permitsChanged(const GeoZonePermits::Permit &permit, bool 
         _updateGroundStatus(monitor);
     }
     _updateAlertActions();
+    // A permit makes its zone an advisory, and its end a caution or warning again, before the next evaluation
+    _updateActiveLevel();
 }
 
 QStringList GeoZoneMonitor::approvedZoneKeys() const
