@@ -16,6 +16,8 @@ namespace GeoZoneGeometry {
 namespace {
 
 constexpr double kDegreesToRadians = M_PI / 180.0;
+/// Cosine of the latitude of an origin below which it is at a pole, where east distances have no scale
+constexpr double kPoleCosine = 1e-9;
 
 } // namespace
 
@@ -65,7 +67,7 @@ QList<QPointF> LocalProjection::lonLatToLocal(const QList<QPointF> &lonLats) con
 double LocalProjection::eastScaleAt(double latitude) const
 {
     const double originCos = std::cos(_originLatitude * kDegreesToRadians);
-    return (originCos > 1e-9) ? (std::cos(latitude * kDegreesToRadians) / originCos) : 1.0;
+    return (originCos > kPoleCosine) ? (std::cos(latitude * kDegreesToRadians) / originCos) : 1.0;
 }
 
 QPointF LocalProjection::toLocal(const QGeoCoordinate &coordinate, const QPointF &previous) const

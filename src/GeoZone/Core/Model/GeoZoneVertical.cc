@@ -23,6 +23,8 @@ namespace {
 // pressure ratio R * L / (g * M)
 constexpr double kStandardTemperatureOverLapseRate = 288.15 / 0.0065;
 constexpr double kPressureExponent = 0.190263;
+/// Meters of height change between two positions below which the path between them is level
+constexpr double kLevelHeightChange = 1e-9;
 
 } // namespace
 
@@ -115,7 +117,7 @@ std::optional<std::pair<double, double>> interval(const GeoZone::Volume &volume,
         }
         const double value = upper ? (limit->limit + margin) : (limit->limit - margin);
         const double slope = limit->to - limit->from;
-        if (std::abs(slope) < 1e-9) {
+        if (std::abs(slope) < kLevelHeightChange) {
             if (upper ? (limit->from > value) : (limit->from < value)) {
                 first = 1;
                 last = 0;

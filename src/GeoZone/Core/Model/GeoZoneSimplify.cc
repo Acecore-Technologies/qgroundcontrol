@@ -23,11 +23,17 @@ namespace GeoZoneGeometry {
 
 namespace {
 
-/// Intersection of the lines through p with direction d and through q with direction e
+/// Sine of the angle between two lines below which they have no single intersection
+constexpr double kNoIntersectionSine = 1e-12;
+/// Cosine of the angle between the outward normals of two edges below which their corner is sharper than 60 degrees
+constexpr double kSharpCornerCosine = -0.5;
+
+/// Intersection of the lines through p with unit direction d and through q with unit direction e, p when they are
+/// parallel
 QPointF _lineIntersection(const QPointF &p, const QPointF &d, const QPointF &q, const QPointF &e)
 {
     const double denominator = GeoZoneVector::cross(d, e);
-    if (std::abs(denominator) < 1e-12) {
+    if (std::abs(denominator) < kNoIntersectionSine) {
         return p;
     }
     return p + (d * (GeoZoneVector::cross(q - p, e) / denominator));
@@ -138,7 +144,7 @@ QList<QPointF> _offsetRing(const QList<QPointF> &ring, const Expansion &expansio
         const QPointF p2 = vertex + (n2 * expansion.offsets[i]);
         const double turn = GeoZoneVector::cross(d1, d2);
 
-        if (std::abs(turn) < 1e-9) {
+        if (std::abs(turn) < kParallelSine) {
             // Collinear or folding back, the offset lines don't meet
             append(p1, i);
             append(p2, i);
@@ -150,7 +156,7 @@ QList<QPointF> _offsetRing(const QList<QPointF> &ring, const Expansion &expansio
         // The mitre may use up to half of each edge, leaving the rest for the corner at its other end
         const bool mitreFits = (QPointF::dotProduct(mitre - vertex, d1) >= -(GeoZoneVector::length(vertex - previous) / 2)) &&
                                (QPointF::dotProduct(mitre - vertex, d2) <= (GeoZoneVector::length(next - vertex) / 2));
-        if (convex && (QPointF::dotProduct(n1, n2) < -0.5)) {
+        if (convex && (QPointF::dotProduct(n1, n2) < kSharpCornerCosine)) {
             QPointF bisector = GeoZoneVector::unit(n1 + n2);
             if (bisector.isNull()) {
                 bisector = d1;
@@ -193,11 +199,13 @@ QRectF _ringBounds(const QList<QPointF> &ring)
 class SegmentGrid
 {
 public:
+    static constexpr double minCellSize = 1e-6;     ///< For bounds without width or height
+
     SegmentGrid(const QRectF &bounds, qsizetype segmentCount)
         : _bounds(bounds)
         , _size(std::clamp(static_cast<int>(std::sqrt(static_cast<double>(segmentCount))), 1, 512))
-        , _cellWidth(std::max(bounds.width() / _size, 1e-6))
-        , _cellHeight(std::max(bounds.height() / _size, 1e-6))
+        , _cellWidth(std::max(bounds.width() / _size, minCellSize))
+        , _cellHeight(std::max(bounds.height() / _size, minCellSize))
         , _cells(static_cast<qsizetype>(_size) * _size)
         , _marks(segmentCount, 0)
     {

@@ -16,6 +16,10 @@
 /// Planar vector helpers shared by the geozone geometry, on points of a local projection in meters
 namespace GeoZoneVector {
 
+/// Cross product of the edges from a point to two others, in the units of the points squared, below which the three
+/// are collinear
+inline constexpr double kCollinearTolerance = 1e-12;
+
 inline double dot(const QPointF &a, const QPointF &b)
 {
     return (a.x() * b.x()) + (a.y() * b.y());
@@ -40,7 +44,7 @@ inline QPointF unit(const QPointF &vector)
 }
 
 /// @return Sign of the turn from a->b to a->c, 0 when collinear within the tolerance
-inline int orientation(const QPointF &a, const QPointF &b, const QPointF &c, double tolerance = 1e-12)
+inline int orientation(const QPointF &a, const QPointF &b, const QPointF &c, double tolerance = kCollinearTolerance)
 {
     const double value = cross(b - a, c - a);
     if (std::abs(value) < tolerance) {

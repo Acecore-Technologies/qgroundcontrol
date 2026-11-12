@@ -20,6 +20,9 @@ namespace {
 
 constexpr double kDegreesToRadians = M_PI / 180.0;
 constexpr double kMetersPerDegree = kEarthRadiusMeters * kDegreesToRadians;
+/// Sine of the angle between two points seen from the center of the earth below which they are the same or opposite
+/// points, which have no single great circle and are joined straight in latitude and longitude
+constexpr double kSamePointsSine = 1e-12;
 
 struct Vector3 {
     double x = 0;
@@ -107,8 +110,7 @@ QPointF greatCircleInterpolate(const QPointF &from, const QPointF &to, double fr
     const Vector3 b = _toVector(to);
     const Vector3 normal{ (a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x) };
     const double sine = std::sqrt((normal.x * normal.x) + (normal.y * normal.y) + (normal.z * normal.z));
-    // The same or opposite points have no single great circle
-    if (sine < 1e-12) {
+    if (sine < kSamePointsSine) {
         return straight;
     }
     const double angle = std::atan2(sine, (a.x * b.x) + (a.y * b.y) + (a.z * b.z));
@@ -130,8 +132,8 @@ std::pair<double, double> greatCircleLatitudes(const QPointF &from, const QPoint
     const Vector3 b = _toVector(to);
     const Vector3 normal = _cross(a, b);
     const double sine = std::sqrt(_dot(normal, normal));
-    // The same or opposite points have no single great circle, they are joined straight, see greatCircleInterpolate
-    if (sine < 1e-12) {
+    // The same or opposite points are joined straight, see greatCircleInterpolate
+    if (sine < kSamePointsSine) {
         return { south, north };
     }
     // The whole great circle is closest to the north pole where the pole projects onto its plane, at the latitude

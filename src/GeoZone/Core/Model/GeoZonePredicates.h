@@ -23,6 +23,12 @@ namespace GeoZoneGeometry {
 
 /// Points closer than this to an edge of a ring, in the units of the points, are on its boundary
 inline constexpr double kBoundaryTolerance = 1e-6;
+/// Segments whose squared length, in the units of the points squared, is below this are a point
+inline constexpr double kDegenerateLengthSquared = 1e-12;
+/// Sine of the angle between two segments or edges below which they are parallel
+inline constexpr double kParallelSine = 1e-9;
+/// Fractions of a segment this far before its start or beyond its end are still on it
+inline constexpr double kFractionTolerance = 1e-9;
 
 /// @return true if the point is inside the ring or on its boundary
 /// @param ring     Unclosed polygon ring

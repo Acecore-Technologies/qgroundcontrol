@@ -182,23 +182,22 @@ QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, cons
     }
     const QPointF direction = b - a;
     const double lengthSquared = QPointF::dotProduct(direction, direction);
-    if (lengthSquared < 1e-12) {
+    if (lengthSquared < kDegenerateLengthSquared) {
         return polygonContains(rings, a, fillRule) ? QList<Interval>{ { 0, 1 } } : QList<Interval>{};
     }
     const double length = std::sqrt(lengthSquared);
 
     // Fractions where the segment meets the boundary, which is inside, and the segment ends
     QList<std::pair<double, bool>> cuts = { { 0, false }, { 1, false } };
-    constexpr double tolerance = 1e-9;
     for (const QList<QPointF> &ring : rings) {
         for (qsizetype i = 0; i < ring.count(); i++) {
             const QPointF &edgeStart = ring[i];
             const QPointF edge = ring[(i + 1) % ring.count()] - edgeStart;
             const QPointF offset = edgeStart - a;
             const double denominator = GeoZoneVector::cross(direction, edge);
-            if (std::abs(denominator) <= (tolerance * length * GeoZoneVector::length(edge))) {
+            if (std::abs(denominator) <= (kParallelSine * length * GeoZoneVector::length(edge))) {
                 // Parallel, a collinear edge overlaps the segment on the boundary
-                if (std::abs(GeoZoneVector::cross(offset, direction)) > (1e-6 * length)) {
+                if (std::abs(GeoZoneVector::cross(offset, direction)) > (kBoundaryTolerance * length)) {
                     continue;
                 }
                 const double t1 = QPointF::dotProduct(offset, direction) / lengthSquared;
@@ -213,7 +212,7 @@ QList<Interval> segmentPolygonIntervals(const QPointF &a, const QPointF &b, cons
             }
             const double t = GeoZoneVector::cross(offset, edge) / denominator;
             const double s = GeoZoneVector::cross(offset, direction) / denominator;
-            if ((t >= -tolerance) && (t <= (1 + tolerance)) && (s >= -tolerance) && (s <= (1 + tolerance))) {
+            if ((t >= -kFractionTolerance) && (t <= (1 + kFractionTolerance)) && (s >= -kFractionTolerance) && (s <= (1 + kFractionTolerance))) {
                 cuts.append({ std::clamp(t, 0.0, 1.0), true });
             }
         }
@@ -242,7 +241,7 @@ std::optional<Interval> segmentCircleInterval(const QPointF &a, const QPointF &b
     const double quadratic = QPointF::dotProduct(direction, direction);
     const double linear = 2 * QPointF::dotProduct(a, direction);
     const double constant = QPointF::dotProduct(a, a) - (radius * radius);
-    if (quadratic < 1e-12) {
+    if (quadratic < kDegenerateLengthSquared) {
         return (constant <= 0) ? std::make_optional(Interval{ 0, 1 }) : std::nullopt;
     }
     const double discriminant = (linear * linear) - (4 * quadratic * constant);

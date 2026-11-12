@@ -19,6 +19,10 @@ namespace {
 constexpr double kMaxMercatorLatitude = 85.05112878;
 constexpr double kEarthCircumferenceMeters = 40075016.686;
 constexpr double kTilePixels = 256.0;
+/// Radians of latitude an edge changes by below which it stays straight in mercator
+constexpr double kStraightLatitudeChange = 1e-4;
+/// Smallest cosine of the latitude for the mercator radius of a circle, that of about 89.4 degrees
+constexpr double kMinCosLatitude = 0.01;
 
 } // namespace
 
@@ -48,7 +52,7 @@ GeoZoneShape::GeoZoneShape(GeoZone *zone, const QGeoCoordinate &center, double r
     , _radius(radius)
 {
     const QPointF point = toMercator(center);
-    const double cosLatitude = qMax(0.01, qCos(qDegreesToRadians(center.latitude())));
+    const double cosLatitude = qMax(kMinCosLatitude, qCos(qDegreesToRadians(center.latitude())));
     // Mercator scale grows with 1 / cos(latitude), equally in both directions
     const double mercatorRadius = radius / (kEarthCircumferenceMeters * cosLatitude);
     _mercatorBounds = { point.x() - mercatorRadius, point.y() - mercatorRadius, point.x() + mercatorRadius, point.y() + mercatorRadius };
@@ -85,7 +89,7 @@ QList<QPointF> GeoZoneShape::toMercator(const GeoZone::Ring &ring)
         const QPointF &next = ring[(i + 1) % ring.count()];
         const QPointF delta(std::remainder(next.x() - from.x(), 360.0), next.y() - from.y());
         const double latitudeChange = qDegreesToRadians(delta.y());
-        if ((std::abs(latitudeChange) < 1e-4) || (delta.x() == 0)) {
+        if ((std::abs(latitudeChange) < kStraightLatitudeChange) || (delta.x() == 0)) {
             continue;
         }
         const QPointF chord = toMercator(from + delta) - start;
