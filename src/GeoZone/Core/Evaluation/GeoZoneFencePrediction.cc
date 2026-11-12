@@ -24,6 +24,10 @@ using GeoZoneVector::cross;
 using GeoZoneVector::dot;
 
 constexpr double kEpsilon = 1e-9;
+/// Meters the distance to a boundary may be short of the margin, for the rounding of positions at the margin
+constexpr double kMarginTolerance = 1e-6;
+/// Meters past a boundary at which a position is taken to tell which side of it the path continues on
+constexpr double kProbeDistance = 0.01;
 
 /// Adds the times within the horizon at which the point moving from p at the velocity v is at the distance from center
 void addCircleHits(const QPointF &p, const QPointF &v, double horizon, const QPointF &center, double distance, QList<double> &times)
@@ -119,7 +123,7 @@ struct Area {
     /// @return true on the allowed side, farther than the margin from the boundary
     bool clear(const QPointF &point) const
     {
-        return (contains(point) == inclusion) && (boundaryDistance(point) >= (margin - 1e-6));
+        return (contains(point) == inclusion) && (boundaryDistance(point) >= (margin - kMarginTolerance));
     }
 
     /// @return Ascending times within the horizon at which the moving point is at the margin from the boundary
@@ -252,7 +256,7 @@ std::optional<Breach> predict(const Fence &fence, const QGeoCoordinate &coordina
             }
         }
         std::sort(inclusionHits.begin(), inclusionHits.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
-        const double step = 0.01 / GeoZoneVector::length(v);
+        const double step = kProbeDistance / GeoZoneVector::length(v);
         for (const auto &[time, area] : std::as_const(inclusionHits)) {
             const QPointF after = start + (v * (time + step));
             if (std::none_of(areas.cbegin(), areas.cend(), [&after](const Area &other) { return _isInclusion(other) && other.clear(after); })) {

@@ -24,6 +24,7 @@
 #include "GeoZonePathEvaluator.h"
 #include "GeoZonePlanning.h"
 #include "GeoZonePolicy.h"
+#include "GeoZoneProjection.h"
 #include "GeoZoneSettings.h"
 #include "GeoZoneSourceRepository.h"
 #include "GeoZoneText.h"
@@ -473,7 +474,7 @@ QList<const GeoZone*> GeoZonePreflightCheck::flightLevelZonesNear(const GeoZoneC
     if (!box.isValid()) {
         return {};
     }
-    const double latitudeMargin = qRadiansToDegrees(qnhHorizontalMargin / 6371000.0);
+    const double latitudeMargin = qRadiansToDegrees(qnhHorizontalMargin / GeoZoneGeometry::kEarthRadiusMeters);
     const double longitudeMargin = latitudeMargin / (std::max)(std::cos(qDegreesToRadians((std::max)(std::abs(box.south()), std::abs(box.north())))), 0.01);
     const GeoZoneBox area(box.south() - latitudeMargin, box.west() - longitudeMargin, box.north() + latitudeMargin, box.east() + longitudeMargin);
     const GeoZone::Position center{ box.center(), qQNaN(), qQNaN() };

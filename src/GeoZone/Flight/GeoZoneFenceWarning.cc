@@ -51,14 +51,34 @@ const QStringList &_fenceParameters()
     return names;
 }
 
-// PX4's GF_ACTION which ends the flight
+// PX4's GF_ACTION
+constexpr int kPx4ActionNone = 0;
+constexpr int kPx4ActionWarning = 1;
+constexpr int kPx4ActionHold = 2;
+constexpr int kPx4ActionReturn = 3;
 constexpr int kPx4ActionTerminate = 4;
+constexpr int kPx4ActionLand = 5;
+
+// ArduPilot's FENCE_ACTION without manoeuvre, the others are those of the vehicle class
+constexpr int kArduPilotActionReportOnly = 0;
+
+constexpr int kArduPilotFenceEnabled = 1;   // FENCE_ENABLE
 
 // Fences of ArduPilot's FENCE_TYPE
 constexpr int kArduPilotPolygonsBit = 4;
 constexpr int kArduPilotCircleBit = 2;
 constexpr int kArduPilotAltMaxBit = 1;
 constexpr int kArduPilotAltMinBit = 8;
+
+// Bits of ArduPilot's FENCE_OPTIONS
+constexpr int kArduPilotNoModeChangeBit = 1;    // No mode change after the fence action until the breach clears
+constexpr int kArduPilotInclusionUnionBit = 2;  // Inside any inclusion fence is inside the fence
+
+// What ArduPilot's altitude limits are above, FENCE_ALT_MAX_TP and FENCE_ALT_MIN_TP. Limits above the terrain aren't
+// predicted.
+constexpr int kArduPilotAltitudeAmsl = 0;
+constexpr int kArduPilotAltitudeAboveHome = 1;
+constexpr int kArduPilotAltitudeAboveOrigin = 2;
 
 } // namespace
 
@@ -225,7 +245,7 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
         const QVariant action = _parameter(vehicle, QStringLiteral("GF_ACTION"));
         config.action = action.isValid() ? action.toInt() : -1;
         // PX4 checks its geofence unless the action is None
-        config.enabled = config.action > 0;
+        config.enabled = config.action > kPx4ActionNone;
         addShapes();
         fence.inclusionUnion = true;
         fence.maxDistance = positive(QStringLiteral("GF_MAX_HOR_DIST"));
@@ -238,7 +258,7 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
         config.action = action.isValid() ? action.toInt() : -1;
         const QVariant enable = _parameter(vehicle, QStringLiteral("FENCE_ENABLE"));
         const int autoEnable = _parameter(vehicle, QStringLiteral("FENCE_AUTOENABLE")).toInt();
-        config.enabled = enable.isValid() && ((enable.toInt() == 1) || ((autoEnable > 0) && vehicle->armed()));
+        config.enabled = enable.isValid() && ((enable.toInt() == kArduPilotFenceEnabled) || ((autoEnable > 0) && vehicle->armed()));
         const int type = _parameter(vehicle, QStringLiteral("FENCE_TYPE")).toInt();
         if (type & kArduPilotPolygonsBit) {
             addShapes();
@@ -246,7 +266,7 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
         if (type & kArduPilotCircleBit) {
             fence.maxDistance = positive(QStringLiteral("FENCE_RADIUS"));
         }
-        // Altitudes above home, or above sea level or terrain with the frame parameters of newer versions
+        // Altitudes above home, or above the origin or sea level with the frame parameters of newer versions
         const auto altitudeLimit = [vehicle, &fence](const QString &name, const QString &frameName) {
             bool ok = false;
             const double limit = _parameter(vehicle, name).toDouble(&ok);
@@ -254,10 +274,10 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
                 return qQNaN();
             }
             const QVariant frame = _parameter(vehicle, frameName);
-            if (!frame.isValid() || (frame.toInt() == 1) || (frame.toInt() == 2)) {
+            if (!frame.isValid() || (frame.toInt() == kArduPilotAltitudeAboveHome) || (frame.toInt() == kArduPilotAltitudeAboveOrigin)) {
                 return limit;
             }
-            if ((frame.toInt() == 0) && fence.home.isValid() && !std::isnan(fence.home.altitude())) {
+            if ((frame.toInt() == kArduPilotAltitudeAmsl) && fence.home.isValid() && !std::isnan(fence.home.altitude())) {
                 return limit - fence.home.altitude();
             }
             return qQNaN();
@@ -273,8 +293,8 @@ GeoZoneFenceWarning::Config GeoZoneFenceWarning::vehicleConfig(Vehicle *vehicle,
         fence.verticalMargin = margin;
         fence.horizontalMargin = (horizontalMargin > 0) ? horizontalMargin : margin;
         const int options = _parameter(vehicle, QStringLiteral("FENCE_OPTIONS")).toInt();
-        config.modeChangeBlocked = (options & 1) != 0;
-        fence.inclusionUnion = (options & 2) != 0;
+        config.modeChangeBlocked = (options & kArduPilotNoModeChangeBit) != 0;
+        fence.inclusionUnion = (options & kArduPilotInclusionUnionBit) != 0;
     }
     if (!fence.home.isValid()) {
         fence.maxDistance = qQNaN();
@@ -491,9 +511,9 @@ bool GeoZoneFenceWarning::isManoeuvre(Firmware firmware, int action)
 {
     switch (firmware) {
     case Firmware::PX4:
-        return action >= 2;
+        return action >= kPx4ActionHold;
     case Firmware::ArduPilot:
-        return action > 0;
+        return action > kArduPilotActionReportOnly;
     case Firmware::Other:
         break;
     }
@@ -513,23 +533,23 @@ QString GeoZoneFenceWarning::actionText(Firmware firmware, VehicleClass vehicleC
     }
     if (firmware == Firmware::PX4) {
         switch (action) {
-        case 0:
+        case kPx4ActionNone:
             return tr("No action");
-        case 1:
+        case kPx4ActionWarning:
             return tr("Warning only, no manoeuvre");
-        case 2:
+        case kPx4ActionHold:
             return tr("Hold");
-        case 3:
+        case kPx4ActionReturn:
             return tr("Return");
-        case 4:
+        case kPx4ActionTerminate:
             return tr("Flight termination");
-        case 5:
+        case kPx4ActionLand:
             return tr("Land");
         default:
             break;
         }
     } else if (firmware == Firmware::ArduPilot) {
-        if (action == 0) {
+        if (action == kArduPilotActionReportOnly) {
             return tr("Report only, no manoeuvre");
         }
         switch (vehicleClass) {
@@ -596,18 +616,18 @@ QString GeoZoneFenceWarning::overrideText(const Config &config)
     switch (config.firmware) {
     case Firmware::PX4:
         switch (config.action) {
-        case 0:
-        case 1:
+        case kPx4ActionNone:
+        case kPx4ActionWarning:
             return tr("The vehicle only warns, it takes no manoeuvre.");
-        case 2:
+        case kPx4ActionHold:
             return tr("Switch the flight mode, with the RC mode switch or Take Control, to override the hold. Moving the sticks doesn't.");
-        case 4:
+        case kPx4ActionTerminate:
             return tr("Flight termination can't be overridden.");
         default:
             return tr("Switch the flight mode, with the RC mode switch or Take Control, to override it. The vehicle acts again only after it leaves the breach and breaches the fence again.");
         }
     case Firmware::ArduPilot:
-        if (config.action == 0) {
+        if (config.action == kArduPilotActionReportOnly) {
             return tr("The vehicle only reports the breach, it takes no manoeuvre.");
         }
         if (config.modeChangeBlocked) {

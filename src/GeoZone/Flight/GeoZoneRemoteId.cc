@@ -22,6 +22,9 @@ namespace GeoZoneRemoteId {
 
 namespace {
 
+/// Value of the enumerated Remote ID settings for what isn't declared
+constexpr int kUndeclared = 0;
+
 /// Translation context of the texts
 class Text
 {
@@ -77,7 +80,7 @@ GeoZoneOperatorDetails operatorDetails()
     RemoteIDSettings *const settings = SettingsManager::instance()->remoteIDSettings();
     const auto text = [](Fact *fact) { return fact->rawValue().toString().trimmed(); };
     // Enumerated settings by their text, empty when undeclared
-    const auto enumText = [](Fact *fact) { return (fact->rawValue().toInt() == 0) ? QString() : fact->enumStringValue(); };
+    const auto enumText = [](Fact *fact) { return (fact->rawValue().toInt() == kUndeclared) ? QString() : fact->enumStringValue(); };
     GeoZoneOperatorDetails details;
     details.operatorId = text(settings->operatorID());
     details.operatorIdType = details.operatorId.isEmpty() ? QString() : settings->operatorIDType()->enumStringValue();
@@ -86,7 +89,7 @@ GeoZoneOperatorDetails operatorDetails()
     details.uasIdType = details.uasId.isEmpty() ? QString() : enumText(settings->basicIDType());
     details.uaType = enumText(settings->basicIDUaType());
     // The category and class are declared with the EU classification only
-    if (settings->classificationType()->rawValue().toInt() != 0) {
+    if (settings->classificationType()->rawValue().toInt() != kUndeclared) {
         details.category = enumText(settings->categoryEU());
         details.aircraftClass = enumText(settings->classEU());
     }
