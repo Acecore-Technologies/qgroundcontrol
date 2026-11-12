@@ -89,7 +89,10 @@ public:
     /// @return Monotonic milliseconds
     using Clock = std::function<qint64()>;
 
-    static constexpr int positionTimeoutMSecs = 5000;           ///< Positions are stale after this, or three times their usual interval
+    static constexpr int positionTimeoutMSecs = 5000;           ///< Positions are stale after this at least, see positionTimeout()
+    static constexpr int maxPositionTimeoutMSecs = 60000;       ///< ... and after this at most, however slow the link
+    static constexpr int positionTimeoutIntervals = 3;          ///< Usual intervals without a position after which it is stale
+    static constexpr int positionIntervalCount = 5;             ///< Last intervals the usual one is the median of
     static constexpr int reportedVelocityMaxAgeMSecs = 2000;    ///< Velocities reported by the vehicle are used up to this age
     /// The fence status the vehicle reported is used up to this age. ArduPilot stops sending it while its fence is disabled.
     static constexpr int fenceStatusTimeoutMSecs = 10000;
@@ -126,7 +129,7 @@ public:
     int vehicleId() const { return _vehicleId; }
     int key() const { return _key; }
 
-    /// Records when the vehicle sent its position, the velocity sent with it and the status of its fence
+    /// Records when the vehicle sent the position its Vehicle shows, the velocity sent with it and the status of its fence
     /// @param msecs Time of the clock
     void handleMessage(const mavlink_message_t &message, qint64 msecs);
 
@@ -134,8 +137,16 @@ public:
     ///         after adding the position to the estimate
     Velocity velocity(qint64 msecs, const GeoZone::Position &position);
 
-    /// @return true if the vehicle sent no position for longer than its timeout
+    /// @return true if the vehicle sent no position for longer than positionTimeout(). Only the messages the Vehicle
+    ///         takes its coordinate from count: GLOBAL_POSITION_INT with a position, GPS_RAW_INT with a 3D fix until the
+    ///         first of those, and the high latency messages. So a coordinate which stopped moving because its message
+    ///         stopped is stale also while the vehicle sends other messages.
     bool positionStale(qint64 msecs) const;
+    /// @return Milliseconds without a position after which it is stale: positionTimeoutIntervals usual intervals of
+    ///         the position messages, for links like satellite ones which send them less often, between
+    ///         positionTimeoutMSecs and maxPositionTimeoutMSecs. The usual interval is the median of the last
+    ///         positionIntervalCount, so that one message after an outage doesn't stretch the timeout.
+    qint64 positionTimeout() const;
 
     /// Evaluates the current position of the vehicle, unless it has none: its coordinate is invalid, its link is lost
     /// or its position stale. Then its alerts pause and positionUnavailable() is true.
@@ -270,7 +281,8 @@ private:
     bool _fixedLimits = false;              ///< Of the last evaluation
 
     qint64 _positionMSecs = -1;             ///< Last position message, -1 without
-    qint64 _positionIntervalMSecs = 0;      ///< Between the last two position messages
+    QList<qint64> _positionIntervals;       ///< Milliseconds between the last position messages, at most positionIntervalCount
+    bool _globalPositionReceived = false;   ///< A GLOBAL_POSITION_INT with a position was received
     qint64 _velocityMSecs = -1;
     Velocity _reported;
     GeoZoneVelocityEstimator _estimator;

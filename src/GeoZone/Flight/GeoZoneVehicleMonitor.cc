@@ -58,7 +58,10 @@ Vehicle *GeoZoneVehicleMonitor::vehicle() const
 void GeoZoneVehicleMonitor::_positionReceived(qint64 msecs)
 {
     if (_positionMSecs >= 0) {
-        _positionIntervalMSecs = msecs - _positionMSecs;
+        _positionIntervals.append((std::max)(qint64{ 0 }, msecs - _positionMSecs));
+        if (_positionIntervals.count() > positionIntervalCount) {
+            _positionIntervals.removeFirst();
+        }
     }
     _positionMSecs = msecs;
 }
@@ -104,6 +107,19 @@ void GeoZoneVehicleMonitor::_deriveFenceStatus()
     _setFenceStatus(false, boundary.has_value(), breachType, 0);
 }
 
+qint64 GeoZoneVehicleMonitor::positionTimeout() const
+{
+    if (_positionIntervals.isEmpty()) {
+        return positionTimeoutMSecs;
+    }
+    // The usual interval is the median of the last ones, the lower of the two in the middle: neither one message after
+    // an outage nor two messages arriving together change it
+    QList<qint64> sorted = _positionIntervals;
+    std::sort(sorted.begin(), sorted.end());
+    const qint64 usual = sorted[(sorted.count() - 1) / 2];
+    return std::clamp(positionTimeoutIntervals * usual, qint64{ positionTimeoutMSecs }, qint64{ maxPositionTimeoutMSecs });
+}
+
 void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint64 msecs)
 {
     if (_fenceWarning) {
@@ -115,9 +131,16 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
     }
     _thresholds.handleMessage(message, msecs);
     switch (message.msgid) {
+    // The position is as old as the last message the Vehicle took its coordinate from, see Vehicle::_handleGpsRawInt,
+    // _handleGlobalPositionInt and _handleHighLatency: other messages leave the coordinate where it was
     case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
         mavlink_global_position_int_t globalPosition{};
         mavlink_msg_global_position_int_decode(&message, &globalPosition);
+        // ArduPilot sends 0/0 without a position, which the Vehicle ignores
+        if ((globalPosition.lat == 0) && (globalPosition.lon == 0)) {
+            break;
+        }
+        _globalPositionReceived = true;
         _positionReceived(msecs);
         // Ground velocity in centimeters per second, down positive
         _reported = Velocity{ globalPosition.vx / 100.0, globalPosition.vy / 100.0, -globalPosition.vz / 100.0, true };
@@ -127,7 +150,8 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
     case MAVLINK_MSG_ID_GPS_RAW_INT: {
         mavlink_gps_raw_int_t gps{};
         mavlink_msg_gps_raw_int_decode(&message, &gps);
-        if (gps.fix_type >= GPS_FIX_TYPE_2D_FIX) {
+        // The coordinate of the Vehicle follows the receiver only until the first GLOBAL_POSITION_INT
+        if ((gps.fix_type >= GPS_FIX_TYPE_3D_FIX) && !_globalPositionReceived) {
             _positionReceived(msecs);
         }
         _gnss.known = true;
@@ -139,6 +163,7 @@ void GeoZoneVehicleMonitor::handleMessage(const mavlink_message_t &message, qint
         _gnssMSecs = msecs;
         break;
     }
+    case MAVLINK_MSG_ID_HIGH_LATENCY:
     case MAVLINK_MSG_ID_HIGH_LATENCY2:
         _positionReceived(msecs);
         break;
@@ -237,9 +262,7 @@ bool GeoZoneVehicleMonitor::positionStale(qint64 msecs) const
         // Vehicles which never sent a position message, like those of tests, keep their coordinate
         return false;
     }
-    // Links like satellite ones send positions less often
-    const qint64 timeout = (std::max)(qint64{ positionTimeoutMSecs }, 3 * _positionIntervalMSecs);
-    return (msecs - _positionMSecs) > timeout;
+    return (msecs - _positionMSecs) > positionTimeout();
 }
 
 GeoZoneVehicleMonitor::Velocity GeoZoneVehicleMonitor::velocity(qint64 msecs, const GeoZone::Position &position)

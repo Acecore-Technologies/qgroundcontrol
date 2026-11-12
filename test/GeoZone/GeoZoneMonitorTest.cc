@@ -25,10 +25,10 @@ using namespace GeoZoneTestHelpers;
 
 namespace {
 
-mavlink_message_t globalPositionMessage(int vehicleId, int16_t vx, int16_t vy, int16_t vz)
+mavlink_message_t globalPositionMessage(int vehicleId, int16_t vx, int16_t vy, int16_t vz, int32_t latitudeE7 = 470000000, int32_t longitudeE7 = 80000000)
 {
     mavlink_message_t message{};
-    (void) mavlink_msg_global_position_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, 470000000, 80000000, 500000, 100000, vx, vy, vz, UINT16_MAX);
+    (void) mavlink_msg_global_position_int_pack(vehicleId, MAV_COMP_ID_AUTOPILOT1, &message, 0, latitudeE7, longitudeE7, 500000, 100000, vx, vy, vz, UINT16_MAX);
     return message;
 }
 
@@ -474,6 +474,69 @@ void GeoZoneMonitorTest::_testVehicleTelemetry()
     QVERIFY(!monitor.positionStale(21000 + 50000));
     QVERIFY(monitor.positionStale(21000 + 60001));
     QVERIFY(!GeoZoneVehicleMonitor(nullptr, 2, 3, clock).positionStale(100000));
+    {
+        // One message after an outage doesn't stretch the timeout: the usual interval is still a second
+        GeoZoneVehicleMonitor regular(nullptr, vehicleId, 4, clock);
+        qint64 msecs = 0;
+        for (int i = 0; i < 6; i++, msecs += 1000) {
+            regular.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), msecs);
+        }
+        msecs += 120000;
+        QVERIFY(regular.positionStale(msecs));
+        regular.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), msecs);
+        QCOMPARE(regular.positionTimeout(), qint64{ GeoZoneVehicleMonitor::positionTimeoutMSecs });
+        QVERIFY(!regular.positionStale(msecs + GeoZoneVehicleMonitor::positionTimeoutMSecs));
+        QVERIFY(regular.positionStale(msecs + GeoZoneVehicleMonitor::positionTimeoutMSecs + 1));
+
+        // A slow link gets three of its intervals, also when two of its messages arrive together, and never more
+        // than the longest timeout
+        GeoZoneVehicleMonitor slow(nullptr, vehicleId, 5, clock);
+        msecs = 0;
+        for (int i = 0; i < 5; i++, msecs += 10000) {
+            slow.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), msecs);
+        }
+        QCOMPARE(slow.positionTimeout(), qint64{ 30000 });
+        slow.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), msecs - 9990);
+        QCOMPARE(slow.positionTimeout(), qint64{ 30000 });
+        GeoZoneVehicleMonitor slower(nullptr, vehicleId, 6, clock);
+        msecs = 0;
+        for (int i = 0; i < 5; i++, msecs += 45000) {
+            slower.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), msecs);
+        }
+        QCOMPARE(slower.positionTimeout(), qint64{ GeoZoneVehicleMonitor::maxPositionTimeoutMSecs });
+
+        // Only the messages the Vehicle takes its coordinate from are positions. A receiver with a 3D fix is one
+        // until the first GLOBAL_POSITION_INT: once that stops, the coordinate is frozen whatever the receiver sends.
+        GeoZoneVehicleMonitor receiver(nullptr, vehicleId, 7, clock);
+        receiver.handleMessage(gpsMessage(vehicleId, GPS_FIX_TYPE_2D_FIX, 5, 2, 0), 0);
+        QVERIFY(!receiver.positionStale(1000000));      // No position yet
+        receiver.handleMessage(gpsMessage(vehicleId, GPS_FIX_TYPE_3D_FIX, 10, 1, 0), 1000);
+        QVERIFY(receiver.positionStale(1000 + GeoZoneVehicleMonitor::positionTimeoutMSecs + 1));
+        receiver.handleMessage(gpsMessage(vehicleId, GPS_FIX_TYPE_2D_FIX, 5, 2, 0), 9000);
+        QVERIFY(receiver.positionStale(9001));
+        receiver.handleMessage(gpsMessage(vehicleId, GPS_FIX_TYPE_3D_FIX, 10, 1, 0), 10000);
+        QVERIFY(!receiver.positionStale(10001));
+        // ArduPilot's GLOBAL_POSITION_INT without a position, at 0/0, isn't one
+        QCOMPARE(receiver.positionTimeout(), qint64{ 27000 });
+        receiver.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0, 0, 0), 40000);
+        QVERIFY(receiver.positionStale(40001));
+        QVERIFY(!receiver.velocity(40001, { start, 500 }).valid);
+        receiver.handleMessage(globalPositionMessage(vehicleId, 0, 0, 0), 41000);
+        QVERIFY(!receiver.positionStale(41001));
+        for (qint64 time = 42000; time <= 70000; time += 1000) {
+            receiver.handleMessage(gpsMessage(vehicleId, GPS_FIX_TYPE_3D_FIX, 10, 1, 0), time);
+        }
+        QCOMPARE(receiver.positionTimeout(), qint64{ 27000 });
+        QVERIFY(receiver.positionStale(70000));
+        // High latency links send their own
+        mavlink_message_t highLatency{};
+        mavlink_high_latency2_t content{};
+        content.latitude = 470000000;
+        content.longitude = 80000000;
+        (void) mavlink_msg_high_latency2_encode(vehicleId, MAV_COMP_ID_AUTOPILOT1, &highLatency, &content);
+        receiver.handleMessage(highLatency, 71000);
+        QVERIFY(!receiver.positionStale(71001));
+    }
 
     // The ground below the vehicle comes from the height above terrain it sends, is where a disarmed vehicle is, or
     // else comes from the terrain data of QGroundControl, which degrades the height above ground
