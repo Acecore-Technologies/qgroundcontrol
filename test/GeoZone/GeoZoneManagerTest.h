@@ -24,4 +24,5 @@ private slots:
     void _testZoneSearch();
     void _testCatalogSnapshot();
     void _testMergedSources();
+    void _testServiceOriginsConfirmed();
 };

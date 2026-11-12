@@ -80,6 +80,10 @@ public:
     /// @param allowOtherOrigins The user confirmed that the token or SHA-256 URLs may be on another server than the
     ///                          feed, see GeoZoneService::otherOrigins. The service is refused otherwise.
     void addService(const QString &url, const GeoZoneService &service, const QString &secret, bool allowOtherOrigins = false);
+    /// Like addService, with the other servers the user confirmed by name
+    /// @param confirmedOrigins The origins of GeoZoneService::otherOrigins shown to the user and confirmed. The service
+    ///                         is refused when it sends requests to an origin which isn't one of them.
+    void addService(const QString &url, const GeoZoneService &service, const QString &secret, const QStringList &confirmedOrigins);
     /// Replaces the secret of the service of a source and downloads it again. Ignored for a key without a service
     /// which sends a secret.
     Q_INVOKABLE void setSecret(const QString &key, const QString &secret);

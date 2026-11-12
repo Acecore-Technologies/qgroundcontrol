@@ -172,6 +172,12 @@ void GeoZoneSourceRepository::addUrl(const QString &url)
 
 void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneService &service, const QString &secret, bool allowOtherOrigins)
 {
+    // All other servers of the service, for callers which don't name those the user confirmed
+    addService(url, service, secret, allowOtherOrigins ? service.otherOrigins(url.trimmed()) : QStringList());
+}
+
+void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneService &service, const QString &secret, const QStringList &confirmedOrigins)
+{
     const QString trimmedUrl = url.trimmed();
     const QUrl parsedUrl(trimmedUrl);
     if (!parsedUrl.isValid() || !QStringList({ QStringLiteral("http"), QStringLiteral("https") }).contains(parsedUrl.scheme()) || parsedUrl.host().isEmpty()) {
@@ -182,10 +188,13 @@ void GeoZoneSourceRepository::addService(const QString &url, const GeoZoneServic
     if (GeoZoneService::hasAreaPlaceholders(trimmedUrl)) {
         feedService.areaOfInterest = true;
     }
-    // The client secret and the area of interest only go to another server the user trusts
-    if (const QStringList otherOrigins = feedService.otherOrigins(trimmedUrl); !otherOrigins.isEmpty() && !allowOtherOrigins) {
+    // The client secret and the area of interest only go to the other servers the user confirmed, by name: a
+    // confirmation given for other addresses than the service has now doesn't count
+    QStringList unconfirmedOrigins = feedService.otherOrigins(trimmedUrl);
+    (void) unconfirmedOrigins.removeIf([&confirmedOrigins](const QString &origin) { return confirmedOrigins.contains(origin); });
+    if (!unconfirmedOrigins.isEmpty()) {
         emit loadFailed(trimmedUrl, tr("Geozone download from %1 failed. The service sends requests to %2, another server than the feed's, which was not confirmed.")
-                                        .arg(trimmedUrl, otherOrigins.join(QStringLiteral(", "))));
+                                        .arg(trimmedUrl, unconfirmedOrigins.join(QStringLiteral(", "))));
         return;
     }
     _setService(trimmedUrl, feedService);

@@ -87,8 +87,15 @@ public:
     /// GeoZoneSourceRepository::addService
     /// @param service Fields of GeoZoneService::toVariantMap
     /// @param secret API key, token, password or client secret, kept by GeoZoneCredentials, the one kept when empty
-    /// @param allowOtherOrigins The user confirmed the other servers of serviceOtherOrigins
-    Q_INVOKABLE void addService(const QString &url, const QVariantMap &service, const QString &secret, bool allowOtherOrigins = false)
+    /// @param confirmedOrigins The other servers of serviceOtherOrigins the user was shown and confirmed. The service is
+    ///                         refused when it sends requests to another one, like after its addresses were edited.
+    Q_INVOKABLE void addService(const QString &url, const QVariantMap &service, const QString &secret, const QStringList &confirmedOrigins)
+    {
+        _repository->addService(url, GeoZoneService::fromVariantMap(service), secret, confirmedOrigins);
+    }
+    /// Like addService for callers which don't show the other servers, not callable from QML
+    /// @param allowOtherOrigins All other servers of the service count as confirmed
+    void addService(const QString &url, const QVariantMap &service, const QString &secret, bool allowOtherOrigins = false)
     {
         _repository->addService(url, GeoZoneService::fromVariantMap(service), secret, allowOtherOrigins);
     }

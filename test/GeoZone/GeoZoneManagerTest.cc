@@ -433,4 +433,69 @@ void GeoZoneManagerTest::_testMergedSources()
     QCOMPARE(manager.catalog().zonesAt(center)[0]->sourceCount(), 2);
 }
 
+void GeoZoneManagerTest::_testServiceOriginsConfirmed()
+{
+    // The other servers of a service are confirmed by name: a confirmation given for other servers than those the
+    // service has when it is added doesn't count, like after its addresses were edited
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    TestFeedServer tokenServer;
+    TestFeedServer hostile;
+    QVERIFY(server.listen(QHostAddress::LocalHost) && tokenServer.listen(QHostAddress::LocalHost) && hostile.listen(QHostAddress::LocalHost));
+    tokenServer.files.insert("/token", R"({ "access_token": "token-1", "token_type": "Bearer", "expires_in": 3600 })");
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    GeoZoneManager manager(storageDir.path());
+    const auto forgetSecrets = qScopeGuard([&manager]() { manager.repository()->clear(); });
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    QSignalSpy failedSpy(&manager, &GeoZoneManager::loadFailed);
+    const QString url = server.url(QStringLiteral("/ok"));
+    const QString secret = QStringLiteral("client-s3cret");
+    const QString tokenOrigin = tokenServer.url(QString());
+    const QString hostileOrigin = hostile.url(QString());
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::OAuth2ClientCredentials;
+    service.tokenUrl = tokenServer.url(QStringLiteral("/token"));
+    service.user = QStringLiteral("client");
+    QCOMPARE(manager.serviceOtherOrigins(url, service.toVariantMap()), QStringList{ tokenOrigin });
+    const auto refused = [&](const GeoZoneService &added, const QStringList &confirmedOrigins, const QString &unconfirmedOrigin) {
+        const int failures = static_cast<int>(failedSpy.count());
+        manager.addService(url, added.toVariantMap(), secret, confirmedOrigins);
+        return (failedSpy.count() == (failures + 1)) && failedSpy.last()[1].toString().contains(unconfirmedOrigin) &&
+               manager.repository()->credentials().secret(url).isEmpty() && !manager.repository()->hasSource(url) && !manager.repository()->busy();
+    };
+
+    // No server confirmed
+    QVERIFY(refused(service, QStringList(), tokenOrigin));
+    // The token address changed after its server was confirmed
+    GeoZoneService moved = service;
+    moved.tokenUrl = hostile.url(QStringLiteral("/token"));
+    QVERIFY(refused(moved, { tokenOrigin }, hostileOrigin));
+    QVERIFY2(!failedSpy.last()[1].toString().contains(tokenOrigin), qPrintable(failedSpy.last()[1].toString()));
+    // A second server was added after the first one was confirmed
+    GeoZoneService second = service;
+    second.sha256Url = hostile.url(QStringLiteral("/ok.sha256"));
+    QVERIFY(refused(second, { tokenOrigin }, hostileOrigin));
+    QCOMPARE(tokenServer.requestCount, 0);
+
+    // The servers confirmed are those of the service: the secret goes to the token server
+    manager.addService(url, service.toVariantMap(), secret, QStringList{ tokenOrigin, hostileOrigin });
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(failedSpy.count(), 3);
+    QCOMPARE(tokenServer.requestCount, 1);
+    QCOMPARE(hostile.requestCount, 0);
+    QCOMPARE(manager.repository()->credentials().secret(url), secret);
+
+    // Callers which don't show the servers confirm all of them or none
+    manager.repository()->clear();
+    manager.addService(url, moved.toVariantMap(), secret);
+    QCOMPARE(failedSpy.count(), 4);
+    QCOMPARE(hostile.requestCount, 0);
+    manager.addService(url, service.toVariantMap(), secret, true);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(tokenServer.requestCount, 2);
+}
+
 GEOZONE_TEST(GeoZoneManagerTest)

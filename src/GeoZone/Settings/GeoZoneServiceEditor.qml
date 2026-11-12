@@ -31,12 +31,20 @@ ColumnLayout {
                                                     user: userField.text, tokenUrl: tokenUrlField.text, responseMember: responseMemberField.text,
                                                     sha256Url: sha256UrlField.text, areaOfInterest: areaCheckBox.checked })
     readonly property var   _otherOrigins:      visible ? _geoZoneManager.serviceOtherOrigins(serviceUrlField.text, _service) : []
+    readonly property string _otherOriginsText: _otherOrigins.join(", ")
+
+    /// The other servers shown when the user ticked "I trust these servers", which the download is confirmed for
+    property var _confirmedOrigins: []
+
+    // The confirmation was for the servers shown then, not for those the addresses give now
+    on_OtherOriginsTextChanged: trustOtherOriginsCheckBox.checked = false
 
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
     // The fields of the form start from the template
     function applyTemplate() {
         const form = _template.form
+        trustOtherOriginsCheckBox.checked = false
         serviceUrlField.text = _template.url
         methodCombo.currentIndex = form.method
         authCombo.currentIndex = form.auth
@@ -175,9 +183,10 @@ ColumnLayout {
     }
 
     QGCCheckBox {
-        id:         trustOtherOriginsCheckBox
-        text:       qsTr("I trust these servers")
-        visible:    serviceEntry._otherOrigins.length > 0
+        id:                 trustOtherOriginsCheckBox
+        text:               qsTr("I trust these servers")
+        visible:            serviceEntry._otherOrigins.length > 0
+        onCheckedChanged:   serviceEntry._confirmedOrigins = checked ? serviceEntry._otherOrigins.slice() : []
     }
 
     QGCButton {
@@ -186,7 +195,8 @@ ColumnLayout {
         enabled:            serviceUrlField.text.trim() !== "" && serviceEntry._template.supported &&
                             (serviceEntry._otherOrigins.length === 0 || trustOtherOriginsCheckBox.checked)
         onClicked: {
-            _geoZoneManager.addService(serviceUrlField.text, serviceEntry._service, serviceSecretField.text, trustOtherOriginsCheckBox.checked)
+            // Refused when the service sends requests to a server which isn't one of those confirmed
+            _geoZoneManager.addService(serviceUrlField.text, serviceEntry._service, serviceSecretField.text, serviceEntry._confirmedOrigins)
             serviceSecretField.text = ""
             trustOtherOriginsCheckBox.checked = false
             serviceEntry.visible = false
