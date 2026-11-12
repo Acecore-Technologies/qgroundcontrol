@@ -138,7 +138,7 @@ QGCPopupDialog {
                 required property var   modelData
                 required property int   index
 
-                readonly property bool  _noRoute:       modelData.kind === "none"
+                readonly property bool  _noRoute:       modelData.kind === GeoZoneRoutePlanner.NoRoute
                 // The climb only needs a higher maximum altitude
                 readonly property bool  _canAllowClimb: modelData.suggestedMaxAltitude !== undefined
                 property bool           _showReasons:   false

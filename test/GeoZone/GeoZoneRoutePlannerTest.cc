@@ -107,7 +107,7 @@ void GeoZoneRoutePlannerTest::_testRoutePlanner()
         texts.append(suggestion[QStringLiteral("notes")].toStringList());
         if (suggestion[QStringLiteral("canApply")].toBool()) {
             detourIndex = i;
-            QCOMPARE(suggestion[QStringLiteral("kind")].toString(), QStringLiteral("detour"));
+            QCOMPARE(suggestion[QStringLiteral("kind")].toInt(), static_cast<int>(GeoZoneRoutePlanner::Detour));
             QVERIFY(suggestion[QStringLiteral("recommended")].toBool());
             QVERIFY(suggestion[QStringLiteral("first")].toBool());
             QCOMPARE(suggestion[QStringLiteral("legText")].toString(), QStringLiteral("Leg to item 2"));
@@ -234,7 +234,7 @@ void GeoZoneRoutePlannerTest::_testRoutePlanner()
     lowerPlanner.update();
     const QVariantList climbSuggestions = lowerPlanner.suggestions();
     QVERIFY2(std::any_of(climbSuggestions.cbegin(), climbSuggestions.cend(), [](const QVariant &suggestion) {
-        return suggestion.toMap()[QStringLiteral("kind")].toString() == QStringLiteral("climb");
+        return suggestion.toMap()[QStringLiteral("kind")].toInt() == GeoZoneRoutePlanner::Climb;
     }), qPrintable(suggestionTexts()));
     QVERIFY(!climbSuggestions.constLast().toMap().contains(QStringLiteral("suggestedMaxAltitude")));
 }
@@ -242,12 +242,12 @@ void GeoZoneRoutePlannerTest::_testRoutePlanner()
 namespace {
 
 /// @return Index of the first suggestion of the kind which can be applied, -1 without
-int applicableSuggestion(const GeoZoneRoutePlanner &planner, const QString &kind)
+int applicableSuggestion(const GeoZoneRoutePlanner &planner, GeoZoneRoutePlanner::SuggestionKind kind)
 {
     const QVariantList suggestions = planner.suggestions();
     for (int i = 0; i < suggestions.count(); i++) {
         const QVariantMap suggestion = suggestions[i].toMap();
-        if (suggestion[QStringLiteral("canApply")].toBool() && (suggestion[QStringLiteral("kind")].toString() == kind)) {
+        if (suggestion[QStringLiteral("canApply")].toBool() && (suggestion[QStringLiteral("kind")].toInt() == kind)) {
             return i;
         }
     }
@@ -302,8 +302,8 @@ void GeoZoneRoutePlannerTest::_testMissionChanges()
     planner.setMissionController(missionController);
     planner.setMaxAltitude(1000);
     planner.update();
-    QVERIFY(applicableSuggestion(planner, QStringLiteral("detour")) >= 0);
-    QVERIFY(applicableSuggestion(planner, QStringLiteral("climb")) >= 0);
+    QVERIFY(applicableSuggestion(planner, GeoZoneRoutePlanner::Detour) >= 0);
+    QVERIFY(applicableSuggestion(planner, GeoZoneRoutePlanner::Climb) >= 0);
 
     // The suggestions refer to the items of the mission by index: an item added before them drops them at once, before
     // the mission controller recalculates the flight path
@@ -328,18 +328,18 @@ void GeoZoneRoutePlannerTest::_testMissionChanges()
     // While the suggestions are shown, they are searched again once the changes settle, and the dialog shows it meanwhile
     planner.setActive(true);
     QTRY_VERIFY(!planner.busy());
-    QVERIFY(applicableSuggestion(planner, QStringLiteral("detour")) >= 0);
+    QVERIFY(applicableSuggestion(planner, GeoZoneRoutePlanner::Detour) >= 0);
     qobject_cast<SimpleMissionItem*>(visualItems->get(2))->altitude()->setRawValue(460);
     QTRY_VERIFY(planner.busy());
     QVERIFY(planner.suggestions().isEmpty());
     QTRY_VERIFY(!planner.busy());
-    QVERIFY(applicableSuggestion(planner, QStringLiteral("detour")) >= 0);
+    QVERIFY(applicableSuggestion(planner, GeoZoneRoutePlanner::Detour) >= 0);
     planner.setActive(false);
 
     // Should a change of the mission go unnoticed, a suggestion is still only applied to the items it was made for
     planner.update();
-    const int climb = applicableSuggestion(planner, QStringLiteral("climb"));
-    const int detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    const int climb = applicableSuggestion(planner, GeoZoneRoutePlanner::Climb);
+    const int detour = applicableSuggestion(planner, GeoZoneRoutePlanner::Detour);
     QVERIFY((climb >= 0) && (detour >= 0));
     QSignalSpy failedSpy(&planner, &GeoZoneRoutePlanner::applyFailed);
     {
@@ -412,7 +412,7 @@ void GeoZoneRoutePlannerTest::_testDetourAltitudes()
     GeoZoneRoutePlanner planner(&manager);
     planner.setMissionController(missionController);
     planner.update();
-    int detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    int detour = applicableSuggestion(planner, GeoZoneRoutePlanner::Detour);
     QVERIFY(detour >= 0);
 
     // The waypoints can't be given the altitudes the detour was checked at: none is inserted, and the dialog tells why
@@ -425,7 +425,7 @@ void GeoZoneRoutePlannerTest::_testDetourAltitudes()
     // With the terrain at the waypoints they are, above it
     environment.setTerrain(420.0);
     planner.update();
-    detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    detour = applicableSuggestion(planner, GeoZoneRoutePlanner::Detour);
     QVERIFY(detour >= 0);
     QVERIFY(planner.applySuggestion(detour));
     QCOMPARE(failedSpy.count(), 1);
@@ -513,7 +513,7 @@ void GeoZoneRoutePlannerTest::_testApplySearchesOnce()
     };
     planner.setActive(true);
     QVERIFY(searched());
-    const int detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    const int detour = applicableSuggestion(planner, GeoZoneRoutePlanner::Detour);
     QVERIFY(detour >= 0);
 
     // The mission with the detour is searched once, when its changes have settled, not also at once

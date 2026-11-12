@@ -46,10 +46,10 @@ class GeoZoneRoutePlanner : public QObject
 
     Q_PROPERTY(MissionController*   missionController   READ missionController  WRITE setMissionController  NOTIFY missionControllerChanged FINAL)
     /// Maps with text, canApply when the suggestion can change the mission and applyText for the button doing it, kind
-    /// ("detour", "climb", "descent", or "none" for legs without a way around the zones), recommended for the cheapest
-    /// way of each leg, legText naming the leg, first for the first suggestion of each leg, and notes, on the last one,
-    /// explaining why the other ways don't work, with suggestedMaxAltitude, the meters above the terrain a climb blocked
-    /// by maxAltitude needs (absent without), which can be set as maxAltitude
+    /// (a SuggestionKind), recommended for the cheapest way of each leg, legText naming the leg, first for the first
+    /// suggestion of each leg, and notes, on the last one, explaining why the other ways don't work, with
+    /// suggestedMaxAltitude, the meters above the terrain a climb blocked by maxAltitude needs (absent without), which
+    /// can be set as maxAltitude
     Q_PROPERTY(QVariantList         suggestions         READ suggestions                                    NOTIFY suggestionsChanged FINAL)
     /// Suggestions are computed and follow mission and zone changes while active, like while they are shown
     Q_PROPERTY(bool                 active              READ active             WRITE setActive             NOTIFY activeChanged FINAL)
@@ -70,6 +70,15 @@ public:
     /// @param manager Zones to avoid, GeoZoneManager::instance() when null
     explicit GeoZoneRoutePlanner(GeoZoneManager *manager, QObject *parent = nullptr);
     ~GeoZoneRoutePlanner() override;
+
+    /// How a suggestion avoids the zones of its leg
+    enum SuggestionKind {
+        Detour,     ///< Waypoints around the zones
+        Climb,      ///< The waypoints of the leg raised over the zones
+        Descent,    ///< The waypoints of the leg lowered below the zones
+        NoRoute,    ///< The leg has no way around the zones
+    };
+    Q_ENUM(SuggestionKind)
 
     static constexpr double detourMargin = 100;         ///< Meters kept from the zones horizontally
     static constexpr double floorMargin = 10;           ///< Meters kept below floors and above ceilings
@@ -175,7 +184,7 @@ private:
 
     struct Suggestion {
         QString text;
-        QString kind;
+        SuggestionKind kind = Detour;
         QString legText;
         QStringList notes;
         bool recommended = false;

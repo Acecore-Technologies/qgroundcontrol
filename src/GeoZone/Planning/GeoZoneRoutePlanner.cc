@@ -235,7 +235,7 @@ QVariantList GeoZoneRoutePlanner::suggestions() const
     for (const Suggestion &suggestion : _suggestions) {
         QVariantMap map{
             { QStringLiteral("text"), suggestion.text },
-            { QStringLiteral("kind"), suggestion.kind },
+            { QStringLiteral("kind"), static_cast<int>(suggestion.kind) },
             { QStringLiteral("legText"), suggestion.legText },
             { QStringLiteral("notes"), suggestion.notes },
             { QStringLiteral("recommended"), suggestion.recommended },
@@ -572,7 +572,7 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
             suggestion.recommended = legSuggestions.isEmpty();
             switch (route.kind) {
             case GeoZoneRouteSearch::Kind::Detour: {
-                suggestion.kind = QStringLiteral("detour");
+                suggestion.kind = Detour;
                 if (!route.waypoints.isEmpty() && _itemAt(legJob.toItemIndex, legJob.toItem)) {
                     suggestion.insertIndex = legJob.toItemIndex;
                     suggestion.insertBefore = legJob.toItem;
@@ -591,7 +591,7 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
             }
             case GeoZoneRouteSearch::Kind::Climb:
             case GeoZoneRouteSearch::Kind::Descent:
-                suggestion.kind = (route.kind == GeoZoneRouteSearch::Kind::Climb) ? QStringLiteral("climb") : QStringLiteral("descent");
+                suggestion.kind = (route.kind == GeoZoneRouteSearch::Kind::Climb) ? Climb : Descent;
                 suggestion.altitudes = _itemAltitudes(legJob, route);
                 if (suggestion.altitudes.isEmpty()) {
                     suggestion.text += QStringLiteral(" ") + tr("Change the altitudes of the waypoints in the mission, they can't be changed here.");
@@ -603,7 +603,7 @@ void GeoZoneRoutePlanner::_apply(const Job &job, const QList<LegResult> &results
         if (legSuggestions.isEmpty()) {
             Suggestion suggestion;
             suggestion.legText = legText;
-            suggestion.kind = QStringLiteral("none");
+            suggestion.kind = NoRoute;
             suggestion.text = tr("%1: no route avoids %2.").arg(legText, _zoneList(result.crossedZones));
             legSuggestions.append(suggestion);
         }
