@@ -796,7 +796,9 @@ bool GeoZoneRoutePlanner::applySuggestion(int index)
     } else {
         return false;
     }
-    startUpdate();
+    // Searched again once the changes of the mission settle, which the mission controller recalculates later: a search
+    // started now would be of a mission still changing, and dropped for the one which follows
+    _invalidate();
     return true;
 }
 

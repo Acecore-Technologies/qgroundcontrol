@@ -106,7 +106,8 @@ public:
     Q_INVOKABLE void cancel();
 
     /// Inserts the waypoints of a detour into the mission, at the altitudes the detour was checked at, or changes the
-    /// altitudes of the waypoints of a leg, then computes the suggestions again
+    /// altitudes of the waypoints of a leg. The suggestions are then dropped, and searched again once the mission
+    /// settles while active.
     /// @return true if the mission changed. false when there is nothing to apply, or, with applyFailed telling why,
     ///         when the mission isn't the one the suggestion was made for or the altitudes can't be set: the mission
     ///         is then left as it was.

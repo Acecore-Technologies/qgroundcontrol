@@ -9,6 +9,7 @@
 
 #include "GeoZoneRoutePlannerTest.h"
 #include "GeoZoneMissionReader.h"
+#include "GeoZoneMissionWorker.h"
 #include "GeoZoneTestBase.h"
 #include "GeoZoneTestHelpers.h"
 #include "SettingsManager.h"
@@ -118,17 +119,18 @@ void GeoZoneRoutePlannerTest::_testRoutePlanner()
     QVERIFY2(texts.contains(QStringLiteral("No climb: the altitudes of the leg aren't known.")), qPrintable(texts.join(QStringLiteral(" | "))));
     QVERIFY2(texts.contains(QStringLiteral("No descent: the altitudes of the leg aren't known.")), qPrintable(texts.join(QStringLiteral(" | "))));
 
-    // Inserting the detour leaves the zones
+    // Inserting the detour leaves the zones. The suggestions were for the mission as it was.
     const int itemCount = missionController->visualItems()->count();
     QVERIFY(planner.applySuggestion(detourIndex));
     QVERIFY(missionController->visualItems()->count() > itemCount);
+    QVERIFY(planner.suggestions().isEmpty());
+    QVERIFY(!planner.applySuggestion(0));
     GeoZoneMissionCheck check(&manager);
     check.setUpdateDelay(0);
     check.setMissionController(missionController);
-    QTRY_VERIFY_WITH_TIMEOUT(check.zones(GeoZoneMissionCheck::Crossed).isEmpty(), 5000);
-    QTRY_VERIFY(!planner.busy());
-    QVERIFY(planner.suggestions().isEmpty());
-    QVERIFY(!planner.applySuggestion(0));
+    // Not settled before the mission as it is now was checked
+    QTRY_VERIFY_WITH_TIMEOUT(check.settled() && check.zones(GeoZoneMissionCheck::Crossed).isEmpty(), 5000);
+    QTRY_VERIFY2((planner.update(), planner.suggestions().isEmpty()), qPrintable(planner.suggestions().value(0).toMap()[QStringLiteral("text")].toString()));
 
     // Zones on either side of a leg are passed between instead of around both
     ZoneOwner owner;
@@ -475,6 +477,54 @@ void GeoZoneRoutePlannerTest::_testMaxAltitudeText()
     }
     QCOMPARE(maxAltitudeSpy.count(), 1);
     QCOMPARE(planner.maxAltitudeText(), QStringLiteral("400"));
+}
+
+void GeoZoneRoutePlannerTest::_testApplySearchesOnce()
+{
+    const ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"),
+        QJsonArray{ _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300) }), errorString), qPrintable(errorString));
+    PlanMasterController masterController;
+    masterController.setFlyView(false);
+    masterController.start();
+    MissionController *const missionController = masterController.missionController();
+    for (const QGeoCoordinate &coordinate : { center.atDistanceAndAzimuth(2000, 270), center.atDistanceAndAzimuth(2000, 90) }) {
+        QVERIFY(missionController->insertSimpleMissionItem(coordinate, missionController->visualItems()->count()));
+    }
+
+    GeoZoneRoutePlanner planner(&manager);
+    planner.setMissionController(missionController);
+    GeoZoneMissionWorker *const worker = planner.findChild<GeoZoneMissionWorker*>();
+    QVERIFY(worker);
+    // The searches scheduled only start when triggered here, until one is applied
+    worker->setDelay(600000);
+    const auto searched = [&planner, worker]() {
+        return QTest::qWaitFor([&planner, worker]() {
+            if (worker->scheduled() && !worker->busy()) {
+                worker->trigger();
+            }
+            return !planner.busy();
+        }, 30000);
+    };
+    planner.setActive(true);
+    QVERIFY(searched());
+    const int detour = applicableSuggestion(planner, QStringLiteral("detour"));
+    QVERIFY(detour >= 0);
+
+    // The mission with the detour is searched once, when its changes have settled, not also at once
+    QVERIFY(planner.applySuggestion(detour));
+    QVERIFY(planner.suggestions().isEmpty());
+    QVERIFY(planner.busy());
+    QVERIFY(worker->scheduled());
+    QVERIFY(!worker->busy());
+    QVERIFY(searched());
+    QVERIFY(planner.suggestions().isEmpty());
+    planner.setActive(false);
 }
 
 void GeoZoneRoutePlannerTest::_testRoutePlannerWorker()
