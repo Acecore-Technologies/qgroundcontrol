@@ -284,9 +284,9 @@ public:
     /// @return Alerts whose actions are kept: those among the latest maxActionAlerts alert ids
     int alertSubjectCount() const { return static_cast<int>(_alertSubjects.count()); }
 
-    /// Shows, logs and announces an alert of a vehicle which isn't about a zone of the catalog, like the
-    /// NonConformance alerts of GeoZoneConformance, as urgent as a zone requiring an authorisation at its level. It
-    /// isn't repeated.
+    /// Shows in the alert popup, logs and announces an alert of a vehicle which isn't about a zone of the catalog,
+    /// like the NonConformance alerts of GeoZoneConformance, as urgent as a zone requiring an authorisation at its
+    /// level. It isn't repeated.
     /// @param identifier,name Of the zone column of the log, the name also ends the message
     /// @return The alert
     AlertEvent raiseVehicleAlert(AlertEvent::Kind kind, int vehicleId, const GeoZone::Position &position, double distance, const QString &identifier,

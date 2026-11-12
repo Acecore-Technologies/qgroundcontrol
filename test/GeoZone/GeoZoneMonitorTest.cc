@@ -2607,7 +2607,24 @@ void GeoZoneMonitorTest::_testAlertActions()
         (void) counting.raiseVehicleAlert(GeoZoneMonitor::AlertEvent::NonConformance, 2, GeoZone::Position{ center }, 10, QStringLiteral("horizontal"), QStringLiteral("10 m beside it"));
     }
     counting.evaluate({ uSpaceCenter, 450, 400 }, 3);
-    QCOMPARE(counting.alertSubjectCount(), 1);
+    QCOMPARE(counting.alertSubjectCount(), GeoZoneMonitor::maxActionAlerts);
+
+    // An alert which isn't about a zone, like leaving the planned volume, is shown in the popup too, without a
+    // question, and dismissed there
+    counting.closeAlerts();
+    const GeoZoneMonitor::AlertEvent outside = counting.raiseVehicleAlert(GeoZoneMonitor::AlertEvent::NonConformance, 3, GeoZone::Position{ uSpaceCenter, 450, 400 }, 40,
+                                                                          QStringLiteral("above"), QStringLiteral("40 m above it"));
+    QCOMPARE(outside.message, QStringLiteral("Vehicle 3: Outside planned volume: 40 m above it"));
+    std::optional<GeoZoneAlertModel::Alert> shownOutside = shownAlert(counting, outside.id);
+    QVERIFY(shownOutside);
+    QCOMPARE(shownOutside->message, outside.message);
+    QCOMPARE(shownOutside->level, GeoZoneAlertLevel::Caution);
+    QVERIFY(!shownOutside->question);
+    QCOMPARE(counting.alertHistory()->unacknowledgedCount() > 0, true);
+    const int unacknowledgedBefore = counting.alertHistory()->unacknowledgedCount();
+    counting.dismissAlert(outside.id);
+    QVERIFY(!shownAlert(counting, outside.id));
+    QCOMPARE(counting.alertHistory()->unacknowledgedCount(), unacknowledgedBefore - 1);
 }
 
 void GeoZoneMonitorTest::_testTraffic()

@@ -1546,13 +1546,17 @@ GeoZoneMonitor::AlertEvent GeoZoneMonitor::raiseVehicleAlert(AlertEvent::Kind ki
     event.message = _labelled(vehicleId, alertMessage(event, name, QString()));
     qCDebug(GeoZoneMonitorLog) << event.message;
     const int severity = GeoZoneAlertLevel::severity(level, GeoZone::restrictionSeverity(GeoZone::ReqAuthorisation));
+    const auto monitor = std::find_if(_monitors.cbegin(), _monitors.cend(), [vehicleId](const GeoZoneVehicleMonitor *candidate) { return candidate->vehicleId() == vehicleId; });
+    const int vehicleKey = (monitor != _monitors.cend()) ? (*monitor)->key() : 0;
+    // Shown in the popup like the alerts about zones, where the pilot dismisses it
+    _keepSubject(AlertSubject{ vehicleKey, event, false });
     emit alertEvent(event);
     emit alert(event.message, severity, event.id);
+    _show(event.id, event.message, severity, level);
 
-    const auto monitor = std::find_if(_monitors.cbegin(), _monitors.cend(), [vehicleId](const GeoZoneVehicleMonitor *candidate) { return candidate->vehicleId() == vehicleId; });
     GeoZoneAlertArbiter::Alert announced;
     announced.id = event.id;
-    announced.vehicleKey = (monitor != _monitors.cend()) ? (*monitor)->key() : 0;
+    announced.vehicleKey = vehicleKey;
     announced.zoneKey = identifier;
     announced.severity = severity;
     announced.level = level;

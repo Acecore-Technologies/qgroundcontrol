@@ -1036,17 +1036,24 @@ void GeoZoneFlightTest::_testConformance()
     QCOMPARE(conformance.state(), Conformance::OutsideTime);
     QCOMPARE(alertSpy.count(), 3);
 
-    // Logged like the other alerts
+    // Shown in the alert popup like the other alerts
+    QCOMPARE(monitor.alertModel()->count(), 3);
+    QCOMPARE(monitor.alertModel()->alerts().constFirst().level, GeoZoneAlertLevel::Caution);
+
+    // Logged like the other alerts, each followed by the popup showing it
     GeoZoneAlertHistory *const history = monitor.alertHistory();
-    history->flushLog();
+    QVERIFY(history->flushLog());
     QFile log(history->logFilePath(environment.now().date()));
     QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
     const QStringList lines = QString::fromUtf8(log.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-    QCOMPARE(lines.count(), 4);
-    const std::optional<GeoZoneMonitor::AlertEvent> logged = GeoZoneAlertHistory::parseLogLine(lines.last());
-    QVERIFY(logged && (logged->kind == GeoZoneMonitor::AlertEvent::NonConformance));
+    QCOMPARE(lines.count(), 7);
+    const std::optional<GeoZoneMonitor::AlertEvent> logged = GeoZoneAlertHistory::parseLogLine(lines[5]);
+    QVERIFY(logged);
+    QCOMPARE(logged->kind, GeoZoneMonitor::AlertEvent::NonConformance);
     QCOMPARE(logged->zoneIdentifier, QStringLiteral("time"));
     QCOMPARE(logged->message, QStringLiteral("Outside planned volume: outside its time window"));
+    QCOMPARE(GeoZoneAlertHistory::logFields(lines[6]).value(6), QStringLiteral("notified"));
+    QCOMPARE(GeoZoneAlertHistory::logFields(lines[6]).value(14), GeoZoneAlertHistory::logFields(lines[5]).value(14));
     QCOMPARE(GeoZoneMonitor::alertMessage(*GeoZoneAlertHistory::parseLogLine(lines[1]), QStringLiteral("50 m beside it"), QString()),
              QStringLiteral("Outside planned volume: 50 m beside it"));
 }
