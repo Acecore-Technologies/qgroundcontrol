@@ -141,15 +141,25 @@ QString GeoZoneSource::areaText() const
         .arg(_area.topLeft().longitude(), 0, 'f', 3).arg(_area.bottomRight().longitude(), 0, 'f', 3);
 }
 
+QString GeoZoneSource::_givenName() const
+{
+    if (!_service.name.isEmpty()) {
+        return _service.name;
+    }
+    return isFeed() ? GeoZoneProviders::serviceName(_url) : QString();
+}
+
 QString GeoZoneSource::name() const
 {
     if (!_service.name.isEmpty()) {
         return _service.name;
     }
-    // Feeds without a title are named after their known service, or their server
-    QString name = _title;
-    if (name.isEmpty() && isFeed()) {
-        name = GeoZoneProviders::serviceName(_url);
+    // A feed of the catalogue is listed by its name there, like "Netherlands (IenW)", which is the one it was chosen
+    // by: the title of its data is in its details. Other sources are named after the title of their data, or their
+    // server or file without one.
+    QString name = _givenName();
+    if (name.isEmpty()) {
+        name = _title;
     }
     if (name.isEmpty()) {
         name = isFeed() ? QUrl(_url).host() : QFileInfo(_key).fileName();
@@ -174,7 +184,12 @@ QString GeoZoneSource::detailsText() const
         return QString();
     }
 
-    QStringList parts = { formatName(), tr("zones: %1").arg(zoneCount()) };
+    QStringList parts = { formatName() };
+    // The title of the data, unless the source is named after it
+    if (const QString givenName = _givenName(); !_title.isEmpty() && !givenName.isEmpty() && (givenName != _title)) {
+        parts.append(tr("title: %1").arg(_title));
+    }
+    parts.append(tr("zones: %1").arg(zoneCount()));
     if (!_dateText().isEmpty()) {
         parts.append(_dateText());
     }

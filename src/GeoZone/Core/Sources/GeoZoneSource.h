@@ -107,7 +107,11 @@ public:
     bool loaded() const { return _format != GeoZoneParser::Format::Unknown; }
     QString url() const { return _url; }
     bool isFeed() const { return !_url.isEmpty(); }
+    /// @return Name of the service of the feed, or of its entry in the feed catalogue, otherwise the title of the
+    ///         data, the server of a feed or the name of a file, with the area of a feed downloaded for one
     QString name() const;
+    /// @return Title the data gives itself, empty without. Part of detailsText when the source isn't named after it.
+    QString title() const { return _title; }
     QString formatName() const;
     QString provider() const { return _provider; }
     int zoneCount() const { return static_cast<int>(_zones.count()); }
@@ -248,6 +252,8 @@ private:
     void _summarizeChanges(const QList<GeoZone::Data> &previous, const QList<GeoZone*> &zones);
     void _setMetadata(const GeoZoneParser::Result &result, const QDateTime &loadedAt, const QDateTime &fileDate);
     QString _dateText() const;
+    /// @return Name of the service of the feed, or of its entry in the feed catalogue, empty without either
+    QString _givenName() const;
     /// @return true for feeds downloaded from a server, which confirms their data
     bool _isDownloaded() const;
     QString _sourceText() const;

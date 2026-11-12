@@ -1295,7 +1295,7 @@ void GeoZoneParserTest::_testParseNationalFormats()
     QVERIFY(source.warningText().contains(QStringLiteral("8")));
     GeoZoneSource areaSource(QStringLiteral("area"), QStringLiteral("https://data.geopf.fr/wfs/ows?SERVICE=WFS&BBOX=2.25,48.8,2.45,48.9,EPSG:4326"));
     areaSource.setResult(france, environment.now(), environment.now());
-    QCOMPARE(areaSource.name(), QStringLiteral("UAS restrictions (France), area around 48.85, 2.35"));
+    QCOMPARE(areaSource.name(), QStringLiteral("France, open category (IGN), area around 48.85, 2.35"));
 
     // UK flight restriction zones in AIXM 5.1: arcs and geodesic strings, a circle and a danger area
     GeoZoneParser::Result aixm;
@@ -3486,6 +3486,48 @@ void GeoZoneParserTest::_testSourceNames()
     result.title = QStringLiteral("Zones %2 of %3 (100%1)");
     area.setResult(result, now, now);
     QCOMPARE(area.name(), QStringLiteral("Zones %2 of %3 (100%1), area around 48.10, 2.35"));
+
+    // A feed of the catalogue is listed by its name there, by which it was chosen, with the title its data gives
+    // itself in its details
+    const QString dutchUrl = QStringLiteral("https://www.luchtvaartindetoekomst.nl/onderwerpen/o/onbemande-luchtvaart");
+    GeoZoneSource dutch(dutchUrl, dutchUrl);
+    result.title = QStringLiteral("UASZoneVersion NL 2026-02");
+    dutch.setResult(result, now, now);
+    QCOMPARE(dutch.name(), QStringLiteral("Netherlands (IenW)"));
+    QCOMPARE(dutch.title(), QStringLiteral("UASZoneVersion NL 2026-02"));
+    QVERIFY2(dutch.detailsText().startsWith(QStringLiteral("ED-269, title: UASZoneVersion NL 2026-02, zones: 0")), qPrintable(dutch.detailsText()));
+    // also the zones of an area of a service of the catalogue
+    const QString dipulUrl = GeoZoneProviders::areaFeedUrl(QStringLiteral("dipul"), QGeoRectangle(QGeoCoordinate(50.2, 8.5), QGeoCoordinate(50.0, 8.7)));
+    GeoZoneSource dipul(dipulUrl, dipulUrl);
+    result.title = QStringLiteral("dipul");
+    dipul.setResult(result, now, now);
+    QCOMPARE(dipul.name(), QStringLiteral("Germany, all zones (DiPUL), area around 50.10, 8.60"));
+    QVERIFY2(dipul.detailsText().contains(QStringLiteral("title: dipul")), qPrintable(dipul.detailsText()));
+
+    // Other feeds and files are named after the title of their data, which isn't repeated in their details
+    const QString otherUrl = QStringLiteral("https://zones.example.com/nl.json");
+    GeoZoneSource other(otherUrl, otherUrl);
+    result.title = QStringLiteral("Zones of Example");
+    other.setResult(result, now, now);
+    QCOMPARE(other.name(), QStringLiteral("Zones of Example"));
+    QVERIFY2(!other.detailsText().contains(QStringLiteral("title:")), qPrintable(other.detailsText()));
+    GeoZoneSource file(QStringLiteral("/data/zones.json"), QString());
+    file.setResult(result, now, now);
+    QCOMPARE(file.name(), QStringLiteral("Zones of Example"));
+    // or after their server or file without one
+    result.title.clear();
+    other.setResult(result, now, now);
+    file.setResult(result, now, now);
+    QCOMPARE(other.name(), QStringLiteral("zones.example.com"));
+    QCOMPARE(file.name(), QStringLiteral("zones.json"));
+    // and a service keeps the name it was given
+    GeoZoneService service;
+    service.name = QStringLiteral("Company zones");
+    other.setService(service);
+    result.title = QStringLiteral("Zones of Example");
+    other.setResult(result, now, now);
+    QCOMPARE(other.name(), QStringLiteral("Company zones"));
+    QVERIFY2(other.detailsText().contains(QStringLiteral("title: Zones of Example")), qPrintable(other.detailsText()));
 }
 
 GEOZONE_TEST(GeoZoneParserTest)
