@@ -56,6 +56,36 @@ public:
         LevelRole,                      ///< GeoZoneAlertLevel::Level
     };
 
+    /// Columns of the alert log, in the order written, see logColumnName(). New columns go last: logs written before
+    /// them are still read.
+    enum LogColumn {
+        TimeColumn,                 ///< UTC, ISO 8601 with milliseconds
+        VehicleColumn,
+        LatitudeColumn,
+        LongitudeColumn,
+        AltitudeColumn,             ///< Meters AMSL
+        TerrainColumn,              ///< Meters AMSL
+        EventColumn,                ///< See GeoZoneMonitor::AlertEvent::Kind
+        DistanceColumn,             ///< Meters to the zone
+        ZoneIdentifierColumn,
+        ZoneNameColumn,
+        RestrictionColumn,
+        SourceColumn,
+        TimeToEntryColumn,          ///< Seconds
+        TrafficColumn,
+        AlertIdColumn,
+        DetailColumn,
+        WarningDistanceColumn,      ///< The alert thresholds, see GeoZoneMonitor::AlertEvent::warningDistance
+        WarningVerticalColumn,
+        WarningTimeColumn,
+        GroundSpeedColumn,
+        VerticalSpeedColumn,
+        LevelColumn,
+        LogColumnCount,
+    };
+    /// Columns every line of a log has, also those written by earlier versions
+    static constexpr int minLogColumns = SourceColumn + 1;
+
     static constexpr int maxEntries = 500;
     static constexpr int shownPositionMSecs = 2 * 60 * 1000;   ///< How long the map shows the position of a shown alert
     static constexpr int logFlushIntervalMSecs = 2000;
@@ -105,6 +135,8 @@ public:
     Q_INVOKABLE void show(int row);
     Q_INVOKABLE void clearShownPosition();
 
+    /// @return Name of the column in the header of the log, like "zone_identifier"
+    static QString logColumnName(LogColumn column);
     static QString logHeader();
     static QString logLine(const GeoZoneMonitor::AlertEvent &event);
     /// @return The fields of a line of a log file, unquoted

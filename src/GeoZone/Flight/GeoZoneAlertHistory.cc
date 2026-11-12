@@ -23,6 +23,7 @@
 #include <QtCore/QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace {
@@ -30,17 +31,67 @@ namespace {
 /// Text from feeds starting like a formula is run by spreadsheets, the log keeps it text with a leading quote
 constexpr QLatin1StringView formulaStarts("=+-@\t\r");
 
-/// Event column of the log by GeoZoneMonitor::AlertEvent::Kind
-const QStringList &eventNames()
+/// Names of the columns of the log by GeoZoneAlertHistory::LogColumn, which the header, the writer and the reader share
+constexpr std::array<const char*, GeoZoneAlertHistory::LogColumnCount> columnNames = {
+    "time_utc", "vehicle", "latitude", "longitude", "altitude_amsl_m", "terrain_amsl_m", "event", "distance_m", "zone_identifier", "zone_name", "restriction",
+    "source", "time_to_entry_s", "traffic", "alert_id", "detail", "warning_distance_m", "warning_vertical_m", "warning_time_s", "ground_speed_mps",
+    "vertical_speed_mps", "level",
+};
+
+// Decimals of the numbers of the log
+constexpr int coordinateDecimals = 7;
+constexpr int altitudeDecimals = 1;
+constexpr int speedDecimals = 1;
+constexpr int wholeNumber = 0;
+
+/// Event column of the log for each GeoZoneMonitor::AlertEvent::Kind
+struct EventName {
+    GeoZoneMonitor::AlertEvent::Kind kind;
+    const char *name;
+};
+
+constexpr EventName eventNames[] = {
+    { GeoZoneMonitor::AlertEvent::Approach, "approaching" },
+    { GeoZoneMonitor::AlertEvent::Entry, "entered" },
+    { GeoZoneMonitor::AlertEvent::PositionLost, "position_lost" },
+    { GeoZoneMonitor::AlertEvent::Traffic, "traffic_entered" },
+    { GeoZoneMonitor::AlertEvent::NonConformance, "outside_volume" },
+    { GeoZoneMonitor::AlertEvent::OnGround, "on_ground" },
+    { GeoZoneMonitor::AlertEvent::Awareness, "geo_awareness" },
+    { GeoZoneMonitor::AlertEvent::FenceWarning, "fence_warning" },
+    { GeoZoneMonitor::AlertEvent::FenceBreach, "fence_breached" },
+    { GeoZoneMonitor::AlertEvent::Activated, "activated" },
+    { GeoZoneMonitor::AlertEvent::ActivationSoon, "activation_soon" },
+    { GeoZoneMonitor::AlertEvent::Notified, "notified" },
+    { GeoZoneMonitor::AlertEvent::Approved, "approved" },
+    { GeoZoneMonitor::AlertEvent::Dismissed, "dismissed" },
+    { GeoZoneMonitor::AlertEvent::Muted, "muted" },
+    { GeoZoneMonitor::AlertEvent::Permit, "permit" },
+    { GeoZoneMonitor::AlertEvent::PermitEnded, "permit_ended" },
+    { GeoZoneMonitor::AlertEvent::SourceOff, "source_off" },
+    { GeoZoneMonitor::AlertEvent::SourceOn, "source_on" },
+    { GeoZoneMonitor::AlertEvent::Authorised, "authorisation" },
+    { GeoZoneMonitor::AlertEvent::AuthorisationRemoved, "authorisation_removed" },
+};
+
+QString eventName(GeoZoneMonitor::AlertEvent::Kind kind)
 {
-    static const QStringList names = { QStringLiteral("approaching"), QStringLiteral("entered"), QStringLiteral("position_lost"), QStringLiteral("traffic_entered"),
-                                       QStringLiteral("outside_volume"), QStringLiteral("on_ground"), QStringLiteral("geo_awareness"),
-                                       QStringLiteral("fence_warning"), QStringLiteral("fence_breached"), QStringLiteral("activated"),
-                                       QStringLiteral("activation_soon"), QStringLiteral("notified"), QStringLiteral("approved"),
-                                       QStringLiteral("dismissed"), QStringLiteral("muted"), QStringLiteral("permit"), QStringLiteral("permit_ended"),
-                                       QStringLiteral("source_off"), QStringLiteral("source_on"), QStringLiteral("authorisation"),
-                                       QStringLiteral("authorisation_removed") };
-    return names;
+    for (const EventName &event : eventNames) {
+        if (event.kind == kind) {
+            return QString::fromLatin1(event.name);
+        }
+    }
+    return QString();
+}
+
+std::optional<GeoZoneMonitor::AlertEvent::Kind> eventKind(const QString &name)
+{
+    for (const EventName &event : eventNames) {
+        if (name == QLatin1String(event.name)) {
+            return event.kind;
+        }
+    }
+    return std::nullopt;
 }
 
 /// A record of the log is one line, which its readers rely on: line breaks in text from feeds, like a zone name, are
@@ -313,39 +364,49 @@ QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
     return QDir(directory).filePath(QStringLiteral("GeoZoneAlerts-%1.csv").arg(date.toString(Qt::ISODate)));
 }
 
+QString GeoZoneAlertHistory::logColumnName(LogColumn column)
+{
+    return ((column >= 0) && (column < LogColumnCount)) ? QString::fromLatin1(columnNames[column]) : QString();
+}
+
 QString GeoZoneAlertHistory::logHeader()
 {
-    return QStringLiteral("time_utc,vehicle,latitude,longitude,altitude_amsl_m,terrain_amsl_m,event,distance_m,zone_identifier,zone_name,restriction,source,time_to_entry_s,traffic,alert_id,detail,warning_distance_m,warning_vertical_m,warning_time_s,ground_speed_mps,vertical_speed_mps,level");
+    QStringList names;
+    for (const char *name : columnNames) {
+        names.append(QString::fromLatin1(name));
+    }
+    return names.join(QLatin1Char(','));
 }
 
 QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
 {
     const QMetaEnum restrictions = QMetaEnum::fromType<GeoZone::Restriction>();
-    return QStringList{
-        event.time.toUTC().toString(Qt::ISODateWithMs),
-        (event.vehicleId == GeoZoneMonitor::noVehicle) ? QString() : QString::number(event.vehicleId),
-        numberText(event.position.coordinate.latitude(), 7),
-        numberText(event.position.coordinate.longitude(), 7),
-        numberText(event.position.altitudeAMSL, 1),
-        numberText(event.position.terrainAMSL, 1),
-        eventNames().value(event.kind),
-        numberText(event.distance, 0),
-        csvField(event.zoneIdentifier),
-        csvField(event.zoneName),
-        QString::fromLatin1(restrictions.valueToKey(event.restriction)),
-        csvField(event.sourceText),
-        numberText(event.timeToEntry, 0),
-        csvField(event.traffic),
-        (event.id > 0) ? QString::number(event.id) : QString(),
-        // The circumstance of an alert about a zone, or the text of the others
-        csvField((event.circumstance != GeoZoneMonitor::AlertEvent::Circumstance::None) ? GeoZoneMonitor::AlertEvent::circumstanceCode(event.circumstance) : event.detail),
-        numberText(event.warningDistance, 0),
-        numberText(event.warningVerticalDistance, 0),
-        numberText(event.warningTime, 0),
-        numberText(event.groundSpeed, 1),
-        numberText(event.verticalSpeed, 1),
-        GeoZoneAlertLevel::code(event.level),
-    }.join(QLatin1Char(','));
+    QStringList fields(LogColumnCount);
+    fields[TimeColumn] = event.time.toUTC().toString(Qt::ISODateWithMs);
+    fields[VehicleColumn] = (event.vehicleId == GeoZoneMonitor::noVehicle) ? QString() : QString::number(event.vehicleId);
+    fields[LatitudeColumn] = numberText(event.position.coordinate.latitude(), coordinateDecimals);
+    fields[LongitudeColumn] = numberText(event.position.coordinate.longitude(), coordinateDecimals);
+    fields[AltitudeColumn] = numberText(event.position.altitudeAMSL, altitudeDecimals);
+    fields[TerrainColumn] = numberText(event.position.terrainAMSL, altitudeDecimals);
+    fields[EventColumn] = eventName(event.kind);
+    fields[DistanceColumn] = numberText(event.distance, wholeNumber);
+    fields[ZoneIdentifierColumn] = csvField(event.zoneIdentifier);
+    fields[ZoneNameColumn] = csvField(event.zoneName);
+    fields[RestrictionColumn] = QString::fromLatin1(restrictions.valueToKey(event.restriction));
+    fields[SourceColumn] = csvField(event.sourceText);
+    fields[TimeToEntryColumn] = numberText(event.timeToEntry, wholeNumber);
+    fields[TrafficColumn] = csvField(event.traffic);
+    fields[AlertIdColumn] = (event.id > 0) ? QString::number(event.id) : QString();
+    // The circumstance of an alert about a zone, or the text of the others
+    fields[DetailColumn] = csvField((event.circumstance != GeoZoneMonitor::AlertEvent::Circumstance::None) ?
+                                        GeoZoneMonitor::AlertEvent::circumstanceCode(event.circumstance) : event.detail);
+    fields[WarningDistanceColumn] = numberText(event.warningDistance, wholeNumber);
+    fields[WarningVerticalColumn] = numberText(event.warningVerticalDistance, wholeNumber);
+    fields[WarningTimeColumn] = numberText(event.warningTime, wholeNumber);
+    fields[GroundSpeedColumn] = numberText(event.groundSpeed, speedDecimals);
+    fields[VerticalSpeedColumn] = numberText(event.verticalSpeed, speedDecimals);
+    fields[LevelColumn] = GeoZoneAlertLevel::code(event.level);
+    return fields.join(QLatin1Char(','));
 }
 
 bool GeoZoneAlertHistory::flushLog()
@@ -482,50 +543,53 @@ QStringList GeoZoneAlertHistory::logFields(const QString &line)
 
 std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(const QString &line)
 {
+    // Logs written before the last columns were added lack them
     const QStringList fields = csvFields(line);
-    if ((fields.count() < 12) || (fields[0] == QStringLiteral("time_utc"))) {
+    const auto text = [&fields](LogColumn column) { return fields.value(column); };
+    const auto number = [&fields](LogColumn column) { return (fields.count() > column) ? numberValue(fields[column]) : qQNaN(); };
+    if ((fields.count() < minLogColumns) || (text(TimeColumn) == logColumnName(TimeColumn))) {
         return std::nullopt;
     }
     GeoZoneMonitor::AlertEvent event;
-    event.time = QDateTime::fromString(fields[0], Qt::ISODateWithMs);
-    const qsizetype kind = eventNames().indexOf(fields[6]);
-    if ((kind < 0) || !event.time.isValid()) {
+    event.time = QDateTime::fromString(text(TimeColumn), Qt::ISODateWithMs);
+    const std::optional<GeoZoneMonitor::AlertEvent::Kind> kind = eventKind(text(EventColumn));
+    if (!kind || !event.time.isValid()) {
         return std::nullopt;
     }
-    event.kind = static_cast<GeoZoneMonitor::AlertEvent::Kind>(kind);
+    event.kind = *kind;
     bool vehicleOk = false;
-    const int vehicleId = fields[1].toInt(&vehicleOk);
+    const int vehicleId = text(VehicleColumn).toInt(&vehicleOk);
     event.vehicleId = vehicleOk ? vehicleId : GeoZoneMonitor::noVehicle;
-    event.position.coordinate = QGeoCoordinate(numberValue(fields[2]), numberValue(fields[3]));
-    event.position.altitudeAMSL = numberValue(fields[4]);
-    event.position.terrainAMSL = numberValue(fields[5]);
-    event.distance = numberValue(fields[7]);
+    event.position.coordinate = QGeoCoordinate(number(LatitudeColumn), number(LongitudeColumn));
+    event.position.altitudeAMSL = number(AltitudeColumn);
+    event.position.terrainAMSL = number(TerrainColumn);
+    event.distance = number(DistanceColumn);
     event.inside = (event.kind == GeoZoneMonitor::AlertEvent::Entry) || (event.kind == GeoZoneMonitor::AlertEvent::Traffic) ||
                    (event.kind == GeoZoneMonitor::AlertEvent::OnGround) ||
                    (event.kind == GeoZoneMonitor::AlertEvent::Activated) ||
                    ((event.kind == GeoZoneMonitor::AlertEvent::ActivationSoon) && (event.distance == 0)) ||
                    ((event.kind == GeoZoneMonitor::AlertEvent::PositionLost) && (event.distance == 0));
-    event.zoneIdentifier = fields[8];
-    event.zoneName = fields[9];
+    event.zoneIdentifier = text(ZoneIdentifierColumn);
+    event.zoneName = text(ZoneNameColumn);
     bool restrictionOk = false;
-    const int restriction = QMetaEnum::fromType<GeoZone::Restriction>().keyToValue(fields[10].toLatin1().constData(), &restrictionOk);
+    const int restriction = QMetaEnum::fromType<GeoZone::Restriction>().keyToValue(text(RestrictionColumn).toLatin1().constData(), &restrictionOk);
     event.restriction = restrictionOk ? static_cast<GeoZone::Restriction>(restriction) : GeoZone::Unknown;
-    event.sourceText = fields[11];
-    event.timeToEntry = (fields.count() > 12) ? numberValue(fields[12]) : qQNaN();
-    event.traffic = (fields.count() > 13) ? fields[13] : QString();
-    event.detail = (fields.count() > 15) ? fields[15] : QString();
+    event.sourceText = text(SourceColumn);
+    event.timeToEntry = number(TimeToEntryColumn);
+    event.traffic = text(TrafficColumn);
+    event.detail = text(DetailColumn);
     event.circumstance = GeoZoneMonitor::AlertEvent::circumstanceFromCode(event.kind, event.detail);
     if (event.circumstance != GeoZoneMonitor::AlertEvent::Circumstance::None) {
         event.detail.clear();
     }
-    event.warningDistance = (fields.count() > 16) ? numberValue(fields[16]) : qQNaN();
-    event.warningVerticalDistance = (fields.count() > 17) ? numberValue(fields[17]) : qQNaN();
-    event.warningTime = (fields.count() > 18) ? numberValue(fields[18]) : qQNaN();
-    event.groundSpeed = (fields.count() > 19) ? numberValue(fields[19]) : qQNaN();
-    event.verticalSpeed = (fields.count() > 20) ? numberValue(fields[20]) : qQNaN();
+    event.warningDistance = number(WarningDistanceColumn);
+    event.warningVerticalDistance = number(WarningVerticalColumn);
+    event.warningTime = number(WarningTimeColumn);
+    event.groundSpeed = number(GroundSpeedColumn);
+    event.verticalSpeed = number(VerticalSpeedColumn);
     // Logs written before the levels have the level of the alert
     bool levelOk = false;
-    event.level = GeoZoneAlertLevel::fromCode(fields.value(21), &levelOk);
+    event.level = GeoZoneAlertLevel::fromCode(text(LevelColumn), &levelOk);
     if (!levelOk) {
         event.level = GeoZoneMonitor::alertLevel(event);
     }

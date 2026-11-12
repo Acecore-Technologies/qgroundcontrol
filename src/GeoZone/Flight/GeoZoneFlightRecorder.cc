@@ -357,7 +357,7 @@ QJsonArray GeoZoneFlightRecorder::loggedAlerts(int vehicleId, const QDateTime &s
                 continue;
             }
             const QDateTime time = QDateTime::fromString(fields.constFirst(), Qt::ISODateWithMs);
-            if (!time.isValid() || (time < start) || (time > end) || (fields.value(header.indexOf(QStringLiteral("vehicle"))) != vehicle)) {
+            if (!time.isValid() || (time < start) || (time > end) || (fields.value(header.indexOf(GeoZoneAlertHistory::logColumnName(GeoZoneAlertHistory::VehicleColumn))) != vehicle)) {
                 continue;
             }
             rows.append(alertJson(header, fields));
