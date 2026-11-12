@@ -135,7 +135,17 @@ GeoZoneProvenance GeoZoneProvenance::fromJson(const QJsonObject &object)
     }
     provenance.packSigner = object.value(QLatin1String(packSignerKey)).toString();
     provenance.packPublicKey = QByteArray::fromBase64(object.value(QLatin1String(packPublicKeyKey)).toString().toLatin1());
+    // Also what earlier versions recorded of the packs they imported
+    provenance.distrustPackIntegrity();
     return provenance;
+}
+
+void GeoZoneProvenance::distrustPackIntegrity()
+{
+    if (imported && (packSignature != PackSignature::Signed) && (integrity == Integrity::Verified)) {
+        integrity = Integrity::Unchecked;
+        integrityText.clear();
+    }
 }
 
 QString GeoZoneProvenance::packSignatureToString(PackSignature signature)

@@ -195,6 +195,8 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
         source.job.provenance.packSignature = import.signature;
         source.job.provenance.packSigner = (import.signature == GeoZoneProvenance::PackSignature::Unsigned) ? QString() : import.signer;
         source.job.provenance.packPublicKey = import.publicKey;
+        // The manifest may say that the data was verified against its publisher's hash
+        source.job.provenance.distrustPackIntegrity();
         import.sources.append(source);
     }
     return import;

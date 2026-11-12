@@ -21,6 +21,7 @@ private slots:
     void _testOfflinePack();
     void _testPackServiceTrust();
     void _testPackExtraction();
+    void _testPackIntegrityClaims();
     void _testStoredFileNames();
     void _testSignedPacks();
     void _testPacksWithoutSigning();

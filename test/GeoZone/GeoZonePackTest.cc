@@ -188,6 +188,110 @@ void GeoZonePackTest::_testPackExtraction()
     QVERIFY(QFile::remove(import.sources.constFirst().job.sourcePath));
 }
 
+void GeoZonePackTest::_testPackIntegrityClaims()
+{
+    const ScopedEnvironment environment;
+    GeoZoneSettings *const settings = GeoZoneSettings::instance();
+    const auto restore = qScopeGuard([settings]() { settings->trustedPackPublishers()->setRawValue(settings->trustedPackPublishers()->rawDefaultValue()); });
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString key = QStringLiteral("/zones/claimed.json");
+    const QString file = QStringLiteral("sources/claimed.json");
+    QFile fixture(QStringLiteral(":/unittest/ed318_test.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const QByteArray data = fixture.readAll();
+    // A source whose manifest says that its data was verified against the hash of its publisher
+    QJsonObject claiming = _manifestSource(key, file, data);
+    claiming.insert(QStringLiteral("loadedAt"), QStringLiteral("2026-06-01T10:00:00Z"));
+    claiming.insert(QStringLiteral("provenance"), QJsonObject{
+        { QStringLiteral("requestUrl"), QStringLiteral("https://example.org/zones.json") }, { QStringLiteral("fetchedAt"), QStringLiteral("2026-06-01T10:00:00Z") },
+        { QStringLiteral("integrity"), QStringLiteral("verified") }, { QStringLiteral("integrityCheck"), QStringLiteral("the SHA-256 of https://example.org/zones.json.sha256") } });
+    const QString packPath = dir.filePath(QStringLiteral("claiming.zip"));
+    QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), _manifest({ claiming }) } }));
+
+    // Anyone can write that into a pack: from one which isn't signed it is only a claim
+    const QString storagePath = dir.filePath(QStringLiteral("storage"));
+    {
+        GeoZoneManager manager(storagePath);
+        QSignalSpy importSpy(&manager, &GeoZoneManager::fileOperationFinished);
+        QVERIFY(manager.importPack(packPath));
+        QVERIFY2(importSpy.last()[0].toBool(), qPrintable(importSpy.last()[1].toString()));
+        QTRY_VERIFY(!manager.repository()->busy());
+        const GeoZoneSource *const source = manager.repository()->source(key);
+        QVERIFY(source);
+        QCOMPARE(source->zoneCount(), 3);
+        QVERIFY(source->imported());
+        QCOMPARE(source->provenance().packSignature, GeoZoneProvenance::PackSignature::Unsigned);
+        QCOMPARE(source->provenance().integrity, GeoZoneProvenance::Integrity::Unchecked);
+        QVERIFY(!source->verified());
+        QVERIFY2(!source->provenanceText().contains(QStringLiteral(", verified")), qPrintable(source->provenanceText()));
+    }
+
+    // nor is it when an earlier version recorded it for the source
+    QFile indexFile(QDir(storagePath).filePath(QStringLiteral("sources.json")));
+    QVERIFY(indexFile.open(QIODevice::ReadOnly));
+    QJsonObject index = QJsonDocument::fromJson(indexFile.readAll()).object();
+    indexFile.close();
+    QJsonObject entry = index.value(QStringLiteral("sources")).toArray().first().toObject();
+    QJsonObject provenance = entry.value(QStringLiteral("provenance")).toObject();
+    QVERIFY(provenance.value(QStringLiteral("imported")).toBool());
+    provenance.insert(QStringLiteral("integrity"), QStringLiteral("verified"));
+    entry.insert(QStringLiteral("provenance"), provenance);
+    index.insert(QStringLiteral("sources"), QJsonArray{ entry });
+    QVERIFY(indexFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(indexFile.write(QJsonDocument(index).toJson()) > 0);
+    indexFile.close();
+    {
+        GeoZoneManager restarted(storagePath);
+        restarted.repository()->loadStoredSources(GeoZoneSourceRepository::LoadMode::Synchronous);
+        const GeoZoneSource *const source = restarted.repository()->source(key);
+        QVERIFY(source);
+        QVERIFY(source->imported());
+        QVERIFY(!source->verified());
+        restarted.repository()->clear();
+    }
+
+    // The data of a source which wasn't imported is verified by this application
+    GeoZoneProvenance own = GeoZoneProvenance::fromJson(claiming.value(QStringLiteral("provenance")).toObject());
+    QCOMPARE(own.integrity, GeoZoneProvenance::Integrity::Verified);
+    // A failed check is kept whoever says so
+    own.imported = true;
+    own.integrity = GeoZoneProvenance::Integrity::Failed;
+    own.distrustPackIntegrity();
+    QCOMPARE(own.integrity, GeoZoneProvenance::Integrity::Failed);
+
+    if (!GeoZonePackSignature::available()) {
+        return;
+    }
+    // A trusted publisher is believed, until it is no longer trusted
+    const QByteArray privateKey = GeoZonePackSignature::generatePrivateKey();
+    QString errorString;
+    const QByteArray publicKey = GeoZonePackSignature::publicKey(privateKey, errorString);
+    QVERIFY2(!publicKey.isEmpty(), qPrintable(errorString));
+    const QString storedPath = dir.filePath(QStringLiteral("claimed.json"));
+    {
+        QFile stored(storedPath);
+        QVERIFY(stored.open(QIODevice::WriteOnly) && (stored.write(data) == data.size()));
+    }
+    GeoZoneSourceIndex::Entry packEntry = GeoZoneSourceIndex::entryFromJson(claiming);
+    packEntry.fileName = QStringLiteral("claimed.json");
+    const QString signedPath = dir.filePath(QStringLiteral("signed.zip"));
+    QVERIFY2(GeoZonePackExchange::write({ GeoZonePackExchange::ExportSource{ QJsonObject{ { QStringLiteral("name"), QStringLiteral("Claimed") } }, packEntry, GeoZoneService(), storedPath } },
+                                        signedPath, errorString, GeoZonePackExchange::Signer{ QStringLiteral("Survey Team"), privateKey }), qPrintable(errorString));
+    GeoZoneManager manager(dir.filePath(QStringLiteral("trusting")));
+    QVERIFY(manager.trustPublisher(QStringLiteral("Survey Team"), QString::fromLatin1(publicKey.toBase64())));
+    QVERIFY(manager.importPack(signedPath));
+    QTRY_VERIFY(!manager.repository()->busy());
+    const GeoZoneSource *const source = manager.repository()->source(key);
+    QVERIFY(source);
+    QCOMPARE(source->provenance().packSignature, GeoZoneProvenance::PackSignature::Signed);
+    QVERIFY(source->verified());
+    manager.distrustPublisher(QString::fromLatin1(publicKey.toBase64()));
+    QCOMPARE(source->provenance().packSignature, GeoZoneProvenance::PackSignature::Untrusted);
+    QVERIFY(!source->verified());
+    manager.repository()->clear();
+}
+
 void GeoZonePackTest::_testOfflinePack()
 {
     const ScopedEnvironment environment;

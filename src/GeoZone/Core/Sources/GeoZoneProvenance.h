@@ -63,6 +63,12 @@ public:
 
     bool isEmpty() const { return !fetchedAt.isValid() && requestUrl.isEmpty() && contentHash.isEmpty(); }
 
+    /// Takes back what a pack says about the integrity of its data unless a trusted publisher signed it: the data of
+    /// a source imported from another pack is unchecked, since "verified" is then only what the manifest of the pack
+    /// claims. A failed check stays. Applied when a pack is imported, when the trust in its publisher changes and
+    /// by fromJson.
+    void distrustPackIntegrity();
+
     QJsonObject toJson() const;
     static GeoZoneProvenance fromJson(const QJsonObject &object);
 

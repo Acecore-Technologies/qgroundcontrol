@@ -28,7 +28,8 @@
 /// policy of imported services: a pack never changes the service of a source already known, and the service of a new
 /// source loses its custom headers and is refused when it sends requests to another server than its feed. Packs are
 /// signed with the private key of their publisher, and the signatures of imported packs are checked against the
-/// publishers the user trusts, see GeoZonePackSignature.
+/// publishers the user trusts, see GeoZonePackSignature. That the data of a source was verified against the hash of
+/// its publisher is only taken from a pack a trusted publisher signed, see GeoZoneProvenance::distrustPackIntegrity.
 class GeoZonePackExchange
 {
     Q_DECLARE_TR_FUNCTIONS(GeoZonePackExchange)

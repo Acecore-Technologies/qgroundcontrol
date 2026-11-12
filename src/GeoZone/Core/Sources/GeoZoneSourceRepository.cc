@@ -918,6 +918,8 @@ void GeoZoneSourceRepository::setTrustedPublishers(const QList<GeoZonePackSignat
         if ((signature != provenance.packSignature) || (signer != provenance.packSigner)) {
             provenance.packSignature = signature;
             provenance.packSigner = signer;
+            // What the pack said about the integrity of its data goes with the trust in its publisher
+            provenance.distrustPackIntegrity();
             source->setProvenance(provenance);
             indexChanged = _index.setProvenance(source->key(), provenance.toJson()) || indexChanged;
         }
