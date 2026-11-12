@@ -132,20 +132,20 @@ public:
             bool inclusion = false;
             QList<QGeoCoordinate> vertices;
 
-            bool operator==(const Polygon &other) const = default;
+            friend bool operator==(const Polygon &, const Polygon &) = default;
         };
         struct Circle {
             bool inclusion = false;
             QGeoCircle circle;
 
-            bool operator==(const Circle &other) const = default;
+            friend bool operator==(const Circle &, const Circle &) = default;
         };
         QList<Polygon> polygons;
         QList<Circle> circles;
         QGeoCoordinate returnPoint;
 
         /// Exactly equal, in the same order
-        bool operator==(const FenceSnapshot &other) const = default;
+        friend bool operator==(const FenceSnapshot &, const FenceSnapshot &) = default;
         /// @return Number of polygon vertices
         int pointCount() const;
     };
