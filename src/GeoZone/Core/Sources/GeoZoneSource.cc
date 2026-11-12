@@ -241,11 +241,9 @@ void GeoZoneSource::setAreaShortfall(const QString &text)
     if (text == _areaShortfall) {
         return;
     }
-    const QString previousError = errorString();
     _areaShortfall = text;
-    if (errorString() != previousError) {
-        emit errorStringChanged();
-    }
+    // Also while a failed refresh is the error string
+    emit errorStringChanged();
 }
 
 QString GeoZoneSource::_dateText() const

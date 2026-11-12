@@ -46,6 +46,7 @@ private slots:
     void _testAiracCycles();
     void _testAiracExpiry();
     void _testSourceValidity();
+    void _testSourceUpdateError();
     void _testFeedAgeFromLastCheck();
     void _testDownloadSizeLimit();
     void _testPagedSizeLimit();

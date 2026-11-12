@@ -1644,6 +1644,44 @@ void GeoZoneRepositoryTest::_testSourceValidity()
     QVERIFY(!scheduler.isDue(feed, now.addSecs(60)));
 }
 
+void GeoZoneRepositoryTest::_testSourceUpdateError()
+{
+    // What the row of a source tells apart: data in use which misses zones, a warning, and a refresh which failed
+    const QString url = QStringLiteral("https://example.com/zones.json");
+    GeoZoneSource feed(url, url);
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::ED318;
+    result.missingFeatures = 2;
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    feed.setResult(result, now, now);
+    const QString incomplete = QStringLiteral("The download is incomplete: 2 zone(s) are missing.");
+    QVERIFY(feed.updateError().isEmpty());
+    QCOMPARE(feed.warningText(), QStringLiteral("The server left out 2 zone(s) beyond its limit, which could not be downloaded. Download a smaller area."));
+    // Which still counts as a failed refresh, to be tried again
+    QCOMPARE(feed.errorString(), incomplete);
+
+    // Nor is the part of the area of interest the service doesn't answer
+    const QString shortfall = QStringLiteral("The area of the mission (900 km²) is larger than the 400 km² the service answers: only the zones around its center are downloaded.");
+    feed.setAreaShortfall(shortfall);
+    QCOMPARE(feed.areaShortfall(), shortfall);
+    QVERIFY(feed.updateError().isEmpty());
+
+    // A refresh which fails is told as such, while the data before stays in use with its warnings
+    QSignalSpy errorSpy(&feed, &GeoZoneSource::errorStringChanged);
+    feed.setErrorString(QStringLiteral("Host not found"));
+    QCOMPARE(feed.updateError(), QStringLiteral("Host not found"));
+    QCOMPARE(feed.errorString(), QStringLiteral("Host not found"));
+    QCOMPARE(feed.areaShortfall(), shortfall);
+    QCOMPARE(errorSpy.count(), 1);
+    // The row follows the area being covered again while the refresh is still the failed one
+    feed.setAreaShortfall(QString());
+    QVERIFY(feed.areaShortfall().isEmpty());
+    QCOMPARE(errorSpy.count(), 2);
+    feed.setErrorString(QString());
+    QVERIFY(feed.updateError().isEmpty());
+    QCOMPARE(feed.errorString(), incomplete);
+}
+
 void GeoZoneRepositoryTest::_testFeedAgeFromLastCheck()
 {
     ScopedEnvironment environment;

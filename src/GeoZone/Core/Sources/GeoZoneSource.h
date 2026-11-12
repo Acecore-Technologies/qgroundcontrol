@@ -82,6 +82,8 @@ class GeoZoneSource : public QObject
     Q_PROPERTY(QString      warningText     READ warningText    NOTIFY changed FINAL)               ///< Why the data is incomplete or partly unreadable, empty when it is complete
     Q_PROPERTY(bool         busy            READ busy           NOTIFY busyChanged FINAL)
     Q_PROPERTY(QString      errorString     READ errorString    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed, or why the data it loaded is incomplete
+    Q_PROPERTY(QString      updateError     READ updateError    NOTIFY errorStringChanged FINAL)  ///< Why the last refresh failed, empty when it didn't
+    Q_PROPERTY(QString      areaShortfall   READ areaShortfall  NOTIFY errorStringChanged FINAL)  ///< Why the area downloaded leaves out part of the area of interest, empty when it covers it
     Q_PROPERTY(QString      nextCheckText   READ nextCheckText  NOTIFY nextCheckChanged FINAL)    ///< When the feed is checked next, like "next check 14:05", empty for files
     Q_PROPERTY(QGeoRectangle boundingBox    READ boundingBox    NOTIFY changed FINAL)
     Q_PROPERTY(bool         enabled         READ enabled        WRITE setEnabled NOTIFY enabledChanged FINAL)   ///< Zones of disabled sources are left out of the maps, checks and alerts
@@ -143,6 +145,9 @@ public:
     /// @return Why the last refresh failed, otherwise incompleteText: data known to miss zones counts as a failed
     ///         refresh, for geo-awareness too
     QString errorString() const { return _errorString.isEmpty() ? incompleteText() : _errorString; }
+    /// @return Why the last refresh failed, empty when it succeeded: the data it loaded may still be incomplete, which
+    ///         is data in use with a warning (warningText and areaShortfall) rather than a failed update
+    QString updateError() const { return _errorString; }
     /// @return Why the data loaded misses zones, like those a WFS left out beyond its limit or the part of the area
     ///         of interest its service can't answer (areaShortfall), empty when it is complete
     QString incompleteText() const;

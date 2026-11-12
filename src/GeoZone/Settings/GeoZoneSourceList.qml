@@ -270,14 +270,26 @@ ColumnLayout {
                 visible:            text !== ""
             }
 
+            // Data which misses zones is in use, with a warning: the zones a server left out are told above, the part of
+            // the area of interest which wasn't downloaded here. Only a refresh which failed is a failed update.
             QGCLabel {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
-                text:               qsTr("Last update failed: %1").arg(sourceColumn.object.errorString)
+                text:               sourceColumn.object.areaShortfall
                 textFormat:         Text.PlainText
-                visible:            sourceColumn.object.errorString !== ""
+                visible:            text !== ""
+            }
+
+            QGCLabel {
+                Layout.fillWidth:   true
+                wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
+                font.pointSize:     ScreenTools.smallFontPointSize
+                color:              qgcPal.warningText
+                text:               qsTr("Last update failed: %1").arg(sourceColumn.object.updateError)
+                textFormat:         Text.PlainText
+                visible:            sourceColumn.object.updateError !== ""
             }
         }
     }
