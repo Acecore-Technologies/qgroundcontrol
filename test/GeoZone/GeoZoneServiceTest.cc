@@ -218,6 +218,8 @@ void GeoZoneServiceTest::_testClearForgetsPendingServices()
 
     // leaves neither its secret nor its service, which a feed added at its address later would send
     QVERIFY(manager.repository()->credentials().secret(url).isEmpty());
+    // The request of the canceled add may be on its way: the server takes it before the requests of the feed are counted
+    QTest::qWait(250);
     server.requests.clear();
     manager.repository()->addUrl(url);
     QVERIFY(addedSpy.wait(10000));
