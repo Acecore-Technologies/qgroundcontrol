@@ -48,9 +48,20 @@ public:
         QByteArray privateKeyPem;   ///< Ed25519 private key, empty to not sign
     };
 
-    /// Writes a pack of the sources, without secrets and custom headers, signed when the signer has a key
+    /// Writes a pack of the sources, without secrets and custom headers, signed when the signer has a key. Secrets
+    /// typed into the address of a feed are left out of every address of the manifest, see shareableText.
     /// @return false when it can't be written, errorString tells why
     static bool write(const QList<ExportSource> &sources, const QString &packPath, QString &errorString, const Signer &signer = Signer());
+
+    /// @return The web address without what authenticates its user: the values of the query parameters named like
+    ///         keys, tokens, passwords or signatures (like "apikey", "access_token" or "subscription-key"), and the
+    ///         password of its user info, are replaced by "***". The rest is kept as written, also the placeholders
+    ///         of a template. Other texts are returned as they are.
+    static QString shareableUrl(const QString &url);
+    /// @return The text with shareableUrl applied to the web addresses in it
+    static QString shareableText(const QString &text);
+    /// @return The value with shareableText applied to all its texts
+    static QJsonValue shareable(const QJsonValue &value);
 
     struct ImportSource {
         GeoZoneLoader::Job job;     ///< Loads the copy extracted from the pack
@@ -70,10 +81,12 @@ public:
     /// Extracts the sources of a pack into the directory. A pack whose signature doesn't match its manifest can't be
     /// read; its signature is recorded in the provenance of its sources otherwise. Builds which can't check
     /// signatures import signed packs as unverified, like unsigned ones.
-    /// @param isKnown Tells whether a source with the key is known
+    /// @param localKey Gives the key of the source here which a source of the pack is, nothing when it isn't known:
+    ///                 the key itself, or the key of the feed whose address has the secrets shareableUrl left out of
+    ///                 the pack, which then takes the data
     /// @param importedAt Time of the import, recorded in the provenance of the sources
     /// @param publishers Whose signatures are trusted
-    static Import read(const QString &packPath, const QString &directory, const std::function<bool(const QString &key)> &isKnown,
+    static Import read(const QString &packPath, const QString &directory, const std::function<QString(const QString &key)> &localKey,
                        const QDateTime &importedAt, const QList<GeoZonePackSignature::Publisher> &publishers = {});
 
     /// @return The service of a new source imported with the URL: the pack's without its custom headers. Empty with

@@ -931,9 +931,18 @@ void GeoZoneSourceRepository::setTrustedPublishers(const QList<GeoZonePackSignat
 
 int GeoZoneSourceRepository::importPack(const QString &packPath, QString &errorString, QString *signatureText)
 {
-    // Sources already here, or being added, keep their service
     const GeoZonePackExchange::Import import = GeoZonePackExchange::read(packPath, _store.downloadDir(), [this](const QString &key) {
-        return source(key) || _services.contains(key);
+        // Sources already here, or being added, keep their service
+        if (source(key) || _services.contains(key)) {
+            return key;
+        }
+        // Packs leave out a secret typed into the address of a feed: the feed here which has it takes the data
+        for (const GeoZoneSource *const candidate : std::as_const(_sources)) {
+            if (candidate->isFeed() && (GeoZonePackExchange::shareableUrl(candidate->key()) == key)) {
+                return candidate->key();
+            }
+        }
+        return QString();
     }, GeoZoneEnvironment::currentDateTimeUtc(), _trustedPublishers);
     if (!import.errorString.isEmpty()) {
         errorString = import.errorString;

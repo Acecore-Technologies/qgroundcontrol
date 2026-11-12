@@ -19,6 +19,115 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSaveFile>
+#include <QtCore/QUrl>
+
+#include <algorithm>
+#include <QtCore/QSet>
+#include <QtCore/QRegularExpression>
+
+namespace {
+
+/// @return true for the name of a query parameter whose value authenticates: a key, token, password or signature
+bool secretParameter(const QString &name)
+{
+    // The whole name without its separators, and the words of names like "subscription-key" or "accessToken"
+    static const QSet<QString> names = {
+        QStringLiteral("apikey"), QStringLiteral("appkey"), QStringLiteral("appid"), QStringLiteral("accesstoken"), QStringLiteral("clientsecret"),
+        QStringLiteral("code"), QStringLiteral("pass"), QStringLiteral("sas"), QStringLiteral("session"), QStringLiteral("sessionid"),
+    };
+    static const QSet<QString> words = {
+        QStringLiteral("key"), QStringLiteral("apikey"), QStringLiteral("token"), QStringLiteral("secret"), QStringLiteral("password"), QStringLiteral("passwd"),
+        QStringLiteral("pwd"), QStringLiteral("auth"), QStringLiteral("authorization"), QStringLiteral("signature"), QStringLiteral("sig"),
+        QStringLiteral("credential"), QStringLiteral("credentials"), QStringLiteral("jwt"), QStringLiteral("bearer"),
+    };
+    static const QRegularExpression separators(QStringLiteral("[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])"));
+    const QStringList nameWords = QUrl::fromPercentEncoding(name.toUtf8()).split(separators, Qt::SkipEmptyParts);
+    if (names.contains(nameWords.join(QString()).toLower())) {
+        return true;
+    }
+    return std::any_of(nameWords.cbegin(), nameWords.cend(), [](const QString &word) { return words.contains(word.toLower()); });
+}
+
+} // namespace
+
+QString GeoZonePackExchange::shareableUrl(const QString &url)
+{
+    const QString hidden = QStringLiteral("***");
+    if (!url.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) && !url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+        return url;
+    }
+    QString result = url;
+    // user:password@host
+    const qsizetype authorityStart = result.indexOf(QStringLiteral("://")) + 3;
+    static const QRegularExpression authorityEndRegExp(QStringLiteral("[/?#]"));
+    qsizetype authorityEnd = result.indexOf(authorityEndRegExp, authorityStart);
+    if (authorityEnd < 0) {
+        authorityEnd = result.size();
+    }
+    const QStringView authority = QStringView(result).mid(authorityStart, authorityEnd - authorityStart);
+    if (const qsizetype at = authority.lastIndexOf(QLatin1Char('@')); at >= 0) {
+        if (const qsizetype colon = authority.indexOf(QLatin1Char(':')); (colon >= 0) && (colon < at - 1)) {
+            (void) result.replace(authorityStart + colon + 1, at - colon - 1, hidden);
+        }
+    }
+
+    const qsizetype queryStart = result.indexOf(QLatin1Char('?'));
+    if (queryStart < 0) {
+        return result;
+    }
+    qsizetype queryEnd = result.indexOf(QLatin1Char('#'), queryStart);
+    if (queryEnd < 0) {
+        queryEnd = result.size();
+    }
+    // As written: the address may be a template, which parsing and writing it again would change
+    QStringList parameters = result.mid(queryStart + 1, queryEnd - queryStart - 1).split(QLatin1Char('&'));
+    for (QString &parameter : parameters) {
+        const qsizetype equals = parameter.indexOf(QLatin1Char('='));
+        if ((equals > 0) && (equals < parameter.size() - 1) && secretParameter(parameter.left(equals))) {
+            parameter = parameter.left(equals + 1) + hidden;
+        }
+    }
+    return result.left(queryStart + 1) + parameters.join(QLatin1Char('&')) + result.mid(queryEnd);
+}
+
+QString GeoZonePackExchange::shareableText(const QString &text)
+{
+    static const QRegularExpression urlRegExp(QStringLiteral("https?://[^\\s\"'<>]+"), QRegularExpression::CaseInsensitiveOption);
+    QString result;
+    qsizetype copied = 0;
+    QRegularExpressionMatchIterator matches = urlRegExp.globalMatch(text);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        result.append(QStringView(text).mid(copied, match.capturedStart() - copied));
+        result.append(shareableUrl(match.captured()));
+        copied = match.capturedEnd();
+    }
+    result.append(QStringView(text).mid(copied));
+    return result;
+}
+
+QJsonValue GeoZonePackExchange::shareable(const QJsonValue &value)
+{
+    if (value.isString()) {
+        return shareableText(value.toString());
+    }
+    if (value.isArray()) {
+        QJsonArray array;
+        for (const QJsonValue &element : value.toArray()) {
+            array.append(shareable(element));
+        }
+        return array;
+    }
+    if (value.isObject()) {
+        QJsonObject object;
+        const QJsonObject members = value.toObject();
+        for (auto it = members.constBegin(); it != members.constEnd(); ++it) {
+            object.insert(it.key(), shareable(it.value()));
+        }
+        return object;
+    }
+    return value;
+}
 
 bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QString &packPath, QString &errorString, const Signer &signer)
 {
@@ -58,7 +167,8 @@ bool GeoZonePackExchange::write(const QList<ExportSource> &sources, const QStrin
             // The service with its user, which identifies but doesn't authenticate, without its headers, which may hold keys
             object.insert(QStringLiteral("service"), source.service.shareableJson());
         }
-        manifestSources.append(object);
+        // A key typed into the address of a feed is in its key, its URLs and its provenance
+        manifestSources.append(shareable(object));
     }
     if (manifestSources.isEmpty()) {
         errorString = tr("None of the sources has stored data to export.");
@@ -123,7 +233,7 @@ GeoZoneService GeoZonePackExchange::importedService(const QString &url, const QJ
 }
 
 GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, const QString &directory,
-                                                      const std::function<bool(const QString &key)> &isKnown, const QDateTime &importedAt,
+                                                      const std::function<QString(const QString &key)> &localKey, const QDateTime &importedAt,
                                                       const QList<GeoZonePackSignature::Publisher> &publishers)
 {
     Import import;
@@ -173,7 +283,7 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
     import.errors = contents.errors;
     const QString packName = QFileInfo(packPath).fileName();
     for (const GeoZonePack::Source &packSource : contents.sources) {
-        const GeoZoneSourceIndex::Entry entry = GeoZoneSourceIndex::entryFromJson(packSource.manifest);
+        GeoZoneSourceIndex::Entry entry = GeoZoneSourceIndex::entryFromJson(packSource.manifest);
         // Feeds are requested at their key, which the service was checked against
         if (!entry.url.isEmpty() && (entry.url != entry.key)) {
             (void) QFile::remove(packSource.filePath);
@@ -181,7 +291,13 @@ GeoZonePackExchange::Import GeoZonePackExchange::read(const QString &packPath, c
             continue;
         }
         ImportSource source;
-        source.known = isKnown(entry.key);
+        const QString known = localKey(entry.key);
+        source.known = !known.isEmpty();
+        if (source.known && (known != entry.key)) {
+            // The feed here whose address has the secret the pack left out
+            entry.key = known;
+            entry.url = known;
+        }
         if (!source.known) {
             QString serviceError;
             source.service = importedService(entry.url, entry.service, serviceError);

@@ -165,7 +165,7 @@ void GeoZonePackTest::_testPackExtraction()
 
     // A pack whose signature file isn't one is refused, also by builds which take signed packs as unsigned
     const QByteArray manifest = _manifest({ _manifestSource(QStringLiteral("/zones/a.json"), file, data) });
-    const auto isKnown = [](const QString &) { return false; };
+    const auto isKnown = [](const QString &) { return QString(); };
     for (const QByteArray &signature : { QByteArray("{ \"algorithm\": \"Ed25519\", "), QByteArray("[]"), QByteArray("signed") }) {
         QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), manifest }, { QStringLiteral("signature.json"), signature } }));
         for (const bool available : { true, false }) {
@@ -289,6 +289,116 @@ void GeoZonePackTest::_testPackIntegrityClaims()
     manager.distrustPublisher(QString::fromLatin1(publicKey.toBase64()));
     QCOMPARE(source->provenance().packSignature, GeoZoneProvenance::PackSignature::Untrusted);
     QVERIFY(!source->verified());
+    manager.repository()->clear();
+}
+
+void GeoZonePackTest::_testPackUrlSecrets_data()
+{
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<QString>("shareable");
+
+    const auto same = [](const char *name, const QString &text) { QTest::newRow(name) << text << text; };
+    QTest::newRow("api key") << QStringLiteral("https://api.example.com/zones?apikey=abc123&bbox=1,2,3,4")
+                             << QStringLiteral("https://api.example.com/zones?apikey=***&bbox=1,2,3,4");
+    QTest::newRow("words of the name") << QStringLiteral("https://h.example/x?bbox={bbox}&subscription-key=S3&f=json")
+                                       << QStringLiteral("https://h.example/x?bbox={bbox}&subscription-key=***&f=json");
+    QTest::newRow("camel case") << QStringLiteral("HTTP://h.example/x?accessToken=t0k&page=2") << QStringLiteral("HTTP://h.example/x?accessToken=***&page=2");
+    QTest::newRow("upper case") << QStringLiteral("https://h.example/x?API_KEY=K&TOKEN=T") << QStringLiteral("https://h.example/x?API_KEY=***&TOKEN=***");
+    QTest::newRow("signed address") << QStringLiteral("https://h.example/d.json?X-Amz-Credential=c&X-Amz-Signature=s&sig=a%2Fb")
+                                    << QStringLiteral("https://h.example/d.json?X-Amz-Credential=***&X-Amz-Signature=***&sig=***");
+    QTest::newRow("fragment") << QStringLiteral("http://h.example/x?access_token=t&f=json#key=frag") << QStringLiteral("http://h.example/x?access_token=***&f=json#key=frag");
+    QTest::newRow("password") << QStringLiteral("https://user:pa55@h.example/zones") << QStringLiteral("https://user:***@h.example/zones");
+    QTest::newRow("password and key") << QStringLiteral("https://user:pa55@h.example:8443/zones?code=c0de") << QStringLiteral("https://user:***@h.example:8443/zones?code=***");
+    QTest::newRow("in a text") << QStringLiteral("the SHA-256 of https://h.example/x.sha256?token=abc and https://h.example/y?key=k")
+                               << QStringLiteral("the SHA-256 of https://h.example/x.sha256?token=*** and https://h.example/y?key=***");
+    same("other parameters", QStringLiteral("https://h.example/wfs?SERVICE=WFS&TYPENAMES=a:b&keyword=k&countryCode=CH&authority=x&monkey=1"));
+    same("no value", QStringLiteral("https://h.example/x?key=&token"));
+    same("user without password", QStringLiteral("https://user@h.example/x"));
+    same("at in the path", QStringLiteral("https://h.example/a:b@c/x"));
+    same("file", QStringLiteral("/home/user/zones?key=abc.json"));
+    same("file address", QStringLiteral("file:///home/user/zones.json?key=abc"));
+    same("no address", QStringLiteral("ED-318 zones, key=abc"));
+}
+
+void GeoZonePackTest::_testPackUrlSecrets()
+{
+    QFETCH(QString, text);
+    QFETCH(QString, shareable);
+
+    QCOMPARE(GeoZonePackExchange::shareableText(text), shareable);
+    // Nothing more is left out of what was shared
+    QCOMPARE(GeoZonePackExchange::shareableText(shareable), shareable);
+    // In all the texts of a manifest
+    const QJsonObject source{ { QStringLiteral("key"), text }, { QStringLiteral("zoneCount"), 3 },
+                              { QStringLiteral("provenance"), QJsonObject{ { QStringLiteral("redirects"), QJsonArray{ text, QStringLiteral("x") } } } } };
+    const QJsonObject shared{ { QStringLiteral("key"), shareable }, { QStringLiteral("zoneCount"), 3 },
+                              { QStringLiteral("provenance"), QJsonObject{ { QStringLiteral("redirects"), QJsonArray{ shareable, QStringLiteral("x") } } } } };
+    QCOMPARE(GeoZonePackExchange::shareable(source).toObject(), shared);
+}
+
+void GeoZonePackTest::_testPackWithoutUrlSecrets()
+{
+    // A feed added by its address, with the key the server wants typed into it
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    const QTemporaryDir storageDir;
+    const QTemporaryDir importDir;
+    const QTemporaryDir packDir;
+    QVERIFY(storageDir.isValid() && importDir.isValid() && packDir.isValid());
+    const QString url = server.url(QStringLiteral("/zones?api_key=url-s3cret&f=json"));
+    const QString sharedUrl = server.url(QStringLiteral("/zones?api_key=***&f=json"));
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+    manager.repository()->addUrl(url);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    const GeoZoneSource *const feed = manager.repository()->source(url);
+    QVERIFY(feed);
+    QCOMPARE(server.requestedPaths.last(), QByteArray("/zones?api_key=url-s3cret&f=json"));
+
+    // Its pack has the address without the key, everywhere
+    const QString packPath = packDir.filePath(QStringLiteral("keyed.zip"));
+    QVERIFY(manager.exportPack(packPath));
+    const QHash<QString, QByteArray> files = _packFiles(packPath);
+    QVERIFY(files.contains(QStringLiteral("manifest.json")));
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        QVERIFY2(!it.value().contains("url-s3cret"), qPrintable(it.key()));
+    }
+    const QJsonObject packSource = QJsonDocument::fromJson(files.value(QStringLiteral("manifest.json"))).object().value(QStringLiteral("sources")).toArray().first().toObject();
+    QCOMPARE(packSource.value(QStringLiteral("key")).toString(), sharedUrl);
+    QCOMPARE(packSource.value(QStringLiteral("url")).toString(), sharedUrl);
+    QCOMPARE(packSource.value(QStringLiteral("provenance")).toObject().value(QStringLiteral("requestUrl")).toString(), sharedUrl);
+
+    // Elsewhere it is the feed of that address, whose zones are there and whose key is entered by adding it again
+    GeoZoneManager imported(importDir.path());
+    QSignalSpy importSpy(&imported, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(imported.importPack(packPath));
+    QVERIFY2(importSpy.last()[0].toBool(), qPrintable(importSpy.last()[1].toString()));
+    QTRY_VERIFY(!imported.repository()->busy());
+    QCOMPARE(imported.sources()->count(), 1);
+    const GeoZoneSource *const copy = imported.repository()->source(sharedUrl);
+    QVERIFY(copy);
+    QCOMPARE(copy->zoneCount(), feed->zoneCount());
+    QVERIFY(!QJsonDocument(GeoZoneSourceRepository::sourceReport(*copy)).toJson().contains("url-s3cret"));
+
+    // Here it is the feed with the key, which takes the data of the pack and keeps its address
+    QVERIFY(!feed->imported());
+    QSignalSpy ownSpy(&manager, &GeoZoneManager::fileOperationFinished);
+    QVERIFY(manager.importPack(packPath));
+    QVERIFY2(ownSpy.last()[0].toBool(), qPrintable(ownSpy.last()[1].toString()));
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(manager.sources()->count(), 1);
+    QVERIFY(feed->imported());
+    QCOMPARE(feed->key(), url);
+    QCOMPARE(feed->url(), url);
+    server.requestedPaths.clear();
+    manager.repository()->refreshFeeds();
+    QTRY_VERIFY(!manager.repository()->busy());
+    QCOMPARE(server.requestedPaths.last(), QByteArray("/zones?api_key=url-s3cret&f=json"));
+    QVERIFY2(feed->errorString().isEmpty(), qPrintable(feed->errorString()));
+    imported.repository()->clear();
     manager.repository()->clear();
 }
 

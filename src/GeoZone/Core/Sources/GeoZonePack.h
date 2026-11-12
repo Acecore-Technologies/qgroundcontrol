@@ -20,7 +20,7 @@
 /// name and version, when the pack was made, and per source GeoZoneSourceRepository::sourceReport with the file of
 /// its copy, the SHA-256 of that file and the index entry fields needed to restore it, like its validators and area.
 /// "signature.json", when the pack is signed, has the Ed25519 signature of the manifest, see GeoZonePackSignature.
-/// Packs hold no secrets. GeoZonePackExchange writes and imports them.
+/// Packs hold no secrets, also not those typed into the address of a feed. GeoZonePackExchange writes and imports them.
 namespace GeoZonePack {
 
 constexpr const char *manifestName = "manifest.json";
