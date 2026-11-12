@@ -28,8 +28,11 @@ Item {
     width:      ScreenTools.defaultFontPixelWidth * 18
     visible:    _monitor.monitoring && _bands.length > 0 && !isNaN(_altitude)
 
-    readonly property var   _monitor:       GeoZoneMonitor
-    readonly property var   _active:        GeoZoneMonitor.activeVehicle    ///< GeoZoneVehicleMonitor, null without
+    /// Whose active vehicle is shown: the monitor of the application, unless a test gives its own
+    property var monitor: GeoZoneMonitor
+
+    readonly property var   _monitor:       monitor
+    readonly property var   _active:        monitor.activeVehicle           ///< GeoZoneVehicleMonitor, null without
     readonly property var   _bands:         _active?.verticalBands ?? []
     readonly property real  _altitude:      _active?.altitudeAMSL ?? NaN
     readonly property real  _terrain:       _active?.terrainAMSL ?? NaN
@@ -51,7 +54,7 @@ Item {
     property bool _expandedByUser: false
 
     /// The bands with the same restriction, floor and ceiling as one, with their names, the most severe last so that
-    /// it is drawn on top
+    /// it is drawn on top. The severity isn't the order of the restrictions: U-space ranks above no restriction.
     readonly property var _merged: {
         const merged = []
         const byKey = {}
@@ -59,7 +62,8 @@ Item {
             const key = band.restriction + "/" + Math.round(band.floor) + "/" + Math.round(band.ceiling)
             let entry = byKey[key]
             if (!entry) {
-                entry = { restriction: band.restriction, floor: band.floor, ceiling: band.ceiling, limitsText: band.limitsText, names: [] }
+                entry = { restriction: band.restriction, severity: band.severity ?? band.restriction, floor: band.floor, ceiling: band.ceiling,
+                          limitsText: band.limitsText, names: [] }
                 byKey[key] = entry
                 merged.push(entry)
             }
@@ -67,7 +71,7 @@ Item {
                 entry.names.push(band.name)
             }
         }
-        return merged.sort((a, b) => b.restriction - a.restriction)
+        return merged.sort((a, b) => b.severity - a.severity)
     }
 
     readonly property bool _limitNear: {
@@ -108,11 +112,16 @@ Item {
         return top
     }
 
-    /// Label positions by index of _merged, NaN for the labels which don't fit: next to their bands, moved apart so
-    /// that they don't overlap
+    /// Label positions by index of _merged, NaN for the bands outside the shown range and the labels which don't fit:
+    /// next to their bands, moved apart so that they don't overlap
     readonly property var _labelYs: {
         const plotBottom = _plotTop + _plotHeight
-        const entries = _merged.map((band, index) => ({ index: index, y: ((_floorY(band) + _ceilingY(band)) - _labelHeight) / 2 }))
+        const entries = []
+        _merged.forEach((band, index) => {
+            if (_inRange(band)) {
+                entries.push({ index: index, y: ((_floorY(band) + _ceilingY(band)) - _labelHeight) / 2 })
+            }
+        })
         entries.sort((a, b) => a.y - b.y)
         let bottom = _plotTop
         for (const entry of entries) {
@@ -124,7 +133,7 @@ Item {
             entries[i].y = Math.min(entries[i].y, top - _labelHeight)
             top = entries[i].y
         }
-        const ys = []
+        const ys = _merged.map(() => NaN)
         for (const entry of entries) {
             ys[entry.index] = entry.y >= _plotTop - 0.5 ? entry.y : NaN
         }
@@ -135,12 +144,22 @@ Item {
         return _plotTop + (_top - altitude) / (_top - _bottom) * _plotHeight
     }
 
+    /// @return Position of the altitude within the plot, at its edge for altitudes beyond the shown range
+    function _clampedY(altitude) {
+        return Math.max(_plotTop, Math.min(_y(altitude), _plotTop + _plotHeight))
+    }
+
     function _floorY(band) {
-        return isNaN(band.floor) ? _plotTop + _plotHeight : Math.min(_y(band.floor), _plotTop + _plotHeight)
+        return isNaN(band.floor) ? _plotTop + _plotHeight : _clampedY(band.floor)
     }
 
     function _ceilingY(band) {
-        return isNaN(band.ceiling) ? _plotTop : Math.max(_y(band.ceiling), _plotTop)
+        return isNaN(band.ceiling) ? _plotTop : _clampedY(band.ceiling)
+    }
+
+    /// @return true if a part of the band is within the shown range
+    function _inRange(band) {
+        return (isNaN(band.floor) || band.floor < _top) && (isNaN(band.ceiling) || band.ceiling > _bottom)
     }
 
     function _names(band) {
@@ -289,14 +308,17 @@ Item {
                 id:             bandItem
                 anchors.fill:   parent
                 opacity:        control._stale ? 0.5 : 1
+                visible:        control._inRange(band)
 
                 required property var   modelData
                 required property int   index
 
-                readonly property real _floorY:     control._floorY(modelData)
-                readonly property real _ceilingY:   control._ceilingY(modelData)
+                readonly property var   band:       modelData
+                readonly property real _floorY:     control._floorY(band)
+                readonly property real _ceilingY:   control._ceilingY(band)
                 readonly property real _labelY:     control._labelYs[index] ?? NaN
-                readonly property color _color:     GeoZoneStyle.restrictionColor(modelData.restriction)
+                readonly property int  _restriction: band.restriction
+                readonly property color _color:     GeoZoneStyle.restrictionColor(_restriction)
 
                 // Overlapping bands share the bar, the most severe on top
                 Rectangle {
@@ -304,7 +326,7 @@ Item {
                     y:              bandItem._ceilingY
                     width:          control._barWidth
                     height:         Math.max(1, bandItem._floorY - bandItem._ceilingY)
-                    color:          GeoZoneStyle.fillColor(bandItem.modelData.restriction, true)
+                    color:          GeoZoneStyle.fillColor(bandItem._restriction, true)
                     border.color:   bandItem._color
                     border.width:   1
                 }
@@ -326,7 +348,7 @@ Item {
 
                     QGCLabel {
                         width:          parent.width
-                        text:           control._names(bandItem.modelData)
+                        text:           control._names(bandItem.band)
                         textFormat:     Text.PlainText
                         elide:          Text.ElideRight
                         font.pointSize: ScreenTools.smallFontPointSize
@@ -334,7 +356,7 @@ Item {
 
                     QGCLabel {
                         width:          parent.width
-                        text:           bandItem.modelData.limitsText
+                        text:           bandItem.band.limitsText
                         textFormat:     Text.PlainText
                         elide:          Text.ElideRight
                         font.pointSize: ScreenTools.smallFontPointSize

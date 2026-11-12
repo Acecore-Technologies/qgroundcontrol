@@ -1260,6 +1260,34 @@ void GeoZoneMonitorTest::_testFenceTakeControl()
     QVERIFY2(item.text.contains(QStringLiteral("Disable Fence")), qPrintable(item.text));
 }
 
+void GeoZoneMonitorTest::_testVerticalBandSeverity()
+{
+    // The bands of the altitude strip tell how severe their restriction is, which isn't the order of the restrictions:
+    // U-space airspace ranks above no restriction
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("U"), QStringLiteral("USPACE"), center, 300),
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+    }), errorString), qPrintable(errorString));
+    GeoZoneMonitor monitor(&manager);
+    monitor.evaluate({ center, 400, 300 });
+    QVERIFY(monitor.activeMonitor());
+    QMap<QString, int> severities;
+    for (const QVariant &band : monitor.activeMonitor()->verticalBands()) {
+        const QVariantMap map = band.toMap();
+        QVERIFY(map.contains(QStringLiteral("severity")));
+        severities.insert(map[QStringLiteral("name")].toString(), map[QStringLiteral("severity")].toInt());
+        QCOMPARE(map[QStringLiteral("severity")].toInt(), GeoZone::restrictionSeverity(static_cast<GeoZone::Restriction>(map[QStringLiteral("restriction")].toInt())));
+    }
+    QCOMPARE(severities.value(QStringLiteral("P"), -1), 0);
+    QCOMPARE(severities.value(QStringLiteral("U"), -1), 3);
+    QVERIFY(GeoZone::restrictionSeverity(GeoZone::USpace) < GeoZone::restrictionSeverity(GeoZone::NoRestriction));
+}
+
 void GeoZoneMonitorTest::_testFenceAlertSequence()
 {
     // An ArduCopter flying east at 10 m/s towards a prohibited zone whose exclusion fence it stores, with FENCE_ACTION

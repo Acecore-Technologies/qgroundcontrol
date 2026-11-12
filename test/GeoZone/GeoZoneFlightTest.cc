@@ -1339,6 +1339,91 @@ void GeoZoneFlightTest::_testGuidedActionWarning()
     _disconnectMockLink();
 }
 
+void GeoZoneFlightTest::_testAltitudeStrip()
+{
+    // The strip of a vehicle at 400 m, 100 m above ground, given by a stand-in for the monitor
+    QmlHarness harness;
+    QObject *const root = harness.create(R"(
+        import QtQuick
+        import QGroundControl.GeoZone
+        Item {
+            id: root
+            width: 400
+            height: 600
+            property alias strip: strip
+            property var vehicle: QtObject {
+                property var verticalBands: []
+                property real altitudeAMSL: 400
+                property real terrainAMSL: 300
+                property bool positionUnavailable: false
+                property bool altitudeDegraded: false
+            }
+            property var fake: QtObject {
+                property bool monitoring: true
+                property int activeLevel: -1
+                property var activeVehicle: root.vehicle
+            }
+            GeoZoneAltitudeStrip { id: strip; height: 400; monitor: root.fake }
+        }
+    )");
+    QVERIFY2(root, qPrintable(harness.error));
+    QQuickItem *const strip = root->property("strip").value<QQuickItem*>();
+    QObject *const vehicle = root->property("vehicle").value<QObject*>();
+    QVERIFY(strip && vehicle);
+    const auto band = [](GeoZone::Restriction restriction, const QString &name, double floor, double ceiling) {
+        return QVariantMap{ { QStringLiteral("restriction"), static_cast<int>(restriction) }, { QStringLiteral("severity"), GeoZone::restrictionSeverity(restriction) },
+                            { QStringLiteral("name"), name }, { QStringLiteral("limitsText"), QStringLiteral("limits") },
+                            { QStringLiteral("floor"), floor }, { QStringLiteral("ceiling"), ceiling } };
+    };
+    // The items of the bands, which have their label position, in the order they are drawn
+    const auto bandItems = [strip]() {
+        QList<QPointer<QQuickItem>> items;
+        QList<QQuickItem*> pending = { strip };
+        while (!pending.isEmpty()) {
+            QQuickItem *const item = pending.takeFirst();
+            if (item->property("_labelY").isValid() && item->property("index").isValid()) {
+                items.append(item);
+            }
+            pending.append(item->childItems());
+        }
+        std::sort(items.begin(), items.end(), [](const QPointer<QQuickItem> &a, const QPointer<QQuickItem> &b) {
+            return a->property("index").toInt() < b->property("index").toInt();
+        });
+        return items;
+    };
+
+    // The vehicle is in a zone without restriction and in U-space airspace, which is the more severe: on top and named
+    const QVariantList bands = { band(GeoZone::NoRestriction, QStringLiteral("N"), qQNaN(), 450), band(GeoZone::USpace, QStringLiteral("U"), 350, 900) };
+    QVERIFY(vehicle->setProperty("verticalBands", bands));
+    QVERIFY(strip->isVisible());
+    const QVariantMap inside = strip->property("_insideBand").toMap();
+    QCOMPARE(inside.value(QStringLiteral("names")).toStringList(), QStringList{ QStringLiteral("U") });
+    QList<QPointer<QQuickItem>> items = bandItems();
+    QCOMPARE(items.count(), 2);
+
+    // A band wholly above the shown range isn't drawn, and its edges stay within the plot
+    const double plotTop = strip->property("_plotTop").toDouble();
+    const double plotBottom = plotTop + strip->property("_plotHeight").toDouble();
+    QVERIFY(plotBottom > plotTop);
+    const QVariantMap high = band(GeoZone::Prohibited, QStringLiteral("HIGH"), 5000, 6000);
+    const QVariantMap low = band(GeoZone::Prohibited, QStringLiteral("LOW"), 100, 200);
+    for (const QVariantMap &outside : { high, low }) {
+        for (const char *const function : { "_floorY", "_ceilingY" }) {
+            const double y = QmlHarness::call(strip, function, { outside }).toDouble();
+            QVERIFY2((y >= plotTop) && (y <= plotBottom), qPrintable(QStringLiteral("%1 of %2: %3 outside %4..%5").arg(QLatin1String(function), outside.value(QStringLiteral("name")).toString()).arg(y).arg(plotTop).arg(plotBottom)));
+        }
+        QCOMPARE(QmlHarness::call(strip, "_inRange", { outside }), QVariant(false));
+    }
+    QCOMPARE(QmlHarness::call(strip, "_inRange", { bands.constLast() }), QVariant(true));
+    QVERIFY(vehicle->setProperty("verticalBands", QVariantList{ high, bands.constLast() }));
+    items = bandItems();
+    QCOMPARE(items.count(), 2);
+    // The most severe is the last, on top
+    QVERIFY(items.constFirst() && items.constLast());
+    QVERIFY(items.constFirst()->isVisible());
+    QVERIFY(!items.constLast()->isVisible());
+}
+
 void GeoZoneFlightTest::_testPreflightPermits()
 {
     using Check = GeoZonePreflightCheck;

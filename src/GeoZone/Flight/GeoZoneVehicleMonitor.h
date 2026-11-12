@@ -49,8 +49,9 @@ class GeoZoneVehicleMonitor : public QObject
     Q_PROPERTY(bool         inside              READ inside             NOTIFY nearbyChanged FINAL)           ///< The vehicle is inside one of the nearby zones
     /// GeoZoneInfo of the nearby zones and of the predicted entry, which the map filters don't hide
     Q_PROPERTY(QVariantList keptZones           READ keptZones          NOTIFY keptZonesChanged FINAL)
-    /// Volumes of the active zones above and below the vehicle, as maps with restriction, name, limitsText, floor and
-    /// ceiling (meters AMSL, NaN when the zone extends to the ground or has no ceiling, or the limit is unknown)
+    /// Volumes of the active zones above and below the vehicle, as maps with restriction, severity (see
+    /// GeoZone::restrictionSeverity), name, limitsText, floor and ceiling (meters AMSL, NaN when the zone extends to the
+    /// ground or has no ceiling, or the limit is unknown)
     Q_PROPERTY(QVariantList verticalBands       READ verticalBands      NOTIFY verticalBandsChanged FINAL)
     Q_PROPERTY(double       altitudeAMSL        READ altitudeAMSL       NOTIFY verticalBandsChanged FINAL)    ///< Of the bands, NaN when unknown
     Q_PROPERTY(double       terrainAMSL         READ terrainAMSL        NOTIFY verticalBandsChanged FINAL)    ///< Below the vehicle, NaN when unknown

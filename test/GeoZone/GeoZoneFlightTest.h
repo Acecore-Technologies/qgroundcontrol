@@ -32,6 +32,7 @@ private slots:
     void _testChecklistButton();
     void _testChecklistReset();
     void _testGuidedActionWarning();
+    void _testAltitudeStrip();
     void _testPreflightPermits();
     void _testPreflightCheckUpdates();
     void _testArduPilotTakeoff();

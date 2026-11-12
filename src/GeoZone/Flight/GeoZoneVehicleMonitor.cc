@@ -377,6 +377,7 @@ QVariantList GeoZoneVehicleMonitor::verticalBands() const
     for (const GeoZoneVerticalBand &band : _bands) {
         bands.append(QVariantMap{
             { QStringLiteral("restriction"), static_cast<int>(band.zone->restriction()) },
+            { QStringLiteral("severity"), GeoZone::restrictionSeverity(band.zone->restriction()) },
             { QStringLiteral("name"), band.zone->displayName() },
             { QStringLiteral("limitsText"), GeoZoneText::verticalLimits(band.zone->data()) },
             { QStringLiteral("floor"), band.floor },
