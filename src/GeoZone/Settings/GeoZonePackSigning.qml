@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 
@@ -19,6 +21,7 @@ import QGroundControl.GeoZone
 
 /// Signatures of offline packs: the key signing the packs exported, and the publishers whose packs are trusted
 ColumnLayout {
+    id:         root
     spacing:    _margin
 
     /// Selects or saves the key files, see the file dialog of GeoZoneSourcesPanel
@@ -41,7 +44,7 @@ ColumnLayout {
     ColumnLayout {
         id:                 packSignatures
         Layout.fillWidth:   true
-        spacing:            _margin
+        spacing:            root._margin
         visible:            false
 
         // Builds without OpenSSL
@@ -51,61 +54,61 @@ ColumnLayout {
             font.pointSize:     ScreenTools.smallFontPointSize
             color:              qgcPal.warningText
             text:               qsTr("This build of QGroundControl can't sign packs or check their signatures: packs are exported unsigned, and signed packs are imported as unsigned.")
-            visible:            !_geoZoneManager.packSigningAvailable
+            visible:            !root._geoZoneManager.packSigningAvailable
         }
 
         QGCLabel {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
-            visible:            _geoZoneManager.packSigningAvailable
-            text:               _geoZoneManager.packPublicKey === "" ?
+            visible:            root._geoZoneManager.packSigningAvailable
+            text:               root._geoZoneManager.packPublicKey === "" ?
                                     qsTr("Exported packs are not signed. Select or create an Ed25519 private key to sign them.") :
-                                    qsTr("Exported packs are signed with the key %1. Give its public key to those importing them:").arg(_geoZoneManager.packKeyId)
+                                    qsTr("Exported packs are signed with the key %1. Give its public key to those importing them:").arg(root._geoZoneManager.packKeyId)
         }
 
         QGCTextField {
             Layout.fillWidth:   true
             readOnly:           true
-            text:               _geoZoneManager.packPublicKey
+            text:               root._geoZoneManager.packPublicKey
             visible:            text !== ""
         }
 
         GridLayout {
             Layout.fillWidth:   true
             columns:            2
-            columnSpacing:      _margin
-            rowSpacing:         _margin / 2
-            enabled:            _geoZoneManager.packSigningAvailable
+            columnSpacing:      root._margin
+            rowSpacing:         root._margin / 2
+            enabled:            root._geoZoneManager.packSigningAvailable
 
             QGCLabel { text: qsTr("Signing key") }
             RowLayout {
                 Layout.fillWidth:   true
-                spacing:            _margin
+                spacing:            root._margin
 
                 FactTextField {
                     Layout.fillWidth:   true
-                    fact:               _geoZoneSettings.packSigningKeyFile
+                    fact:               root._geoZoneSettings.packSigningKeyFile
                     placeholderText:    qsTr("Private key file (PEM)")
                 }
 
                 QGCButton {
                     text:       qsTr("Browse...")
-                    onClicked:  dialog.openFor({ title: qsTr("Select Pack Signing Key"), nameFilters: [ qsTr("PEM Files (*.pem)"), qsTr("All Files (*)") ],
-                                                     accept: file => _geoZoneSettings.packSigningKeyFile.rawValue = file })
+                    onClicked:  root.dialog.openFor({ title: qsTr("Select Pack Signing Key"), nameFilters: [ qsTr("PEM Files (*.pem)"), qsTr("All Files (*)") ],
+                                                     accept: file => root._geoZoneSettings.packSigningKeyFile.rawValue = file })
                 }
 
                 QGCButton {
                     text:       qsTr("New Key...")
-                    onClicked:  dialog.openFor({ title: qsTr("Save New Pack Signing Key"), nameFilters: [ qsTr("PEM Files (*.pem)") ],
-                                                     defaultSuffix: "pem", save: true, accept: file => _geoZoneManager.createSigningKey(file) })
+                    onClicked:  root.dialog.openFor({ title: qsTr("Save New Pack Signing Key"), nameFilters: [ qsTr("PEM Files (*.pem)") ],
+                                                     defaultSuffix: "pem", save: true, accept: file => root._geoZoneManager.createSigningKey(file) })
                 }
             }
 
             QGCLabel { text: qsTr("Publisher") }
             FactTextField {
                 Layout.fillWidth:   true
-                fact:               _geoZoneSettings.packPublisherName
+                fact:               root._geoZoneSettings.packPublisherName
                 placeholderText:    qsTr("Name given in the packs")
             }
         }
@@ -113,20 +116,20 @@ ColumnLayout {
         // Trusted publishers of the settings which can't be read are left there until discarded
         RowLayout {
             Layout.fillWidth:   true
-            spacing:            _margin
-            visible:            _geoZoneManager.trustedPublishersWarning !== ""
+            spacing:            root._margin
+            visible:            root._geoZoneManager.trustedPublishersWarning !== ""
 
             QGCLabel {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
-                text:               _geoZoneManager.trustedPublishersWarning
+                text:               root._geoZoneManager.trustedPublishersWarning
             }
 
             QGCButton {
                 text:       qsTr("Discard Unreadable")
-                onClicked:  _geoZoneManager.discardUnreadablePublishers()
+                onClicked:  root._geoZoneManager.discardUnreadablePublishers()
             }
         }
 
@@ -134,37 +137,40 @@ ColumnLayout {
             Layout.fillWidth:   true
             wrapMode:           Text.WordWrap
             font.pointSize:     ScreenTools.smallFontPointSize
-            visible:            _geoZoneManager.packSigningAvailable || _geoZoneManager.trustedPublishers.length > 0
-            text:               _geoZoneManager.trustedPublishers.length === 0 ?
+            visible:            root._geoZoneManager.packSigningAvailable || root._geoZoneManager.trustedPublishers.length > 0
+            text:               root._geoZoneManager.trustedPublishers.length === 0 ?
                                     qsTr("No trusted publishers. Imported packs are marked unsigned, or untrusted when signed.") :
                                     qsTr("Packs signed by these publishers are marked as signed by them:")
         }
 
         Repeater {
-            model: _geoZoneManager.trustedPublishers
+            model: root._geoZoneManager.trustedPublishers
 
             RowLayout {
+                id:                 publisherRow
                 Layout.fillWidth:   true
-                spacing:            _margin
+                spacing:            root._margin
+
+                required property var modelData     ///< Map with name, publicKey and keyId
 
                 QGCLabel {
                     Layout.fillWidth:   true
                     elide:              Text.ElideRight
-                    text:               qsTr("%1 (key %2)").arg(modelData.name).arg(modelData.keyId)
+                    text:               qsTr("%1 (key %2)").arg(publisherRow.modelData.name).arg(publisherRow.modelData.keyId)
                     textFormat:         Text.PlainText
                 }
 
                 QGCButton {
                     text:       qsTr("Remove")
-                    onClicked:  _geoZoneManager.distrustPublisher(modelData.publicKey)
+                    onClicked:  root._geoZoneManager.distrustPublisher(publisherRow.modelData.publicKey)
                 }
             }
         }
 
         RowLayout {
             Layout.fillWidth:   true
-            spacing:            _margin
-            enabled:            _geoZoneManager.packSigningAvailable
+            spacing:            root._margin
+            enabled:            root._geoZoneManager.packSigningAvailable
 
             QGCTextField {
                 id:                 publisherNameField
@@ -181,7 +187,7 @@ ColumnLayout {
                 text:       qsTr("Trust")
                 enabled:    publisherNameField.text.trim() !== "" && publisherKeyField.text.trim() !== ""
                 onClicked: {
-                    if (_geoZoneManager.trustPublisher(publisherNameField.text, publisherKeyField.text)) {
+                    if (root._geoZoneManager.trustPublisher(publisherNameField.text, publisherKeyField.text)) {
                         publisherNameField.text = ""
                         publisherKeyField.text = ""
                     }

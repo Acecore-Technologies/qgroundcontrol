@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 
@@ -86,11 +88,12 @@ ColumnLayout {
         required property int       restriction
         required property string    text
 
-        readonly property bool _shown: (root._geoZoneManager.display.hiddenRestrictions & (1 << restriction)) === 0
+        // Inline components don't see the ids of the file when used elsewhere, so the singleton rather than root
+        readonly property bool _shown: (GeoZoneManager.display.hiddenRestrictions & (1 << restriction)) === 0
 
         QGCCheckBox {
             checked:                restrictionRow._shown
-            onClicked:              root._geoZoneManager.display.setRestrictionVisible(restrictionRow.restriction, checked)
+            onClicked:              GeoZoneManager.display.setRestrictionVisible(restrictionRow.restriction, checked)
             Accessible.name:        qsTr("Show %1 zones on the maps").arg(restrictionRow.text)
         }
 

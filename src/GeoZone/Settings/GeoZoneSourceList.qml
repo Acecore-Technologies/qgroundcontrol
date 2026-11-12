@@ -7,6 +7,8 @@
  *
  ****************************************************************************/
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -20,6 +22,7 @@ import QGroundControl.GeoZone
 /// The geozone sources with their details, turned on and off, and their secrets and publishers set. Each source has
 /// a menu to refresh a feed, show the details of its data and remove it after a confirmation.
 ColumnLayout {
+    id:         root
     spacing:    _margin
     visible:    _geoZoneManager.sources.count > 0
 
@@ -33,9 +36,9 @@ ColumnLayout {
                                      qsTr("Remove %1 and its %n zone(s)? Its stored copy is deleted.", "", zoneCount).arg(name.replace(/</g, "\u2039").replace(/>/g, "\u203A")),
                                      Dialog.Yes | Dialog.No,
                                      () => {
-                                         for (let i = 0; i < _geoZoneManager.sources.count; i++) {
-                                             if (_geoZoneManager.sources.get(i).key === key) {
-                                                 _repository.removeSource(i)
+                                         for (let i = 0; i < root._geoZoneManager.sources.count; i++) {
+                                             if (root._geoZoneManager.sources.get(i).key === key) {
+                                                 root._repository.removeSource(i)
                                                  return
                                              }
                                          }
@@ -45,28 +48,30 @@ ColumnLayout {
     QGCPalette { id: qgcPal; colorGroupEnabled: true }
 
     Repeater {
-        model: _geoZoneManager.sources
+        model: root._geoZoneManager.sources
 
         ColumnLayout {
             id:                 sourceColumn
             Layout.fillWidth:   true
-            spacing:            _margin / 2
+            spacing:            root._margin / 2
+
+            required property var object    ///< GeoZoneSource
 
             property bool _expanded: false  ///< Shows the provenance, area and changed zones
 
             RowLayout {
                 Layout.fillWidth:   true
-                spacing:            _margin
+                spacing:            root._margin
 
                 QGCCheckBox {
-                    checked:    object.enabled
-                    onClicked:  object.enabled = checked
+                    checked:    sourceColumn.object.enabled
+                    onClicked:  sourceColumn.object.enabled = checked
                 }
 
                 QGCLabel {
                     Layout.fillWidth:   true
                     elide:              Text.ElideRight
-                    text:               object.name
+                    text:               sourceColumn.object.name
                     textFormat:         Text.PlainText
                 }
 
@@ -76,7 +81,7 @@ ColumnLayout {
                     Layout.preferredHeight: expiredLabel.implicitHeight + (ScreenTools.defaultFontPixelHeight / 4)
                     radius:                 height / 4
                     color:                  qgcPal.colorRed
-                    visible:                object.invalid && object.enabled
+                    visible:                sourceColumn.object.invalid && sourceColumn.object.enabled
 
                     QGCLabel {
                         id:                 expiredLabel
@@ -98,8 +103,8 @@ ColumnLayout {
 
                         QGCMenuItem {
                             text:           qsTr("Refresh")
-                            enabled:        object.url !== "" && !object.busy
-                            onTriggered:    _repository.refreshSource(object.key)
+                            enabled:        sourceColumn.object.url !== "" && !sourceColumn.object.busy
+                            onTriggered:    root._repository.refreshSource(sourceColumn.object.key)
                         }
 
                         QGCMenuItem {
@@ -109,7 +114,7 @@ ColumnLayout {
 
                         QGCMenuItem {
                             text:           qsTr("Remove...")
-                            onTriggered:    _confirmRemove(object.key, object.name, object.zoneCount)
+                            onTriggered:    root._confirmRemove(sourceColumn.object.key, sourceColumn.object.name, sourceColumn.object.zoneCount)
                         }
                     }
                 }
@@ -119,8 +124,8 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.detailsText !== "" ? object.detailsText + (object.nextCheckText !== "" ? ", " + object.nextCheckText : "")
-                                                              : (object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
+                text:               sourceColumn.object.detailsText !== "" ? sourceColumn.object.detailsText + (sourceColumn.object.nextCheckText !== "" ? ", " + sourceColumn.object.nextCheckText : "")
+                                                              : (sourceColumn.object.busy ? qsTr("Loading...") : qsTr("Not loaded"))
                 textFormat:         Text.PlainText
             }
 
@@ -128,7 +133,7 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.provenanceText
+                text:               sourceColumn.object.provenanceText
                 textFormat:         Text.PlainText
                 visible:            sourceColumn._expanded && text !== ""
             }
@@ -137,8 +142,8 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.areaText
-                visible:            sourceColumn._expanded && object.followsArea && text !== ""
+                text:               sourceColumn.object.areaText
+                visible:            sourceColumn._expanded && sourceColumn.object.followsArea && text !== ""
             }
 
             QGCLabel {
@@ -147,14 +152,14 @@ ColumnLayout {
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
                 text:               qsTr("The last download did not match the SHA-256 its publisher gave and was not loaded.")
-                visible:            object.integrityFailed
+                visible:            sourceColumn.object.integrityFailed
             }
 
             // A pack signed by a publisher the user may trust
             RowLayout {
                 Layout.fillWidth:   true
-                spacing:            _margin
-                visible:            object.untrustedPack
+                spacing:            root._margin
+                visible:            sourceColumn.object.untrustedPack
 
                 QGCLabel {
                     Layout.fillWidth:   true
@@ -166,34 +171,34 @@ ColumnLayout {
 
                 QGCButton {
                     text:       qsTr("Trust Publisher")
-                    onClicked:  _geoZoneManager.trustSourcePublisher(object.key)
+                    onClicked:  root._geoZoneManager.trustSourcePublisher(sourceColumn.object.key)
                 }
             }
 
             // The secret of a service, like after importing a pack on another computer
             RowLayout {
                 Layout.fillWidth:   true
-                spacing:            _margin
-                visible:            object.needsCredentials
+                spacing:            root._margin
+                visible:            sourceColumn.object.needsCredentials
 
                 QGCLabel {
                     font.pointSize: ScreenTools.smallFontPointSize
-                    color:          object.credentialsMissing ? qgcPal.warningText : qgcPal.text
-                    text:           object.credentialsMissing ? qsTr("Credentials missing") : qsTr("Credentials")
+                    color:          sourceColumn.object.credentialsMissing ? qgcPal.warningText : qgcPal.text
+                    text:           sourceColumn.object.credentialsMissing ? qsTr("Credentials missing") : qsTr("Credentials")
                 }
 
                 QGCTextField {
                     id:                 sourceSecretField
                     Layout.fillWidth:   true
                     echoMode:           TextInput.Password
-                    placeholderText:    object.credentialsMissing ? qsTr("Enter the secret") : qsTr("Replace the secret")
+                    placeholderText:    sourceColumn.object.credentialsMissing ? qsTr("Enter the secret") : qsTr("Replace the secret")
                 }
 
                 QGCButton {
                     text:       qsTr("Set")
                     enabled:    sourceSecretField.text !== ""
                     onClicked: {
-                        _repository.setSecret(object.key, sourceSecretField.text)
+                        root._repository.setSecret(sourceColumn.object.key, sourceSecretField.text)
                         sourceSecretField.text = ""
                     }
                 }
@@ -205,7 +210,7 @@ ColumnLayout {
                 font.pointSize:     ScreenTools.smallFontPointSize
                 font.italic:        true
                 text:               qsTr("Turned off: its zones are not shown, checked or alerted.")
-                visible:            !object.enabled
+                visible:            !sourceColumn.object.enabled
             }
 
             QGCLabel {
@@ -214,31 +219,31 @@ ColumnLayout {
                 font.pointSize:     ScreenTools.smallFontPointSize
                 font.italic:        true
                 text:               qsTr("Updating...")
-                visible:            object.busy && object.detailsText !== ""
+                visible:            sourceColumn.object.busy && sourceColumn.object.detailsText !== ""
             }
 
             QGCLabel {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WordWrap
                 font.pointSize:     ScreenTools.smallFontPointSize
-                color:              object.invalid ? qgcPal.colorRed : qgcPal.warningText
-                font.bold:          object.invalid
-                text:               object.invalid ? qsTr("%1, treated as invalid: uploads ask for confirmation, its zones still apply. Refresh or replace it.").arg(object.validityText) :
-                                                     object.validityText
-                visible:            object.validityText !== ""
+                color:              sourceColumn.object.invalid ? qgcPal.colorRed : qgcPal.warningText
+                font.bold:          sourceColumn.object.invalid
+                text:               sourceColumn.object.invalid ? qsTr("%1, treated as invalid: uploads ask for confirmation, its zones still apply. Refresh or replace it.").arg(sourceColumn.object.validityText) :
+                                                     sourceColumn.object.validityText
+                visible:            sourceColumn.object.validityText !== ""
             }
 
             // The zones the last reload added, changed and removed, their names on demand
             RowLayout {
                 Layout.fillWidth:   true
-                spacing:            _margin
-                visible:            object.changesText !== ""
+                spacing:            root._margin
+                visible:            sourceColumn.object.changesText !== ""
 
                 QGCLabel {
                     Layout.fillWidth:   true
                     wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                     font.pointSize:     ScreenTools.smallFontPointSize
-                    text:               object.changesText
+                    text:               sourceColumn.object.changesText
                     textFormat:         Text.PlainText
                 }
 
@@ -252,7 +257,7 @@ ColumnLayout {
                 Layout.fillWidth:   true
                 wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
-                text:               object.changesDetails
+                text:               sourceColumn.object.changesDetails
                 textFormat:         Text.PlainText
                 visible:            sourceColumn._expanded && text !== ""
             }
@@ -262,7 +267,7 @@ ColumnLayout {
                 wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
-                text:               object.warningText
+                text:               sourceColumn.object.warningText
                 visible:            text !== ""
             }
 
@@ -271,9 +276,9 @@ ColumnLayout {
                 wrapMode:           Text.WrapAtWordBoundaryOrAnywhere
                 font.pointSize:     ScreenTools.smallFontPointSize
                 color:              qgcPal.warningText
-                text:               qsTr("Last update failed: %1").arg(object.errorString)
+                text:               qsTr("Last update failed: %1").arg(sourceColumn.object.errorString)
                 textFormat:         Text.PlainText
-                visible:            object.errorString !== ""
+                visible:            sourceColumn.object.errorString !== ""
             }
         }
     }
