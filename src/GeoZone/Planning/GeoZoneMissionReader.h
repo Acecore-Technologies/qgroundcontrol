@@ -25,12 +25,12 @@ class GeoZoneMissionReader
 {
 public:
     /// @return The current path of the mission, empty without a controller, see GeoZoneMissionPathBuilder. Returns are
-    ///         flown with the parameters of the controller's vehicle, see returnParameters. The contingency paths, which
-    ///         take longer to build, are only built withContingencies.
-    static GeoZoneMissionPath path(MissionController *missionController, bool withContingencies = false);
+    ///         flown with the parameters of the controller's vehicle, see returnParameters.
+    static GeoZoneMissionPath path(MissionController *missionController,
+                                   GeoZoneMissionPath::Contingencies contingencies = GeoZoneMissionPath::Contingencies::Without);
     /// @return The current path of the mission with returns flown with the parameters
     static GeoZoneMissionPath path(MissionController *missionController, const GeoZoneReturnModel::Parameters &returnParameters,
-                                   bool withContingencies = false);
+                                   GeoZoneMissionPath::Contingencies contingencies = GeoZoneMissionPath::Contingencies::Without);
     /// @return The visual items of the mission, the planned home first
     static QList<GeoZoneMissionItem> items(MissionController *missionController);
 

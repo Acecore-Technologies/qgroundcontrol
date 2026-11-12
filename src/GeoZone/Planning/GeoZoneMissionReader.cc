@@ -114,14 +114,14 @@ GeoZoneReturnModel::Destinations destinations(MissionController *missionControll
 
 } // namespace
 
-GeoZoneMissionPath GeoZoneMissionReader::path(MissionController *missionController, bool withContingencies)
+GeoZoneMissionPath GeoZoneMissionReader::path(MissionController *missionController, GeoZoneMissionPath::Contingencies contingencies)
 {
     PlanMasterController *const masterController = missionController ? missionController->masterController() : nullptr;
-    return path(missionController, returnParameters(masterController ? masterController->managerVehicle() : nullptr), withContingencies);
+    return path(missionController, returnParameters(masterController ? masterController->managerVehicle() : nullptr), contingencies);
 }
 
 GeoZoneMissionPath GeoZoneMissionReader::path(MissionController *missionController, const GeoZoneReturnModel::Parameters &returnParameters,
-                                              bool withContingencies)
+                                              GeoZoneMissionPath::Contingencies contingencies)
 {
     const QmlObjectListModel *const visualItems = missionController ? missionController->visualItems() : nullptr;
     if (!visualItems) {
@@ -186,7 +186,7 @@ GeoZoneMissionPath GeoZoneMissionReader::path(MissionController *missionControll
     parameters.returnParameters = returnParameters;
     parameters.destinations = destinations(missionController, missionItems);
     parameters.vtolTransitionDistance = SettingsManager::instance()->planViewSettings()->vtolTransitionDistance()->rawValue().toDouble();
-    return GeoZoneMissionPathBuilder::build(builderItems, parameters, withContingencies);
+    return GeoZoneMissionPathBuilder::build(builderItems, parameters, contingencies);
 }
 
 QList<GeoZoneMissionItem> GeoZoneMissionReader::items(MissionController *missionController)

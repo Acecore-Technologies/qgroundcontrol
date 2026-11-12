@@ -97,6 +97,24 @@ public:
         int start = -1;                 ///< Index of the start
     };
 
+    /// Whether the contingency paths of a mission, which take longer to build, are built
+    enum class Contingencies {
+        Without,
+        With,
+    };
+
+    /// How a return is named
+    enum class Article {
+        Definite,       ///< The one the vehicle flies, like "the return to launch"
+        Indefinite,     ///< One of those it may fly, like "a return to launch"
+    };
+
+    /// Why the vehicle returns
+    enum class Cause {
+        Return,         ///< A return to launch command or a failsafe
+        FenceBreach,
+    };
+
     GeoZoneMissionPath() = default;
 
     /// @return Path made of the segments, for tests and paths which aren't missions
@@ -163,8 +181,14 @@ public:
 
     /// @return Description of the return with the parameters, like "the return to rally point 2", for paths and their
     ///         labels, saying when the altitude is unknown or assumed
+    static QString returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, Article article,
+                                     Cause cause = Cause::Return);
+    /// The same, for callers which have the article and the cause as flags
     static QString returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, bool definite,
-                                     bool breach = false);
+                                     bool breach = false)
+    {
+        return returnDescription(path, parameters, definite ? Article::Definite : Article::Indefinite, breach ? Cause::FenceBreach : Cause::Return);
+    }
 
     /// @return Closed path around the center at the radius, the altitude and terrain
     static QList<GeoZone::Position> circle(const QGeoCoordinate &center, double radius, double altitudeAMSL, double terrainAMSL);

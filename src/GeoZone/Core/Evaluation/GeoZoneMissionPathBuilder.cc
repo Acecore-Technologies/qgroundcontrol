@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <cmath>
 
-GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, const Parameters &parameters, bool withContingencies)
+GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, const Parameters &parameters, GeoZoneMissionPath::Contingencies contingencies)
 {
     GeoZoneMissionPath path;
 
@@ -98,7 +98,7 @@ GeoZoneMissionPath GeoZoneMissionPathBuilder::build(const QList<Item> &items, co
     path._flightDistance = flight.distance;
     path._repeatsIndefinitely = flight.repeatsIndefinitely;
     path._paths.append(_coveragePaths(path, items, coordinateItems, parameters, flight.returnItem, flight.returnFromItem));
-    if (withContingencies) {
+    if (contingencies == GeoZoneMissionPath::Contingencies::With) {
         // The sequence numbers the segments lead to
         QHash<int, int> outgoingSequenceNumbers;
         for (qsizetype k = 1; k < coordinateItems.count(); k++) {
@@ -286,7 +286,7 @@ QList<GeoZoneMissionPath::Path> GeoZoneMissionPathBuilder::_coveragePaths(const 
     if (!returnPath.isValid() || !flies) {
         return paths;
     }
-    const QString label = GeoZoneMissionPath::returnDescription(returnPath, parameters.returnParameters, true);
+    const QString label = GeoZoneMissionPath::returnDescription(returnPath, parameters.returnParameters, GeoZoneMissionPath::Article::Definite);
     appendPath(_modelPositions(returnPath.positions, GeoZoneTerrain::defaultSpacing), returnItem, label, path.flightDistance());
     appendPath(returnPath.loiter, returnItem, label, path.flightDistance());
     return paths;
@@ -380,10 +380,11 @@ void GeoZoneMissionPathBuilder::_appendContingencies(GeoZoneMissionPath &path, c
     for (qsizetype i = 0; i < path._contingencyStarts.count(); i++) {
         const GeoZoneReturnModel::Start start{ path._contingencyStarts[i].position, path._contingencyStarts[i].toSequenceNumber };
         const GeoZoneReturnModel::Path returnPath = GeoZoneReturnModel::returnPath(returnParameters, parameters.destinations, start);
-        appendContingency(returnPath, static_cast<int>(i), GeoZoneMissionPath::returnDescription(returnPath, returnParameters, false));
+        appendContingency(returnPath, static_cast<int>(i), GeoZoneMissionPath::returnDescription(returnPath, returnParameters, GeoZoneMissionPath::Article::Indefinite));
         if (returnParameters.breachAction == GeoZoneReturnModel::BreachAction::ReturnPoint) {
             const GeoZoneReturnModel::Path breachPath = GeoZoneReturnModel::breachPath(returnParameters, parameters.destinations, start);
-            appendContingency(breachPath, static_cast<int>(i), GeoZoneMissionPath::returnDescription(breachPath, returnParameters, false, true));
+            appendContingency(breachPath, static_cast<int>(i), GeoZoneMissionPath::returnDescription(breachPath, returnParameters, GeoZoneMissionPath::Article::Indefinite,
+                                                                                                      GeoZoneMissionPath::Cause::FenceBreach));
         }
     }
 }

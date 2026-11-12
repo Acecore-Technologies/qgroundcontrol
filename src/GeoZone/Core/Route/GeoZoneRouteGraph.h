@@ -40,6 +40,12 @@ public:
         Complete,   ///< All edges
     };
 
+    /// Paths a search finds
+    enum class Length {
+        WithinLimit,    ///< Only those within the length limit
+        Any,            ///< Also longer ones
+    };
+
     /// @param maxLength Meters paths may be long at most, infinite without limit
     /// @param maxWork   Units of work after which searches stop, see work
     GeoZoneRouteGraph(GeoZoneRouteObstacles &obstacles, const QPointF &start, const QPointF &end, double maxLength, qint64 maxWork,
@@ -55,9 +61,8 @@ public:
 
     /// @return Nodes of the shortest path from the start to the end, of those the search follows, empty without or when
     ///         the work reaches the limit, see GeoZoneRouteGraph
-    /// @param limited  Only paths within the length limit
     /// @param blockers Obstacles blocking the edges tested
-    QList<int> shortestPath(bool limited, QSet<int> *blockers, Search search = Search::Complete);
+    QList<int> shortestPath(Length length, QSet<int> *blockers, Search search = Search::Complete);
     /// @return true if Search::Near leaves out edges, so that it may miss paths a complete search finds
     bool nearSearchIncomplete() const;
 

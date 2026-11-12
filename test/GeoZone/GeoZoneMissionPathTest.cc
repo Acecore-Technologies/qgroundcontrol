@@ -604,7 +604,7 @@ void GeoZoneMissionPathTest::_testMissionContingencies()
     QCOMPARE(check.contingencyText(), QStringLiteral(u"A return to launch assuming the PX4 default return altitude of 30 m from items 1\u20133 would enter X (Prohibited)."));
 
     // The starts are grouped into ranges of items
-    const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController, true);
+    const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController, GeoZoneMissionPath::Contingencies::With);
     const QList<GeoZoneMissionPath::ContingencyStart> &starts = path.contingencyStarts();
     QVERIFY(starts.count() > 10);
     QVERIFY(starts.count() <= GeoZoneMissionPath::maxContingencyStarts);
@@ -663,7 +663,7 @@ void GeoZoneMissionPathTest::_testMissionReturnParameters()
     }
     QTRY_COMPARE(GeoZoneMissionReader::path(missionController).segments().count(), 3);
     const auto contingencies = [&manager, missionController](const GeoZoneReturnModel::Parameters &parameters) {
-        return GeoZoneMissionCheck::evaluate(manager.catalog(), GeoZoneMissionReader::path(missionController, parameters, true));
+        return GeoZoneMissionCheck::evaluate(manager.catalog(), GeoZoneMissionReader::path(missionController, parameters, GeoZoneMissionPath::Contingencies::With));
     };
 
     // Of unknown firmware at an unknown altitude, entering X

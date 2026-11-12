@@ -57,9 +57,11 @@ GeoZone::Position GeoZoneMissionPath::Segment::positionAt(double along) const
     return interpolated(fraction, along, ((fraction > 0) && (fraction < 1)) ? from.azimuthTo(to) : 0, terrainAt(along));
 }
 
-QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, bool definite, bool breach)
+QString GeoZoneMissionPath::returnDescription(const GeoZoneReturnModel::Path &path, const GeoZoneReturnModel::Parameters &parameters, Article article, Cause cause)
 {
     using Destination = GeoZoneReturnModel::Destination;
+    const bool definite = (article == Article::Definite);
+    const bool breach = (cause == Cause::FenceBreach);
     const int rallyPoint = path.destinationIndex + 1;
     QString description;
     if (breach) {

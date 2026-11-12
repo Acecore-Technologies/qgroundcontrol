@@ -89,7 +89,7 @@ GeoZoneRouteSearch::Failure GeoZoneRouteDetour::run(const Verify &verify)
         }
         _statistics.rounds++;
         QSet<int> blockers;
-        QList<int> path = graph.shortestPath(true, &blockers, GeoZoneRouteGraph::Search::Near);
+        QList<int> path = graph.shortestPath(GeoZoneRouteGraph::Length::WithinLimit, &blockers, GeoZoneRouteGraph::Search::Near);
         if (_cancel.isCancelled()) {
             return Failure::Cancelled;
         }
@@ -108,7 +108,7 @@ GeoZoneRouteSearch::Failure GeoZoneRouteDetour::run(const Verify &verify)
                     return Failure::TooLong;
                 }
                 blockers.clear();
-                path = graph.shortestPath(true, &blockers);
+                path = graph.shortestPath(GeoZoneRouteGraph::Length::WithinLimit, &blockers);
                 if (_cancel.isCancelled()) {
                     return Failure::Cancelled;
                 }
@@ -121,10 +121,10 @@ GeoZoneRouteSearch::Failure GeoZoneRouteDetour::run(const Verify &verify)
             if (!std::isinf(_maxLength)) {
                 // Whether a longer detour goes around the obstacles found so far
                 QSet<int> allBlockers;
-                QList<int> longer = graph.shortestPath(false, &allBlockers, GeoZoneRouteGraph::Search::Near);
+                QList<int> longer = graph.shortestPath(GeoZoneRouteGraph::Length::Any, &allBlockers, GeoZoneRouteGraph::Search::Near);
                 if (longer.isEmpty() && !graph.limitReached() && graph.nearSearchIncomplete() && !_cancel.isCancelled()) {
                     allBlockers.clear();
-                    longer = graph.shortestPath(false, &allBlockers);
+                    longer = graph.shortestPath(GeoZoneRouteGraph::Length::Any, &allBlockers);
                 }
                 if (_cancel.isCancelled()) {
                     return Failure::Cancelled;

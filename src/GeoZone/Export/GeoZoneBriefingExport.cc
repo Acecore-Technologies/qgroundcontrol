@@ -417,7 +417,7 @@ bool GeoZoneBriefingExport::exportBriefing(const QString &fileName)
 GeoZoneBriefing GeoZoneBriefingExport::briefing() const
 {
     MissionController *const missionController = this->missionController();
-    const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController, true);
+    const GeoZoneMissionPath path = GeoZoneMissionReader::path(missionController, GeoZoneMissionPath::Contingencies::With);
     const auto [start, end] = GeoZoneMissionCheck::plannedFlightTimes(_manager, missionController);
     const QDateTime flightEnd = path.flightEnd(start, end);
 

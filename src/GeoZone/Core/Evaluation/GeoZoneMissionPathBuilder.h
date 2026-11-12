@@ -59,9 +59,9 @@ public:
         double vtolTransitionDistance = 0;              ///< Meters VTOL transitions take
     };
 
-    /// @return The path of the mission with the items, the planned home first. The contingency paths, which take
-    ///         longer to build, are only built withContingencies.
-    static GeoZoneMissionPath build(const QList<Item> &items, const Parameters &parameters, bool withContingencies = false);
+    /// @return The path of the mission with the items, the planned home first
+    static GeoZoneMissionPath build(const QList<Item> &items, const Parameters &parameters,
+                                    GeoZoneMissionPath::Contingencies contingencies = GeoZoneMissionPath::Contingencies::Without);
 
 private:
     /// Paths flown following the DO_JUMP items of the mission

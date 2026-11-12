@@ -171,10 +171,10 @@ int GeoZoneRouteGraph::includeZones(const QList<const GeoZone*> &zones)
     return added;
 }
 
-QList<int> GeoZoneRouteGraph::shortestPath(bool limited, QSet<int> *blockers, Search search)
+QList<int> GeoZoneRouteGraph::shortestPath(Length length, QSet<int> *blockers, Search search)
 {
     const bool near = (search == Search::Near) && nearSearchIncomplete();
-    const QList<int> path = _astar(limited, near, blockers);
+    const QList<int> path = _astar(length == Length::WithinLimit, near, blockers);
     return (near && !path.isEmpty()) ? _straightened(path) : path;
 }
 

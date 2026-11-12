@@ -500,7 +500,7 @@ GeoZoneMissionCheck::Inputs GeoZoneMissionCheck::inputs(const GeoZoneManager *ma
 {
     Inputs inputs;
     inputs.catalog = manager->catalog();
-    inputs.path = GeoZoneMissionReader::path(missionController, true);
+    inputs.path = GeoZoneMissionReader::path(missionController, GeoZoneMissionPath::Contingencies::With);
     std::tie(inputs.start, inputs.end) = plannedFlightTimes(manager, missionController);
     // A copy of the authorisations, which change on the GUI thread
     const std::shared_ptr<GeoZoneAuthorisations> authorisations(new GeoZoneAuthorisations(QString()), [](GeoZoneAuthorisations *copy) { copy->deleteLater(); });
