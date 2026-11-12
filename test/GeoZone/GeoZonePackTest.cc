@@ -62,7 +62,106 @@ bool _rewritePack(const QString &packPath, const QString &copyPath, const std::f
     return writer.finish();
 }
 
+/// A pack file
+struct PackEntry {
+    QString name;
+    QByteArray data;
+};
+
+bool _writePack(const QString &packPath, const QList<PackEntry> &entries)
+{
+    QFile pack(packPath);
+    if (!pack.open(QIODevice::WriteOnly)) {
+        return false;
+    }
+    GeoZoneZip::Writer writer(&pack);
+    for (const PackEntry &entry : entries) {
+        if (!writer.add(entry.name, entry.data)) {
+            return false;
+        }
+    }
+    return writer.finish();
+}
+
+/// @return The manifest of a pack with the sources
+QByteArray _manifest(const QJsonArray &sources)
+{
+    return QJsonDocument(QJsonObject{ { QStringLiteral("format"), QStringLiteral("qgc-geozone-pack") }, { QStringLiteral("version"), 1 },
+                                      { QStringLiteral("sources"), sources } }).toJson();
+}
+
+/// @return A source of a manifest whose copy is the data, with its SHA-256
+QJsonObject _manifestSource(const QString &key, const QString &file, const QByteArray &data)
+{
+    return QJsonObject{ { QStringLiteral("key"), key }, { QStringLiteral("name"), key }, { QStringLiteral("file"), file },
+                        { QStringLiteral("fileSha256"), QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()) } };
+}
+
 } // namespace
+
+void GeoZonePackTest::_testPackExtraction()
+{
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString packPath = dir.filePath(QStringLiteral("pack.zip"));
+    const QString extractDir = dir.filePath(QStringLiteral("extracted"));
+    const auto extractedFiles = [&extractDir]() { return QDir(extractDir).entryList(QDir::Files); };
+    // Larger than the manifest, so that it is extracted first
+    const QByteArray data = R"({ "features": [] })" + QByteArray(4096, ' ');
+    const QString file = QStringLiteral("sources/a.json");
+    const QString notAPack = QStringLiteral("The file is not a geozone pack.");
+
+    // The copy of a source is extracted for the caller
+    QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), _manifest({ _manifestSource(QStringLiteral("/zones/a.json"), file, data) }) } }));
+    {
+        const GeoZonePack::Contents contents = GeoZonePack::read(packPath, extractDir);
+        QVERIFY2(contents.errorString.isEmpty(), qPrintable(contents.errorString));
+        QVERIFY(contents.errors.isEmpty());
+        QCOMPARE(contents.sources.count(), 1);
+        QCOMPARE(extractedFiles(), QStringList{ QFileInfo(contents.sources.constFirst().filePath).fileName() });
+        QVERIFY(QFile::remove(contents.sources.constFirst().filePath));
+    }
+
+    // A copy which can't be written is why the pack can't be read, not that it isn't a pack
+    {
+        const QString blocked = dir.filePath(QStringLiteral("blocked"));
+        QFile blocker(blocked);
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.close();
+        const GeoZonePack::Contents contents = GeoZonePack::read(packPath, blocked + QStringLiteral("/extracted"));
+        QVERIFY(contents.sources.isEmpty());
+        QVERIFY2(contents.errorString.startsWith(QStringLiteral("The files of the pack could not be extracted to")), qPrintable(contents.errorString));
+        QVERIFY(contents.errorString != notAPack);
+    }
+
+    // The copy of a source without key isn't left behind
+    QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), _manifest({ _manifestSource(QString(), file, data) }) } }));
+    {
+        const GeoZonePack::Contents contents = GeoZonePack::read(packPath, extractDir);
+        QVERIFY2(contents.errorString.isEmpty(), qPrintable(contents.errorString));
+        QCOMPARE(contents.errors.count(), 1);
+        QVERIFY(contents.sources.isEmpty());
+        QCOMPARE(extractedFiles(), QStringList());
+    }
+
+    // nor are the copies of a pack with two files of one name, which is refused
+    QVERIFY(_writePack(packPath, { { file, data }, { file, data + ' ' },
+                                   { QStringLiteral("manifest.json"), _manifest({ _manifestSource(QStringLiteral("/zones/a.json"), file, data) }) } }));
+    {
+        const GeoZonePack::Contents contents = GeoZonePack::read(packPath, extractDir);
+        QVERIFY(contents.sources.isEmpty());
+        QVERIFY2(contents.errorString.contains(QStringLiteral("several files named sources/a.json")), qPrintable(contents.errorString));
+        QCOMPARE(extractedFiles(), QStringList());
+    }
+
+    // nor those the manifest doesn't name, or of a file which isn't a pack
+    QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("sources/b.json"), data }, { QStringLiteral("manifest.json"), _manifest({}) } }));
+    QVERIFY(GeoZonePack::read(packPath, extractDir).errorString.isEmpty());
+    QCOMPARE(extractedFiles(), QStringList());
+    QVERIFY(_writePack(packPath, { { file, data }, { QStringLiteral("manifest.json"), "{}" } }));
+    QCOMPARE(GeoZonePack::read(packPath, extractDir).errorString, notAPack);
+    QCOMPARE(extractedFiles(), QStringList());
+}
 
 void GeoZonePackTest::_testOfflinePack()
 {
