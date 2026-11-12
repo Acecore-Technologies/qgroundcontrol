@@ -331,7 +331,7 @@ QJsonArray GeoZoneFlightRecorder::loggedAlerts(int vehicleId, const QDateTime &s
     if (!history || !start.isValid() || !end.isValid()) {
         return rows;
     }
-    history->flushLog();
+    (void) history->flushLog();
     const QString vehicle = QString::number(vehicleId);
     for (QDate date = start.toUTC().date(); date <= end.toUTC().date(); date = date.addDays(1)) {
         QFile file(history->logFilePath(date));

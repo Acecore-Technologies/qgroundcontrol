@@ -194,6 +194,18 @@ ToolIndicatorPage {
                 visible:            text !== ""
             }
 
+            // The alerts are kept and written when the log works again
+            QGCLabel {
+                Layout.fillWidth:   true
+                Layout.maximumWidth: control._pageWidth
+                wrapMode:           Text.WordWrap
+                color:              control._history.logFailing ? qgcPal.colorRed : qgcPal.warningText
+                font.bold:          control._history.logFailing
+                textFormat:         Text.PlainText
+                text:               control._history.logStatus
+                visible:            text !== ""
+            }
+
             // Rather than a message at startup
             SettingsGroupLayout {
                 Layout.preferredWidth:  control._pageWidth

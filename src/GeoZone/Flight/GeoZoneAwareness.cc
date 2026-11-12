@@ -143,6 +143,10 @@ GeoZoneAwareness::Status GeoZoneAwareness::evaluate(const Input &input)
     if (input.covered == false) {
         add(Reason::NotCovered, Degraded, tr("no geozone data covers the vehicle position"));
     }
+    if (input.logFailing) {
+        // The alerts still work, but what the pilot is shown and answers is no longer traceable
+        add(Reason::LogNotWritten, Degraded, tr("alert log not written"));
+    }
 
     // The unavailable reasons first
     std::stable_sort(status.issues.begin(), status.issues.end(), [](const Issue &a, const Issue &b) { return a.state > b.state; });

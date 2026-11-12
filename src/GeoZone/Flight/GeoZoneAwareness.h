@@ -24,8 +24,8 @@
 class GeoZoneManager;
 
 /// Whether geo-awareness is available for a vehicle (EN 4709-003 §5.2.3): zones are loaded, current, updated and cover
-/// the position the vehicle sends over its link with a good GNSS fix. Each problem is a reason the state is degraded
-/// or unavailable. GeoZoneMonitor publishes the status of the active vehicle, or of the data alone without one, and
+/// the position the vehicle sends over its link with a good GNSS fix, and its alerts are logged. Each problem is a
+/// reason the state is degraded or unavailable. GeoZoneMonitor publishes the status of the active vehicle, or of the data alone without one, and
 /// alerts the changes of state of each flying vehicle, see Tracker.
 class GeoZoneAwareness : public QObject
 {
@@ -54,6 +54,7 @@ public:
         DataOutdated,   ///< See GeoZoneSourceRepository::validityWarning
         RefreshFailed,  ///< The last download or load of a source failed
         NotCovered,     ///< No source has zones around the vehicle position
+        LogNotWritten,  ///< The alerts can't be written to the alert log, see GeoZoneAlertHistory::logFailing
     };
 
     /// GNSS fix below which geo-awareness is degraded, set by the manufacturer in the alert profile of the vehicle
@@ -92,6 +93,7 @@ public:
         std::optional<bool> covered;    ///< A source covers the vehicle position, unknown without position or zones
         Gnss gnss;
         GnssLimits gnssLimits;          ///< Of the vehicle's profile
+        bool logFailing = false;        ///< The alert log can't be written
     };
 
     struct Issue {

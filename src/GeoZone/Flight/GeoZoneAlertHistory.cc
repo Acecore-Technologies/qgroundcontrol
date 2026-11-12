@@ -118,7 +118,9 @@ GeoZoneAlertHistory::GeoZoneAlertHistory(GeoZoneManager *manager, QObject *paren
 
 GeoZoneAlertHistory::~GeoZoneAlertHistory()
 {
-    flushLog();
+    if (!flushLog()) {
+        qCWarning(GeoZoneMonitorLog) << "Geozone alert log lines not written:" << _logLines.count() << _logError;
+    }
 }
 
 int GeoZoneAlertHistory::rowCount(const QModelIndex &parent) const
@@ -204,29 +206,47 @@ void GeoZoneAlertHistory::_log(const GeoZoneMonitor::AlertEvent &event)
     if (!_logging) {
         return;
     }
-    const QDate date = event.time.toUTC().date();
-    const QString path = logFilePath(date);
-    if (path.isEmpty()) {
-        return;
+    // Kept until written. When the log can't be written for long, the oldest lines make room and are counted as lost.
+    const QString previousStatus = logStatus();
+    while (_logLines.count() >= maxPendingLogLines) {
+        _logLines.removeFirst();
+        _lostLogLines++;
+        qCWarning(GeoZoneMonitorLog) << "Geozone alert log lines lost:" << _lostLogLines;
     }
-    if (path != _logBufferPath) {
-        flushLog();
-        _logBufferPath = path;
-        _logBufferDate = date;
+    _logLines.append(LogLine{ event.time.toUTC().date(), (logLine(event) + QLatin1Char('\n')).toUtf8() });
+    if (logStatus() != previousStatus) {
+        emit logHealthChanged();
     }
-    _logBuffer += (logLine(event) + QLatin1Char('\n')).toUtf8();
     if (!_logFlushTimer.isActive()) {
-        _logFlushTimer.start();
+        _logFlushTimer.start(logFlushIntervalMSecs);
     }
 }
 
+QString GeoZoneAlertHistory::logStatus() const
+{
+    QStringList parts;
+    if (logFailing()) {
+        parts.append(tr("The alert log can't be written: %1.").arg(_logError));
+        if (!_logLines.isEmpty()) {
+            parts.append(tr("%n alert log line(s) are kept and written when it can be again.", nullptr, static_cast<int>(_logLines.count())));
+        }
+    }
+    if (_lostLogLines > 0) {
+        parts.append(tr("%n alert log line(s) were lost.", nullptr, _lostLogLines));
+    }
+    return parts.join(QLatin1Char(' '));
+}
+
+
 void GeoZoneAlertHistory::startLog(const QString &directory)
 {
-    flushLog();
+    (void) flushLog();
     _logFile.close();
     _logDirectory = directory;
     _logging = true;
     _loadLog(logFilePath(GeoZoneEnvironment::currentDateTimeUtc().date()));
+    // Lines the previous folder couldn't take go to this one
+    (void) flushLog();
 }
 
 QString GeoZoneAlertHistory::logFilePath(const QDate &date) const
@@ -272,39 +292,78 @@ QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
     }.join(QLatin1Char(','));
 }
 
-void GeoZoneAlertHistory::flushLog()
+bool GeoZoneAlertHistory::flushLog()
 {
     _logFlushTimer.stop();
-    if (_logBuffer.isEmpty()) {
-        return;
+    if (_logLines.isEmpty()) {
+        return true;
     }
-    if (((_logFile.fileName() != _logBufferPath) || !_logFile.isOpen()) && !_openLog()) {
-        _logBuffer.clear();
-        return;
+    const QString previousStatus = logStatus();
+    const QString error = _writeLog();
+    if (!error.isEmpty()) {
+        if (error != _logError) {
+            qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log, lines kept:" << _logLines.count() << error;
+        }
+        // Tried again, the folder may come back or get room
+        _logFlushTimer.start(logRetryIntervalMSecs);
     }
-    if ((_logFile.write(_logBuffer) != _logBuffer.size()) || !_logFile.flush()) {
-        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << _logFile.fileName() << _logFile.errorString();
-        _logFile.close();
+    _logError = error;
+    if (logStatus() != previousStatus) {
+        emit logHealthChanged();
     }
-    _logBuffer.clear();
+    return _logLines.isEmpty();
 }
 
-bool GeoZoneAlertHistory::_openLog()
+QString GeoZoneAlertHistory::_writeLog()
+{
+    while (!_logLines.isEmpty()) {
+        const QDate date = _logLines.constFirst().date;
+        const QString path = logFilePath(date);
+        if (path.isEmpty()) {
+            return tr("no telemetry folder is set");
+        }
+        if ((_logFile.fileName() != path) || !_logFile.isOpen()) {
+            const QString error = _openLog(path, date);
+            if (!error.isEmpty()) {
+                return error;
+            }
+        }
+        // The lines of the day, each written whole or tried again
+        while (!_logLines.isEmpty() && (_logLines.constFirst().date == date)) {
+            const QByteArray &text = _logLines.constFirst().text;
+            const qint64 written = _logFile.write(text);
+            if (written != text.size()) {
+                const QString error = _logFile.errorString();
+                _logLineTorn = _logLineTorn || (written > 0);
+                _logFile.close();
+                return error;
+            }
+            _logLines.removeFirst();
+        }
+    }
+    return QString();
+}
+
+QString GeoZoneAlertHistory::_openLog(const QString &path, const QDate &date)
 {
     _logFile.close();
-    (void) QDir().mkpath(QFileInfo(_logBufferPath).absolutePath());
-    _logFile.setFileName(_logBufferPath);
-    if (!_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        qCWarning(GeoZoneMonitorLog) << "Unable to write geozone alert log" << _logBufferPath << _logFile.errorString();
-        return false;
+    (void) QDir().mkpath(QFileInfo(path).absolutePath());
+    _logFile.setFileName(path);
+    // Unbuffered, so that a write tells whether the line reached the file
+    if (!_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text | QIODevice::Unbuffered)) {
+        return _logFile.errorString();
     }
-    if (_logFile.size() == 0) {
-        (void) _logFile.write((logHeader() + QLatin1Char('\n')).toUtf8());
+    const QByteArray start = (_logFile.size() == 0) ? (logHeader() + QLatin1Char('\n')).toUtf8() : (_logLineTorn ? QByteArrayLiteral("\n") : QByteArray());
+    if (!start.isEmpty() && (_logFile.write(start) != start.size())) {
+        const QString error = _logFile.errorString();
+        _logFile.close();
+        return error;
     }
+    _logLineTorn = false;
 
     // A file is started each day, a good time to delete those past the retention
-    (void) removeOldLogs(_logBufferDate, GeoZoneSettings::instance()->recordRetention()->rawValue().toInt());
-    return true;
+    (void) removeOldLogs(date, GeoZoneSettings::instance()->recordRetention()->rawValue().toInt());
+    return QString();
 }
 
 int GeoZoneAlertHistory::removeOldLogs(const QDate &today, int days)

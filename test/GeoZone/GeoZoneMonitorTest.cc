@@ -735,6 +735,138 @@ void GeoZoneMonitorTest::_testAlertLog()
     QVERIFY(GeoZoneAlertHistory::logLine(event).contains(QStringLiteral(",'@A1,'=1+1,")));
 }
 
+void GeoZoneMonitorTest::_testAlertLogFailure()
+{
+    ScopedEnvironment environment;
+    const QGeoCoordinate center(47, 8);
+    const QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GeoZoneManager manager(dir.filePath(QStringLiteral("storage")));
+    QString errorString;
+    QVERIFY2(manager.repository()->loadFile(_writeFeatures(dir, QStringLiteral("zones.json"), QJsonArray{
+        _circleFeature(QStringLiteral("P"), QStringLiteral("PROHIBITED"), center, 300),
+    }), errorString), qPrintable(errorString));
+
+    // The folder of the log can't be made: a file is in its way
+    const QString blocker = dir.filePath(QStringLiteral("blocked"));
+    {
+        QFile file(blocker);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    GeoZoneMonitor monitor(&manager);
+    qint64 now = 0;
+    monitor.setClock([&now]() { return now; });
+    GeoZoneAlertHistory &log = *monitor.alertHistory();
+    QSignalSpy healthSpy(&log, &GeoZoneAlertHistory::logHealthChanged);
+    QSignalSpy eventSpy(&monitor, &GeoZoneMonitor::alertEvent);
+    log.startLog(blocker + QStringLiteral("/logs"));
+    QVERIFY(!log.logFailing());
+    QVERIFY(log.logStatus().isEmpty());
+
+    // The alert which can't be written and the popup showing it are kept, and the pilot is told
+    constexpr int vehicleId = 3;
+    monitor.setActiveVehicleId(vehicleId);
+    const GeoZone::Position inside{ center.atDistanceAndAzimuth(250, 0), 450, 400 };
+    monitor.evaluate({ center.atDistanceAndAzimuth(10000, 0), 450, 400 }, vehicleId);
+    GeoZoneVehicleMonitor *const vehicle = monitor.positionMonitor(vehicleId);
+    QVERIFY(vehicle);
+    vehicle->setArmed(true);
+    monitor.evaluate(inside, vehicleId);
+    QCOMPARE(log.pendingLogLines(), 2);
+    QVERIFY(healthSpy.isEmpty());
+    QVERIFY(!log.flushLog());
+    QVERIFY(log.logFailing());
+    QVERIFY(!log.logError().isEmpty());
+    QCOMPARE(log.pendingLogLines(), 2);
+    QCOMPARE(healthSpy.count(), 1);
+    QCOMPARE(log.logStatus(), QStringLiteral("The alert log can't be written: %1. 2 alert log line(s) are kept and written when it can be again.").arg(log.logError()));
+
+    // Geo-awareness is degraded for it, alerted in flight once it lasts
+    monitor.evaluate(inside, vehicleId);
+    QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(GeoZoneAwareness::Degraded));
+    QCOMPARE(monitor.awareness()->reasons(), QStringList{ QStringLiteral("alert log not written") });
+    now += GeoZoneAwareness::Tracker::worseSettleMSecs;
+    eventSpy.clear();
+    monitor.evaluate(inside, vehicleId);
+    QCOMPARE(eventSpy.count(), 1);
+    const GeoZoneMonitor::AlertEvent degraded = eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>();
+    QCOMPARE(degraded.kind, GeoZoneMonitor::AlertEvent::Awareness);
+    QCOMPARE(degraded.message, QStringLiteral("Geo-awareness degraded: alert log not written"));
+    QCOMPARE(degraded.level, GeoZoneAlertLevel::Caution);
+    QCOMPARE(log.pendingLogLines(), 4);
+
+    // It is tried again by itself, and once the folder can be made everything is written in order
+    QVERIFY(QFile::remove(blocker));
+    const QString path = log.logFilePath(environment.now().date());
+    QTRY_VERIFY_WITH_TIMEOUT(!log.logFailing(), GeoZoneAlertHistory::logRetryIntervalMSecs * 2);
+    QCOMPARE(log.pendingLogLines(), 0);
+    QVERIFY(log.logStatus().isEmpty());
+    QFile file(path);
+    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+    QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    file.close();
+    QCOMPARE(lines.count(), 5);
+    QCOMPARE(lines[0], GeoZoneAlertHistory::logHeader());
+    QStringList events;
+    for (const QString &line : lines.mid(1)) {
+        events.append(GeoZoneAlertHistory::logFields(line).value(6));
+    }
+    QCOMPARE(events, (QStringList{ QStringLiteral("entered"), QStringLiteral("notified"), QStringLiteral("geo_awareness"), QStringLiteral("notified") }));
+    monitor.evaluate(inside, vehicleId);
+    QCOMPARE(monitor.awareness()->stateValue(), static_cast<int>(GeoZoneAwareness::Available));
+
+    // While it can't be written for long, the oldest lines make room for the newest and the pilot is told how many
+    // were lost
+    GeoZoneAlertHistory bounded(&manager);
+    const QString otherBlocker = dir.filePath(QStringLiteral("blocked too"));
+    {
+        QFile again(otherBlocker);
+        QVERIFY(again.open(QIODevice::WriteOnly));
+    }
+    bounded.startLog(otherBlocker + QStringLiteral("/logs"));
+    GeoZoneMonitor::AlertEvent event;
+    event.time = environment.now();
+    event.kind = GeoZoneMonitor::AlertEvent::Dismissed;
+    for (int i = 0; i < GeoZoneAlertHistory::maxPendingLogLines + 3; i++) {
+        event.id = i + 1;
+        bounded.logPilotEvent(event);
+    }
+    QCOMPARE(bounded.pendingLogLines(), GeoZoneAlertHistory::maxPendingLogLines);
+    QCOMPARE(bounded.lostLogLines(), 3);
+    QVERIFY(!bounded.flushLog());
+    QVERIFY(bounded.logStatus().endsWith(QStringLiteral("3 alert log line(s) were lost.")));
+    bounded.startLog(dir.filePath(QStringLiteral("other")));
+    QVERIFY(!bounded.logFailing());
+    QCOMPARE(bounded.logStatus(), QStringLiteral("3 alert log line(s) were lost."));
+    QFile otherFile(bounded.logFilePath(environment.now().date()));
+    QVERIFY(otherFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    lines = QString::fromUtf8(otherFile.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    QCOMPARE(lines.count(), GeoZoneAlertHistory::maxPendingLogLines + 1);
+    QCOMPARE(GeoZoneAlertHistory::logFields(lines[1]).value(14), QStringLiteral("4"));
+    QCOMPARE(GeoZoneAlertHistory::logFields(lines.constLast()).value(14), QString::number(GeoZoneAlertHistory::maxPendingLogLines + 3));
+
+#ifdef Q_OS_LINUX
+    // A file which opens but can't be written, like on a full disk: the header counts too, and the line is kept
+    if (QFile::exists(QStringLiteral("/dev/full"))) {
+        GeoZoneAlertHistory full(&manager);
+        const QString fullDir = dir.filePath(QStringLiteral("full"));
+        QVERIFY(QDir().mkpath(fullDir));
+        full.startLog(fullDir);
+        const QString fullPath = full.logFilePath(environment.now().date());
+        QVERIFY(QFile::link(QStringLiteral("/dev/full"), fullPath));
+        full.logPilotEvent(event);
+        QVERIFY(!full.flushLog());
+        QVERIFY(full.logFailing());
+        QCOMPARE(full.pendingLogLines(), 1);
+        QVERIFY(QFile::remove(fullPath));
+        QVERIFY(full.flushLog());
+        QFile fullFile(fullPath);
+        QVERIFY(fullFile.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(fullFile.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts).count(), 2);
+    }
+#endif
+}
+
 void GeoZoneMonitorTest::_testPilotEventLog()
 {
     ScopedEnvironment environment;

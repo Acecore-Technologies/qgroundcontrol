@@ -842,6 +842,7 @@ GeoZoneAwareness::Status GeoZoneMonitor::awarenessStatus(const GeoZoneVehicleMon
 {
     const bool positioned = monitor && !monitor->positionUnavailable() && monitor->position().coordinate.isValid();
     GeoZoneAwareness::Input input = GeoZoneAwareness::dataInput(_manager, positioned ? monitor->position().coordinate : QGeoCoordinate());
+    input.logFailing = _alertHistory->logFailing();
     if (monitor) {
         Vehicle *const vehicle = monitor->vehicle();
         const VehicleLinkManager *const links = vehicle ? vehicle->vehicleLinkManager() : nullptr;

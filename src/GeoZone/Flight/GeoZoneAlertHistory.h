@@ -27,7 +27,9 @@ class GeoZoneManager;
 /// UTC day, with what the pilot was shown and answered about them (GeoZoneMonitor::AlertEvent::pilotEvent()),
 /// buffered and written to the open file every logFlushIntervalMSecs rather than opening and flushing the file for
 /// each alert. The files of the days before the retention of GeoZoneSettings::recordRetention are deleted when a new
-/// file is started. The application monitor always logs, the flight alerts must be traceable.
+/// file is started. The application monitor always logs, the flight alerts must be traceable: lines which can't be
+/// written, for lack of a folder or because the file can't be opened or written, are kept, up to maxPendingLogLines of
+/// them, and written again every logRetryIntervalMSecs, while logFailing() tells the monitor and the pilot.
 class GeoZoneAlertHistory : public QAbstractListModel
 {
     Q_OBJECT
@@ -35,6 +37,10 @@ class GeoZoneAlertHistory : public QAbstractListModel
     Q_PROPERTY(int              count               READ count                  NOTIFY countChanged FINAL)
     Q_PROPERTY(int              unacknowledgedCount READ unacknowledgedCount    NOTIFY unacknowledgedCountChanged FINAL)
     Q_PROPERTY(QGeoCoordinate   shownPosition       READ shownPosition          NOTIFY shownPositionChanged FINAL)  ///< Vehicle position of the alert shown on the map, invalid when none
+    Q_PROPERTY(bool             logFailing          READ logFailing             NOTIFY logHealthChanged FINAL)     ///< The last alerts couldn't be written to the log, they are kept and tried again
+    /// What the pilot is told about the log: why it isn't written and how many alerts wait, or how many were lost,
+    /// empty while all alerts were written
+    Q_PROPERTY(QString          logStatus           READ logStatus              NOTIFY logHealthChanged FINAL)
 
 public:
     enum Roles {
@@ -53,6 +59,8 @@ public:
     static constexpr int maxEntries = 500;
     static constexpr int shownPositionMSecs = 2 * 60 * 1000;   ///< How long the map shows the position of a shown alert
     static constexpr int logFlushIntervalMSecs = 2000;
+    static constexpr int logRetryIntervalMSecs = 10000;     ///< Between two tries to write lines which couldn't be written
+    static constexpr int maxPendingLogLines = 2000;         ///< Lines kept while they can't be written, the oldest are lost beyond
 
     /// @param manager Zones the alerts are shown on, GeoZoneManager::instance() when null
     explicit GeoZoneAlertHistory(GeoZoneManager *manager = nullptr, QObject *parent = nullptr);
@@ -72,8 +80,17 @@ public:
     void startLog(const QString &directory = QString());
     /// @return Log file for the date, empty without a folder
     QString logFilePath(const QDate &date) const;
-    /// Writes the buffered alerts now
-    void flushLog();
+    /// Writes the buffered alerts now. Those which can't be written are kept and tried again.
+    /// @return true when none is left to write
+    bool flushLog();
+    bool logFailing() const { return !_logError.isEmpty(); }
+    /// Why the log can't be written, empty while it is
+    QString logError() const { return _logError; }
+    /// Lines waiting to be written
+    int pendingLogLines() const { return static_cast<int>(_logLines.count()); }
+    /// Lines lost since the log started, because more than maxPendingLogLines couldn't be written
+    int lostLogLines() const { return _lostLogLines; }
+    QString logStatus() const;
     /// Deletes the log files of the folder for the days before the last ones, today included, none when days is 0
     /// @return Number of files deleted
     int removeOldLogs(const QDate &today, int days);
@@ -106,6 +123,8 @@ signals:
     void alertAcknowledged(int alertId);
     void allAcknowledged();
     void shownPositionChanged();
+    /// logFailing() or logStatus() changed
+    void logHealthChanged();
 
 private:
     struct Entry {
@@ -117,8 +136,11 @@ private:
     void _loadLog(const QString &filePath);
     /// Logs the event within logFlushIntervalMSecs once the log is started
     void _log(const GeoZoneMonitor::AlertEvent &event);
-    /// Opens the log file the buffer belongs to, starting it with the header
-    bool _openLog();
+    /// Opens the log file of the date, starting it with the header
+    /// @return Why it can't be opened or started, empty when it is open
+    QString _openLog(const QString &path, const QDate &date);
+    /// @return Why the buffered lines can't all be written, empty when they were
+    QString _writeLog();
 
     GeoZoneManager *_manager = nullptr;
     QList<Entry> _entries;          ///< Newest first
@@ -127,9 +149,16 @@ private:
 
     bool _logging = false;          ///< Set by startLog()
     QString _logDirectory;
+    /// A line not written yet
+    struct LogLine {
+        QDate date;                 ///< UTC, of its file
+        QByteArray text;            ///< With its line break
+    };
+
     QFile _logFile;                 ///< Kept open between flushes
-    QByteArray _logBuffer;          ///< Lines not written yet
-    QString _logBufferPath;         ///< File the buffered lines belong to
-    QDate _logBufferDate;
-    QTimer _logFlushTimer;
+    QList<LogLine> _logLines;       ///< Not written yet, the oldest first, at most maxPendingLogLines
+    QString _logError;              ///< Why the last flush failed, empty when it didn't
+    int _lostLogLines = 0;
+    bool _logLineTorn = false;      ///< A line was written in part, the next one starts on a new line
+    QTimer _logFlushTimer;          ///< Also retries
 };
