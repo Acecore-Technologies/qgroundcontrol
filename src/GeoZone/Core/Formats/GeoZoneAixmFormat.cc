@@ -57,6 +57,73 @@ double _aixmAngle(const QString &text, QStringView uom)
     return (uom.trimmed().compare(QLatin1String("deg"), Qt::CaseInsensitive) == 0) ? _numberFromText(text) : qQNaN();
 }
 
+/// Coordinate reference system of the positions of an element: that of its srsName and srsDimension, or of the
+/// elements enclosing it. EPSG:4326, with the latitude first, where none is given, as the AIXM profile of GML has it.
+struct AixmCrs {
+    bool supported = true;
+    bool latitudeFirst = true;
+    int systemDimension = 2;    ///< Values of a position in the reference system
+    int dimension = 2;          ///< Values of a position: 3 with a height, which isn't read
+    QString name;               ///< As published, for the issue
+};
+
+/// @return The reference system of an element with the attributes, in one with the enclosing one. Positions are read
+///         in WGS 84 by latitude and longitude (EPSG:4326, or EPSG:4979 with a height) or by longitude and latitude
+///         (OGC CRS84, or CRS84h with a height), named as URN, URL or authority and code. Others aren't supported.
+AixmCrs _aixmCrs(const AixmCrs &enclosing, const QXmlStreamAttributes &attributes)
+{
+    if (attributes.isEmpty()) {
+        return enclosing;
+    }
+    AixmCrs crs = enclosing;
+    if (attributes.hasAttribute(QLatin1String("srsName"))) {
+        const QString srsName = attributes.value(QLatin1String("srsName")).trimmed().toString();
+        // Elements usually repeat the name of the one enclosing them
+        if (!crs.supported || (srsName != crs.name)) {
+            crs.name = srsName;
+            const QString name = srsName.toUpper();
+            // urn:ogc:def:crs:EPSG::4326, http://www.opengis.net/def/crs/EPSG/0/4326 or EPSG:4326: the authority and
+            // the code are the first and the last part after the prefix
+            static const QString urlPrefix = QStringLiteral("://WWW.OPENGIS.NET/DEF/CRS/");
+            QStringList parts;
+            if (name.startsWith(QStringLiteral("URN:OGC:DEF:CRS:")) || name.startsWith(QStringLiteral("URN:X-OGC:DEF:CRS:"))) {
+                parts = name.section(QStringLiteral(":DEF:CRS:"), 1).split(QLatin1Char(':'));
+            } else if (name.startsWith(QStringLiteral("HTTP") + urlPrefix) || name.startsWith(QStringLiteral("HTTPS") + urlPrefix)) {
+                parts = name.section(urlPrefix, 1).split(QLatin1Char('/'));
+            } else {
+                parts = name.split(QLatin1Char(':'));
+            }
+            const bool authorityAndCode = (parts.count() == 2) || (parts.count() == 3);
+            const QString authority = parts.constFirst();
+            const QString code = parts.constLast();
+            if (authorityAndCode && (authority == QStringLiteral("EPSG")) && ((code == QStringLiteral("4326")) || (code == QStringLiteral("4979")))) {
+                crs.supported = true;
+                crs.latitudeFirst = true;
+                crs.systemDimension = (code == QStringLiteral("4979")) ? 3 : 2;
+            } else if (authorityAndCode && ((authority == QStringLiteral("OGC")) || (authority == QStringLiteral("CRS"))) &&
+                       ((code == QStringLiteral("CRS84")) || (code == QStringLiteral("84")) || (code == QStringLiteral("CRS84H")))) {
+                crs.supported = true;
+                crs.latitudeFirst = false;
+                crs.systemDimension = (code == QStringLiteral("CRS84H")) ? 3 : 2;
+            } else {
+                crs.supported = false;
+            }
+        }
+        // That of the reference system unless the element gives its own
+        crs.dimension = crs.systemDimension;
+    }
+    if (attributes.hasAttribute(QLatin1String("srsDimension"))) {
+        const QStringView srsDimension = attributes.value(QLatin1String("srsDimension"));
+        bool ok = false;
+        crs.dimension = srsDimension.trimmed().toInt(&ok);
+        if (!ok || ((crs.dimension != 2) && (crs.dimension != 3))) {
+            crs.supported = false;
+            crs.name = QStringLiteral("%1 srsDimension %2").arg(crs.name, srsDimension).trimmed();
+        }
+    }
+    return crs;
+}
+
 /// Sets the limits of the volume, in feet when both are published in feet or as flight levels, in meters otherwise
 void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmLimit &upper)
 {
@@ -81,9 +148,10 @@ void _setAixmLimits(GeoZone::Volume &volume, const AixmLimit &lower, const AixmL
 /// Parses the airspaces of an AIXM 5.1 message, like the UK flight restriction zones. Boundaries of geodesic strings,
 /// line strings, arcs and circles by center point are supported. As in the AIXM coding guidelines, geodesic strings are
 /// great circles, line strings in EPSG:4326 are straight in latitude and longitude, like parallels, and arcs are circles
-/// around their center whose angles are bearings. A volume whose boundary has a position, arc or unit which can't be
-/// read is left out with an issue of its airspace, rather than given another shape. Airspaces left without volume
-/// are returned too, GeoZoneParser counts them as skipped with their issues.
+/// around their center whose angles are bearings. Positions are read in the reference system of their element or of
+/// those enclosing it, see _aixmCrs. A volume whose boundary has a position, arc or unit which can't be read, or is in
+/// another reference system, is left out with an issue of its airspace, rather than given another shape. Airspaces
+/// left without volume are returned too, GeoZoneParser counts them as skipped with their issues.
 bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &errorString)
 {
     result.format = GeoZoneParser::Format::Aixm;
@@ -107,7 +175,8 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
     bool circleOnly = true;
     bool volumeRejected = false;
     QString segment;
-    bool segmentValid = true;
+    QString segmentIssue;   ///< Why the segment can't be read, empty when it can
+    QList<AixmCrs> crsStack;    ///< Of the open elements
     QList<QGeoCoordinate> points;
     double radius = qQNaN();
     double startAngle = qQNaN();
@@ -125,21 +194,35 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
             }
         }
     };
-    // Adds the positions of a pos or posList, false when a value isn't a number or a position isn't on the globe
-    const auto parsePositions = [](const QString &text, QList<QGeoCoordinate> &positions) {
-        const QStringList values = text.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
-        if ((values.count() % 2) != 0) {
-            return false;
+    // Adds the positions of a pos or posList in the reference system
+    // @return Why they can't be read: the reference system isn't supported, a value isn't a number or a position isn't
+    //         on the globe. Empty when they are read.
+    const auto parsePositions = [](const QString &text, const AixmCrs &crs, QList<QGeoCoordinate> &positions) {
+        if (!crs.supported) {
+            return GeoZoneParser::tr("Boundary in the unsupported coordinate reference system %1 ignored").arg(crs.name);
         }
-        for (qsizetype i = 0; i < values.count(); i += 2) {
-            // EPSG:4326 lists latitude first
-            const QGeoCoordinate coordinate(_numberFromText(values[i]), _numberFromText(values[i + 1]));
-            if (!coordinate.isValid()) {
-                return false;
+        const QString invalid = GeoZoneParser::tr("Boundary with an invalid position ignored");
+        const QStringList values = text.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if ((values.count() % crs.dimension) != 0) {
+            return invalid;
+        }
+        for (qsizetype i = 0; i < values.count(); i += crs.dimension) {
+            const double first = _numberFromText(values[i]);
+            const double second = _numberFromText(values[i + 1]);
+            const QGeoCoordinate coordinate(crs.latitudeFirst ? first : second, crs.latitudeFirst ? second : first);
+            // The height isn't used, the limits of the volume are
+            if (!coordinate.isValid() || ((crs.dimension == 3) && std::isnan(_numberFromText(values[i + 2])))) {
+                return invalid;
             }
             positions.append(coordinate);
         }
-        return true;
+        return QString();
+    };
+    // Reads the text of the element just started, which ends it
+    const auto elementText = [&reader, &crsStack]() {
+        const QString text = reader.readElementText();
+        crsStack.removeLast();
+        return text;
     };
     // The volume isn't added, its airspace tells why
     const auto rejectVolume = [&volumeRejected, &zone](const QString &issue) {
@@ -151,11 +234,12 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
         reader.readNext();
         const QStringView name = reader.name();
         if (reader.isStartElement()) {
+            crsStack.append(_aixmCrs(crsStack.isEmpty() ? AixmCrs() : crsStack.constLast(), reader.attributes()));
             // Dataset title of the message metadata
             if (!titleRead && !inAirspace && (name == QLatin1String("title"))) {
                 inTitle = true;
             } else if (inTitle && (name == QLatin1String("CharacterString"))) {
-                const QString title = reader.readElementText().trimmed();
+                const QString title = elementText().trimmed();
                 if (!title.isEmpty()) {
                     result.title = title;
                 }
@@ -184,18 +268,18 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                 circleOnly = true;
                 volumeRejected = false;
             } else if (!inVolume && (name == QLatin1String("type")) && type.isEmpty()) {
-                type = reader.readElementText().trimmed();
+                type = elementText().trimmed();
             } else if (!inVolume && (name == QLatin1String("localType")) && localType.isEmpty()) {
-                localType = reader.readElementText().trimmed();
+                localType = elementText().trimmed();
             } else if (!inVolume && (name == QLatin1String("designator")) && zone.identifier.isEmpty()) {
-                zone.identifier = reader.readElementText().trimmed();
+                zone.identifier = elementText().trimmed();
             } else if (!inVolume && (name == QLatin1String("name")) && zone.name.isEmpty()) {
-                zone.name = reader.readElementText().trimmed();
+                zone.name = elementText().trimmed();
             } else if (inVolume && ((name == QLatin1String("upperLimit")) || (name == QLatin1String("lowerLimit")))) {
                 AixmLimit &limit = (name == QLatin1String("upperLimit")) ? upper : lower;
                 const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
                 limit.uom = uom.trimmed().toUpper();
-                const QString text = reader.readElementText().trimmed().toUpper();
+                const QString text = elementText().trimmed().toUpper();
                 if (text == QStringLiteral("GND")) {
                     limit.value = 0;
                 } else if (text == QStringLiteral("UNL")) {
@@ -211,35 +295,45 @@ bool _parseAixm(const QByteArray &xml, GeoZoneParser::Result &result, QString &e
                     }
                 }
             } else if (inVolume && (name == QLatin1String("upperLimitReference"))) {
-                upper.reference = reader.readElementText().trimmed().toUpper();
+                upper.reference = elementText().trimmed().toUpper();
             } else if (inVolume && (name == QLatin1String("lowerLimitReference"))) {
-                lower.reference = reader.readElementText().trimmed().toUpper();
+                lower.reference = elementText().trimmed().toUpper();
             } else if (inVolume && (name == QLatin1String("exterior"))) {
                 inExterior = true;
             } else if (inExterior && ((name == QLatin1String("GeodesicString")) || (name == QLatin1String("LineStringSegment")) ||
                                       (name == QLatin1String("ArcByCenterPoint")) || (name == QLatin1String("CircleByCenterPoint")))) {
                 segment = name.toString();
-                segmentValid = true;
+                segmentIssue.clear();
                 points.clear();
                 radius = qQNaN();
                 startAngle = qQNaN();
                 endAngle = qQNaN();
             } else if (!segment.isEmpty() && ((name == QLatin1String("pos")) || (name == QLatin1String("posList")))) {
-                segmentValid = parsePositions(reader.readElementText(), points) && segmentValid;
+                const AixmCrs crs = crsStack.constLast();
+                const QString issue = parsePositions(elementText(), crs, points);
+                if (segmentIssue.isEmpty()) {
+                    segmentIssue = issue;
+                }
             } else if (!segment.isEmpty() && (name == QLatin1String("radius"))) {
                 const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
-                radius = _aixmDistance(_numberFromText(reader.readElementText()), uom);
+                radius = _aixmDistance(_numberFromText(elementText()), uom);
             } else if (!segment.isEmpty() && (name == QLatin1String("startAngle"))) {
                 const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
-                startAngle = _aixmAngle(reader.readElementText(), uom);
+                startAngle = _aixmAngle(elementText(), uom);
             } else if (!segment.isEmpty() && (name == QLatin1String("endAngle"))) {
                 const QString uom = reader.attributes().value(QStringLiteral("uom")).toString();
-                endAngle = _aixmAngle(reader.readElementText(), uom);
+                endAngle = _aixmAngle(elementText(), uom);
             }
-        } else if (reader.isEndElement() && inAirspace) {
+        } else if (reader.isEndElement()) {
+            if (!crsStack.isEmpty()) {
+                crsStack.removeLast();
+            }
+            if (!inAirspace) {
+                continue;
+            }
             if (!segment.isEmpty() && (name == segment)) {
-                if (!segmentValid) {
-                    rejectVolume(GeoZoneParser::tr("Boundary with an invalid position ignored"));
+                if (!segmentIssue.isEmpty()) {
+                    rejectVolume(segmentIssue);
                 } else if (segment == QLatin1String("ArcByCenterPoint")) {
                     // The center alone would be a vertex of another boundary, and a radius beyond the limit of circles
                     // leaves no step between the points of the arc

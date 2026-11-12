@@ -51,6 +51,8 @@ private slots:
     void _testAixmTitle();
     void _testAixmInvalidBoundary_data();
     void _testAixmInvalidBoundary();
+    void _testAixmReferenceSystems_data();
+    void _testAixmReferenceSystems();
     void _testParserFuzz();
     void _testFuzzFindings();
     void _testDisplayText();

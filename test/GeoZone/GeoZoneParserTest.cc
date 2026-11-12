@@ -1880,6 +1880,87 @@ void GeoZoneParserTest::_testAixmInvalidBoundary()
     QVERIFY(zone.contains(GeoZone::Position{ center.atDistanceAndAzimuth(10 * 1852, 45), 5000, 0 }));
 }
 
+void GeoZoneParserTest::_testAixmReferenceSystems_data()
+{
+    QTest::addColumn<QString>("surfaceAttributes");
+    QTest::addColumn<QString>("segments");
+    QTest::addColumn<QString>("issue");     ///< Empty when the boundary is read
+
+    // The same area between 52N and 52.1N, 4E and 4.2E, by latitude and longitude, by longitude and latitude, and
+    // with heights
+    const QString latLon = QStringLiteral("52 4 52 4.2 52.1 4.2 52.1 4 52 4");
+    const QString lonLat = QStringLiteral("4 52 4.2 52 4.2 52.1 4 52.1 4 52");
+    const QString latLonHeight = QStringLiteral("52 4 100 52 4.2 100 52.1 4.2 100 52.1 4 100 52 4 100");
+    const QString lonLatHeight = QStringLiteral("4 52 100 4.2 52 100 4.2 52.1 100 4 52.1 100 4 52 100");
+    const auto line = [](const QString &positions, const QString &attributes = QString()) {
+        return QStringLiteral("<gml:LineStringSegment><gml:posList %1>%2</gml:posList></gml:LineStringSegment>").arg(attributes, positions);
+    };
+    const auto srs = [](const char *name) { return QStringLiteral("srsName=\"%1\"").arg(QLatin1String(name)); };
+    const auto unsupported = [](const char *name) {
+        return QStringLiteral("Boundary in the unsupported coordinate reference system %1 ignored").arg(QLatin1String(name));
+    };
+    const QString invalidPosition = QStringLiteral("Boundary with an invalid position ignored");
+    const QString epsg4326 = srs("urn:ogc:def:crs:EPSG::4326");
+    const QString crs84 = srs("urn:ogc:def:crs:OGC:1.3:CRS84");
+    const auto row = [](const char *name, const QString &surfaceAttributes, const QString &segments, const QString &issue = QString()) {
+        QTest::newRow(name) << surfaceAttributes << segments << issue;
+    };
+
+    // EPSG:4326 lists the latitude first, and is the reference system when none is given
+    row("EPSG:4326 URN", epsg4326, line(latLon));
+    row("EPSG:4326 URN with version", srs("urn:ogc:def:crs:EPSG:6.6:4326"), line(latLon));
+    row("EPSG:4326 URL", srs("http://www.opengis.net/def/crs/EPSG/0/4326"), line(latLon));
+    row("EPSG:4326 code", srs("EPSG:4326"), line(latLon));
+    row("none", QString(), line(latLon));
+    // CRS84 lists the longitude first
+    row("CRS84 URN", crs84, line(lonLat));
+    row("CRS84 URL", srs("http://www.opengis.net/def/crs/OGC/1.3/CRS84"), line(lonLat));
+    row("CRS84 code", srs("CRS:84"), line(lonLat));
+    // The element of the positions has its own reference system, or the one of an element enclosing it
+    row("of the positions", epsg4326, line(lonLat, crs84));
+    row("of the positions back", crs84, line(latLon, epsg4326));
+    row("of the center", epsg4326, QStringLiteral(R"(<gml:CircleByCenterPoint numArc="1"><gml:pointProperty><aixm:Point %1><gml:pos>4.1 52.05</gml:pos></aixm:Point>
+        </gml:pointProperty><gml:radius uom="[nmi_i]">2</gml:radius></gml:CircleByCenterPoint>)").arg(crs84));
+    // Positions with a height, which isn't read
+    row("3-D surface", epsg4326 + QStringLiteral(" srsDimension=\"3\""), line(latLonHeight));
+    row("3-D positions", epsg4326, line(latLonHeight, QStringLiteral("srsDimension=\"3\"")));
+    row("3-D CRS84 positions", crs84, line(lonLatHeight, QStringLiteral("srsDimension=\"3\"")));
+    row("2-D positions of a 3-D surface", epsg4326 + QStringLiteral(" srsDimension=\"3\""), line(latLon, QStringLiteral("srsDimension=\"2\"")));
+    row("EPSG:4979", srs("urn:ogc:def:crs:EPSG::4979"), line(latLonHeight));
+    row("CRS84h", srs("urn:ogc:def:crs:OGC::CRS84h"), line(lonLatHeight));
+    // Other reference systems and dimensions reject the volume instead of placing it elsewhere
+    row("projected", srs("urn:ogc:def:crs:EPSG::3857"), line(latLon), unsupported("urn:ogc:def:crs:EPSG::3857"));
+    row("another datum", srs("urn:ogc:def:crs:EPSG::4258"), line(latLon), unsupported("urn:ogc:def:crs:EPSG::4258"));
+    row("unknown", srs("local"), line(latLon), unsupported("local"));
+    row("unsupported positions", epsg4326, line(latLon, srs("EPSG:27700")), unsupported("EPSG:27700"));
+    row("4-D", epsg4326, line(latLon, QStringLiteral("srsDimension=\"4\"")), unsupported("urn:ogc:def:crs:EPSG::4326 srsDimension 4"));
+    row("heights without their dimension", epsg4326, line(latLonHeight), invalidPosition);
+    row("height not a number", epsg4326, line(QStringLiteral("52 4 100 52 4.2 high 52.1 4.2 100 52.1 4 100"), QStringLiteral("srsDimension=\"3\"")), invalidPosition);
+}
+
+void GeoZoneParserTest::_testAixmReferenceSystems()
+{
+    QFETCH(QString, surfaceAttributes);
+    QFETCH(QString, segments);
+    QFETCH(QString, issue);
+
+    GeoZoneParser::Result result;
+    QString errorString;
+    QVERIFY2(GeoZoneParser::parse(_aixmMessage(segments, QString(), surfaceAttributes), result, errorString), qPrintable(errorString));
+    QCOMPARE(result.issues, issue.isEmpty() ? (QMap<QString, int>()) : (QMap<QString, int>{ { issue, 1 } }));
+    QCOMPARE(result.skippedFeatures, issue.isEmpty() ? 0 : 1);
+    QCOMPARE(result.zones.count(), issue.isEmpty() ? 2 : 1);
+    if (!issue.isEmpty()) {
+        QCOMPARE(result.zones.first().identifier, QStringLiteral("VALID"));
+        return;
+    }
+    QCOMPARE(result.zones.first().identifier, QStringLiteral("TESTED"));
+    const GeoZone zone(result.zones.first());
+    QVERIFY(zone.contains(QGeoCoordinate(52.05, 4.1)));
+    QVERIFY(!zone.contains(QGeoCoordinate(52.15, 4.1)));
+    QVERIFY(!zone.contains(QGeoCoordinate(4.1, 52.05)));
+}
+
 void GeoZoneParserTest::_testParserFuzz()
 {
     // Mutated documents must load or fail cleanly, and loaded zones must be usable
