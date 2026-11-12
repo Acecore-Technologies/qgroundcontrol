@@ -333,6 +333,19 @@ QRegularExpression GeoZoneProviders::linkPattern(const QString &pattern)
 
 namespace {
 
+/// The effective dates datasetLink found with the datasets of the services publishing by AIRAC cycle, by dataset URL
+struct DatasetDates {
+    static constexpr qsizetype maxCount = 64;   ///< Datasets remembered, a few per service
+    QReadWriteLock lock;
+    QHash<QString, QDate> dates;
+};
+
+DatasetDates &datasetDates()
+{
+    static DatasetDates dates;
+    return dates;
+}
+
 /// @return The service whose download page the URL is, nullptr for other URLs
 const GeoZoneProviders::Service *linkingService(const QList<GeoZoneProviders::Service> &services, const QString &url)
 {
@@ -370,6 +383,7 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
 
     const QString page = QString::fromUtf8(data);
     QString link;
+    QDate effective;
     if (service->datasetLinkPattern.captureCount() < 2) {
         const QRegularExpressionMatch match = service->datasetLinkPattern.match(page);
         if (match.hasMatch()) {
@@ -398,8 +412,10 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
                 break;
             }
         }
+        effective = linkDate;
         if (link.isEmpty()) {
             link = earliestLink;
+            effective = earliestDate;
         }
     }
     if (link.isEmpty()) {
@@ -417,6 +433,15 @@ QString GeoZoneProviders::datasetLink(const QString &url, const QByteArray &data
         }
         return QString();
     }
+    // The date found with the link is the one of the dataset, see airacDatasetDate
+    if (service->airac && effective.isValid()) {
+        DatasetDates &found = datasetDates();
+        const QWriteLocker locker(&found.lock);
+        if (found.dates.count() >= DatasetDates::maxCount) {
+            found.dates.clear();
+        }
+        found.dates.insert(target.toString(), effective);
+    }
     return target.toString();
 }
 
@@ -425,7 +450,15 @@ QDate GeoZoneProviders::airacDatasetDate(const QString &datasetUrl)
     if (datasetUrl.isEmpty()) {
         return QDate();
     }
-    // The patterns match the links of the download pages
+    {
+        DatasetDates &found = datasetDates();
+        const QReadLocker locker(&found.lock);
+        if (const auto it = found.dates.constFind(datasetUrl); it != found.dates.cend()) {
+            return it.value();
+        }
+    }
+    // The dataset of an earlier session, whose date wasn't kept with it: where the page wrote the date into the link,
+    // the patterns read it from there again
     const QString link = QStringLiteral("href=\"%1\"").arg(datasetUrl);
     for (const Service &service : _services()) {
         if (!service.airac || !service.datasetLinkPattern.isValid() || service.datasetLinkPattern.pattern().isEmpty()) {

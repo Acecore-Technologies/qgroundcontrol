@@ -78,4 +78,5 @@ private slots:
     void _testPageUrls();
     void _testSourceNames();
     void _testProviderLookups();
+    void _testAiracDatasetDate();
 };

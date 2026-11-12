@@ -3592,4 +3592,52 @@ void GeoZoneParserTest::_testProviderLookups()
     QVERIFY(counter.count.load() >= 6);
 }
 
+void GeoZoneParserTest::_testAiracDatasetDate()
+{
+    // A service publishing by AIRAC cycle whose page lists the effective date of each dataset beside its link, not in it
+    GeoZoneFeedCatalogue::Catalogue catalogue = GeoZoneFeedCatalogue::builtIn();
+    GeoZoneFeedCatalogue::Catalogue overlay;
+    QString errorString;
+    QVERIFY2(GeoZoneFeedCatalogue::parse(R"json({ "feeds": [ { "id": "table", "name": "Table", "url": "https://table.example.com/datasets", "format": "ed269", "airac": true,
+        "datasetLink": { "pattern": "href=\"([^\"]{1,200}\\.zip)\">[^<]{0,50}</a></td><td>(\\d{4}-\\d{2}-\\d{2})", "dateFormat": "yyyy-MM-dd" } } ] })json",
+        QStringLiteral("feeds.json"), overlay, errorString), qPrintable(errorString));
+    QVERIFY2(overlay.warnings.isEmpty(), qPrintable(overlay.warnings.join(QLatin1Char('\n'))));
+    GeoZoneFeedCatalogue::apply(catalogue, overlay);
+    GeoZoneProviders::setCatalogue(catalogue.feeds, catalogue.templates);
+    const auto restore = qScopeGuard([]() { GeoZoneProviders::resetCatalogue(); });
+    const QByteArray page = "<html><body><table>"
+                            "<tr><td><a href=\"/files/a81f.zip\">zones</a></td><td>2026-10-29</td></tr>"
+                            "<tr><td><a href=\"/files/c27b.zip\">zones</a></td><td>2026-11-26</td></tr></table></body></html>";
+
+    // The date found with the link is the date of the dataset: it isn't read back from the link, which doesn't hold it
+    const QString current = GeoZoneProviders::datasetLink(QStringLiteral("https://table.example.com/datasets"), page, QDate(2026, 11, 10));
+    QCOMPARE(current, QStringLiteral("https://table.example.com/files/a81f.zip"));
+    QCOMPARE(GeoZoneProviders::airacDatasetDate(current), QDate(2026, 10, 29));
+    const QString next = GeoZoneProviders::datasetLink(QStringLiteral("https://table.example.com/datasets"), page, QDate(2026, 11, 26));
+    QCOMPARE(next, QStringLiteral("https://table.example.com/files/c27b.zip"));
+    QCOMPARE(GeoZoneProviders::airacDatasetDate(next), QDate(2026, 11, 26));
+    QCOMPARE(GeoZoneProviders::airacDatasetDate(current), QDate(2026, 10, 29));
+    // so the source of the dataset knows its cycle, and that it ended when the next one took effect
+    ScopedEnvironment environment;
+    environment.setNow(_utc(QDate(2026, 11, 10), QTime(12, 0)));
+    GeoZoneSource source(QStringLiteral("https://table.example.com/datasets"), QStringLiteral("https://table.example.com/datasets"));
+    GeoZoneParser::Result result;
+    result.format = GeoZoneParser::Format::ED269;
+    source.setResult(result, environment.now(), environment.now());
+    source.setDatasetUrl(current);
+    QCOMPARE(source.airacDate(), QDate(2026, 10, 29));
+    QCOMPARE(source.validityText(), QString());
+    source.updateValidity(_utc(QDate(2026, 11, 26), QTime(0, 0)));
+    QVERIFY2(source.validityText().startsWith(QStringLiteral("AIRAC cycle")), qPrintable(source.validityText()));
+
+    // The dataset of an earlier session, whose link holds its date like those of NATS, is still read from the link
+    QCOMPARE(GeoZoneProviders::airacDatasetDate(QStringLiteral("https://nats-uk.ead-it.com/cms-nats/export/UAS_AREA_1/EG_UAS_FR_DS_AREA1_FULL_20251225_XML.zip")), QDate(2025, 12, 25));
+    QVERIFY(!GeoZoneProviders::airacDatasetDate(QStringLiteral("https://table.example.com/files/unknown.zip")).isValid());
+    // Datasets of services which don't publish by cycle have no cycle
+    const QString austria = GeoZoneProviders::datasetLink(QStringLiteral("https://www.austrocontrol.at/luftfahrtbehoerde/lizenzen__bewilligungen/drohnen/geografische_zonen"),
+        "<html><table><tr><td><a href=\"/x/UASZones-ACG-20261021-130632-full-production.zip\">a</a></td><td>25.10.2026</td></tr></table></html>", QDate(2026, 11, 10));
+    QVERIFY(austria.endsWith(QStringLiteral("UASZones-ACG-20261021-130632-full-production.zip")));
+    QVERIFY(!GeoZoneProviders::airacDatasetDate(austria).isValid());
+}
+
 GEOZONE_TEST(GeoZoneParserTest)

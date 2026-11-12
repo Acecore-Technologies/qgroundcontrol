@@ -134,7 +134,8 @@ public:
     static constexpr int linkMatchLimit = 1000000;              ///< Steps of a match of a dataset link pattern, a tenth of the default
     static constexpr int linkMatchBudgetMSecs = 250;            ///< Longest search of a page for its dated links
     /// @return Effective date of a dataset linked from a download page (see datasetLink) when its service publishes
-    ///         its datasets by AIRAC cycle, invalid otherwise
+    ///         its datasets by AIRAC cycle, invalid otherwise: the date datasetLink found with the link, or for the
+    ///         dataset of an earlier session the date its link holds
     static QDate airacDatasetDate(const QString &datasetUrl);
 
     /// @return true for formats of short-lived restrictions, refreshed and outdated after hours rather than days
