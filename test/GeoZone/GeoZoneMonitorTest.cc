@@ -3234,6 +3234,17 @@ void GeoZoneMonitorTest::_testPermits()
     permits->withdraw(GeoZonePermits::key(authorisation), otherId);
     QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Warning));
     QCOMPARE(levelSpy.count(), 2);
+
+    // The level of its predicted entry honours the permit like the level where it is: an advisory, not a caution
+    monitor.evaluate({ center.atDistanceAndAzimuth(10000, 0), 450, 400 }, otherId);
+    monitor.evaluate({ center.atDistanceAndAzimuth(450, 0), 450, 400 }, otherId, GeoZoneMonitor::Velocity{ -10, 0, 0, true });
+    QVERIFY(other->entry());
+    QCOMPARE(monitor.predictionLevel(), static_cast<int>(GeoZoneAlertLevel::Caution));
+    QVERIFY(permits->acknowledge(authorisation, GeoZonePermits::ZoneDetails, otherId));
+    QCOMPARE(monitor.predictionLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
+    QCOMPARE(monitor.activeLevel(), static_cast<int>(GeoZoneAlertLevel::Advisory));
+    permits->withdraw(GeoZonePermits::key(authorisation), otherId);
+    QCOMPARE(monitor.predictionLevel(), static_cast<int>(GeoZoneAlertLevel::Caution));
     monitor.setActiveVehicleId(vehicleId);
 
     // A permit acknowledged without a vehicle becomes that of the next active vehicle

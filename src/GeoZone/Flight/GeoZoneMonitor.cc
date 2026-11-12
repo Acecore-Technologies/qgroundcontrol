@@ -1117,7 +1117,8 @@ void GeoZoneMonitor::_updateActiveLevel()
             level = (level < 0) ? zoneLevel : (std::min)(level, zoneLevel);
         }
         if (const std::optional<GeoZoneAlertTracker::Entry> entry = monitor->entry()) {
-            predictionLevel = zoneLevel(entry->zone->restriction(), false, imminent(entry->time), approved.contains(entry->zone->key()));
+            const bool permitted = approved.contains(entry->zone->key()) || _permits->covers(entry->zone, monitor->vehicleId());
+            predictionLevel = zoneLevel(entry->zone->restriction(), false, imminent(entry->time), permitted);
         }
         if (monitor->fenceBreached()) {
             level = GeoZoneAlertLevel::Warning;
