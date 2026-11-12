@@ -36,12 +36,12 @@ Rectangle {
     property real _missionTotalDistance:    isNaN(missionController.missionTotalDistance) ? 100 : missionController.missionTotalDistance
     property var  _unitsConversion:         QGroundControl.unitsConversion
     // Distances along the mission, long missions in km or miles, with round ticks
-    property real   _axisDistance:          _unitsConversion.metersToAppSettingsHorizontalDistanceUnits(_missionTotalDistance)
-    property bool   _metricDistance:        _unitsConversion.appSettingsHorizontalDistanceUnitsString === "m"
-    property real   _axisScale:             _metricDistance ? (_axisDistance >= 1000 ? 1000 : 1) : (_axisDistance >= 5280 ? 5280 : 1)
-    property string _axisUnit:              _axisScale === 1 ? _unitsConversion.appSettingsHorizontalDistanceUnitsString : (_metricDistance ? qsTr("km") : qsTr("mi"))
-    property real   _axisMax:               _axisDistance / _axisScale
-    property real   _axisTickInterval: {
+    readonly property real   _axisDistance:    _unitsConversion.metersToAppSettingsHorizontalDistanceUnits(_missionTotalDistance)
+    readonly property bool   _metricDistance:  _unitsConversion.appSettingsHorizontalDistanceUnitsString === "m"
+    readonly property real   _axisScale:       _metricDistance ? (_axisDistance >= 1000 ? 1000 : 1) : (_axisDistance >= 5280 ? 5280 : 1)
+    readonly property string _axisUnit:        _axisScale === 1 ? _unitsConversion.appSettingsHorizontalDistanceUnitsString : (_metricDistance ? qsTr("km") : qsTr("mi"))
+    readonly property real   _axisMax:         _axisDistance / _axisScale
+    readonly property real   _axisTickInterval: {
         const raw = _axisMax / 4
         if (!(raw > 0)) {
             return 1
