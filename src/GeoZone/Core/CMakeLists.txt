@@ -216,6 +216,20 @@ qt_add_resources(GeoZoneCore "geozone_geoid"
 
 # The built-in feed catalogue, see GeoZoneFeedCatalogue. Custom builds can compile in their own catalogue instead.
 set(GEOZONE_FEEDS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Sources/GeoZoneFeeds.json" CACHE FILEPATH "Built-in geozone feed catalogue (GeoZoneFeeds.json format)")
+# A catalogue which can't be read fails the configuration, and the build once it changed, rather than build a
+# QGroundControl which starts without feeds
+include("${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneFeedsCheck.cmake")
+geozone_check_feeds_file("${GEOZONE_FEEDS_FILE}")
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GeoZoneFeedsCheck.stamp"
+    COMMAND ${CMAKE_COMMAND} "-DFEEDS_FILE=${GEOZONE_FEEDS_FILE}" -P "${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneFeedsCheck.cmake"
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_BINARY_DIR}/GeoZoneFeedsCheck.stamp"
+    DEPENDS "${GEOZONE_FEEDS_FILE}" "${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneFeedsCheck.cmake"
+    COMMENT "Checking the built-in geozone feed catalogue"
+    VERBATIM
+)
+add_custom_target(GeoZoneFeedsCheck DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/GeoZoneFeedsCheck.stamp")
+add_dependencies(GeoZoneCore GeoZoneFeedsCheck)
 set_source_files_properties("${GEOZONE_FEEDS_FILE}" PROPERTIES QT_RESOURCE_ALIAS GeoZoneFeeds.json)
 qt_add_resources(GeoZoneCore "geozone_feeds"
     PREFIX "/geozone"

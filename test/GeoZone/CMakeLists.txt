@@ -7,6 +7,12 @@ if(QGC_DISABLE_GEOZONE)
     return()
 endif()
 
+# The check of the built-in feed catalogue (GEOZONE_FEEDS_FILE) at configuration accepts the built-in catalogue and
+# refuses catalogues which QGroundControl couldn't read
+add_test(NAME GeoZoneFeedsCheck COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/GeoZoneFeedsCheck
+                                        -P ${CMAKE_CURRENT_SOURCE_DIR}/GeoZoneFeedsCheckTest.cmake)
+set_tests_properties(GeoZoneFeedsCheck PROPERTIES LABELS "geozone;core")
+
 # The geozone test classes, each in <Class>.cc and <Class>.h, which registers itself with GEOZONE_TEST(<Class>), see
 # GeoZoneTestBase.h. These lists are the only list of them: they choose where each class is built and runs, and each
 # class is a CTest test labeled geozone.
