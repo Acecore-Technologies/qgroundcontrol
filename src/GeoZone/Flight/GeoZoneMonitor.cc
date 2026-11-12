@@ -134,9 +134,9 @@ GeoZoneMonitor::GeoZoneMonitor(GeoZoneManager *manager, QObject *parent)
         _logPermit(permit, AlertEvent::Permit, GeoZonePermits::originText(permit.origin));
         _permitsChanged(permit, false);
     });
-    (void) connect(_permits, &GeoZonePermits::ended, this, [this](const GeoZonePermits::Permit &permit, const QString &reason) {
-        _logPermit(permit, AlertEvent::PermitEnded, reason);
-        _permitsChanged(permit, reason == QStringLiteral("withdrawn"));
+    (void) connect(_permits, &GeoZonePermits::ended, this, [this](const GeoZonePermits::Permit &permit, GeoZonePermits::EndReason reason) {
+        _logPermit(permit, AlertEvent::PermitEnded, GeoZonePermits::endReasonText(reason));
+        _permitsChanged(permit, reason == GeoZonePermits::EndReason::Withdrawn);
     });
 
     GeoZoneSettings *const settings = GeoZoneSettings::instance();
@@ -243,7 +243,7 @@ GeoZoneVehicleMonitor *GeoZoneMonitor::_createMonitor(Vehicle *vehicle, int vehi
             _flying.insert(monitor->key());
             _armingAttempted(monitor);
         } else if (monitor->onGround() && _flying.remove(monitor->key())) {
-            _permits->endFlight(monitor->vehicleId(), QStringLiteral("flight ended"));
+            _permits->endFlight(monitor->vehicleId(), GeoZonePermits::EndReason::FlightEnded);
             // The pilot confirmed the permission for that flight: a vehicle which landed in the zone is warned on the
             // ground and when it arms again, like before its first flight
             const int approvalCount = _arbiter.approvalCount();
@@ -267,7 +267,7 @@ void GeoZoneMonitor::_removeMonitor(GeoZoneVehicleMonitor *monitor)
     (void) _awarenessTrackers.remove(monitor->key());
     (void) _flying.remove(monitor->key());
     if (monitor->followsVehicle()) {
-        _permits->endFlight(monitor->vehicleId(), QStringLiteral("vehicle disconnected"));
+        _permits->endFlight(monitor->vehicleId(), GeoZonePermits::EndReason::VehicleDisconnected);
     }
     const int fenceWarningId = _fenceWarningAlerts.take(monitor->key());
     if (fenceWarningId > 0) {
@@ -656,7 +656,7 @@ void GeoZoneMonitor::_submit(GeoZoneVehicleMonitor *monitor, const AlertEvent &r
     // With a permit for the flight, the alerts are logged and an entry is shown as an advisory, not spoken
     const bool permitted = zoneAlert && _permits->covers(zone, monitor->vehicleId());
     if (permitted) {
-        event.detail = QStringLiteral("permit");
+        event.circumstance = AlertEvent::Circumstance::Permit;
         event.message = _labelled(monitor->vehicleId(), alertMessage(event, zone->displayName(), GeoZoneText::restriction(zone->restriction())));
     }
     // The pilot has the permission to fly in an approved zone
@@ -817,7 +817,7 @@ void GeoZoneMonitor::_armingAttempted(GeoZoneVehicleMonitor *monitor)
             continue;
         }
         AlertEvent event = _alertEvent(nearby.zone, AlertEvent::OnGround, true, 0, qQNaN(), monitor->position(), monitor->vehicleId());
-        event.detail = QStringLiteral("arming");
+        event.circumstance = AlertEvent::Circumstance::Arming;
         event.message = _labelled(monitor->vehicleId(), alertMessage(event, nearby.zone->displayName(), GeoZoneText::restriction(nearby.zone->restriction())));
         _submit(monitor, event, nearby.zone);
         alerted = true;
@@ -851,10 +851,11 @@ void GeoZoneMonitor::_updateGroundStatus(GeoZoneVehicleMonitor *monitor)
             AlertEvent event;
             event.kind = AlertEvent::OnGround;
             event.restriction = zone->restriction();
-            event.detail = _permits->covers(zone, monitor->vehicleId()) ? QStringLiteral("permit") : QString();
+            const bool permitted = _permits->covers(zone, monitor->vehicleId());
+            event.circumstance = permitted ? AlertEvent::Circumstance::Permit : AlertEvent::Circumstance::None;
             warning = approved ? tr("On the ground inside geozone %1 (%2), permission confirmed").arg(zone->displayName(), GeoZoneText::restriction(zone->restriction())) :
                                  alertMessage(event, zone->displayName(), GeoZoneText::restriction(zone->restriction()));
-            level = groundLevel(zone->restriction(), approved || !event.detail.isEmpty());
+            level = groundLevel(zone->restriction(), approved || permitted);
             break;
         }
     }
@@ -999,6 +1000,7 @@ void GeoZoneMonitor::_logPilotEvent(const AlertEvent &alert, const GeoZoneVehicl
     event.time = GeoZoneEnvironment::currentDateTimeUtc();
     event.kind = kind;
     event.detail = detail;
+    event.circumstance = AlertEvent::Circumstance::None;
     event.timeToEntry = qQNaN();
     // The thresholds belong to the alert
     event.warningDistance = qQNaN();
@@ -1477,10 +1479,36 @@ QString GeoZoneMonitor::_labelled(int vehicleId, const QString &message) const
     return (vehicleCount > 1) ? QStringLiteral("%1: %2").arg(tr("Vehicle %1").arg(vehicleId), message) : message;
 }
 
+QString GeoZoneMonitor::AlertEvent::circumstanceCode(Circumstance circumstance)
+{
+    switch (circumstance) {
+    case Circumstance::Permit:
+        return QStringLiteral("permit");
+    case Circumstance::Arming:
+        return QStringLiteral("arming");
+    case Circumstance::None:
+        break;
+    }
+    return QString();
+}
+
+GeoZoneMonitor::AlertEvent::Circumstance GeoZoneMonitor::AlertEvent::circumstanceFromCode(Kind kind, const QString &code)
+{
+    // The alerts about a zone the vehicle is in or near, see GeoZoneMonitor::_submit
+    const bool zoneAlert = (kind == Approach) || (kind == Entry) || (kind == OnGround) || (kind == Activated);
+    if (zoneAlert && (code == circumstanceCode(Circumstance::Permit))) {
+        return Circumstance::Permit;
+    }
+    if ((kind == OnGround) && (code == circumstanceCode(Circumstance::Arming))) {
+        return Circumstance::Arming;
+    }
+    return Circumstance::None;
+}
+
 QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zoneName, const QString &restrictionText)
 {
     // Alerts about a zone the pilot acknowledged a permit for, see GeoZonePermits
-    const bool permitted = (event.detail == QStringLiteral("permit"));
+    const bool permitted = (event.circumstance == AlertEvent::Circumstance::Permit);
     switch (event.kind) {
     case AlertEvent::Entry:
         return permitted ? tr("Entered geozone %1 (%2) \u2014 permit acknowledged").arg(zoneName, restrictionText) : tr("Entered geozone %1 (%2)").arg(zoneName, restrictionText);
@@ -1488,7 +1516,7 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         if (permitted) {
             return tr("On the ground inside geozone %1 (%2) \u2014 permit acknowledged").arg(zoneName, restrictionText);
         }
-        const bool arming = (event.detail == QStringLiteral("arming"));
+        const bool arming = (event.circumstance == AlertEvent::Circumstance::Arming);
         switch (event.restriction) {
         case GeoZone::Prohibited:
             return arming ? tr("Arming inside prohibited geozone %1 — take-off not allowed here").arg(zoneName) :

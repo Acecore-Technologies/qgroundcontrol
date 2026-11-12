@@ -2795,7 +2795,8 @@ void GeoZoneMonitorTest::_testGroundAlerts()
     const QString arming = QStringLiteral("Arming inside prohibited geozone P \u2014 take-off not allowed here");
     QCOMPARE(alertSpy.count(), 2);
     QCOMPARE(alertSpy.last()[0].toString(), arming);
-    QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().detail, QStringLiteral("arming"));
+    QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().circumstance, GeoZoneMonitor::AlertEvent::Circumstance::Arming);
+    QCOMPARE(GeoZoneAlertHistory::logFields(GeoZoneAlertHistory::logLine(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>())).value(15), QStringLiteral("arming"));
     QCOMPARE(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>().warningDistance, 100.0);
     QCOMPARE(GeoZoneAlertHistory::parseLogLine(GeoZoneAlertHistory::logLine(eventSpy.last().first().value<GeoZoneMonitor::AlertEvent>()))->message, arming);
     QCOMPARE(monitor.alertModel()->count(), 1);

@@ -135,7 +135,7 @@ public:
             Traffic,                ///< An aircraft of the traffic entered the zone
             NonConformance,         ///< The vehicle left the volumes of its operational intent, see GeoZoneConformance: the zone
                                     ///< identifier is the GeoZoneConformance::stateCode, the name tells how far
-            OnGround,               ///< The vehicle is on the ground inside the zone, or tried to arm there when detail is "arming"
+            OnGround,               ///< The vehicle is on the ground inside the zone, or tried to arm there, see Circumstance
             Awareness,              ///< The geo-awareness of the flying vehicle changed state: the zone identifier is the
                                     ///< GeoZoneAwareness::stateCode, the name has the reasons
             FenceWarning,           ///< The vehicle is about to breach its own fence, see GeoZoneFenceWarning: the zone name is the
@@ -149,7 +149,7 @@ public:
             Dismissed,              ///< The pilot dismissed the alert, or closed the popup
             Muted,                  ///< The pilot muted the alerts while the alert was shown
             Permit,                 ///< The pilot acknowledged the permit to enter the zone, detail tells where, see GeoZonePermits
-            PermitEnded,            ///< The permit ended, detail tells why: "flight ended", "vehicle disconnected" or "withdrawn"
+            PermitEnded,            ///< The permit ended, detail tells why, see GeoZonePermits::endReasonText
             SourceOff,              ///< A source was turned off, so its zones are no longer checked: the zone name is the source's
             SourceOn,               ///< A source was turned on
             Authorised,             ///< An authorisation or notification of the zone was recorded or changed, which stops its
@@ -157,8 +157,19 @@ public:
             AuthorisationRemoved,   ///< An authorisation or notification of the zone was removed
         };
 
+        /// What an alert about a zone is raised in, beyond its kind. Logged in the detail column, see circumstanceCode().
+        enum class Circumstance {
+            None,
+            Permit,                 ///< The vehicle has a permit for the zone, see GeoZonePermits: the alert is an advisory
+            Arming,                 ///< OnGround: the vehicle tried to arm, or armed
+        };
+
         /// @return true for what the pilot was shown and answered
         bool pilotEvent() const { return kind >= Notified; }
+        /// @return The circumstance as logged: "permit", "arming", or empty without
+        static QString circumstanceCode(Circumstance circumstance);
+        /// @return The circumstance logged as the detail of an alert of the kind, None for other texts and kinds
+        static Circumstance circumstanceFromCode(Kind kind, const QString &code);
 
         int id = 0;                 ///< Unique for the session, that of the alert for pilot events, 0 when read from a log
         QDateTime time;             ///< UTC
@@ -175,7 +186,8 @@ public:
         QString zoneKey;            ///< See GeoZone::key, empty for alerts read from a log
         double timeToEntry = qQNaN();   ///< Seconds until the predicted entry of an approach alert, NaN when not predicted
         QString traffic;            ///< Callsign or ICAO address of the aircraft of a Traffic alert
-        QString detail;             ///< Of pilot events: the question asked, or the button pressed
+        QString detail;             ///< Of pilot events: the question asked, or the button pressed. Of fence alerts: the action.
+        Circumstance circumstance = Circumstance::None;     ///< Of alerts about zones
         GeoZoneAlertLevel::Level level = GeoZoneAlertLevel::Caution;   ///< Of the alert, also for its pilot events
         /// Alert thresholds of the vehicle at the alert, of any kind, NaN when not known, like for pilot events and
         /// while the limits are fixed, see GeoZoneAlertThresholds::Result
@@ -404,6 +416,7 @@ private:
     void _updateAwareness();
     void _raiseAwarenessAlert(GeoZoneVehicleMonitor *monitor, const GeoZoneAwareness::Tracker::Change &change);
     /// Logs a permit acknowledged or ended
+    /// @param detail Where it was acknowledged, or why it ended, as logged
     void _logPermit(const GeoZonePermits::Permit &permit, AlertEvent::Kind kind, const QString &detail);
     /// Updates the questions, ground warnings and level after a permit was acknowledged or ended, and alerts its
     /// vehicle about the zones of a withdrawn permit again

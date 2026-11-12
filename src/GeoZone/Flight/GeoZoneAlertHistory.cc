@@ -335,7 +335,8 @@ QString GeoZoneAlertHistory::logLine(const GeoZoneMonitor::AlertEvent &event)
         numberText(event.timeToEntry, 0),
         csvField(event.traffic),
         (event.id > 0) ? QString::number(event.id) : QString(),
-        csvField(event.detail),
+        // The circumstance of an alert about a zone, or the text of the others
+        csvField((event.circumstance != GeoZoneMonitor::AlertEvent::Circumstance::None) ? GeoZoneMonitor::AlertEvent::circumstanceCode(event.circumstance) : event.detail),
         numberText(event.warningDistance, 0),
         numberText(event.warningVerticalDistance, 0),
         numberText(event.warningTime, 0),
@@ -511,6 +512,10 @@ std::optional<GeoZoneMonitor::AlertEvent> GeoZoneAlertHistory::parseLogLine(cons
     event.timeToEntry = (fields.count() > 12) ? numberValue(fields[12]) : qQNaN();
     event.traffic = (fields.count() > 13) ? fields[13] : QString();
     event.detail = (fields.count() > 15) ? fields[15] : QString();
+    event.circumstance = GeoZoneMonitor::AlertEvent::circumstanceFromCode(event.kind, event.detail);
+    if (event.circumstance != GeoZoneMonitor::AlertEvent::Circumstance::None) {
+        event.detail.clear();
+    }
     event.warningDistance = (fields.count() > 16) ? numberValue(fields[16]) : qQNaN();
     event.warningVerticalDistance = (fields.count() > 17) ? numberValue(fields[17]) : qQNaN();
     event.warningTime = (fields.count() > 18) ? numberValue(fields[18]) : qQNaN();

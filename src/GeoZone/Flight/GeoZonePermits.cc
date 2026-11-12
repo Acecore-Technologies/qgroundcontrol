@@ -125,6 +125,19 @@ void GeoZonePermits::setVehicleId(int vehicleId)
     emit countChanged();
 }
 
+QString GeoZonePermits::endReasonText(EndReason reason)
+{
+    switch (reason) {
+    case EndReason::FlightEnded:
+        return QStringLiteral("flight ended");
+    case EndReason::VehicleDisconnected:
+        return QStringLiteral("vehicle disconnected");
+    case EndReason::Withdrawn:
+        break;
+    }
+    return QStringLiteral("withdrawn");
+}
+
 bool GeoZonePermits::acknowledge(const GeoZone *zone, Origin origin, int vehicleId)
 {
     if (!applies(zone) || covers(zone, vehicleId)) {
@@ -167,11 +180,11 @@ void GeoZonePermits::withdraw(const QString &key, int vehicleId)
 {
     const int row = _find(key, vehicleId);
     if (row >= 0) {
-        _remove(row, QStringLiteral("withdrawn"));
+        _remove(row, EndReason::Withdrawn);
     }
 }
 
-void GeoZonePermits::endFlight(int vehicleId, const QString &reason)
+void GeoZonePermits::endFlight(int vehicleId, EndReason reason)
 {
     for (int row = count() - 1; row >= 0; row--) {
         if ((_permits[row].vehicleId == vehicleId) || (_permits[row].vehicleId < 0)) {
@@ -182,7 +195,7 @@ void GeoZonePermits::endFlight(int vehicleId, const QString &reason)
     }
 }
 
-void GeoZonePermits::_remove(int row, const QString &reason)
+void GeoZonePermits::_remove(int row, EndReason reason)
 {
     beginRemoveRows(QModelIndex(), row, row);
     const Permit permit = _permits.takeAt(row);

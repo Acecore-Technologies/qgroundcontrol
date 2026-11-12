@@ -42,6 +42,13 @@ public:
     };
     Q_ENUM(Origin)
 
+    /// Why a permit ended
+    enum class EndReason {
+        Withdrawn,              ///< The pilot withdrew it
+        FlightEnded,            ///< Its vehicle disarmed after having been armed
+        VehicleDisconnected,
+    };
+
     enum Roles {
         KeyRole = Qt::UserRole + 1,
         ZoneNameRole,
@@ -78,6 +85,8 @@ public:
     static QString key(const GeoZone *zone);
     /// @return Where the permit was acknowledged, like "zone details", as logged
     static QString originText(Origin origin);
+    /// @return Why the permit ended, as logged: "withdrawn", "flight ended" or "vehicle disconnected"
+    static QString endReasonText(EndReason reason);
 
     /// @return true when the vehicle has a permit for the zone: one acknowledged for it, or without a vehicle. The
     ///         permit of another vehicle doesn't count.
@@ -103,8 +112,8 @@ public:
     Q_INVOKABLE void withdrawZone(const QVariant &zone) { withdraw(key(zone.value<GeoZoneInfo>().zone())); }
     /// Ends the permits of the flight of the vehicle: those acknowledged for it or without vehicle, which are logged as
     /// the vehicle's
-    /// @param reason Logged, like "flight ended"
-    void endFlight(int vehicleId, const QString &reason);
+    /// @param reason EndReason::FlightEnded or EndReason::VehicleDisconnected
+    void endFlight(int vehicleId, EndReason reason);
 
     /// The active vehicle, which the permits acknowledged, asked for and withdrawn from QML are for. Permits
     /// acknowledged without a vehicle become its permits.
@@ -114,11 +123,10 @@ public:
 signals:
     void countChanged();
     void acknowledged(const GeoZonePermits::Permit &permit);
-    /// @param reason Like "withdrawn" or "flight ended"
-    void ended(const GeoZonePermits::Permit &permit, const QString &reason);
+    void ended(const GeoZonePermits::Permit &permit, GeoZonePermits::EndReason reason);
 
 private:
-    void _remove(int row, const QString &reason);
+    void _remove(int row, EndReason reason);
     /// @return Row of the permit with the key which covers the vehicle, -1 without
     int _find(const QString &key, int vehicleId) const;
 
