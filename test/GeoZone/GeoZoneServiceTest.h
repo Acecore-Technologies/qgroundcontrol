@@ -20,6 +20,7 @@ class GeoZoneServiceTest : public UnitTest
 private slots:
     void _testOpenAipService();
     void _testServiceApiKeys();
+    void _testClearForgetsPendingServices();
     void _testServiceOAuth2();
     void _testEd318Service();
     void _testServiceAreaOfInterest();

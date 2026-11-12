@@ -718,9 +718,12 @@ void GeoZoneSourceRepository::clear()
     while (!_sources.isEmpty()) {
         removeSource(_sources.count() - 1);
     }
-    // Drops results of new sources still loading
+    // Drops results of new sources still loading. Their services were set when they were added: forgotten with
+    // their secrets and tokens, which would otherwise be used again for a source added at the same address.
     for (const QString &key : _operations.keys() + _fetches.keys()) {
         _cancelOperation(key);
+        _companions.remove(key);
+        _services.forget(key);
     }
 }
 

@@ -181,6 +181,46 @@ void GeoZoneServiceTest::_testServiceApiKeys()
     QVERIFY(restarted.repository()->credentials().secret(headerUrl).isEmpty());
 }
 
+void GeoZoneServiceTest::_testClearForgetsPendingServices()
+{
+    const ScopedEnvironment environment;
+    TestFeedServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.files.insert("/zones", server.body);
+    const QTemporaryDir storageDir;
+    QVERIFY(storageDir.isValid());
+    const QString url = server.url(QStringLiteral("/zones"));
+    GeoZoneManager manager(storageDir.path());
+    QSignalSpy addedSpy(&manager, &GeoZoneManager::sourceAdded);
+
+    // A service removed with all sources while it is being added
+    GeoZoneService service;
+    service.auth = GeoZoneService::Auth::ApiKeyHeader;
+    service.authParameter = QStringLiteral("X-Api-Key");
+    manager.addService(url, service.toVariantMap(), QStringLiteral("pending-s3cret"));
+    QVERIFY(manager.repository()->busy());
+    QCOMPARE(manager.repository()->credentials().secret(url), QStringLiteral("pending-s3cret"));
+    manager.repository()->clear();
+    QVERIFY(!manager.repository()->busy());
+    QCOMPARE(manager.sources()->count(), 0);
+
+    // leaves neither its secret nor its service, which a feed added at its address later would send
+    QVERIFY(manager.repository()->credentials().secret(url).isEmpty());
+    server.requests.clear();
+    manager.repository()->addUrl(url);
+    QVERIFY(addedSpy.wait(10000));
+    QTRY_VERIFY(!manager.repository()->busy());
+    const GeoZoneSource *const feed = manager.repository()->source(url);
+    QVERIFY(feed);
+    QVERIFY(feed->service().isEmpty());
+    QVERIFY(!feed->needsCredentials());
+    QVERIFY(!server.requests.isEmpty());
+    for (const QByteArray &request : std::as_const(server.requests)) {
+        QVERIFY(TestFeedServer::header(request, "X-Api-Key").isEmpty());
+    }
+    manager.repository()->clear();
+}
+
 void GeoZoneServiceTest::_testServiceOAuth2()
 {
     ScopedEnvironment environment;
