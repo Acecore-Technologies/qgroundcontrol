@@ -17,15 +17,16 @@ import QGroundControl.ScreenTools
 import QGroundControl.Vehicle
 
 /// The pre-flight checklist of the vehicle type, see PreFlightCheckList.qml, followed by the automatic geozone checks of
-/// GeoZonePreflightCheck. QGCOptions::preFlightChecklistUrl points to it. The checklist passes when both pass.
+/// GeoZonePreflightCheck. QGCOptions::preFlightChecklistUrl points to it. The checklist passes when both pass, and the
+/// geozone checks are reset with those of the vehicle type: by its reset button and for another active vehicle.
 ColumnLayout {
     id:         root
     spacing:    0.8 * ScreenTools.defaultFontPixelWidth
 
     readonly property bool allChecksPassed: standardChecklist.item ? (standardChecklist.item.allChecksPassed && geoZoneGroup.passed) : false
 
-    // The vehicle's state follows this checklist rather than the standard one alone
-    function _updateCheckListState() {
+    // The only place the vehicle's state is set: the embedded checklist of the vehicle type leaves it to this one
+    onAllChecksPassedChanged: {
         if (globals.activeVehicle) {
             globals.activeVehicle.checkListState = allChecksPassed ? Vehicle.CheckListPassed : Vehicle.CheckListFailed
         }
@@ -33,20 +34,17 @@ ColumnLayout {
 
     /// Called by the geozone group when it passes or fails, like PreFlightCheckList.groupPassedChanged
     function groupPassedChanged(index, passed) {
-        _updateCheckListState()
     }
 
-    onAllChecksPassedChanged: _updateCheckListState()
-
     Loader {
-        id:                 standardChecklist
-        Layout.fillWidth:   true
-        source:             "qrc:/qml/QGroundControl/FlightDisplay/PreFlightCheckList.qml"
+        id:                     standardChecklist
+        Layout.fillWidth:       true
+        Component.onCompleted:  setSource("qrc:/qml/QGroundControl/FlightDisplay/PreFlightCheckList.qml", { embedded: true })
     }
 
     Connections {
-        target:                         standardChecklist.item
-        function onAllChecksPassedChanged() { root._updateCheckListState() }
+        target:                     standardChecklist.item
+        function onGroupsReset()    { geoZoneGroup.reset() }
     }
 
     PreFlightCheckGroup {

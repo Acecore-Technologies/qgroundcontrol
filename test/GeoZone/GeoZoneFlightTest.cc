@@ -52,6 +52,11 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QScopeGuard>
 #include <QtCore/QTemporaryDir>
+#include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
+#include <QtQml/QQmlPropertyMap>
+#include <QtQuick/QQuickItem>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
@@ -168,6 +173,49 @@ QJsonObject withHeightLimits(QJsonObject feature, double lower, double upper)
     feature[QStringLiteral("geometry")] = geometry;
     return feature;
 }
+
+/// Makes objects of QML source like the main window does, with its `globals`
+class QmlHarness
+{
+public:
+    QmlHarness()
+    {
+        engine.addImportPath(QStringLiteral("qrc:/qml"));
+        engine.rootContext()->setContextProperty(QStringLiteral("globals"), &globals);
+    }
+
+    /// @return The object of the source, null when it has errors, see error
+    QObject *create(const QByteArray &source)
+    {
+        QQmlComponent component(&engine);
+        component.setData(source, QUrl(QStringLiteral("qrc:/qml/QGroundControl/GeoZone/Flight/GeoZoneTest.qml")));
+        object.reset(component.create());
+        error = component.errorString();
+        return object.get();
+    }
+
+    /// @return Result of the function of the object called with the arguments
+    static QVariant call(QObject *object, const char *function, const QVariantList &arguments = {})
+    {
+        QVariant result;
+        switch (arguments.count()) {
+        case 0:
+            (void) QMetaObject::invokeMethod(object, function, Q_RETURN_ARG(QVariant, result));
+            break;
+        case 1:
+            (void) QMetaObject::invokeMethod(object, function, Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, arguments[0]));
+            break;
+        default:
+            break;
+        }
+        return result;
+    }
+
+    QQmlEngine engine;
+    QQmlPropertyMap globals;
+    std::unique_ptr<QObject> object;
+    QString error;
+};
 
 void restoreSettingDefaults()
 {
@@ -1040,6 +1088,154 @@ void GeoZoneFlightTest::_testGroundInsideZone()
     }
 }
 
+
+void GeoZoneFlightTest::_testChecklistButton()
+{
+    using Check = GeoZonePreflightCheck;
+    QmlHarness harness;
+    QObject *const root = harness.create(R"(
+        import QtQuick
+        import QGroundControl.GeoZone
+        import QGroundControl.Palette
+        Item {
+            property alias button: button
+            function buttonPassedChanged() { }
+            QGCPalette { id: qgcPal }
+            GeoZonePreFlightCheckButton { id: button; name: "Fence" }
+        }
+    )");
+    QVERIFY2(root, qPrintable(harness.error));
+    QObject *const button = root->property("button").value<QObject*>();
+    QVERIFY(button);
+    const auto setItem = [button](Check::State state, const QString &text) {
+        QVERIFY(button->setProperty("item", QVariantMap{ { QStringLiteral("state"), static_cast<int>(state) }, { QStringLiteral("text"), text } }));
+    };
+    const auto passed = [button]() { return button->property("passed").toBool(); };
+    const auto text = [button]() { return button->property("_text").toString(); };
+
+    // A warning is accepted by clicking it
+    setItem(Check::Warning, QStringLiteral("No current position"));
+    QVERIFY(!passed());
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QVERIFY(passed());
+    QVERIFY2(text().endsWith(QStringLiteral("No current position (accepted)")), qPrintable(text()));
+    // ... and stays accepted while the checklist is updated with the same text
+    setItem(Check::Warning, QStringLiteral("No current position"));
+    QVERIFY(passed());
+
+    // Another warning is to be accepted again
+    setItem(Check::Warning, QStringLiteral("Inside geozone X"));
+    QVERIFY(!passed());
+    QVERIFY2(text().endsWith(QStringLiteral("Inside geozone X")), qPrintable(text()));
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QVERIFY(passed());
+    // ... as after a reset of the checklist
+    QVERIFY(QMetaObject::invokeMethod(button, "reset"));
+    QVERIFY(!passed());
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QVERIFY(passed());
+
+    // A failure can't be accepted, and what passes needs no click
+    setItem(Check::Failed, QStringLiteral("Inside prohibited geozone P"));
+    QVERIFY(!passed());
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QVERIFY(!passed());
+    setItem(Check::Passed, QStringLiteral("Fine"));
+    QVERIFY(passed());
+    QVERIFY2(text().endsWith(QStringLiteral("Fine")), qPrintable(text()));
+    setItem(Check::Warning, QStringLiteral("Inside geozone X"));
+    QVERIFY(!passed());
+
+    // Names of external data aren't markup
+    setItem(Check::Warning, QStringLiteral("Inside <img src=\"x\"> & <b>P</b>"));
+    QVERIFY2(text().endsWith(QStringLiteral("Inside &lt;img src=\"x\"&gt; &amp; &lt;b&gt;P&lt;/b&gt;")), qPrintable(text()));
+}
+
+void GeoZoneFlightTest::_testChecklistReset()
+{
+    // The checklist of the active vehicle, without geozone data: its Geozones group warns about that
+    _connectMockLink(MAV_AUTOPILOT_PX4);
+    Vehicle *const vehicle = MultiVehicleManager::instance()->activeVehicle();
+    QVERIFY(vehicle);
+    QTRY_VERIFY_WITH_TIMEOUT(vehicle->parameterManager()->parametersReady(), 30000);
+    QmlHarness harness;
+    harness.globals.insert(QStringLiteral("activeVehicle"), QVariant::fromValue(vehicle));
+    harness.globals.insert(QStringLiteral("planMasterControllerFlyView"), QVariant::fromValue<QObject*>(nullptr));
+    QObject *const root = harness.create(R"(
+        import QtQuick
+        import QGroundControl.GeoZone
+        import QGroundControl.Palette
+        Item {
+            property alias list: list
+            QGCPalette { id: qgcPal }
+            GeoZonePreFlightCheckList { id: list }
+        }
+    )");
+    QVERIFY2(root, qPrintable(harness.error));
+    QObject *const list = root->property("list").value<QObject*>();
+    QVERIFY(list);
+    // The checklist of the vehicle type, in its loader
+    QObject *standard = nullptr;
+    for (QObject *const child : list->findChildren<QObject*>()) {
+        if (child->property("allChecksPassed").isValid() && child->property("vehicleCopy").isValid()) {
+            standard = child;
+        }
+    }
+    QVERIFY(standard);
+    QList<QObject*> geoZoneButtons;
+    for (QObject *const child : list->findChildren<QObject*>()) {
+        if (child->property("item").isValid() && child->property("telemetryFailure").isValid()) {
+            geoZoneButtons.append(child);
+        }
+    }
+    QCOMPARE(geoZoneButtons.count(), 8);
+    const auto pending = [&geoZoneButtons]() {
+        QList<QObject*> buttons;
+        for (QObject *const button : std::as_const(geoZoneButtons)) {
+            if (!button->property("passed").toBool()) {
+                buttons.append(button);
+            }
+        }
+        return buttons;
+    };
+    const auto acceptAll = [&pending]() {
+        for (QObject *const button : pending()) {
+            (void) QMetaObject::invokeMethod(button, "clicked");
+        }
+    };
+    // Once the items are checked, the warnings left are the pilot's to accept
+    QTRY_VERIFY_WITH_TIMEOUT(!pending().isEmpty() && std::all_of(geoZoneButtons.cbegin(), geoZoneButtons.cend(), [](QObject *button) {
+        return button->property("passed").toBool() || button->property("allowTelemetryFailureOverride").toBool();
+    }), 10000);
+    const qsizetype warnings = pending().count();
+
+    // The vehicle's state is written here only: not passed by the checklist of the vehicle type alone
+    QList<int> states;
+    const QMetaObject::Connection connection = connect(vehicle, &Vehicle::checkListStateChanged, this, [vehicle, &states]() { states.append(vehicle->checkListState()); });
+    QVERIFY(standard->setProperty("allChecksPassed", true));
+    QVERIFY(!list->property("allChecksPassed").toBool());
+    QVERIFY2(!states.contains(Vehicle::CheckListPassed), "passed without the geozone checks");
+    acceptAll();
+    QVERIFY(pending().isEmpty());
+    QTRY_VERIFY(list->property("allChecksPassed").toBool());
+    QCOMPARE(states, QList<int>{ Vehicle::CheckListPassed });
+
+    // The reset of the checklist resets the geozone checks too
+    QVERIFY(QMetaObject::invokeMethod(standard, "_resetGroups"));
+    QCOMPARE(pending().count(), warnings);
+    QVERIFY(!list->property("allChecksPassed").toBool());
+    QCOMPARE(states.constLast(), static_cast<int>(Vehicle::CheckListFailed));
+    acceptAll();
+    QVERIFY(pending().isEmpty());
+
+    // ... like another active vehicle, which mustn't inherit what was accepted
+    Vehicle other(MAV_AUTOPILOT_PX4, MAV_TYPE_QUADROTOR);
+    harness.globals.insert(QStringLiteral("activeVehicle"), QVariant::fromValue(&other));
+    QCOMPARE(pending().count(), warnings);
+    disconnect(connection);
+    harness.object.reset();
+    _disconnectMockLink();
+}
 
 void GeoZoneFlightTest::_testPreflightPermits()
 {

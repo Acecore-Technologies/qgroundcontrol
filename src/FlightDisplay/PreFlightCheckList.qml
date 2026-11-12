@@ -30,14 +30,26 @@ ColumnLayout {
 
     property bool allChecksPassed:  false
     property var  vehicleCopy:      globals.activeVehicle
+    /// A checklist which embeds this one among checks of its own sets the vehicle's checklist state from all of them
+    /// instead, and resets its own checks on groupsReset
+    property bool embedded:         false
 
-    onVehicleCopyChanged: {
+    /// The groups were reset: by the reset button or for another active vehicle
+    signal groupsReset()
+
+    function _resetGroups() {
         if (checkListRepeater.model) {
             checkListRepeater.model.reset()
         }
+        groupsReset()
     }
 
+    onVehicleCopyChanged: _resetGroups()
+
     onAllChecksPassedChanged: {
+        if (embedded) {
+            return
+        }
         if (allChecksPassed) {
             globals.activeVehicle.checkListState = Vehicle.CheckListPassed
         } else {
@@ -138,7 +150,7 @@ ColumnLayout {
             width:              1.2 * ScreenTools.defaultFontPixelHeight
             height:             1.2 * ScreenTools.defaultFontPixelHeight
             Layout.alignment:   Qt.AlignVCenter
-            onClicked:          checkListRepeater.model.reset()
+            onClicked:          _resetGroups()
 
             QGCColoredImage {
                 source:         "/qmlimages/MapSyncBlack.svg"

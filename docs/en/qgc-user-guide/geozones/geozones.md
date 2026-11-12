@@ -518,7 +518,7 @@ With the pre-flight checklist turned on (_Application Settings > Fly View > Use 
 - **Geo-awareness**: [geo-awareness](#geo-awareness) is available for the vehicle; it warns with the reasons when it is degraded or unavailable.
 - **Permits**: you acknowledged the [permit to enter](#permits) each zone requiring an authorisation or a notification which the vehicle is in or the mission enters (zones with a valid authorisation aren't listed). The zones are listed below the item, each with **I Have Permission** to acknowledge it for this flight.
 
-Each item shows its state and why: green when it passed or doesn't apply, orange for a warning, which you can accept by clicking it, and red for a failure, which you can't. The checklist passes when the vehicle checklist and the geozone group pass, so with _Enforce Preflight Checklist_ a failed geozone item prevents arming.
+Each item shows its state and why: green when it passed or doesn't apply, orange for a warning, which you can accept by clicking it, and red for a failure, which you can't. You accept the warning shown: when its text changes, like from a missing position to a zone the vehicle is in, the item is orange again. The reset button of the checklist and a change of the active vehicle also reset the geozone group, so warnings accepted before are to be accepted again. The checklist passes when the vehicle checklist and the geozone group pass, so with _Enforce Preflight Checklist_ a failed geozone item prevents arming.
 
 ### Flight Alerts {#flight-alerts}
 

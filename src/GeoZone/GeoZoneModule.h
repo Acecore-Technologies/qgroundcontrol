@@ -33,12 +33,14 @@
 /// - GeoFenceEditor.qml: GeoZoneFenceGroup, beside the lists of polygon and of circular fences
 /// - QGCOptions::preFlightChecklistUrl: GeoZonePreFlightCheckList.qml, the checklist of the vehicle type with the
 ///   geozone checks
+/// - PreFlightCheckList.qml: embedded and groupsReset, with which GeoZonePreFlightCheckList.qml sets the vehicle's
+///   checklist state from both and resets the geozone checks with it
 ///
 /// Changes outside the module which don't depend on it and could go upstream on their own: those of QGCFileDialog.qml,
-/// ToolStripDropPanel.qml and FlyViewPreFlightChecklistPopup.qml, the distance axis of TerrainStatus.qml, Vehicle
-/// clearing altitudeAboveTerr when the terrain query fails, QGCMapPolygon and QGCMapPolyline destroyed after the
-/// application, and the modes of the ArduPilot vehicles of MockLink. docs/en/qgc-dev-guide/geozones.md lists them all
-/// with their lines, see Upstream Footprint.
+/// ToolStripDropPanel.qml and FlyViewPreFlightChecklistPopup.qml, embedded and groupsReset of PreFlightCheckList.qml,
+/// the distance axis of TerrainStatus.qml, Vehicle clearing altitudeAboveTerr when the terrain query fails,
+/// QGCMapPolygon and QGCMapPolyline destroyed after the application, and the modes of the ArduPilot vehicles of
+/// MockLink. docs/en/qgc-dev-guide/geozones.md lists them all with their lines, see Upstream Footprint.
 ///
 /// Builds with -DQGC_DISABLE_GEOZONE=ON leave the module out: the C++ hooks are within #ifndef QGC_DISABLE_GEOZONE and
 /// the QML ones get the hidden no-op types of the stub module in src/GeoZone/Stub.
