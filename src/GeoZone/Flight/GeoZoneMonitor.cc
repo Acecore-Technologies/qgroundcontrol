@@ -1110,9 +1110,21 @@ GeoZoneAlertLevel::Level GeoZoneMonitor::alertLevel(const AlertEvent &event, boo
     case AlertEvent::FenceWarning:
     case AlertEvent::FenceBreach:
         return GeoZoneAlertLevel::Warning;
-    default:
-        return event.level;
+    // Those of the state the geo-awareness reached, and of the alert the pilot was shown or answered
+    case AlertEvent::Awareness:
+    case AlertEvent::Notified:
+    case AlertEvent::Approved:
+    case AlertEvent::Dismissed:
+    case AlertEvent::Muted:
+    case AlertEvent::Permit:
+    case AlertEvent::PermitEnded:
+    case AlertEvent::SourceOff:
+    case AlertEvent::SourceOn:
+    case AlertEvent::Authorised:
+    case AlertEvent::AuthorisationRemoved:
+        break;
     }
+    return event.level;
 }
 
 void GeoZoneMonitor::_updateActiveLevel()
@@ -1488,7 +1500,8 @@ QString GeoZoneMonitor::alertMessage(const AlertEvent &event, const QString &zon
         case GeoZone::Unknown:
             return arming ? tr("Arming inside geozone %1 (%2) — check its conditions before take-off").arg(zoneName, restrictionText) :
                             tr("On the ground inside geozone %1 (%2) — check its conditions before take-off").arg(zoneName, restrictionText);
-        default:
+        case GeoZone::NoRestriction:
+        case GeoZone::USpace:
             break;
         }
         return arming ? tr("Arming inside geozone %1 (%2)").arg(zoneName, restrictionText) : tr("On the ground inside geozone %1 (%2)").arg(zoneName, restrictionText);
