@@ -55,6 +55,7 @@ public:
         RefreshFailed,  ///< The last download or load of a source failed
         NotCovered,     ///< No source has zones around the vehicle position
         LogNotWritten,  ///< The alerts can't be written to the alert log, see GeoZoneAlertHistory::logFailing
+        GnssUnknown,    ///< The vehicle no longer reports its GNSS status, which it did before
     };
 
     /// GNSS fix below which geo-awareness is degraded, set by the manufacturer in the alert profile of the vehicle
@@ -79,6 +80,7 @@ public:
         int satellites = -1;            ///< -1 when unknown
         double hdop = qQNaN();
         double horizontalAccuracy = qQNaN();    ///< Meters, NaN when unknown
+        bool stale = false;             ///< Reported before but not recently: the quality of the fix isn't known
     };
 
     /// What the status is evaluated from

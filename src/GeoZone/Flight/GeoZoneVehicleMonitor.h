@@ -206,7 +206,8 @@ public:
     QVariant predictedEntryZone() const;
 
     bool positionUnavailable() const { return _unavailable; }
-    /// @return GNSS status of the last GPS_RAW_INT of the vehicle, not known when it is older than the position timeout
+    /// @return GNSS status of the last GPS_RAW_INT of the vehicle: not known before the first, and not known and stale
+    ///         once it is older than positionTimeoutMSecs, which degrades the geo-awareness
     /// @param msecs Time of the clock
     GeoZoneAwareness::Gnss gnss(qint64 msecs) const;
     void setPositionUnavailable(bool unavailable);

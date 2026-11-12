@@ -2926,6 +2926,23 @@ void GeoZoneMonitorTest::_testAwareness()
     QVERIFY(check([](Awareness::Input &in) { in.gnss.hdop = 6.5; in.gnssLimits.maxHdop = 8; }, Awareness::Available, QStringLiteral("Geo-awareness available")));
     QVERIFY(check([](Awareness::Input &in) { in.gnss.horizontalAccuracy = 8; }, Awareness::Degraded, QStringLiteral("Geo-awareness degraded: GNSS poor (accuracy 8.0 m)")));
     QVERIFY(check([](Awareness::Input &in) { in.gnss.fixType = 1; }, Awareness::Unavailable, QStringLiteral("Geo-awareness unavailable: GNSS lost (no fix)")));
+    // A status the vehicle stopped reporting isn't known, which isn't fine. One it never reported is left alone.
+    QVERIFY(check([](Awareness::Input &in) { in.gnss = Awareness::Gnss(); in.gnss.stale = true; }, Awareness::Degraded,
+                  QStringLiteral("Geo-awareness degraded: GNSS status no longer reported")));
+    QVERIFY(check([](Awareness::Input &in) { in.gnss = Awareness::Gnss(); }, Awareness::Available, QStringLiteral("Geo-awareness available")));
+    QVERIFY(check([](Awareness::Input &in) { in.gnss = Awareness::Gnss(); in.gnss.stale = true; in.linkLost = true; }, Awareness::Unavailable,
+                  QStringLiteral("Geo-awareness unavailable: telemetry link lost")));
+    {
+        const GeoZoneVehicleMonitor::Clock clock = []() { return qint64{ 0 }; };
+        GeoZoneVehicleMonitor reporting(nullptr, 1, 1, clock);
+        QVERIFY(!reporting.gnss(100000).known);
+        QVERIFY(!reporting.gnss(100000).stale);
+        reporting.handleMessage(gpsMessage(1, GPS_FIX_TYPE_3D_FIX, 12, 0.8, 1.5), 1000);
+        QVERIFY(reporting.gnss(1000 + GeoZoneVehicleMonitor::positionTimeoutMSecs).known);
+        const Awareness::Gnss old = reporting.gnss(1000 + GeoZoneVehicleMonitor::positionTimeoutMSecs + 1);
+        QVERIFY(!old.known);
+        QVERIFY(old.stale);
+    }
     QVERIFY(check([](Awareness::Input &in) { in.positionUnavailable = true; }, Awareness::Unavailable, QStringLiteral("Geo-awareness unavailable: no current vehicle position")));
     // A lost link explains the rest
     QVERIFY(check([](Awareness::Input &in) { in.linkLost = true; in.positionUnavailable = true; in.gnss.fixType = 1; }, Awareness::Unavailable,

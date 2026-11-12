@@ -576,6 +576,7 @@ Geo-awareness only works with current zone data and a good position of the vehic
 | GNSS lost: the vehicle reports no fix (`GPS_RAW_INT`) | Unavailable |
 | No geozone data loaded | Unavailable |
 | GNSS poor: a 2D fix, fewer than 6 satellites, HDOP above 5 or a horizontal accuracy worse than 5 m | Degraded |
+| GNSS status no longer reported: the vehicle sent `GPS_RAW_INT` before, but not for 5 seconds, so the quality of its fix isn't known | Degraded |
 | Geozone data expired, or may be outdated (see [Managing Sources](#managing-sources)) | Degraded |
 | The last update of a source failed, like a feed download | Degraded |
 | No source has zones around the vehicle position (by the bounds of its zones, or the area of a service) | Degraded |

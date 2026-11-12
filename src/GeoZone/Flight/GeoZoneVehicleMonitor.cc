@@ -257,8 +257,13 @@ QString GeoZoneVehicleMonitor::fenceBreachText(int breachType, int breachCount)
 
 GeoZoneAwareness::Gnss GeoZoneVehicleMonitor::gnss(qint64 msecs) const
 {
-    if ((_gnssMSecs < 0) || ((msecs - _gnssMSecs) > positionTimeoutMSecs)) {
+    if (_gnssMSecs < 0) {
         return GeoZoneAwareness::Gnss();
+    }
+    if ((msecs - _gnssMSecs) > positionTimeoutMSecs) {
+        GeoZoneAwareness::Gnss unknown;
+        unknown.stale = true;
+        return unknown;
     }
     return _gnss;
 }

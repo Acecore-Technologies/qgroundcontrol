@@ -126,6 +126,10 @@ GeoZoneAwareness::Status GeoZoneAwareness::evaluate(const Input &input)
             add(Reason::GnssPoor, Degraded, tr("GNSS poor (%1)").arg(poor.join(QStringLiteral(", "))));
         }
     }
+    // A status which stopped coming says nothing about the fix now: not known isn't fine
+    if (input.vehicle && !input.linkLost && !input.gnss.known && input.gnss.stale) {
+        add(Reason::GnssUnknown, Degraded, tr("GNSS status no longer reported"));
+    }
     if (input.zoneCount > 0) {
         if (input.dataInvalid) {
             add(Reason::DataExpired, Degraded, tr("geozone data expired"));
